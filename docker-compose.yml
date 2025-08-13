@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  genie_ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: genie_ai:latest
+    container_name: genie_ai
+    ports:
+      - "8501:8501"
+    volumes:
+      # Mount data cache directory for persistence
+      - ./data:/app/data
+      # Optional: Mount code for development mode
+      # - .:/app
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GENIE_LLM_MODEL=${GENIE_LLM_MODEL:-gpt-4o-mini}
+      - GENIE_LLM_TEMPERATURE=${GENIE_LLM_TEMPERATURE:-0.7}
+      - GENIE_CACHE_DIR=/app/data/cache
+      - DEBUG=${DEBUG:-False}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: genie_ai_network
+    driver: bridge
