@@ -125,7 +125,8 @@ dev-install: check-python $(VENV_PATH) setup-env
 	@echo "2. Configure your API keys in the .env file"
 	@echo "3. Run tests: $(YELLOW)make test$(NC)"
 
-clean-install: uninstall install
+clean-install: 
+	uninstall install
 
 # Show activation command
 activate:
