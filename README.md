@@ -23,7 +23,7 @@ Lobster AI is a powerful command-line tool that uses specialized AI agents to an
 
 ```bash
 git clone https://github.com/homara-ai/lobster-ai.git
-cd lobster-ai
+cd lobster
 make install
 ```
 
