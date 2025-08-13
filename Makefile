@@ -282,14 +282,14 @@ echo "======================="
 
 # Check if git is installed
 if ! command -v git &> /dev/null; then
-    echo "❌ Git is required but not installed. Please install git first."
-    exit 1
+	echo "❌ Git is required but not installed. Please install git first."
+	exit 1
 fi
 
 # Check if Python 3.9+ is available
 if ! command -v python3 &> /dev/null; then
-    echo "❌ Python 3 is required but not installed. Please install Python 3.9+ first."
-    exit 1
+	echo "❌ Python 3 is required but not installed. Please install Python 3.9+ first."
+	exit 1
 fi
 
 # Check Python version
@@ -297,15 +297,15 @@ PYTHON_VERSION=$$(python3 -c 'import sys; print(".".join(map(str, sys.version_in
 REQUIRED_VERSION="3.9"
 
 if ! python3 -c "import sys; exit(0 if sys.version_info >= (3,9) else 1)" 2>/dev/null; then
-    echo "❌ Python 3.9+ required. Found: Python $$PYTHON_VERSION"
-    exit 1
+	echo "❌ Python 3.9+ required. Found: Python $$PYTHON_VERSION"
+	exit 1
 fi
 
 # Clone repository
 echo "📦 Cloning Lobster AI repository..."
 if [ -d "lobster-ai" ]; then
-    echo "⚠️  Directory 'lobster-ai' already exists. Removing..."
-    rm -rf lobster-ai
+	echo "⚠️  Directory 'lobster-ai' already exists. Removing..."
+	rm -rf lobster-ai
 fi
 
 git clone https://github.com/homara-ai/lobster-ai.git
