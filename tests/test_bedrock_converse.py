@@ -14,7 +14,7 @@ def check_weather(location: str) -> str:
     return f"It's always sunny in {location}"
 
 graph = create_react_agent(
-    "anthropic:claude-3-7-sonnet-latest",
+    "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
     tools=[check_weather],
     prompt="You are a helpful assistant",
 )

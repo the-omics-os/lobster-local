@@ -580,7 +580,7 @@ class TestAgentClient:
         client = AgentClient(
             data_manager=data_manager,
             workspace_path=temp_directory,
-            enable_reasoning=True
+            enable_reasoning=False
         )
         
         assert client.data_manager == data_manager

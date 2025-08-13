@@ -7,8 +7,36 @@
 PYTHON := python3
 VENV_NAME := .venv
 VENV_PATH := $(VENV_NAME)
-PYTHON_VERSION_MIN := 3.9
+PYTHON_VERSION_MIN := 3.12
 PROJECT_NAME := lobster-ai
+
+# Determine package manager (prefer uv > pip3 > pip)
+UV_EXISTS := $(shell which uv > /dev/null 2>&1 && echo "yes" || echo "no")
+PIP_EXISTS := $(shell which pip > /dev/null 2>&1 && echo "yes" || echo "no")
+PIP3_EXISTS := $(shell which pip3 > /dev/null 2>&1 && echo "yes" || echo "no")
+
+ifeq ($(UV_EXISTS),yes)
+	# Use uv if available for faster installations
+	PKG_MGR := uv
+	SYS_PIP := uv pip
+	USE_UV := true
+else
+	USE_UV := false
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S),Darwin)
+		# On macOS, prefer pip3 if available
+		ifeq ($(PIP3_EXISTS),yes)
+			SYS_PIP := pip3
+			PKG_MGR := pip3
+		else
+			SYS_PIP := pip
+			PKG_MGR := pip
+		endif
+	else
+		SYS_PIP := pip
+		PKG_MGR := pip
+	endif
+endif
 
 # Colors for output
 RED := \033[0;31m
@@ -52,15 +80,56 @@ help:
 # Python version check
 check-python:
 	@echo "🔍 Checking Python version..."
-	@$(PYTHON) -c "import sys; exit(0 if sys.version_info >= ($(shell echo $(PYTHON_VERSION_MIN) | tr '.' ',')) else 1)" || \
-	(echo "$(RED)❌ Python $(PYTHON_VERSION_MIN)+ required. Found: $$($(PYTHON) --version)$(NC)" && exit 1)
-	@echo "$(GREEN)✅ Python version check passed: $$($(PYTHON) --version)$(NC)"
+	@if ! command -v $(PYTHON) >/dev/null 2>&1; then \
+		echo "$(RED)❌ $(PYTHON) command not found. Please install Python 3.12+.$(NC)"; \
+		exit 1; \
+	fi
+	@$(PYTHON) -c "import sys; print(sys.version_info)" > /dev/null 2>&1 || { \
+		echo "$(RED)❌ Failed to execute Python. Please check your installation.$(NC)"; \
+		exit 1; \
+	}
+	@$(PYTHON) -c "import sys; exit(0 if sys.version_info >= (3,12) else 1)" || \
+		(echo "$(RED)❌ Python 3.12+ is required. Found: $$($(PYTHON) --version)$(NC)" && exit 1)
+	@echo "$(GREEN)✅ Python 3.12+ check passed: $$($(PYTHON) --version)$(NC)"
+	@echo "🔍 Checking venv module..."
+	@$(PYTHON) -c "import venv" > /dev/null 2>&1 || { \
+		echo "$(RED)❌ Python venv module not found. Please install python3-venv package.$(NC)"; \
+		echo "$(YELLOW)  For Ubuntu/Debian: sudo apt install python3-venv$(NC)"; \
+		echo "$(YELLOW)  For macOS: brew reinstall python3$(NC)"; \
+		exit 1; \
+	}
+	@echo "$(GREEN)✅ Python venv module available$(NC)"
 
-# Virtual environment creation
 $(VENV_PATH):
-	@echo "🐍 Creating virtual environment..."
-	$(PYTHON) -m venv $(VENV_PATH)
-	@echo "$(GREEN)✅ Virtual environment created at $(VENV_PATH)$(NC)"
+	@echo "🐍 Creating virtual environment with $(PYTHON)..."
+	@if ! command -v $(PYTHON) >/dev/null 2>&1; then \
+		echo "$(RED)❌ $(PYTHON) command not found. Please install Python 3.12+.$(NC)"; \
+		echo "$(YELLOW)   macOS: brew install python@3.12$(NC)"; \
+		echo "$(YELLOW)   Ubuntu/Debian: sudo apt install python3.12$(NC)"; \
+		exit 1; \
+	fi
+	@if ! $(PYTHON) -c "import ensurepip" >/dev/null 2>&1; then \
+		echo "$(RED)❌ Python ensurepip module not found. Your Python might be missing venv support.$(NC)"; \
+		exit 1; \
+	fi
+	@echo "   Using package manager: $(PKG_MGR)"
+	@$(PYTHON) -m venv $(VENV_PATH) || { \
+		echo "$(RED)❌ Failed to create virtual environment. Trying with --without-pip flag...$(NC)"; \
+		$(PYTHON) -m venv $(VENV_PATH) --without-pip || { \
+			echo "$(RED)❌ Virtual environment creation completely failed. Please check your Python installation.$(NC)"; \
+			exit 1; \
+		}; \
+		echo "$(YELLOW)⚠️ Created environment without pip. Installing pip manually...$(NC)"; \
+		curl -sSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py; \
+		$(VENV_PATH)/bin/python /tmp/get-pip.py; \
+		rm /tmp/get-pip.py; \
+	}
+	@if [ ! -f "$(VENV_PATH)/bin/pip" ] && [ ! -f "$(VENV_PATH)/bin/pip3" ]; then \
+		echo "$(RED)❌ Virtual environment created but pip is not available. Please check your Python installation.$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✅ Virtual environment created successfully at $(VENV_PATH)$(NC)"
+
 
 # Environment setup
 setup-env: $(VENV_PATH)
@@ -88,10 +157,23 @@ setup-env: $(VENV_PATH)
 # Installation targets
 install: check-python $(VENV_PATH) setup-env
 	@echo "🦞 Installing Lobster AI..."
-	@echo "📦 Upgrading pip and installing build tools..."
-	$(VENV_PATH)/bin/pip install --upgrade pip setuptools wheel
-	@echo "📦 Installing Lobster AI and dependencies..."
-	$(VENV_PATH)/bin/pip install -e .
+	@if [ "$(USE_UV)" = "true" ]; then \
+		echo "📦 Using uv for faster installation..."; \
+		uv pip install -e .; \
+	else \
+		echo "📦 Upgrading pip and installing build tools..."; \
+		if [ -f "$(VENV_PATH)/bin/pip3" ]; then \
+			$(VENV_PATH)/bin/pip3 install --upgrade pip build wheel; \
+		else \
+			$(VENV_PATH)/bin/pip install --upgrade pip build wheel; \
+		fi; \
+		echo "📦 Installing Lobster AI and dependencies..."; \
+		if [ -f "$(VENV_PATH)/bin/pip3" ]; then \
+			$(VENV_PATH)/bin/pip3 install -e .; \
+		else \
+			$(VENV_PATH)/bin/pip install -e .; \
+		fi; \
+	fi
 	@echo ""
 	@echo "$(GREEN)🎉 Installation complete!$(NC)"
 	@echo ""
@@ -110,23 +192,41 @@ install: check-python $(VENV_PATH) setup-env
 
 dev-install: check-python $(VENV_PATH) setup-env
 	@echo "🦞 Installing Lobster AI with development dependencies..."
-	@echo "📦 Upgrading pip and installing build tools..."
-	$(VENV_PATH)/bin/pip install --upgrade pip setuptools wheel
-	@echo "📦 Installing development dependencies..."
-	$(VENV_PATH)/bin/pip install -e ".[dev]"
-	$(VENV_PATH)/bin/pre-commit install
-	@echo ""
+	@if [ "$(USE_UV)" = "true" ]; then \
+		echo "📦 Using uv for faster installation..."; \
+		uv pip install -e ".[dev]"; \
+	else \
+		echo "📦 Upgrading pip and installing build tools..."; \
+		if [ -f "$(VENV_PATH)/bin/pip3" ]; then \
+			$(VENV_PATH)/bin/pip3 install --upgrade pip build wheel; \
+		else \
+			$(VENV_PATH)/bin/pip install --upgrade pip build wheel; \
+		fi; \
+		echo "📦 Installing development dependencies..."; \
+		if [ -f "$(VENV_PATH)/bin/pip3" ]; then \
+			$(VENV_PATH)/bin/pip3 install -e ".[dev]"; \
+		else \
+			$(VENV_PATH)/bin/pip install -e ".[dev]"; \
+		fi; \
+	fi
+	@echo "🔧 Installing pre-commit git hooks..."
+	@if [ -f "$(VENV_PATH)/bin/pre-commit" ]; then \
+		$(VENV_PATH)/bin/pre-commit install; \
+	else \
+		echo "$(YELLOW)⚠️ pre-commit not found, skipping hook installation$(NC)"; \
+	fi
 	@echo "$(GREEN)🎉 Development installation complete!$(NC)"
 	@echo ""
 	@echo "$(BLUE)📋 Next steps:$(NC)"
 	@echo "1. Activate the virtual environment:"
 	@echo "   $(YELLOW)source $(VENV_PATH)/bin/activate$(NC)"
-	@echo ""
 	@echo "2. Configure your API keys in the .env file"
 	@echo "3. Run tests: $(YELLOW)make test$(NC)"
 
 clean-install: 
-	uninstall install
+	@echo "🧹 Clean installing Lobster AI..."
+	$(MAKE) uninstall || true
+	$(MAKE) install
 
 # Show activation command
 activate:
@@ -136,7 +236,7 @@ activate:
 # Testing targets (require virtual environment)
 test: $(VENV_PATH)
 	@echo "🧪 Running tests..."
-	$(VENV_PATH)/bin/pytest tests/ -v --cov=lobster --cov-report=html --cov-report=term
+	$(VENV_PATH)/bin/pytest tests/test_lobster.py -v --cov=lobster --cov-report=html --cov-report=term
 
 test-fast: $(VENV_PATH)
 	@echo "🧪 Running tests in parallel..."
@@ -239,10 +339,8 @@ setup-pre-commit: $(VENV_PATH)
 	$(VENV_PATH)/bin/pre-commit run --all-files
 
 update-deps: $(VENV_PATH)
-	@echo "📦 Updating dependencies..."
-	$(VENV_PATH)/bin/pip-compile requirements.in -o requirements.txt
-	$(VENV_PATH)/bin/pip-compile requirements-dev.in -o requirements-dev.txt
-	@echo "$(GREEN)✅ Dependencies updated!$(NC)"
+	@echo "📦 Dependencies are now managed in pyproject.toml"
+	@echo "$(GREEN)✅ To add new dependencies, edit the pyproject.toml file directly$(NC)"
 
 # Documentation
 docs: $(VENV_PATH)

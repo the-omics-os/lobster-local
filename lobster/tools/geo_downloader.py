@@ -5,6 +5,7 @@ This module handles downloading and parsing data from the Gene Expression Omnibu
 database, providing structured access to gene expression datasets.
 """
 
+import os
 import requests
 import re
 import tarfile
@@ -131,7 +132,29 @@ class GEODownloadManager:
                 
                 logger.info(f"Extracting TAR file to: {extract_dir}")
                 with tarfile.open(tar_file_path, 'r') as tar:
-                    tar.extractall(path=extract_dir)
+                    # Security check: Validate tar file members before extraction
+                    # to prevent path traversal attacks
+                    def is_safe_member(member):
+                        # Prevent absolute paths and path traversal
+                        member_path = Path(member.name)
+                        try:
+                            # Path.resolve() will fail on path traversal attempts
+                            # Check that the resolved path is within the extract_dir
+                            target_path = (extract_dir / member_path).resolve()
+                            common_path = Path(os.path.commonpath([extract_dir.resolve(), target_path]))
+                            is_safe = common_path == extract_dir.resolve()
+                            if not is_safe:
+                                logger.warning(f"Skipping potentially unsafe member: {member.name}")
+                            return is_safe
+                        except (ValueError, RuntimeError):
+                            # Path traversal attempt
+                            logger.warning(f"Skipping invalid path in TAR: {member.name}")
+                            return False
+                    
+                    # Extract only safe members
+                    safe_members = [m for m in tar.getmembers() if is_safe_member(m)]
+                    logger.info(f"Extracting {len(safe_members)} validated members from TAR")
+                    tar.extractall(path=extract_dir, members=safe_members)
                 
                 # Clean up the tar file after extraction
                 tar_file_path.unlink()

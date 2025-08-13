@@ -5,13 +5,12 @@ Provides a simple, extensible interface for both CLI and future UI implementatio
 
 import os
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Generator, Callable
+from typing import List, Dict, Any, Optional, Generator
 from datetime import datetime
 import json
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
-from langfuse.langchain import CallbackHandler as LangfuseCallback
 
 from .data_manager import DataManager
 from ..agents.graph import create_bioinformatics_graph
@@ -23,7 +22,7 @@ class AgentClient:
         data_manager: Optional[DataManager] = None,
         session_id: str = None,
         enable_reasoning: bool = True,
-        enable_langfuse: bool = True,
+        enable_langfuse: bool = False,
         workspace_path: Optional[Path] = None,
         custom_callbacks: Optional[List] = None  # Changed from List[Callable]
     ):

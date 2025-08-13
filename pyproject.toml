@@ -1,34 +1,21 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+requires = ["setuptools>=42", "wheel", "build>=0.10.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "lobster-ai"
 dynamic = ["version"]
+authors = [
+    {name = "Homara AI", email = "support@homara.ai"}
+]
 description = "Multi-Agent Bioinformatics Analysis System powered by LangGraph"
 readme = "README.md"
-license = {file = "LICENSE"}
-authors = [
-    {name = "Homara AI", email = "support@homara.ai"},
-]
-maintainers = [
-    {name = "Homara AI", email = "support@homara.ai"},
-]
-keywords = [
-    "bioinformatics",
-    "RNA-seq", 
-    "single-cell",
-    "AI",
-    "machine-learning",
-    "data-analysis",
-    "genomics",
-    "langgraph",
-    "langchain"
-]
+requires-python = ">=3.9"
+license = {text = "MIT"}
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
-    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Healthcare Industry", 
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -41,14 +28,17 @@ classifiers = [
     "Environment :: Console",
     "Framework :: FastAPI",
 ]
-requires-python = ">=3.9"
+keywords = ["bioinformatics", "RNA-seq", "single-cell", "AI", "machine-learning", "data-analysis", "genomics"]
 dependencies = [
+    # Core
     "pandas>=1.5.0",
     "numpy>=1.23.0",
     "plotly>=5.0.0",
     "rich>=12.0.0",
     "typer>=0.7.0",
     "python-dotenv>=1.0.0",
+
+    # LangChain and AI
     "langchain>=0.1.0",
     "langchain-community>=0.0.10",
     "langchain-openai>=0.0.5",
@@ -56,7 +46,11 @@ dependencies = [
     "langgraph>=0.0.20",
     "langgraph-supervisor>=0.0.1",
     "openai>=1.0.0",
-    "scanpy>=1.9.3",
+
+    # Bioinformatics (bumped versions for Python 3.12 support)
+    "scanpy>=1.10.2",            # was 1.9.3 — now supports Python 3.12
+    "numba>=0.56.4",             # ensures llvmlite >=0.39 (Python 3.12 support)
+    "llvmlite>=0.39.0",          # explicit to avoid old version being pulled
     "scipy>=1.10.0",
     "scikit-learn>=1.3.0",
     "anndata>=0.9.0",
@@ -66,14 +60,24 @@ dependencies = [
     "scrublet>=0.2.3",
     "h5py>=3.9.0",
     "tables>=3.8.0",
+
+    # Visualization
     "seaborn>=0.12.0",
     "matplotlib>=3.7.0",
     "kaleido>=0.2.0",
+
+    # Data I/O
     "openpyxl>=3.1.0",
     "pyarrow>=12.0.0",
+    "pyreadr>=0.4.0",
+
+    # HTTP and utilities
     "requests>=2.31.0",
     "aiofiles>=23.0.0",
     "xmltodict>=0.13.0",
+    "boto3>=1.26.0",
+
+    # API support
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
 ]
@@ -96,20 +100,37 @@ dev = [
     "build>=0.10.0",
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.0.0",
-]
-observability = [
     "langfuse>=2.0.0",
+    "tabulate>=0.9.0",
+    "ruff>=0.0.300",
 ]
 all = [
-    "lobster-ai[dev,observability]",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "pytest-xdist>=3.0.0",
+    "pytest-asyncio>=0.20.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "pylint>=2.17.0",
+    "mypy>=1.0.0",
+    "bandit>=1.7.0",
+    "pre-commit>=3.0.0",
+    "bumpversion>=0.6.0",
+    "twine>=4.0.0",
+    "build>=0.10.0",
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.0.0",
+    "langfuse>=2.0.0",
+    "tabulate>=0.9.0",
 ]
 
 [project.urls]
-Homepage = "https://github.com/homara-ai/lobster-ai"
-Documentation = "https://docs.lobster-ai.com"
-Repository = "https://github.com/homara-ai/lobster-ai.git"
-"Bug Tracker" = "https://github.com/homara-ai/lobster-ai/issues"
-Discord = "https://discord.gg/homaraai"
+"Homepage" = "https://github.com/homara-ai/lobster"
+"Bug Tracker" = "https://github.com/homara-ai/lobster/issues"
+"Documentation" = "https://docs.lobster-ai.com"
+"Source Code" = "https://github.com/homara-ai/lobster"
+"Discord" = "https://discord.gg/homaraai"
 
 [project.scripts]
 lobster = "lobster.cli:app"
@@ -117,98 +138,34 @@ lobster = "lobster.cli:app"
 [tool.setuptools]
 packages = ["lobster"]
 
-[tool.setuptools_scm]
-write_to = "lobster/version.py"
+[tool.setuptools.dynamic]
+version = {attr = "lobster.version.__version__"}
 
+[tool.setuptools.package-data]
+lobster = ["**/*.json", "**/*.yaml", "**/*.yml"]
+
+# Development tools configurations
 [tool.black]
 line-length = 88
-target-version = ['py39']
-include = '\.pyi?$'
-extend-exclude = '''
-/(
-  # directories
-  \.eggs
-  | \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | build
-  | dist
-)/
-'''
+target-version = ["py39", "py310", "py311"]
 
 [tool.isort]
 profile = "black"
-multi_line_output = 3
 line_length = 88
-known_first_party = ["lobster"]
 
 [tool.pytest.ini_options]
-minversion = "6.0"
-addopts = "-ra -q --strict-markers --strict-config"
 testpaths = ["tests"]
-python_files = ["test_*.py", "*_test.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-markers = [
-    "integration: marks tests as integration tests",
-    "slow: marks tests as slow",
-    "unit: marks tests as unit tests",
-]
-
-[tool.coverage.run]
-source = ["lobster"]
-omit = ["*/tests/*", "*/test_*.py"]
-
-[tool.coverage.report]
-exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if __name__ == .__main__.:",
-    "if TYPE_CHECKING:",
-]
+python_files = "test_*.py"
+addopts = "-v --cov=lobster --cov-report=term"
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
-check_untyped_defs = true
-disallow_untyped_decorators = true
-no_implicit_optional = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = true
-warn_unreachable = true
-strict_equality = true
-show_error_codes = true
 
-[[tool.mypy.overrides]]
-module = [
-    "scanpy.*",
-    "anndata.*",
-    "scrublet.*",
-    "leidenalg.*",
-    "igraph.*",
-    "tables.*",
-]
-ignore_missing_imports = true
-
-[tool.bandit]
-exclude_dirs = ["tests"]
-skips = ["B101", "B601"]
-
-[tool.pylint.messages_control]
-disable = [
-    "C0103", # Invalid name
-    "R0903", # Too few public methods
-    "R0913", # Too many arguments
-    "W0212", # Access to protected member
-]
-
-[tool.pylint.format]
-max-line-length = 88
+[tool.bumpversion]
+current_version = "0.1.0"
+commit = true
+tag = true

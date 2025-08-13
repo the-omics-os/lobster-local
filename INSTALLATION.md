@@ -6,17 +6,55 @@ The fastest way to get Lobster AI running:
 
 ```bash
 git clone https://github.com/homara-ai/lobster.git
-cd lobster-ai
+cd lobster
 make install
+```
+
+### When to Use Makefile vs pip
+
+- **Use `make install`**: For most users, this is the recommended approach. It sets up everything automatically (virtual environment, dependencies, configuration files).
+
+- **Use `make dev-install`**: For developers who want to contribute to the project. This installs extra tools for development (testing, linting, documentation).
+
+- **Use `pip`/`pip3` directly**: Only if you're an advanced user with specific needs or if the Makefile doesn't work for your environment.
+
+### Package Manager Notes
+
+#### UV (Preferred)
+
+If you have the [uv](https://github.com/astral-sh/uv) package manager installed, the installation will automatically use it for faster installs:
+
+```bash
+# Install UV if you don't have it yet (recommended)
+curl -sSf https://install.astral.sh | sh
+
+# Then use uv directly for installs
+uv pip install -e ".[dev]"  # Note the quotes for zsh
+```
+
+#### macOS-specific Notes
+
+On macOS, Python is typically installed with the `pip3` command rather than `pip`:
+
+```bash
+# If using pip directly on macOS
+pip3 install -e ".[dev]"  # Note the quotes for zsh
+```
+
+You can verify your available package managers with:
+```bash
+which uv      # Check if UV is installed (recommended)
+which pip     # May not exist on macOS
+which pip3    # Should point to your Python 3 pip
 ```
 
 ## What the Installation Does
 
 The `make install` command handles everything automatically:
 
-1. **✅ Python Version Check** - Ensures Python 3.9+ is installed
+1. **✅ Python Version Check** - Ensures Python 3.12+ is installed
 2. **✅ Virtual Environment** - Creates isolated `.venv` directory
-3. **✅ Dependency Installation** - Installs all required packages
+3. **✅ Dependency Installation** - Installs all required packages from pyproject.toml
 4. **✅ Environment Setup** - Creates `.env` file for API keys
 5. **✅ Post-Install Guidance** - Shows you exactly what to do next
 
@@ -31,6 +69,26 @@ source .venv/bin/activate
 Or use the helper command:
 ```bash
 make activate
+```
+
+### 2. Install Dependencies
+
+When using `make dev-install`, everything is handled automatically. But if you need to install dependencies manually:
+
+#### macOS (using zsh and pip3):
+
+```bash
+# Option 1: Use quotes to prevent zsh globbing
+pip3 install -e ".[dev]"
+
+# Option 2: Use noglob command
+noglob pip3 install -e .[dev]
+```
+
+#### Linux (using bash and pip):
+
+```bash
+pip install -e .[dev]
 ```
 
 ### 2. Configure API Keys
@@ -101,7 +159,7 @@ curl -sSL https://get.lobster-ai.com | bash
 ### System Requirements
 
 - **Operating System**: macOS, Linux, or Windows with WSL
-- **Python**: 3.9 or higher
+- **Python**: 3.12 or higher
 - **Memory**: 4GB RAM minimum, 8GB recommended
 - **Storage**: 2GB free space for dependencies and data
 
@@ -129,10 +187,10 @@ python3 --version
 
 # If you need to install Python 3.9+:
 # macOS with Homebrew
-brew install python@3.11
+brew install python@3.12
 
 # Ubuntu/Debian
-sudo apt update && sudo apt install python3.11
+sudo apt update && sudo apt install python3.12
 
 # Windows - download from python.org
 ```
@@ -178,6 +236,30 @@ make check-env
 cat .env
 ```
 
+### ZSH Square Bracket Issues
+
+If using zsh (default shell on macOS) and getting `zsh: no matches found: .[dev]` error:
+
+```bash
+# Solution 1: Use quotes around the argument
+pip3 install -e ".[dev]"  
+# or with uv:
+uv pip install -e ".[dev]"
+
+# Solution 2: Use noglob command
+noglob pip3 install -e .[dev]
+# or with uv:
+noglob uv pip install -e .[dev]
+
+# Solution 3: Escape the square brackets
+pip3 install -e .\[dev\]
+
+# Solution 4: Use make which already handles this (RECOMMENDED)
+make dev-install
+```
+
+> **NOTE**: Using make or uv is recommended as they handle all edge cases automatically.
+
 ## Environment Management
 
 ### Check Status
@@ -218,7 +300,7 @@ VENV_PATH := /path/to/custom/venv
 
 ```bash
 # Use specific Python version
-PYTHON := python3.11 make install
+PYTHON := python3.12 make install
 ```
 
 ### Development Workflow
@@ -238,6 +320,9 @@ make type-check
 
 # Build documentation
 make docs
+
+# Manage dependencies
+# Edit pyproject.toml directly to add or modify dependencies
 ```
 
 ## Getting Help

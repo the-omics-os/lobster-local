@@ -4,13 +4,8 @@ Modern, user-friendly CLI for the Multi-Agent Bioinformatics System.
 Installable via pip or curl, with rich terminal interface.
 """
 
-import os
-import sys
-import json
-import asyncio
 from pathlib import Path
-from typing import Optional, Dict, Any
-from datetime import datetime
+from typing import Optional
 
 import typer
 from rich.console import Console
@@ -20,18 +15,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.prompt import Prompt, Confirm
-from rich.live import Live
-from rich.layout import Layout
-from rich.text import Text
 from rich import box
 from rich import console
 
 from .core import AgentClient
-from .core import DataManager
 # Import the proper callback handler
 from .utils import TerminalCallbackHandler
 
-from langchain_core.callbacks import BaseCallbackHandler
 
 
 # Initialize Rich console and Typer app
@@ -73,7 +63,7 @@ def init_client(
     client = AgentClient(
         workspace_path=workspace,
         enable_reasoning=reasoning,
-        enable_langfuse=debug,
+        # enable_langfuse=debug,
         custom_callbacks=callbacks  # Pass the proper callback
     )
     

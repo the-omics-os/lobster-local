@@ -2,11 +2,10 @@
 Simplified Transcriptomics Expert Agent with proper handoff.
 """
 
-from typing import List, Optional
+from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_aws import ChatBedrockConverse, ChatBedrock
-from langchain_core.messages import AIMessage
+from langchain_aws import ChatBedrock
 
 from config.settings import get_settings
 from datetime import date

@@ -84,6 +84,7 @@ dev_requires = [
     "mkdocs>=1.5.0",
     "mkdocs-material>=9.0.0",
     "langfuse>=2.0.0",
+    'tabulate>=0.9.0',
 ]
 
 setup(

@@ -2,7 +2,7 @@ import json
 import boto3
 
 # Replace with the specific Claude model ID you have access to
-MODEL_ID = 'anthropic.claude-opus-4-20250514-v1:0'
+MODEL_ID = 'us.anthropic.claude-opus-4-20250514-v1:0'
 
 bedrock_runtime = boto3.client("bedrock-runtime")
 

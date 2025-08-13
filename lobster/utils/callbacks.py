@@ -3,27 +3,22 @@ Modern Terminal Callback Handler for Multi-Agent System.
 Provides clean, informative display of agent reasoning and execution flow.
 """
 
-import sys
 from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 from dataclasses import dataclass, field
 from enum import Enum
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 from langchain_core.outputs import LLMResult
 from langchain_core.agents import AgentAction, AgentFinish
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn
-from rich.markdown import Markdown
-from rich.syntax import Syntax
+from rich.progress import Progress
 from rich.tree import Tree
 from rich.live import Live
 from rich.layout import Layout
-from rich.text import Text
 from rich import box
 
 
@@ -125,7 +120,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         if event.type == EventType.AGENT_START:
             if self.use_panels:
                 panel = Panel(
-                    f"[cyan]Starting analysis...[/cyan]",
+                    "[cyan]Starting analysis...[/cyan]",
                     title=f"🤖 {agent_display}",
                     border_style="cyan",
                     box=box.ROUNDED
