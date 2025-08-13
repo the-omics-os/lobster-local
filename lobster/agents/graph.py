@@ -13,6 +13,7 @@ from langchain_aws import ChatBedrock
 from .supervisor import create_supervisor_prompt
 from .transcriptomics_expert import transcriptomics_expert
 from .method_expert import method_expert
+from ..config.settings import get_settings
 from ..core.data_manager import DataManager
 from ..utils.logger import get_logger
 
@@ -80,5 +81,3 @@ def create_bioinformatics_graph(
     logger.info("Bioinformatics multi-agent graph created successfully")
     return graph
 
-# Import settings here to avoid circular imports
-from config.settings import get_settings

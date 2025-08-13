@@ -66,7 +66,7 @@ def create_supervisor_prompt(data_manager) -> str:
     - Maintain conversation flow
 
     Today's date is {date}.
-    """.format(date=date.today()())
+    """.format(date=date.today())
         
     # Add data context if available
     if data_manager.has_data():

@@ -7,8 +7,9 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrock
 
-from config.settings import get_settings
 from datetime import date
+
+from ..config.settings import get_settings
 from ..core.data_manager import DataManager
 from ..utils.logger import get_logger
 

@@ -12,7 +12,7 @@ import tarfile
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List, Union
 
-from config.settings import get_settings
+from ..config.settings import get_settings
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
