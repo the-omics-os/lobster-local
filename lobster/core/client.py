@@ -10,7 +10,8 @@ from datetime import datetime
 import json
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.prebuilt.chat_agent_executor import AgentState
 
 from .data_manager import DataManager
 from ..agents.graph import create_bioinformatics_graph
@@ -24,7 +25,8 @@ class AgentClient:
         enable_reasoning: bool = True,
         enable_langfuse: bool = False,
         workspace_path: Optional[Path] = None,
-        custom_callbacks: Optional[List] = None  # Changed from List[Callable]
+        custom_callbacks: Optional[List] = None,  # Changed from List[Callable]
+        manual_model_params: Optional[Dict[str, Any]] = None
     ):
         """
         Initialize the agent client.
@@ -56,12 +58,13 @@ class AgentClient:
         if custom_callbacks:
             self.callbacks.extend(custom_callbacks)
         
-        self.checkpointer = MemorySaver()
+        self.checkpointer = InMemorySaver()
         # Initialize graph - pass all callbacks
         self.graph = create_bioinformatics_graph(
             data_manager=self.data_manager,
             checkpointer=self.checkpointer,
-            callback_handler=self.callbacks  # Pass the list of callbacks
+            callback_handler=self.callbacks,  # Pass the list of callbacks
+            manual_model_params=manual_model_params  # Placeholder for future manual model params
         )        
         
         # Conversation state

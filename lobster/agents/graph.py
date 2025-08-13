@@ -4,7 +4,7 @@ LangGraph multi-agent graph for bioinformatics analysis.
 Implementation using langgraph_supervisor package for hierarchical multi-agent coordination.
 """
 
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.memory import MemorySaver, InMemorySaver
 
 from langgraph_supervisor import create_supervisor
 from langgraph_supervisor.handoff import create_forward_message_tool
@@ -13,23 +13,33 @@ from langchain_aws import ChatBedrock
 from .supervisor import create_supervisor_prompt
 from .transcriptomics_expert import transcriptomics_expert
 from .method_expert import method_expert
+from .state import OverallState
 from ..config.settings import get_settings
 from ..core.data_manager import DataManager
 from ..utils.logger import get_logger
+from ..tools.handoff_tool import create_custom_handoff_tool
 
 logger = get_logger(__name__)
 
 def create_bioinformatics_graph(
     data_manager: DataManager,
-    checkpointer: MemorySaver = None,
-    callback_handler=None
+    checkpointer: InMemorySaver = None,
+    callback_handler=None,
+    manual_model_params: dict = None
 ):
     """Create the bioinformatics multi-agent graph using langgraph_supervisor."""
     logger.info("Creating bioinformatics multi-agent graph")
     
     # Get model configuration for the supervisor
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('supervisor')
+
+    #ensure this for later
+    if manual_model_params:
+        # Use provided manual model parameters if available
+        model_params = manual_model_params
+    else:
+        model_params = settings.get_agent_llm_params('supervisor')
+
     supervisor_model = ChatBedrock(**model_params)
     
     if callback_handler and hasattr(supervisor_model, 'with_config'):
@@ -68,15 +78,26 @@ def create_bioinformatics_graph(
         model=supervisor_model,
         prompt=system_prompt,
         supervisor_name="supervisor",
+        state_schema=OverallState,
         add_handoff_messages=False,
         include_agent_nameand='inline',
         # Change from "full_history" to "messages" or "last_message"
         output_mode="last_message",  # This ensures the actual messages are returned
-        tools=[forwarding_tool]
+        tools=[
+            create_custom_handoff_tool(agent_name='transcriptomics_expert_agent',
+                                       name="handoff_to_transcriptomics_expert",
+                                       description="Assign request to the transcriptomics expert"),
+            create_custom_handoff_tool(agent_name='method_expert_agent',
+                                       name="handoff_to_method_expert",
+                                       description="Assign request to the method expert")
+            ]
+        # tools=[forwarding_tool]
     )
     
     # Compile the graph with the provided checkpointer
-    graph = workflow.compile(checkpointer=checkpointer)
+    graph = workflow.compile(
+        checkpointer=checkpointer
+        )
     
     logger.info("Bioinformatics multi-agent graph created successfully")
     return graph

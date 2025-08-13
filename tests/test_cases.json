@@ -1,0 +1,156 @@
+{
+  "test_geo_download": [
+    "Download GEO dataset GSE291670"
+  ],
+  
+  "test_geo_download_with_qc": [
+    "Download GEO dataset GSE291670 and do the quality control"
+  ],
+  
+  "test_geo_download_with_qc_umap": [
+    "Download GEO dataset GSE291670 and do the quality control",
+    "Generate the UMAP with resolution 0.7"
+  ],
+  
+  "test_random_question_geo_download_with_qc": [
+    "Hi how are you?",
+    "Download GEO dataset GSE291670 and do the quality control",
+    "Generate the UMAP with resolution 0.7"
+  ],
+  
+  "test_simple_geo_query": [
+    "Download GSE109564 from GEO"
+  ],
+  
+  "test_full_analysis_workflow": [
+    "Download GSE109564 from GEO and perform quality control",
+    "Perform clustering using Leiden algorithm",
+    "Create UMAP visualization",
+    "Identify cell type markers"
+  ],
+  
+  "test_specific_qc_parameters": [
+    "Download GEO dataset GSE291670",
+    "Perform quality control with mitochondrial gene threshold of 20% and minimum genes per cell of 200"
+  ],
+  
+  "test_clustering_parameters": [
+    "Download GSE109564 and do quality control",
+    "Perform Leiden clustering with resolution 0.5",
+    "Generate UMAP with 15 neighbors and minimum distance 0.3"
+  ],
+  
+  "test_differential_expression": [
+    "Download GSE109564 from GEO",
+    "Perform quality control and clustering",  
+    "Find differentially expressed genes between clusters 0 and 1"
+  ],
+  
+  "test_pathway_analysis": [
+    "Download GSE291670 and perform complete analysis",
+    "Perform GO enrichment analysis on the top differentially expressed genes"
+  ],
+  
+  "test_cell_annotation": [
+    "Download GSE109564 from GEO",
+    "Perform quality control and clustering",
+    "Annotate cell types using marker genes"
+  ],
+  
+  "test_literature_integration": [
+    "Find optimal parameters for single-cell RNA-seq quality control from recent literature",
+    "Download GSE291670 and apply those parameters"
+  ],
+  
+  "test_multiple_datasets": [
+    "Download GSE109564 from GEO",
+    "Also download GSE291670",
+    "Compare the quality metrics between these two datasets"
+  ],
+  
+  "test_error_handling_invalid_geo": [
+    "Download GEO dataset GSE999999999"
+  ],
+  
+  "test_conversational_with_analysis": [
+    "Hello, I need help with single-cell analysis",
+    "I want to analyze GSE109564",
+    "Please download it and show me the basic statistics",
+    "Now perform quality control",
+    "What cell types might be present based on the clustering?"
+  ],
+  
+  "test_advanced_visualization": [
+    "Download GSE291670 and perform quality control",
+    "Create violin plots for QC metrics",
+    "Generate feature plots for top variable genes",
+    "Create a heatmap of marker genes for each cluster"
+  ],
+  
+  "test_batch_effect_analysis": [
+    "Download GSE109564 from GEO",
+    "Check for batch effects in the data",
+    "If present, suggest correction methods"
+  ],
+  
+  "test_doublet_detection": [
+    "Download GSE291670",
+    "Perform doublet detection using scrublet",
+    "Remove doublets and proceed with quality control"
+  ],
+  
+  "test_custom_gene_sets": [
+    "Download GSE109564 and perform basic analysis",
+    "Calculate scores for T cell markers: CD3D, CD3E, CD4, CD8A",
+    "Identify which clusters express these markers"
+  ],
+  
+  "test_trajectory_analysis": [
+    "Download GSE291670 from GEO",
+    "Perform quality control and clustering",
+    "Suggest trajectory analysis methods for this dataset"
+  ],
+  
+  "test_integration_methods": [
+    "I have multiple single-cell datasets that need integration",
+    "What are the best methods for batch correction?",
+    "Download GSE109564 as an example and show preprocessing steps"
+  ],
+  
+  "test_export_functionality": [
+    "Download GSE291670 and perform complete analysis",
+    "Export all results including plots and processed data"
+  ],
+  
+  "test_parameter_optimization": [
+    "Download GSE109564",
+    "Test different clustering resolutions: 0.3, 0.5, 0.8",
+    "Which resolution gives the most biologically meaningful clusters?"
+  ],
+  
+  "test_statistical_analysis": [
+    "Download GSE291670 and perform quality control",
+    "Calculate statistical significance of differentially expressed genes",
+    "Apply multiple testing correction"
+  ],
+  
+  "test_data_interpretation": [
+    "Download GSE109564 from GEO",
+    "Perform complete analysis",
+    "Interpret the biological significance of the findings",
+    "Suggest follow-up experiments"
+  ],
+  
+  "test_troubleshooting": [
+    "Download GSE291670",
+    "The quality control shows many low-quality cells, what should I do?",
+    "Apply stricter filtering and re-analyze"
+  ],
+  
+  "test_comparison_analysis": [
+    "Download GSE109564",
+    "Perform analysis with default parameters",
+    "Now repeat with more stringent quality control",
+    "Compare the results and explain differences"
+  ]
+}

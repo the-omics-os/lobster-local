@@ -58,7 +58,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         verbose: bool = True,
         show_reasoning: bool = True,
         show_tools: bool = True,
-        max_length: int = 500,
+        max_length: int = None,
         use_panels: bool = True
     ):
         """
@@ -100,7 +100,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         if not content:
             return ""
         content = str(content).strip()
-        if len(content) > self.max_length:
+        if self.max_length is not None and len(content) > self.max_length:
             return content[:self.max_length] + "..."
         return content
     

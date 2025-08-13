@@ -5,10 +5,12 @@ Simplified Transcriptomics Expert Agent with proper handoff.
 from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
+from langgraph.prebuilt.chat_agent_executor import AgentState
 from langchain_aws import ChatBedrock
 
 from datetime import date
 
+from .state import TranscriptomicsExpertState
 from ..config.settings import get_settings
 from ..core.data_manager import DataManager
 from ..utils.logger import get_logger
@@ -250,5 +252,7 @@ Today's date is {date}.
         model=llm,
         tools=tools,
         prompt=system_prompt,
-        name=agent_name
+        name=agent_name,
+        state_schema=TranscriptomicsExpertState
+
     )

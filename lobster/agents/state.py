@@ -7,42 +7,42 @@ capture routing metadata, agent-specific working memory, and intermediate output
 
 from typing import Dict, Any, List
 from langgraph.graph import MessagesState
+from langgraph.prebuilt.chat_agent_executor import AgentState
 
 
-class OverallState(MessagesState):
+
+class OverallState(AgentState):
     """
     Master state that holds sub-states for each agent and conversation-level memory.
     """
     # Meta routing information
     last_active_agent: str
     conversation_id: str
-    task_history: List[str]
 
     # Sub-states for each agent
-    supervisor_state: "SupervisorState"
     transcriptomics_expert_state: "TranscriptomicsExpertState"
-    method_state: "MethodState"
-    human_state: "HumanState"
+    transcriptomics_expert_state: "MethodState"
+    
 
 
-class SupervisorState(MessagesState):
-    """
-    State for the supervisor agent.
-    """
-    next: str  # The next node to route to (agent name or END)
-    last_active_agent: str
+# class SupervisorState(AgentState):
+#     """
+#     State for the supervisor agent.
+#     """
+#     next: str  # The next node to route to (agent name or END)
+#     last_active_agent: str
 
-    # Bioinformatics-specific context the supervisor might maintain
-    analysis_results: Dict[str, Any]     # Combined results from multiple experts
-    methodology_parameters: Dict[str, Any]
-    data_context: str                    # High-level description of the data in use
+#     # Bioinformatics-specific context the supervisor might maintain
+#     analysis_results: Dict[str, Any]     # Combined results from multiple experts
+#     methodology_parameters: Dict[str, Any]
+#     data_context: str                    # High-level description of the data in use
 
-    # Control information
-    delegation_history: List[str]        # Track which agents have been called
-    pending_tasks: List[str]             
+#     # Control information
+#     delegation_history: List[str]        # Track which agents have been called
+#     pending_tasks: List[str]             
 
 
-class TranscriptomicsExpertState(MessagesState):
+class TranscriptomicsExpertState(AgentState):
     """
     State for the transcriptomics expert agent.
     """
@@ -50,13 +50,14 @@ class TranscriptomicsExpertState(MessagesState):
 
     # Transcriptomics-specific context
     analysis_results: Dict[str, Any]     # Gene expression, DEG lists, etc.
+    file_paths: List[str]            # Paths to input/output files
     methodology_parameters: Dict[str, Any] 
     data_context: str                    # Type/source of transcriptomics data (RNA-seq, microarray)
     quality_control_metrics: Dict[str, Any]
     intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
 
 
-class MethodState(MessagesState):
+class MethodState(AgentState):
     """
     State for the method expert agent.
     """
@@ -68,15 +69,3 @@ class MethodState(MessagesState):
     evaluation_metrics: Dict[str, Any]   # Accuracy, runtime, reproducibility metrics
     recommendations: List[str]           # Suggested methods or pipelines
     references: List[str]                
-
-
-class HumanState(MessagesState):
-    """
-    State for the human user interaction agent.
-    """
-    next: str
-
-    # Track what’s been asked and answered
-    user_goals: List[str]
-    clarifying_questions: List[str]
-    confirmed_requirements: Dict[str, Any]
