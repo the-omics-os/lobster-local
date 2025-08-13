@@ -1,4 +1,4 @@
-# 🦞 Lobster AI Installation Guide
+# 🦞 Lobster Installation Guide
 
 ## Quick Start (Recommended)
 
