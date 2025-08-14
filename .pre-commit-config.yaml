@@ -1,0 +1,49 @@
+# See https://pre-commit.com for more information
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v4.4.0
+  hooks:
+    - id: trailing-whitespace
+      warn_only: true       # non-blocking
+    - id: end-of-file-fixer
+      warn_only: true       # non-blocking
+    - id: check-yaml
+      warn_only: true       # non-blocking
+    - id: check-json
+      warn_only: true       # non-blocking
+    - id: check-added-large-files
+      args: ['--maxkb=1000']
+      warn_only: true       # non-blocking
+    - id: debug-statements
+      warn_only: true       # non-blocking
+    - id: detect-private-key   # keep blocking by default
+
+- repo: https://github.com/psf/black
+  rev: 23.3.0
+  hooks:
+    - id: black
+      args: ["--line-length", "88"]
+      warn_only: true       # non-blocking
+
+- repo: https://github.com/pycqa/isort
+  rev: 5.12.0
+  hooks:
+    - id: isort
+      args: ["--profile", "black", "--line-length", "88"]
+      warn_only: true       # non-blocking
+
+- repo: https://github.com/pycqa/flake8
+  rev: 6.0.0
+  hooks:
+    - id: flake8
+      additional_dependencies: [flake8-docstrings]
+      args: ["--max-line-length=88", "--extend-ignore=E203"]
+      exclude: ^tests/
+      warn_only: true       # non-blocking
+
+- repo: https://github.com/PyCQA/bandit
+  rev: 1.7.5
+  hooks:
+    - id: bandit
+      args: ["-ll", "-r", "lobster"]
+      exclude: ^tests/      # blocking (critical hook)
