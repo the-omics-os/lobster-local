@@ -1,8 +1,7 @@
 # 🦞 Lobster AI
 
-[![PyPI version](https://badge.fury.io/py/lobster-ai.svg)](https://badge.fury.io/py/lobster-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
 **Multi-Agent Bioinformatics Analysis System powered by LangGraph**
 
@@ -28,7 +27,7 @@ make install
 ```
 
 This will:
-- ✅ Check Python 3.9+ is installed
+- ✅ Check Python 3.12+ is installed
 - ✅ Create isolated virtual environment
 - ✅ Install all dependencies
 - ✅ Set up environment configuration
@@ -42,7 +41,7 @@ This will:
 pip install lobster-ai
 ```
 
-#### Using Docker
+#### Using Docker (not tested)
 
 ```bash
 docker run -it --rm \
@@ -51,18 +50,18 @@ docker run -it --rm \
   homaraai/lobster:latest
 ```
 
-#### One-line installer
+<!-- #### One-line installer (inactive)
 
 ```bash
 curl -sSL https://get.lobster-ai.com | bash
-```
+``` -->
 
 ## 🔧 Configuration
 
 ### Quick Setup
 
 ```bash
-lobster configure
+Read config/README_CONFIGURATION.md
 ```
 
 This interactive command will help you set up:
@@ -91,6 +90,12 @@ GENIE_PROFILE=production
 
 ```bash
 lobster chat
+```
+
+### Interactive Chat Mode for debugging
+
+```bash
+lobster chat --reasoning --debug
 ```
 
 ### Single Query
