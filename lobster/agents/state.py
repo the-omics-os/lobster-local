@@ -20,8 +20,9 @@ class OverallState(AgentState):
     conversation_id: str
 
     # Sub-states for each agent
+    data_expert_state: "DataExpertState"
     transcriptomics_expert_state: "TranscriptomicsExpertState"
-    transcriptomics_expert_state: "MethodState"
+    method_state: "MethodState"
     
 
 
@@ -57,6 +58,20 @@ class TranscriptomicsExpertState(AgentState):
     intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
 
 
+class DataExpertState(AgentState):
+    """
+    State for the data expert agent.
+    """
+    next: str
+
+    # Data management specific context
+    available_datasets: Dict[str, Any]   # Catalog of available datasets
+    current_dataset_id: str              # Currently loaded dataset identifier
+    dataset_metadata: Dict[str, Any]     # Metadata for current dataset
+    download_history: List[Dict[str, Any]]  # History of downloaded datasets
+    data_sources: List[str]              # Available data sources (GEO, custom, etc.)
+
+
 class MethodState(AgentState):
     """
     State for the method expert agent.
@@ -68,4 +83,4 @@ class MethodState(AgentState):
     data_context: str
     evaluation_metrics: Dict[str, Any]   # Accuracy, runtime, reproducibility metrics
     recommendations: List[str]           # Suggested methods or pipelines
-    references: List[str]                
+    references: List[str]

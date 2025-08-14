@@ -115,7 +115,7 @@ class AgentClient:
             for event in self.graph.stream(
                 input=graph_input, 
                 config=config,
-                stream_mode='updates'
+                stream_mode='debug'
                 ):
                 events.append(event)
             
@@ -178,39 +178,45 @@ class AgentClient:
             }
     
     def _extract_response(self, events: List[Dict]) -> str:
-        """Extract the final response from graph events."""
+        """Extract the final response from ChatBedrockConverse format events."""
         if not events:
             return "No response generated."
         
-        # The last event should contain the final state
-        # Structure: [{'node_name': {'messages': [HumanMessage, AIMessage, ...]}}]
-        last_event = events[-1]
-        
-        # Extract the node output (could be supervisor, transcriptomics_expert_agent, etc.)
-        for node_name, node_output in last_event.items():
-            if isinstance(node_output, dict) and "messages" in node_output:
-                messages = node_output["messages"]
-                
-                # Find the last AI message in the conversation
-                for msg in reversed(messages):
-                    # Check if it's an AIMessage and has content
-                    if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content and msg.content.strip():
-                        return msg.content
-                    # Also handle cases where msg might have different attributes
-                    elif hasattr(msg, 'content') and msg.content and not isinstance(msg, HumanMessage):
-                        # This catches any message with content that isn't a HumanMessage
-                        return msg.content
-        
-        # If no AI message found in the last event, check all events
+        # Process events in reverse chronological order to find the last AI response
         for event in reversed(events):
-            for node_name, node_output in event.items():
-                if isinstance(node_output, dict) and "messages" in node_output:
-                    messages = node_output["messages"]
+            # Look for task_result events which contain the actual results
+            if event.get("type") == "task_result":
+                payload = event.get("payload", {})
+                result = payload.get("result", [])
+                
+                # Result is a list of tuples like [("messages", [HumanMessage, AIMessage, ...])]
+                for item in result:
+                    if isinstance(item, tuple) and len(item) == 2:
+                        key, value = item
+                        if key == "messages" and isinstance(value, list):
+                            # Find the last AIMessage in this result
+                            for msg in reversed(value):
+                                if isinstance(msg, AIMessage) and hasattr(msg, 'content'):
+                                    content = msg.content.strip() if msg.content else ""
+                                    # Return the content, even if it's empty
+                                    if content or msg.content == "":
+                                        return content
+            
+            # Fallback: check checkpoint events with values.messages
+            elif event.get("type") == "checkpoint":
+                payload = event.get("payload", {})
+                values = payload.get("values", {})
+                messages = values.get("messages", [])
+                
+                if messages:
+                    # Find the last AIMessage in checkpoint messages
                     for msg in reversed(messages):
-                        if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content and msg.content.strip():
-                            return msg.content
+                        if isinstance(msg, AIMessage) and hasattr(msg, 'content'):
+                            content = msg.content.strip() if msg.content else ""
+                            if content or msg.content == "":
+                                return content
         
-        return "Analysis completed."
+        return "No response generated."
     
     def _extract_event_content(self, node_output: Dict) -> Optional[str]:
         """Extract displayable content from a node output."""
@@ -300,18 +306,42 @@ class AgentClient:
         self.metadata["reset_at"] = datetime.now().isoformat()
     
     def export_session(self, export_path: Optional[Path] = None) -> Path:
-        """Export the current session data."""
-        export_path = export_path or self.workspace_path / f"session_{self.session_id}.json"
-        
-        session_data = {
-            "session_id": self.session_id,
-            "metadata": self.metadata,
-            "conversation": self.get_conversation_history(),
-            "status": self.get_status(),
-            "exported_at": datetime.now().isoformat()
-        }
-        
-        with open(export_path, 'w') as f:
-            json.dumps(session_data, f, indent=2, default=str)
-        
-        return export_path
+        """Export the current session data using data_manager's comprehensive export."""
+        try:
+            # Try to use data_manager's comprehensive export if data is available
+            if self.data_manager.has_data():
+                export_path = self.data_manager.create_data_package(
+                    output_dir=str(self.data_manager.exports_dir)
+                )
+                return Path(export_path)
+            else:
+                # Fallback to basic session export
+                export_path = export_path or self.workspace_path / f"session_{self.session_id}.json"
+                
+                session_data = {
+                    "session_id": self.session_id,
+                    "metadata": self.metadata,
+                    "conversation": self.get_conversation_history(),
+                    "status": self.get_status(),
+                    "workspace_status": self.data_manager.get_workspace_status(),
+                    "exported_at": datetime.now().isoformat()
+                }
+                
+                with open(export_path, 'w') as f:
+                    json.dump(session_data, f, indent=2, default=str)
+                
+                return export_path
+        except Exception as e:
+            # Final fallback
+            export_path = export_path or self.workspace_path / f"session_{self.session_id}_basic.json"
+            basic_data = {
+                "session_id": self.session_id,
+                "error": str(e),
+                "conversation": self.get_conversation_history(),
+                "exported_at": datetime.now().isoformat()
+            }
+            
+            with open(export_path, 'w') as f:
+                json.dump(basic_data, f, indent=2, default=str)
+            
+            return export_path

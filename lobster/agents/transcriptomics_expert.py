@@ -6,7 +6,7 @@ from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langgraph.prebuilt.chat_agent_executor import AgentState
-from langchain_aws import ChatBedrock
+from langchain_aws import ChatBedrock, ChatBedrockConverse
 
 from datetime import date
 
@@ -28,7 +28,7 @@ def transcriptomics_expert(
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('transcriptomics_expert')
-    llm = ChatBedrock(**model_params)
+    llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])
@@ -36,41 +36,25 @@ def transcriptomics_expert(
     # Store the analysis results
     analysis_results = {"summary": "", "details": {}}
     
-    # Define tools with result storage
+    # Define tools focused on analysis (not data fetching)
     @tool
-    def download_geo_dataset(geo_id: str) -> str:
-        """Download dataset from GEO using accession number."""
-        try:
-            from ..tools import GEOService
-            geo_service = GEOService(data_manager)
-            result = geo_service.download_dataset(geo_id.strip())
-            logger.info(f"Downloaded GEO dataset: {geo_id}")
-            # Store result
-            analysis_results["details"]["data_download"] = result
-            return result
-        except Exception as e:
-            logger.error(f"Error downloading GEO dataset {geo_id}: {e}")
-            return f"Error downloading dataset: {str(e)}"
-
-    @tool
-    def get_data_summary(query: str = "") -> str:
-        """Get summary of currently loaded data."""
+    def check_data_status() -> str:
+        """Check if data is loaded and ready for analysis."""
         if not data_manager.has_data():
-            return "No data loaded. Use download_geo_dataset to load data from GEO."
+            return "No data loaded. Please ask the data expert to load a dataset first."
         
         try:
             summary = data_manager.get_data_summary()
-            response = f"Data loaded: {summary['shape'][0]} cells × {summary['shape'][1]} genes"
-            
-            if 'source' in data_manager.current_metadata:
-                response += f" from {data_manager.current_metadata['source']}"
+            dataset_id = data_manager.current_metadata.get('dataset_id', 'Unknown')
+            response = f"Data ready for analysis: {summary['shape'][0]} cells × {summary['shape'][1]} genes"
+            response += f"\nDataset ID: {dataset_id}"
             
             # Store result
-            analysis_results["details"]["data_summary"] = response
+            analysis_results["details"]["data_status"] = response
             return response
         except Exception as e:
-            logger.error(f"Error getting data summary: {e}")
-            return f"Error getting data summary: {str(e)}"
+            logger.error(f"Error checking data status: {e}")
+            return f"Error checking data status: {str(e)}"
 
     @tool
     def assess_data_quality(query: str) -> str:
@@ -148,72 +132,74 @@ def transcriptomics_expert(
             return f"Error finding marker genes: {str(e)}"
     
     # CRITICAL: Add a completion tool that summarizes and returns results
-    @tool
-    def complete_analysis(summary: str) -> str:
-        """
-        Complete the analysis and return results to supervisor.
-        Use this tool AFTER completing all analysis steps to summarize findings.
+    # @tool
+    # def complete_analysis(summary: str) -> str:
+    #     """
+    #     Complete the analysis and return results to supervisor.
+    #     Use this tool AFTER completing all analysis steps to summarize findings.
         
-        Args:
-            summary: A comprehensive summary of all analysis performed and key findings
-        """
-        # Store the summary
-        analysis_results["summary"] = summary
+    #     Args:
+    #         summary: A comprehensive summary of all analysis performed and key findings
+    #     """
+    #     # Store the summary
+    #     analysis_results["summary"] = summary
         
-        # Format complete response
-        full_response = f"## Transcriptomics Analysis Complete\n\n{summary}\n\n"
+    #     # Format complete response
+    #     full_response = f"## Transcriptomics Analysis Complete\n\n{summary}\n\n"
         
-        # Add details if available
-        if analysis_results["details"]:
-            full_response += "### Detailed Results:\n"
-            for step, result in analysis_results["details"].items():
-                if result:
-                    full_response += f"\n**{step.replace('_', ' ').title()}:**\n{result}\n"
+    #     # Add details if available
+    #     if analysis_results["details"]:
+    #         full_response += "### Detailed Results:\n"
+    #         for step, result in analysis_results["details"].items():
+    #             if result:
+    #                 full_response += f"\n**{step.replace('_', ' ').title()}:**\n{result}\n"
         
-        logger.info("Analysis completed and results prepared for supervisor")
-        return full_response
+    #     logger.info("Analysis completed and results prepared for supervisor")
+    #     return full_response
 
     base_tools = [
-        download_geo_dataset,
-        get_data_summary,
+        check_data_status,
         assess_data_quality,
         cluster_cells,
         detect_doublets,
         annotate_cell_types,
-        find_marker_genes,
-        complete_analysis  # Add the completion tool
+        find_marker_genes
     ]
     
     # Combine base tools with handoff tools if provided
     tools = base_tools + (handoff_tools or [])
     
-    # UPDATED SYSTEM PROMPT - Emphasizes using complete_analysis
+    # Updated system prompt - focused on analysis, not data management
     system_prompt = """
-You are a transcriptomics domain expert specializing in RNA-seq analysis (both single-cell and bulk). YOU ONLY REPPORT TO YOUR SUPERVISOR. NEVER TO THE HUMAN DIRECTLY.
+You are a transcriptomics domain expert specializing in RNA-seq analysis (both single-cell and bulk).
 
 <Task>
 You will receive specific analysis instructions from the supervisor. Your job is to:
-1. Check if data is available or needs to be downloaded
-2. Ask supervisor in case you need more information to fulfill your task (example no GEO ID or DOI provided). If supervisor doesnt give any identifier do not mention any tools. just ask the supervisor to ask the human.
+1. Check if data is available using check_data_status
+2. If no data is loaded, ask the supervisor to have the data expert load the required dataset
 3. Execute the requested analysis using available tools
-4. **IMPORTANT: Use the complete_analysis tool to summarize and return your findings**
+4. **IMPORTANT: Transfer your findings back to the supervisor once you are done**
 </Task>
 
 <Available Tools>
 You have access to these transcriptomics analysis tools:
-- download_geo_dataset: Download dataset from GEO
-- get_data_summary: Get summary of currently loaded data
+- check_data_status: Check if data is loaded and ready
 - assess_data_quality: Assess quality of RNA-seq data
 - cluster_cells: Perform clustering and UMAP visualization
 - detect_doublets: Detect doublets in single-cell data
 - annotate_cell_types: Annotate cell types based on markers
 - find_marker_genes: Find marker genes for clusters
-- **complete_analysis**: USE THIS to summarize and return results after analysis
-
 </Available Tools>
 
+<Data Access>
+- You DO NOT download or manage data directly
+- If you need a specific dataset, ask the supervisor to request it from the data expert
+- The data expert will handle all data acquisition and provide the dataset ID
+- Once data is loaded, you can proceed with analysis
+</Data Access>
+
 <CRITICAL Instructions>
-**ALWAYS end your analysis by calling the complete_analysis tool with a comprehensive summary of:**
+When reporting results, always include:
 - What analysis was performed
 - Key findings with specific numbers
 - Any visualizations created
@@ -223,17 +209,17 @@ This ensures your results are properly communicated back to the supervisor and u
 </CRITICAL Instructions>
 
 <Analysis Process>
-1. Check data availability with get_data_summary
-2. Download data if needed using download_geo_dataset
+1. Check data availability with check_data_status
+2. If no data, request the supervisor to get data from data expert
 3. Execute the specific analysis requested
-4. **Call complete_analysis with a detailed summary of all findings**
+4. Report results with specific metrics and findings
 </Analysis Process>
 
 <Guidelines>
 - Include specific numbers in results (e.g., "15 clusters identified")
 - Explain what each analysis step accomplishes
 - Be thorough but concise
-- **Always use complete_analysis as your final step**
+- Always mention the dataset ID you're analyzing
 </Guidelines>
 
 Today's date is {date}.

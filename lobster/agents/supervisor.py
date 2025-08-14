@@ -23,6 +23,7 @@ def create_supervisor_prompt(data_manager) -> str:
     </Your Role>
 
     <Available Experts>
+    - **data_expert_agent**: Handles all data operations (download, fetch, manage datasets)
     - **transcriptomics_expert_agent**: RNA-seq analysis specialist
     - **method_expert_agent**: Literature research for computational parameters
     </Available Experts>
@@ -35,16 +36,24 @@ def create_supervisor_prompt(data_manager) -> str:
     - System capability questions
     - Any question you can answer with general knowledge
 
-    2. **Delegate to transcriptomics_expert_agent**:
-    - Dataset analysis requests
+    2. **Delegate to data_expert_agent**:
+    - Downloading datasets from GEO (needs GEO ID)
+    - Finding datasets from DOI
+    - Loading/managing data files
+    - Listing available datasets
+    - Any data acquisition or storage tasks
+
+    3. **Delegate to transcriptomics_expert_agent**:
+    - Dataset analysis requests (AFTER data is loaded)
     - Clustering, differential expression, quality control
     - Any RNA-seq specific analysis
+    - Cell type annotation, marker gene identification
 
-    3. **Delegate to method_expert_agent**:
+    4. **Delegate to method_expert_agent**:
     - Literature-based parameter optimization
     - Finding best practices from publications
-
-    You can use the forwarding_tool to delegate tasks to experts directly. 
+    - Extracting methods from DOIs
+    - Protocol information searches
 
     <CRITICAL RESPONSE RULES>
     **When an expert completes their task:**

@@ -36,7 +36,7 @@ class ModelConfig:
     provider: ModelProvider
     model_id: str
     tier: ModelTier
-    temperature: float = 0.7
+    temperature: float = 1.0
     region: str = "us-east-1"
     description: str = ""
     
@@ -74,7 +74,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-3-haiku-20240307-v1:0",
             tier=ModelTier.LIGHTWEIGHT,
-            temperature=0.7,
+            temperature=1.0,
             description="Fast, cost-effective Claude 3 Haiku for simple tasks"
         ),
         
@@ -82,7 +82,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             tier=ModelTier.LIGHTWEIGHT,
-            temperature=0.7,
+            temperature=1.0,
             description="Fast, cost-effective Claude 3.5 Haiku for simple tasks"
         ),
         
@@ -90,7 +90,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-3-5-sonnet-20240620-v1:0",
             tier=ModelTier.STANDARD,
-            temperature=0.7,
+            temperature=1.0,
             description="Enhanced Claude 3.5 Sonnet with improved performance"
         ),
         
@@ -98,7 +98,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
             tier=ModelTier.STANDARD,
-            temperature=0.7,
+            temperature=1.0,
             description="Latest Claude 3.5 Sonnet v2 with enhanced capabilities"
         ),
         
@@ -106,7 +106,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
             tier=ModelTier.STANDARD,
-            temperature=0.7,
+            temperature=1.0,
             description="Next-generation Claude 4 Sonnet model"
         ),
         
@@ -149,7 +149,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="eu.anthropic.claude-3-5-haiku-20241022-v1:0",
             tier=ModelTier.LIGHTWEIGHT,
-            temperature=0.7,
+            temperature=1.0,
             region="eu-central-1",
             description="EU region Claude 3.5 Haiku model"
         ),
@@ -158,7 +158,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="eu.anthropic.claude-3-5-sonnet-20240620-v1:0",
             tier=ModelTier.STANDARD,
-            temperature=0.7,
+            temperature=1.0,
             region="eu-central-1",
             description="EU region Claude 3.5 Sonnet model"
         ),
@@ -167,7 +167,7 @@ class GenieAgentConfigurator:
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
             tier=ModelTier.STANDARD,
-            temperature=0.7,
+            temperature=1.0,
             region="eu-central-1",
             description="EU region Claude 3.5 Sonnet v2 model"
         ),
@@ -318,7 +318,7 @@ class GenieAgentConfigurator:
                 provider=model_data['provider'],
                 model_id=model_data['model_id'],
                 tier=model_data['tier'],
-                temperature=model_data.get('temperature', 0.7),
+                temperature=model_data.get('temperature', 1.0),
                 region=model_data.get('region', 'us-east-1'),
                 description=model_data.get('description', '')
             )

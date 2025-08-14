@@ -8,9 +8,10 @@ from langgraph.checkpoint.memory import MemorySaver, InMemorySaver
 
 from langgraph_supervisor import create_supervisor
 from langgraph_supervisor.handoff import create_forward_message_tool
-from langchain_aws import ChatBedrock
+from langchain_aws import ChatBedrock, ChatBedrockConverse
 
 from .supervisor import create_supervisor_prompt
+from .data_expert import data_expert
 from .transcriptomics_expert import transcriptomics_expert
 from .method_expert import method_expert
 from .state import OverallState
@@ -40,13 +41,22 @@ def create_bioinformatics_graph(
     else:
         model_params = settings.get_agent_llm_params('supervisor')
 
-    supervisor_model = ChatBedrock(**model_params)
+    supervisor_model = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(supervisor_model, 'with_config'):
         supervisor_model = supervisor_model.with_config(callbacks=[callback_handler])
     
     # Create worker agents
     agents = []
+    
+    # Create data expert agent
+    data_agent = data_expert(
+        data_manager=data_manager,
+        callback_handler=callback_handler,
+        agent_name='data_expert_agent',
+        handoff_tools=None
+    )
+    agents.append(data_agent)
     
     # Create transcriptomics expert agent
     transcriptomics_agent = transcriptomics_expert(
@@ -84,12 +94,16 @@ def create_bioinformatics_graph(
         # Change from "full_history" to "messages" or "last_message"
         output_mode="last_message",  # This ensures the actual messages are returned
         tools=[
+            create_custom_handoff_tool(agent_name='data_expert_agent',
+                                       name="handoff_to_data_expert",
+                                       description="Assign data fetching/download tasks to the data expert"),
             create_custom_handoff_tool(agent_name='transcriptomics_expert_agent',
                                        name="handoff_to_transcriptomics_expert",
-                                       description="Assign request to the transcriptomics expert"),
+                                       description="Assign analysis tasks to the transcriptomics expert"),
             create_custom_handoff_tool(agent_name='method_expert_agent',
                                        name="handoff_to_method_expert",
-                                       description="Assign request to the method expert")
+                                       description="Assign literature/method tasks to the method expert"),
+            forwarding_tool
             ]
         # tools=[forwarding_tool]
     )
@@ -101,4 +115,3 @@ def create_bioinformatics_graph(
     
     logger.info("Bioinformatics multi-agent graph created successfully")
     return graph
-

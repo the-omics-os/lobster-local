@@ -25,8 +25,8 @@ class DataManager:
     bioinformatics datasets and related metadata.
     """
     
-    def __init__(self):
-        """Initialize an empty DataManager instance."""
+    def __init__(self, workspace_path: Optional[Path] = None):
+        """Initialize DataManager with optional workspace path."""
         self.current_data: Optional[pd.DataFrame] = None
         self.current_metadata: Dict[str, Any] = {}
         self.adata: Optional[sc.AnnData] = None
@@ -36,6 +36,19 @@ class DataManager:
         self.processing_log: List[str] = []
         self.tool_usage_history: List[Dict[str, Any]] = []  # Track tool usage for reproducibility
         self.max_plots_history: int = 50  # Maximum number of plots to keep in history
+        
+        # Workspace configuration
+        self.workspace_path = workspace_path or Path.cwd() / ".lobster_workspace"
+        self.workspace_path.mkdir(parents=True, exist_ok=True)
+        
+        # Create subdirectories for better organization
+        self.data_dir = self.workspace_path / "data"
+        self.plots_dir = self.workspace_path / "plots" 
+        self.exports_dir = self.workspace_path / "exports"
+        
+        self.data_dir.mkdir(exist_ok=True)
+        self.plots_dir.mkdir(exist_ok=True)
+        self.exports_dir.mkdir(exist_ok=True)
     
     def set_data(self, data: pd.DataFrame, metadata: Dict[str, Any] = None):
         """
@@ -479,3 +492,171 @@ class DataManager:
         
         logger.info(f"Data package created at {zip_filename}")
         return zip_filename
+    
+    def save_plots_to_workspace(self):
+        """Save all current plots to the workspace plots directory."""
+        if not self.latest_plots:
+            logger.info("No plots to save")
+            return []
+        
+        saved_files = []
+        import plotly.io as pio
+        
+        for plot_entry in self.latest_plots:
+            try:
+                plot = plot_entry["figure"]
+                plot_id = plot_entry["id"]
+                plot_title = plot_entry["title"]
+                
+                # Create sanitized filename
+                safe_title = "".join(c for c in plot_title if c.isalnum() or c in [' ', '_', '-']).rstrip()
+                safe_title = safe_title.replace(' ', '_')
+                filename_base = f"{plot_id}_{safe_title}" if safe_title else plot_id
+                
+                # Save as HTML (interactive)
+                html_path = self.plots_dir / f"{filename_base}.html"
+                pio.write_html(plot, html_path)
+                saved_files.append(str(html_path))
+                
+                # Save as PNG (static)
+                png_path = self.plots_dir / f"{filename_base}.png"
+                try:
+                    pio.write_image(plot, png_path)
+                    saved_files.append(str(png_path))
+                except Exception as e:
+                    logger.warning(f"Could not save PNG for {plot_id}: {e}")
+                
+                logger.info(f"Saved plot {plot_id} to workspace")
+                
+            except Exception as e:
+                logger.error(f"Failed to save plot {plot_id}: {e}")
+        
+        return saved_files
+    
+    def save_data_to_workspace(self, filename: str = None):
+        """Save current data to the workspace data directory."""
+        if not self.has_data():
+            logger.warning("No data to save")
+            return None
+        
+        if filename is None:
+            import datetime
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"data_{timestamp}.csv"
+        
+        filepath = self.data_dir / filename
+        
+        try:
+            self.current_data.to_csv(filepath)
+            
+            # Also save metadata if available
+            if self.current_metadata:
+                metadata_path = self.data_dir / f"{Path(filename).stem}_metadata.json"
+                with open(metadata_path, 'w') as f:
+                    json.dump(self.current_metadata, f, indent=2, default=str)
+            
+            logger.info(f"Data saved to workspace: {filepath}")
+            return str(filepath)
+            
+        except Exception as e:
+            logger.error(f"Failed to save data: {e}")
+            return None
+    
+    def list_workspace_files(self) -> Dict[str, List[Dict[str, Any]]]:
+        """List all files in the workspace organized by category."""
+        files_by_category = {
+            "data": [],
+            "plots": [],
+            "exports": []
+        }
+        
+        # List data files
+        for file_path in self.data_dir.iterdir():
+            if file_path.is_file():
+                files_by_category["data"].append({
+                    "name": file_path.name,
+                    "path": str(file_path),
+                    "size": file_path.stat().st_size,
+                    "modified": file_path.stat().st_mtime
+                })
+        
+        # List plot files  
+        for file_path in self.plots_dir.iterdir():
+            if file_path.is_file():
+                files_by_category["plots"].append({
+                    "name": file_path.name,
+                    "path": str(file_path),
+                    "size": file_path.stat().st_size,
+                    "modified": file_path.stat().st_mtime
+                })
+        
+        # List export files
+        for file_path in self.exports_dir.iterdir():
+            if file_path.is_file():
+                files_by_category["exports"].append({
+                    "name": file_path.name,
+                    "path": str(file_path),
+                    "size": file_path.stat().st_size,
+                    "modified": file_path.stat().st_mtime
+                })
+        
+        return files_by_category
+    
+    def get_workspace_status(self) -> Dict[str, Any]:
+        """Get comprehensive workspace status."""
+        files = self.list_workspace_files()
+        
+        status = {
+            "workspace_path": str(self.workspace_path),
+            "data_loaded": self.has_data(),
+            "plot_count": len(self.latest_plots),
+            "files": {
+                "data_files": len(files["data"]),
+                "plot_files": len(files["plots"]),
+                "export_files": len(files["exports"])
+            },
+            "processing_history": len(self.tool_usage_history),
+            "directories": {
+                "data": str(self.data_dir),
+                "plots": str(self.plots_dir),
+                "exports": str(self.exports_dir)
+            }
+        }
+        
+        if self.has_data():
+            status["current_data"] = self.get_data_summary()
+        
+        return status
+    
+    def auto_save_state(self):
+        """Automatically save current state including data and plots."""
+        saved_items = []
+        
+        # Save data if available
+        if self.has_data():
+            data_file = self.save_data_to_workspace()
+            if data_file:
+                saved_items.append(f"Data: {Path(data_file).name}")
+        
+        # Save plots if available
+        if self.latest_plots:
+            plot_files = self.save_plots_to_workspace()
+            if plot_files:
+                saved_items.append(f"Plots: {len(plot_files)} files")
+        
+        # Save processing log
+        if self.processing_log or self.tool_usage_history:
+            log_path = self.exports_dir / "processing_log.json"
+            log_data = {
+                "processing_log": self.processing_log,
+                "tool_usage_history": self.tool_usage_history,
+                "timestamp": pd.Timestamp.now().isoformat()
+            }
+            with open(log_path, 'w') as f:
+                json.dump(log_data, f, indent=2, default=str)
+            saved_items.append("Processing log")
+        
+        if saved_items:
+            logger.info(f"Auto-saved: {', '.join(saved_items)}")
+        
+        return saved_items

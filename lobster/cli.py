@@ -50,6 +50,10 @@ def init_client(
     
     workspace.mkdir(parents=True, exist_ok=True)
     
+    # Initialize DataManager with workspace support
+    from .core.data_manager import DataManager
+    data_manager = DataManager(workspace_path=workspace)
+    
     # Create reasoning callback using the terminal_callback_handler
     callbacks = []
     if reasoning:
@@ -59,8 +63,9 @@ def init_client(
         )
         callbacks.append(reasoning_callback)
     
-    # Initialize client
+    # Initialize client with proper data_manager connection
     client = AgentClient(
+        data_manager=data_manager,  # Pass the configured data_manager
         workspace_path=workspace,
         enable_reasoning=reasoning,
         # enable_langfuse=debug,
@@ -68,6 +73,27 @@ def init_client(
     )
     
     return client
+
+
+def get_current_agent_name() -> str:
+    """Get the current active agent name for display."""
+    global client
+    if client and hasattr(client, 'callbacks') and client.callbacks:
+        for callback in client.callbacks:
+            if isinstance(callback, TerminalCallbackHandler):
+                if hasattr(callback, 'current_agent') and callback.current_agent:
+                    # Format the agent name properly
+                    agent_name = callback.current_agent.replace('_', ' ').title()
+                    return f"🦞 {agent_name}"
+                # Check if there are any recent events that might indicate the active agent
+                elif hasattr(callback, 'events') and callback.events:
+                    # Get the most recent agent from events
+                    for event in reversed(callback.events):
+                        if event.agent_name and event.agent_name != "system" and event.agent_name != "unknown":
+                            agent_name = event.agent_name.replace('_', ' ').title()
+                            return f"🦞 {agent_name}"
+                break
+    return "🦞 Lobster"
 
 
 def display_welcome():
@@ -137,8 +163,8 @@ def chat(
     
     while True:
         try:
-            # Get user input with rich prompt
-            user_input = Prompt.ask("\n[bold red]🦞 You[/bold red]")
+            # Get user input with rich prompt - always show Lobster
+            user_input = Prompt.ask(f"\n[bold red]🦞 Lobster You[/bold red]")
             
             # Handle commands
             if user_input.startswith("/"):
@@ -161,6 +187,7 @@ def chat(
             
             # Display response
             if result["success"]:
+                # Response header always shows Lobster
                 response_panel = Panel(
                     Markdown(result["response"]),
                     title="[bold white on red] 🦞 Lobster Response [/bold white on red]",
@@ -196,6 +223,9 @@ def handle_command(command: str, client: AgentClient):
         [red]/help[/red]       [grey50]-[/grey50] Show this help message
         [red]/status[/red]     [grey50]-[/grey50] Show system status
         [red]/files[/red]      [grey50]-[/grey50] List workspace files
+        [red]/data[/red]       [grey50]-[/grey50] Show current data summary
+        [red]/plots[/red]      [grey50]-[/grey50] List generated plots
+        [red]/save[/red]       [grey50]-[/grey50] Save current state to workspace
         [red]/read[/red] <file> [grey50]-[/grey50] Read a file from workspace
         [red]/export[/red]     [grey50]-[/grey50] Export session data
         [red]/reset[/red]      [grey50]-[/grey50] Reset conversation
@@ -213,23 +243,31 @@ def handle_command(command: str, client: AgentClient):
         display_status(client)
     
     elif cmd == "/files":
-        files = client.list_workspace_files()
-        if files:
-            table = Table(
-                title="🦞 Workspace Files",
-                box=box.ROUNDED,
-                border_style="red",
-                title_style="bold red on white"
-            )
-            table.add_column("Name", style="bold white")
-            table.add_column("Size", style="grey74")
-            table.add_column("Modified", style="grey50")
-            
-            for f in files:
-                size_kb = f["size"] / 1024
-                table.add_row(f["name"], f"{size_kb:.1f} KB", f["modified"])
-            
-            console.print(table)
+        # Get categorized workspace files from data_manager
+        workspace_files = client.data_manager.list_workspace_files()
+        
+        if any(workspace_files.values()):
+            for category, files in workspace_files.items():
+                if files:
+                    table = Table(
+                        title=f"🦞 {category.title()} Files",
+                        box=box.ROUNDED,
+                        border_style="red",
+                        title_style="bold red on white"
+                    )
+                    table.add_column("Name", style="bold white")
+                    table.add_column("Size", style="grey74")
+                    table.add_column("Modified", style="grey50")
+                    table.add_column("Path", style="dim grey50")
+                    
+                    for f in files:
+                        from datetime import datetime
+                        size_kb = f["size"] / 1024
+                        mod_time = datetime.fromtimestamp(f["modified"]).strftime("%Y-%m-%d %H:%M")
+                        table.add_row(f["name"], f"{size_kb:.1f} KB", mod_time, Path(f["path"]).parent.name)
+                    
+                    console.print(table)
+                    console.print()  # Add spacing between categories
         else:
             console.print("[grey50]No files in workspace[/grey50]")
     
@@ -255,6 +293,86 @@ def handle_command(command: str, client: AgentClient):
         if Confirm.ask("[red]🦞 Reset conversation?[/red]"):
             client.reset()
             console.print("[bold red]✓[/bold red] [white]Conversation reset[/white]")
+    
+    elif cmd == "/data":
+        # Show current data summary
+        if client.data_manager.has_data():
+            summary = client.data_manager.get_data_summary()
+            
+            table = Table(
+                title="🦞 Current Data Summary",
+                box=box.ROUNDED,
+                border_style="red",
+                title_style="bold red on white"
+            )
+            table.add_column("Property", style="bold grey93")
+            table.add_column("Value", style="white")
+            
+            table.add_row("Status", summary["status"])
+            table.add_row("Shape", f"{summary['shape'][0]} × {summary['shape'][1]}")
+            table.add_row("Memory Usage", summary["memory_usage"])
+            
+            if summary.get("columns"):
+                cols_preview = ", ".join(summary["columns"][:5])
+                if len(summary["columns"]) > 5:
+                    cols_preview += f" ... (+{len(summary['columns'])-5} more)"
+                table.add_row("Columns", cols_preview)
+            
+            if summary.get("metadata_keys"):
+                meta_preview = ", ".join(summary["metadata_keys"][:3])
+                if len(summary["metadata_keys"]) > 3:
+                    meta_preview += f" ... (+{len(summary['metadata_keys'])-3} more)"
+                table.add_row("Metadata", meta_preview)
+            
+            console.print(table)
+        else:
+            console.print("[grey50]No data currently loaded[/grey50]")
+    
+    elif cmd == "/plots":
+        # Show generated plots
+        plots = client.data_manager.get_plot_history()
+        
+        if plots:
+            table = Table(
+                title="🦞 Generated Plots",
+                box=box.ROUNDED,
+                border_style="red",
+                title_style="bold red on white"
+            )
+            table.add_column("ID", style="bold white")
+            table.add_column("Title", style="white")
+            table.add_column("Source", style="grey74")
+            table.add_column("Created", style="grey50")
+            
+            for plot in plots:
+                from datetime import datetime
+                try:
+                    created = datetime.fromisoformat(plot["timestamp"].replace('Z', '+00:00'))
+                    created_str = created.strftime("%Y-%m-%d %H:%M")
+                except:
+                    created_str = plot["timestamp"][:16] if plot["timestamp"] else "N/A"
+                
+                table.add_row(
+                    plot["id"],
+                    plot["title"],
+                    plot["source"] or "N/A",
+                    created_str
+                )
+            
+            console.print(table)
+        else:
+            console.print("[grey50]No plots generated yet[/grey50]")
+    
+    elif cmd == "/save":
+        # Auto-save current state
+        saved_items = client.data_manager.auto_save_state()
+        
+        if saved_items:
+            console.print(f"[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
+            for item in saved_items:
+                console.print(f"  • {item}")
+        else:
+            console.print("[grey50]Nothing to save (no data or plots loaded)[/grey50]")
     
     elif cmd == "/clear":
         console.clear()
@@ -299,44 +417,6 @@ def query(
             ))
     else:
         console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]{result['error']}[/red]")
-
-
-@app.command()
-def install():
-    """
-    Install the Lobster CLI system-wide.
-    """
-    console.print("[red]🦞 Installing Lobster CLI by homara AI...[/red]")
-    
-    # Create installation script
-    install_script = """
-#!/bin/bash
-# Lobster CLI Installation Script
-
-# Check Python version
-python3 --version >/dev/null 2>&1 || { echo "Python 3 is required"; exit 1; }
-
-# Install package
-pip install --user lobster-cli
-
-# Add to PATH if needed
-if ! command -v lobster &> /dev/null; then
-    echo 'export PATH="\$HOME/.local/bin:\$PATH"' >> ~/.bashrc
-    echo "Please run: source ~/.bashrc"
-fi
-
-echo "🦞 Lobster CLI by homara AI installed successfully!"
-echo "Run 'lobster chat' to start"
-    """
-    
-    # Save installation script
-    install_path = Path("/tmp/install_lobster.sh")
-    install_path.write_text(install_script)
-    install_path.chmod(0o755)
-    
-    console.print(f"[bold red]✓[/bold red] [white]Installation script created:[/white] [grey74]{install_path}[/grey74]")
-    console.print("[red]Run:[/red] [white]curl -sSL https://homara.ai/lobster/install.sh | bash[/white]")
-
 
 @app.command()
 def serve(

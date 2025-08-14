@@ -8,7 +8,7 @@ import re
 from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_aws import ChatBedrock
+from langchain_aws import ChatBedrock, ChatBedrockConverse
 
 from datetime import date
 
@@ -29,7 +29,7 @@ def method_expert(
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('method_agent')
-    llm = ChatBedrock(**model_params)
+    llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])
@@ -49,20 +49,27 @@ def method_expert(
             return f"Error searching PubMed: {str(e)}"
 
     @tool
-    def find_geo_from_doi(doi: str) -> str:
-        """Find GEO accession numbers from a DOI."""
+    def find_method_parameters_from_doi(doi: str) -> str:
+        """Extract method parameters and protocols from a publication DOI."""
         try:
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
             
             from ..tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            results = pubmed_service.find_geo_from_doi(doi)
-            logger.info(f"GEO search completed for DOI: {doi}")
+            
+            # Search for the publication
+            results = pubmed_service.search_pubmed(f"DOI:{doi}")
+            
+            # Store DOI-based parameters in metadata
+            if "parameters" in results.lower() or "methods" in results.lower():
+                data_manager.current_metadata[f'methods_from_doi_{doi}'] = results
+                
+            logger.info(f"Method search completed for DOI: {doi}")
             return results
         except Exception as e:
-            logger.error(f"Error finding GEO from DOI: {e}")
-            return f"Error finding GEO datasets: {str(e)}"
+            logger.error(f"Error finding methods from DOI: {e}")
+            return f"Error finding method parameters: {str(e)}"
 
     @tool
     def find_marker_genes(query: str) -> str:
@@ -107,7 +114,7 @@ def method_expert(
 
     base_tools = [
         search_pubmed,
-        find_geo_from_doi,
+        find_method_parameters_from_doi,
         find_marker_genes,
         find_protocol_information
     ]
@@ -124,14 +131,22 @@ Given a specific computational method question, you will:
 2. Extract methodology parameters (resolutions, thresholds, etc.)
 3. Find GitHub repositories or supplementary materials
 4. Provide clear recommendations with supporting evidence
+5. Store important method parameters in the data manager for reproducibility
 </Task>
 
 <Available Tools>
 - search_pubmed: Search for relevant publications
-- find_geo_from_doi: Find GEO datasets from DOI
+- find_method_parameters_from_doi: Extract method parameters from a DOI
 - find_marker_genes: Find marker genes for cell types from literature
 - find_protocol_information: Find protocol details for bioinformatics techniques
 </Available Tools>
+
+<Data Management>
+- You DO NOT handle data files directly
+- If GEO datasets are mentioned in papers, note them for the data expert
+- Your focus is on finding and documenting computational methods
+- Store important parameters in the data manager metadata
+</Data Management>
 
 <Guidelines>
 When providing parameter recommendations:
@@ -148,6 +163,7 @@ Provide your findings in clear, structured text that includes:
 - Citations to supporting literature
 - Any relevant GitHub repositories or protocols
 - Context about when different parameters should be used
+- If datasets are mentioned, note their identifiers for the data expert
 
 Today's date is {date}. Max iterations before timeout: {max_iterations}
 """.format(
