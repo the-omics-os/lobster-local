@@ -92,7 +92,8 @@ def create_bioinformatics_graph(
         add_handoff_messages=False,
         include_agent_nameand='inline',
         # Change from "full_history" to "messages" or "last_message"
-        output_mode="last_message",  # This ensures the actual messages are returned
+        output_mode="full_history",  # This ensures the actual messages are returned
+        # output_mode="last_message",  # This ensures the actual messages are returned
         tools=[
             create_custom_handoff_tool(agent_name='data_expert_agent',
                                        name="handoff_to_data_expert",

@@ -56,7 +56,32 @@ docker run -it --rm \
 curl -sSL https://get.lobster-ai.com | bash
 ``` -->
 
-## 🔧 Configuration
+## � Command Line Interface
+
+### Key Commands
+
+- `/read <file>` - Read file from workspace/subdirectories or any absolute path
+- `/files` - List all workspace files with metadata
+- `/data` - Show current dataset information
+- `/plots` - List all generated visualizations
+- `/help` - Show all available commands
+
+### Enhanced File Reading
+
+The `/read` command now supports:
+- Reading files from subdirectories (`/read data.csv` finds files in `.lobster_workspace/data/`)
+- Absolute paths (`/read /Users/name/Desktop/file.csv`)
+- Case-insensitive matching
+- Detailed debug logging
+
+### User-Friendly Welcome Screen
+
+The welcome screen now displays:
+- Key bioinformatics tasks Lobster can perform
+- Most important commands with brief descriptions
+- Clear usage instructions for beginners
+
+## �🔧 Configuration
 
 ### Quick Setup
 

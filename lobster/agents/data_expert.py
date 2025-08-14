@@ -49,7 +49,12 @@ def data_expert(
         """
         try:
             from ..tools import GEOService
-            geo_service = GEOService(data_manager)
+            
+            # Get console from data_manager for showing download progress
+            console = getattr(data_manager, 'console', None)
+            
+            # Pass console to GEOService for download progress tracking
+            geo_service = GEOService(data_manager, console=console)
             result = geo_service.download_dataset(geo_id.strip())
             
             # Store identifier in metadata for reference

@@ -12,6 +12,9 @@ import tarfile
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List, Union
 
+from rich.progress import Progress, DownloadColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn, TransferSpeedColumn
+from rich.console import Console
+
 from ..config.settings import get_settings
 from ..utils.logger import get_logger
 
@@ -26,12 +29,13 @@ class GEODownloadManager:
     downloading and caching SOFT and supplementary files.
     """
     
-    def __init__(self, cache_dir: Optional[str] = None):
+    def __init__(self, cache_dir: Optional[str] = None, console: Optional[Console] = None):
         """
         Initialize the download manager.
         
         Args:
             cache_dir: Directory to cache downloaded files
+            console: Rich console instance for display (creates new if None)
         """
         self.cache_dir = Path(cache_dir or settings.GEO_CACHE_DIR)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -39,6 +43,7 @@ class GEODownloadManager:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (compatible; GEODownloader/1.0)'
         })
+        self.console = console or Console()
     
     def construct_geo_urls(self, gse_id: str) -> Dict[str, str]:
         """
@@ -151,10 +156,31 @@ class GEODownloadManager:
                             logger.warning(f"Skipping invalid path in TAR: {member.name}")
                             return False
                     
-                    # Extract only safe members
+                    # Extract only safe members with progress tracking
                     safe_members = [m for m in tar.getmembers() if is_safe_member(m)]
                     logger.info(f"Extracting {len(safe_members)} validated members from TAR")
-                    tar.extractall(path=extract_dir, members=safe_members)
+                    
+                    # Setup progress tracking for extraction
+                    total_size = sum(member.size for member in safe_members)
+                    progress_columns = [
+                        BarColumn(),
+                        "•",
+                        "{task.percentage:>3.0f}%",
+                        "•",
+                        "{task.completed}/{task.total} files",
+                        "•",
+                        TimeElapsedColumn(),
+                        "•",
+                        TimeRemainingColumn(),
+                    ]
+                    
+                    with Progress(*progress_columns, console=self.console) as progress:
+                        extract_task = progress.add_task(f"Extracting {gse_id} files", total=len(safe_members))
+                        
+                        for i, member in enumerate(safe_members):
+                            tar.extract(member, path=extract_dir)
+                            progress.update(extract_task, completed=i+1, 
+                                           description=f"Extracting {Path(member.name).name[:30]}...")
                 
                 # Clean up the tar file after extraction
                 tar_file_path.unlink()
@@ -380,26 +406,60 @@ class GEODownloadManager:
             logger.error(f"Error downloading supplementary data: {e}")
             return None
 
-    def download_file(self, url: str, local_path: Path) -> bool:
+    def download_file(self, url: str, local_path: Path, description: str = None) -> bool:
         """
-        Download file from URL to local path.
+        Download file from URL to local path with progress tracking.
         
         Args:
             url: URL to download from
             local_path: Path to save file to
+            description: Optional description for the progress bar
             
         Returns:
             bool: True if download succeeded, False otherwise
         """
         try:
             logger.info(f"Downloading from: {url}")
+            
+            # Get file size for progress tracking
+            head_response = self.session.head(url, timeout=30)
+            file_size = int(head_response.headers.get('content-length', 0))
+            
+            # Create a meaningful description for the progress bar
+            if not description:
+                filename = local_path.name
+                if len(filename) > 40:
+                    filename = filename[:37] + "..."
+                description = f"Downloading {filename}"
+            
+            # Start the actual download with progress tracking
             response = self.session.get(url, stream=True, timeout=60)
             response.raise_for_status()
             
-            with open(local_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
+            # Create progress columns for a rich display
+            progress_columns = [
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                "•",
+                TimeElapsedColumn(),
+                "•",
+                TimeRemainingColumn(),
+            ]
+            
+            # Download with progress tracking
+            with Progress(*progress_columns, console=self.console) as progress:
+                # Create the download task
+                task_id = progress.add_task(description, total=file_size)
+                
+                with open(local_path, 'wb') as f:
+                    downloaded = 0
+                    # Use a slightly larger chunk size for better performance
+                    for chunk in response.iter_content(chunk_size=32768):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            progress.update(task_id, completed=downloaded)
             
             logger.info(f"Downloaded to: {local_path}")
             return True

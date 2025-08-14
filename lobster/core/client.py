@@ -4,6 +4,7 @@ Provides a simple, extensible interface for both CLI and future UI implementatio
 """
 
 import os
+import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Generator
 from datetime import datetime
@@ -15,6 +16,9 @@ from langgraph.prebuilt.chat_agent_executor import AgentState
 
 from .data_manager import DataManager
 from ..agents.graph import create_bioinformatics_graph
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class AgentClient:
@@ -252,14 +256,120 @@ class AgentClient:
         return files
     
     def read_file(self, filename: str) -> Optional[str]:
-        """Read a file from the workspace."""
+        """
+        Read a file from the workspace or absolute path.
+        
+        Args:
+            filename: Either a relative filename (searched in workspace) or absolute path
+            
+        Returns:
+            File content as string, or None if not found
+        """
+        logger.info(f"🔍 Attempting to read file: '{filename}'")
+        
+        # Convert to Path object
+        file_path = Path(filename)
+        logger.info(f"🔎 Current filepath: {file_path}")
+        logger.info(f"🔎 Is absolut: {file_path.is_absolute()}")
+        
+        # If it's an absolute path, try to read directly
+        if file_path.is_absolute():
+            logger.info(f"📁 Detected absolute path: {file_path}")
+            if file_path.exists() and file_path.is_file():
+                logger.info(f"✅ Found absolute file: {file_path}")
+                try:
+                    content = file_path.read_text()
+                    logger.info(f"📖 Successfully read {len(content)} characters from {file_path}")
+                    return content
+                except Exception as e:
+                    logger.error(f"❌ Error reading absolute file {file_path}: {e}")
+                    return f"Error reading file {file_path}: {e}"
+            else:
+                logger.warning(f"❌ Absolute file not found: {file_path}")
+                return f"File not found: {file_path}"
+        
+        # For relative paths, search in workspace and subdirectories
+        logger.info(f"🔍 Searching for relative file: '{filename}'")
+        logger.info(f"📂 Workspace path: {self.workspace_path}")
+        
+        # First try the root workspace directory
         file_path = self.workspace_path / filename
+        logger.info(f"🔎 Checking workspace root: {file_path}")
         if file_path.exists() and file_path.is_file():
+            logger.info(f"✅ Found in workspace root: {file_path}")
             try:
-                return file_path.read_text()
+                content = file_path.read_text()
+                logger.info(f"📖 Successfully read {len(content)} characters from workspace root")
+                return content
             except Exception as e:
+                logger.error(f"❌ Error reading from workspace root: {e}")
                 return f"Error reading file: {e}"
-        return None
+        else:
+            logger.info(f"❌ Not found in workspace root: {file_path}")
+        
+        # If not found in root, search in organized subdirectories
+        search_dirs = [
+            self.data_manager.data_dir,
+            self.data_manager.plots_dir, 
+            self.data_manager.exports_dir
+        ]
+        
+        logger.info(f"🔍 Searching in {len(search_dirs)} subdirectories:")
+        for i, search_dir in enumerate(search_dirs):
+            logger.info(f"  {i+1}. {search_dir}")
+        
+        for search_dir in search_dirs:
+            file_path = search_dir / filename
+            logger.info(f"🔎 Checking: {file_path}")
+            if file_path.exists() and file_path.is_file():
+                logger.info(f"✅ Found in subdirectory: {file_path}")
+                try:
+                    content = file_path.read_text()
+                    logger.info(f"📖 Successfully read {len(content)} characters from subdirectory")
+                    return content
+                except Exception as e:
+                    logger.error(f"❌ Error reading from subdirectory: {e}")
+                    return f"Error reading file: {e}"
+            else:
+                logger.debug(f"❌ Not found: {file_path}")
+        
+        # If still not found, try case-insensitive search in all subdirectories
+        logger.info(f"🔍 Starting case-insensitive search for '{filename}'")
+        filename_lower = filename.lower()
+        
+        for search_dir in search_dirs:
+            logger.info(f"🔎 Case-insensitive search in: {search_dir}")
+            if not search_dir.exists():
+                logger.warning(f"⚠️  Directory doesn't exist: {search_dir}")
+                continue
+                
+            try:
+                files_in_dir = list(search_dir.glob("*"))
+                logger.info(f"📁 Found {len(files_in_dir)} items in {search_dir.name}/")
+                
+                for existing_file in files_in_dir:
+                    if existing_file.is_file():
+                        logger.debug(f"  📄 Checking: {existing_file.name}")
+                        if existing_file.name.lower() == filename_lower:
+                            logger.info(f"✅ Case-insensitive match found: {existing_file}")
+                            try:
+                                content = existing_file.read_text()
+                                logger.info(f"📖 Successfully read {len(content)} characters (case-insensitive match)")
+                                return content
+                            except Exception as e:
+                                logger.error(f"❌ Error reading case-insensitive match: {e}")
+                                return f"Error reading file: {e}"
+            except Exception as e:
+                logger.error(f"❌ Error during case-insensitive search in {search_dir}: {e}")
+        
+        # Final logging before giving up
+        logger.warning(f"❌ File '{filename}' not found in any location")
+        logger.info(f"📋 Search summary:")
+        logger.info(f"  - Workspace root: {self.workspace_path}")
+        for search_dir in search_dirs:
+            logger.info(f"  - {search_dir.name}/: {search_dir}")
+        
+        return f"File not found in workspace: {filename}"
     
     def write_file(self, filename: str, content: str) -> bool:
         """Write a file to the workspace."""

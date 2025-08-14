@@ -25,8 +25,8 @@ class DataManager:
     bioinformatics datasets and related metadata.
     """
     
-    def __init__(self, workspace_path: Optional[Path] = None):
-        """Initialize DataManager with optional workspace path."""
+    def __init__(self, workspace_path: Optional[Path] = None, console=None):
+        """Initialize DataManager with optional workspace path and console."""
         self.current_data: Optional[pd.DataFrame] = None
         self.current_metadata: Dict[str, Any] = {}
         self.adata: Optional[sc.AnnData] = None
@@ -36,6 +36,9 @@ class DataManager:
         self.processing_log: List[str] = []
         self.tool_usage_history: List[Dict[str, Any]] = []  # Track tool usage for reproducibility
         self.max_plots_history: int = 50  # Maximum number of plots to keep in history
+        
+        # Store console for progress tracking in tools
+        self.console = console
         
         # Workspace configuration
         self.workspace_path = workspace_path or Path.cwd() / ".lobster_workspace"

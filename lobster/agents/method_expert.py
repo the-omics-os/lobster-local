@@ -36,21 +36,50 @@ def method_expert(
     
     # Define tools
     @tool
-    def search_pubmed(query: str) -> str:
-        """Search PubMed for relevant scientific publications."""
+    def search_pubmed(
+        query: str,
+        top_k_results: int = 3,
+        doc_content_chars_max: int = 4000,
+        max_query_length: int = 300
+    ) -> str:
+        """
+        Search PubMed for relevant scientific publications.
+        
+        Args:
+            query: Search query string
+            top_k_results: Number of results to retrieve (default: 3, range: 1-20)
+            doc_content_chars_max: Maximum content length (default: 4000, range: 1000-10000)
+            max_query_length: Maximum query length (default: 300, range: 100-500)
+        """
         try:
             from ..tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            results = pubmed_service.search_pubmed(query)
-            logger.info(f"PubMed search completed for: {query[:50]}...")
+            results = pubmed_service.search_pubmed(
+                query=query,
+                top_k_results=top_k_results,
+                doc_content_chars_max=doc_content_chars_max,
+                max_query_length=max_query_length
+            )
+            logger.info(f"PubMed search completed for: {query[:50]}... (k={top_k_results})")
             return results
         except Exception as e:
             logger.error(f"Error searching PubMed: {e}")
             return f"Error searching PubMed: {str(e)}"
 
     @tool
-    def find_method_parameters_from_doi(doi: str) -> str:
-        """Extract method parameters and protocols from a publication DOI."""
+    def find_method_parameters_from_doi(
+        doi: str,
+        top_k_results: int = 5,
+        doc_content_chars_max: int = 6000
+    ) -> str:
+        """
+        Extract method parameters and protocols from a publication DOI.
+        
+        Args:
+            doi: Publication DOI (e.g., "10.1038/s41586-021-03659-0")
+            top_k_results: Number of results to retrieve (default: 5, range: 1-10)
+            doc_content_chars_max: Maximum content length (default: 6000, range: 2000-10000)
+        """
         try:
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
@@ -58,22 +87,37 @@ def method_expert(
             from ..tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
-            # Search for the publication
-            results = pubmed_service.search_pubmed(f"DOI:{doi}")
+            # Search for the publication with enhanced parameters
+            results = pubmed_service.search_pubmed(
+                query=f"DOI:{doi}",
+                top_k_results=top_k_results,
+                doc_content_chars_max=doc_content_chars_max
+            )
             
             # Store DOI-based parameters in metadata
             if "parameters" in results.lower() or "methods" in results.lower():
                 data_manager.current_metadata[f'methods_from_doi_{doi}'] = results
                 
-            logger.info(f"Method search completed for DOI: {doi}")
+            logger.info(f"Method search completed for DOI: {doi} (k={top_k_results})")
             return results
         except Exception as e:
             logger.error(f"Error finding methods from DOI: {e}")
             return f"Error finding method parameters: {str(e)}"
 
     @tool
-    def find_marker_genes(query: str) -> str:
-        """Find marker genes for cell types from literature."""
+    def find_marker_genes(
+        query: str,
+        top_k_results: int = 5,
+        doc_content_chars_max: int = 5000
+    ) -> str:
+        """
+        Find marker genes for cell types from literature.
+        
+        Args:
+            query: Query with cell_type parameter (e.g., 'cell_type=T_cell disease=cancer')
+            top_k_results: Number of results to retrieve (default: 5, range: 1-15)
+            doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
+        """
         try:
             from ..tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
@@ -90,9 +134,11 @@ def method_expert(
             
             results = pubmed_service.find_marker_genes(
                 cell_type=cell_type,
-                disease=disease
+                disease=disease,
+                top_k_results=top_k_results,
+                doc_content_chars_max=doc_content_chars_max
             )
-            logger.info(f"Marker gene search completed for {cell_type}")
+            logger.info(f"Marker gene search completed for {cell_type} (k={top_k_results})")
             return results
             
         except Exception as e:
@@ -100,13 +146,28 @@ def method_expert(
             return f"Error finding marker genes: {str(e)}"
 
     @tool
-    def find_protocol_information(technique: str) -> str:
-        """Find protocol information for bioinformatics techniques."""
+    def find_protocol_information(
+        technique: str,
+        top_k_results: int = 4,
+        doc_content_chars_max: int = 5000
+    ) -> str:
+        """
+        Find protocol information for bioinformatics techniques.
+        
+        Args:
+            technique: The bioinformatics technique (e.g., "single-cell RNA-seq clustering")
+            top_k_results: Number of results to retrieve (default: 4, range: 1-10)
+            doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
+        """
         try:
             from ..tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            results = pubmed_service.find_protocol_information(technique)
-            logger.info(f"Protocol search completed for: {technique}")
+            results = pubmed_service.find_protocol_information(
+                technique=technique,
+                top_k_results=top_k_results,
+                doc_content_chars_max=doc_content_chars_max
+            )
+            logger.info(f"Protocol search completed for: {technique} (k={top_k_results})")
             return results
         except Exception as e:
             logger.error(f"Error finding protocol info: {e}")
@@ -135,10 +196,14 @@ Given a specific computational method question, you will:
 </Task>
 
 <Available Tools>
-- search_pubmed: Search for relevant publications
-- find_method_parameters_from_doi: Extract method parameters from a DOI
-- find_marker_genes: Find marker genes for cell types from literature
-- find_protocol_information: Find protocol details for bioinformatics techniques
+- search_pubmed: Search for relevant publications with configurable parameters (top_k_results, doc_content_chars_max, max_query_length)
+- find_method_parameters_from_doi: Extract method parameters from a DOI with enhanced retrieval settings
+- find_marker_genes: Find marker genes for cell types with configurable result limits and content size
+- find_protocol_information: Find protocol details for bioinformatics techniques with flexible parameters
+
+Note: All tools now support dynamic parameter configuration for flexible literature retrieval.
+Use higher top_k_results values (5-10) for comprehensive searches, lower values (1-3) for focused queries.
+Adjust doc_content_chars_max based on detail needs: 2000-4000 for summaries, 6000-8000 for detailed analysis.
 </Available Tools>
 
 <Data Management>

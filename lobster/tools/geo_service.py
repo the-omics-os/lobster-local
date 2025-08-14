@@ -26,19 +26,21 @@ class GEOService:
     handling the downloading, parsing, and processing of datasets.
     """
     
-    def __init__(self, data_manager: DataManager, cache_dir: Optional[str] = None):
+    def __init__(self, data_manager: DataManager, cache_dir: Optional[str] = None, console=None):
         """
         Initialize the GEO service.
         
         Args:
             data_manager: DataManager instance for storing processed data
             cache_dir: Directory to cache downloaded files
+            console: Rich console instance for display (creates new if None)
         """
         logger.info("Initializing GEOService")
         logger.debug(f"Cache directory: {cache_dir}")
         
         self.data_manager = data_manager
-        self.download_manager = GEODownloadManager(cache_dir)
+        # Pass the console to the download manager
+        self.download_manager = GEODownloadManager(cache_dir, console=console)
         self.parser = GEOParser()
         
         logger.info("GEO download manager and parser initialized")

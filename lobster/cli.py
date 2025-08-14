@@ -21,7 +21,36 @@ from rich import console
 from .core import AgentClient
 # Import the proper callback handler
 from .utils import TerminalCallbackHandler
+from .config.agent_config import get_agent_configurator, initialize_configurator
 
+
+def change_mode(new_mode: str, current_client: AgentClient) -> AgentClient:
+    """
+    Change the operation mode and reinitialize client with the new configuration.
+    
+    Args:
+        new_mode: The new mode/profile to switch to
+        current_client: The current AgentClient instance
+        
+    Returns:
+        Updated AgentClient instance
+    """
+    global client
+    
+    # Store current settings before reinitializing
+    current_workspace = Path(current_client.workspace_path)
+    current_reasoning = current_client.enable_reasoning
+    
+    # Initialize a new configurator with the specified profile
+    initialize_configurator(profile=new_mode)
+    
+    # Reinitialize the client with the new profile settings
+    client = init_client(
+        workspace=current_workspace,
+        reasoning=current_reasoning
+    )
+    
+    return client
 
 
 # Initialize Rich console and Typer app
@@ -50,9 +79,9 @@ def init_client(
     
     workspace.mkdir(parents=True, exist_ok=True)
     
-    # Initialize DataManager with workspace support
+    # Initialize DataManager with workspace support and console for progress tracking
     from .core.data_manager import DataManager
-    data_manager = DataManager(workspace_path=workspace)
+    data_manager = DataManager(workspace_path=workspace, console=console)
     
     # Create reasoning callback using the terminal_callback_handler
     callbacks = []
@@ -107,6 +136,19 @@ def display_welcome():
     [grey50]         Multi-Agent Bioinformatics Analysis System v2.0         [/grey50]
     [bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]
     
+    [bold white]Key Tasks:[/bold white]
+    • Analyze RNA-seq & genomics data
+    • Generate visualizations and plots
+    • Extract insights from bioinformatics datasets
+    • Access GEO & literature databases
+    
+    [bold white]Essential Commands:[/bold white]
+    [red]/read[/red] <file>  - Read file from workspace or absolute path (supports subdirectories)
+    [red]/files[/red]        - List all workspace files
+    [red]/data[/red]         - Show current dataset information  
+    [red]/plots[/red]        - List all generated visualizations
+    [red]/help[/red]         - Show all available commands
+    
     [dim grey50]Powered by LangGraph | © 2025 homara AI[/dim grey50]
     """
     console.print(welcome_text)
@@ -115,6 +157,10 @@ def display_welcome():
 def display_status(client: AgentClient):
     """Display current system status."""
     status = client.get_status()
+    
+    # Get current mode/profile
+    configurator = get_agent_configurator()
+    current_mode = configurator.get_current_profile()
     
     # Create status table
     table = Table(
@@ -127,6 +173,7 @@ def display_status(client: AgentClient):
     table.add_column("Value", style="white")
     
     table.add_row("Session ID", status["session_id"])
+    table.add_row("Mode", current_mode)
     table.add_row("Messages", str(status["message_count"]))
     table.add_row("Workspace", status["workspace"])
     table.add_row("Data Loaded", "✓" if status["has_data"] else "✗")
@@ -229,6 +276,8 @@ def handle_command(command: str, client: AgentClient):
         [red]/read[/red] <file> [grey50]-[/grey50] Read a file from workspace
         [red]/export[/red]     [grey50]-[/grey50] Export session data
         [red]/reset[/red]      [grey50]-[/grey50] Reset conversation
+        [red]/mode[/red] <name> [grey50]-[/grey50] Change operation mode
+        [red]/modes[/red]      [grey50]-[/grey50] List available modes
         [red]/clear[/red]      [grey50]-[/grey50] Clear screen
         [red]/exit[/red]       [grey50]-[/grey50] Exit the chat
         """
@@ -273,17 +322,30 @@ def handle_command(command: str, client: AgentClient):
     
     elif cmd.startswith("/read "):
         filename = cmd[6:].strip()
-        content = client.read_file(filename)
-        if content:
-            syntax = Syntax(content, "python", theme="monokai", line_numbers=True)
-            console.print(Panel(
-                syntax, 
-                title=f"[bold white on red] 📄 {filename} [/bold white on red]",
-                border_style="red",
-                box=box.DOUBLE
-            ))
-        else:
+        try:
+            content = client.read_file(filename)
+            if content:
+                # Try to guess syntax from extension, fallback to plain text
+                import mimetypes
+                ext = Path(filename).suffix
+                mime, _ = mimetypes.guess_type(filename)
+                language = "python" if ext == ".py" else (mime.split("/")[1] if mime and "/" in mime else "text")
+                syntax = Syntax(content, language, theme="monokai", line_numbers=True)
+                console.print(Panel(
+                    syntax, 
+                    title=f"[bold white on red] 📄 {filename} [/bold white on red]",
+                    border_style="red",
+                    box=box.DOUBLE
+                ))
+            else:
+                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {filename}[/red]")
+                console.log(f"File not found or empty: {filename}")
+        except FileNotFoundError:
+            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]File not found: {filename}[/red]")
+            console.log(f"FileNotFoundError: {filename}")
+        except Exception as e:
             console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {filename}[/red]")
+            console.log(f"Exception while reading file {filename}: {e}")
     
     elif cmd == "/export":
         export_path = client.export_session()
@@ -373,6 +435,71 @@ def handle_command(command: str, client: AgentClient):
                 console.print(f"  • {item}")
         else:
             console.print("[grey50]Nothing to save (no data or plots loaded)[/grey50]")
+    
+    elif cmd == "/modes":
+        # List all available modes/profiles
+        configurator = get_agent_configurator()
+        current_mode = configurator.get_current_profile()
+        available_profiles = configurator.list_available_profiles()
+        
+        # Create modes table
+        table = Table(
+            title="🦞 Available Modes", 
+            box=box.ROUNDED,
+            border_style="red",
+            title_style="bold red on white"
+        )
+        table.add_column("Mode", style="bold white")
+        table.add_column("Status", style="grey74")
+        table.add_column("Description", style="grey50")
+        
+        for profile in sorted(available_profiles.keys()):
+            # Add descriptions for each mode
+            description = ""
+            if profile == "development":
+                description = "Fast, lightweight models for development"
+            elif profile == "production":
+                description = "Balanced performance and cost"
+            elif profile == "high-performance":
+                description = "Enhanced performance for complex tasks"
+            elif profile == "ultra-performance":
+                description = "Maximum capability for demanding analyses"
+            elif profile == "cost-optimized":
+                description = "Efficient models to minimize costs"
+            elif profile == "heavyweight":
+                description = "Most capable models for all agents"
+            elif profile == "eu-compliant":
+                description = "EU region models for compliance"
+            elif profile == "eu-high-performance":
+                description = "High-performance EU region models"
+            
+            status = "[bold green]ACTIVE[/bold green]" if profile == current_mode else ""
+            table.add_row(profile, status, description)
+            
+        console.print(table)
+    
+    elif cmd.startswith("/mode "):
+        # Get the new mode name from the command
+        new_mode = cmd[6:].strip()
+        
+        # Get available profiles
+        configurator = get_agent_configurator()
+        available_profiles = configurator.list_available_profiles()
+        
+        if new_mode in available_profiles:
+            # Change the mode and update the client
+            change_mode(new_mode, client)
+            console.print(f"[bold red]✓[/bold red] [white]Mode changed to:[/white] [bold red]{new_mode}[/bold red]")
+            display_status(client)
+        else:
+            # Display available profiles
+            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Invalid mode: {new_mode}[/red]")
+            console.print("[white]Available modes:[/white]")
+            for profile in sorted(available_profiles.keys()):
+                if profile == configurator.get_current_profile():
+                    console.print(f"  • [bold red]{profile}[/bold red] (current)")
+                else:
+                    console.print(f"  • {profile}")
     
     elif cmd == "/clear":
         console.clear()
