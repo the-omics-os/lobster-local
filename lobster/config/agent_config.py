@@ -55,7 +55,7 @@ class AgentConfig:
     enabled: bool = True
     custom_params: Dict = field(default_factory=dict)
 
-class GenieAgentConfigurator:
+class LobsterAgentConfigurator:
     """
     Professional configuration manager for Genie AI agents.
     
@@ -205,7 +205,8 @@ class GenieAgentConfigurator:
         "supervisor",
         "transcriptomics_expert", 
         "method_agent",
-        "general_conversation"
+        "general_conversation",
+        "data_expert"
     ]
     
     # Pre-defined testing profiles - automatically includes all agents
@@ -214,6 +215,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-3-5-haiku",
             "transcriptomics_expert": "claude-3-5-haiku", 
             "method_agent": "claude-3-5-haiku",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-haiku"
         },
         
@@ -221,6 +223,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-3-5-sonnet-v2",
             "transcriptomics_expert": "claude-4-opus",
             "method_agent": "claude-3-5-sonnet",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-sonnet"
         },
         
@@ -228,6 +231,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-4-opus",
             "transcriptomics_expert": "claude-3-7-sonnet",
             "method_agent": "claude-4-sonnet",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-haiku"
         },
         
@@ -235,6 +239,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-3-7-sonnet",
             "transcriptomics_expert": "claude-3-7-sonnet",
             "method_agent": "claude-4-1-opus",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-4-sonnet"
         },
         
@@ -242,6 +247,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-3-haiku",
             "transcriptomics_expert": "claude-3-5-sonnet",
             "method_agent": "claude-3-haiku",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-haiku"
         },
         
@@ -249,6 +255,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-4-1-opus",
             "transcriptomics_expert": "claude-4-1-opus",
             "method_agent": "claude-4-opus",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-4-opus"
         },
         
@@ -256,6 +263,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-3-5-sonnet-v2-eu",
             "transcriptomics_expert": "claude-4-1-opus-eu",
             "method_agent": "claude-3-5-sonnet-eu",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-sonnet-eu"
         },
         
@@ -263,6 +271,7 @@ class GenieAgentConfigurator:
             "supervisor": "claude-3-7-sonnet-eu",
             "transcriptomics_expert": "claude-3-7-sonnet-eu",
             "method_agent": "claude-4-opus-eu",
+            "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-sonnet-v2-eu"
         }
     }
@@ -481,7 +490,7 @@ class GenieAgentConfigurator:
 # Singleton instance
 _configurator = None
 
-def get_agent_configurator() -> GenieAgentConfigurator:
+def get_agent_configurator() -> LobsterAgentConfigurator:
     """
     Get the global agent configurator instance.
     
@@ -490,10 +499,10 @@ def get_agent_configurator() -> GenieAgentConfigurator:
     """
     global _configurator
     if _configurator is None:
-        _configurator = GenieAgentConfigurator()
+        _configurator = LobsterAgentConfigurator()
     return _configurator
 
-def initialize_configurator(profile: str = None, config_file: str = None) -> GenieAgentConfigurator:
+def initialize_configurator(profile: str = None, config_file: str = None) -> LobsterAgentConfigurator:
     """
     Initialize or reinitialize the global configurator.
     
@@ -505,5 +514,5 @@ def initialize_configurator(profile: str = None, config_file: str = None) -> Gen
         GenieAgentConfigurator instance
     """
     global _configurator
-    _configurator = GenieAgentConfigurator(profile=profile, config_file=config_file)
+    _configurator = LobsterAgentConfigurator(profile=profile, config_file=config_file)
     return _configurator

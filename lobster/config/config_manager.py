@@ -16,7 +16,7 @@ from tabulate import tabulate
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from config.agent_config import GenieAgentConfigurator, initialize_configurator
+from config.agent_config import LobsterAgentConfigurator, initialize_configurator
 
 def print_colored(text: str, color: str = "white"):
     """Print colored text to terminal."""
@@ -35,7 +35,7 @@ def print_colored(text: str, color: str = "white"):
 
 def list_available_models():
     """List all available model presets."""
-    configurator = GenieAgentConfigurator()
+    configurator = LobsterAgentConfigurator()
     models = configurator.list_available_models()
     
     print_colored("\n🤖 Available Model Presets", "cyan")
@@ -56,7 +56,7 @@ def list_available_models():
 
 def list_available_profiles():
     """List all available testing profiles."""
-    configurator = GenieAgentConfigurator()
+    configurator = LobsterAgentConfigurator()
     profiles = configurator.list_available_profiles()
     
     print_colored("\n⚙️  Available Testing Profiles", "cyan")
@@ -69,7 +69,7 @@ def list_available_profiles():
 
 def show_current_config(profile: str = None):
     """Show current configuration."""
-    configurator = initialize_configurator(profile=profile) if profile else GenieAgentConfigurator()
+    configurator = initialize_configurator(profile=profile) if profile else LobsterAgentConfigurator()
     configurator.print_current_config()
 
 def test_configuration(profile: str, agent: str = None):
@@ -124,7 +124,7 @@ def create_custom_config():
     print_colored("\n🛠️  Create Custom Configuration", "cyan")
     print_colored("=" * 50, "cyan")
     
-    configurator = GenieAgentConfigurator()
+    configurator = LobsterAgentConfigurator()
     available_models = configurator.list_available_models()
     
     # Show available models
