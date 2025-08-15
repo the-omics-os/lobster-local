@@ -7,6 +7,8 @@ This module contains various services and tools for bioinformatics analysis:
 - GEO data services
 - Quality control service
 - PubMed service
+- Enhanced single-cell service with doublet detection and annotation
+- Preprocessing service for advanced single-cell preprocessing
 """
 
 from .clustering_service import ClusteringService
@@ -15,6 +17,7 @@ from .geo_service import GEOService
 from .quality_service import QualityService
 from .pubmed_service import PubMedService
 from .enhanced_singlecell_service import EnhancedSingleCellService
+from .preprocessing_service import PreprocessingService
 
 __all__ = [
     'ClusteringService',
@@ -22,5 +25,6 @@ __all__ = [
     'GEOService',
     'QualityService',
     'PubMedService',
-    'EnhancedSingleCellService'
+    'EnhancedSingleCellService',
+    'PreprocessingService'
 ]

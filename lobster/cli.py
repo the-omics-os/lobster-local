@@ -211,7 +211,7 @@ def chat(
     while True:
         try:
             # Get user input with rich prompt - always show Lobster
-            user_input = Prompt.ask("\n[bold red]🦞 Lobster You[/bold red]")
+            user_input = Prompt.ask(f"\n[bold red]🦞 Lobster You[/bold red]")
             
             # Handle commands
             if user_input.startswith("/"):
@@ -298,6 +298,9 @@ def handle_command(command: str, client: AgentClient):
         if any(workspace_files.values()):
             for category, files in workspace_files.items():
                 if files:
+                    # Sort files by modified date (descending: newest first)
+                    files_sorted = sorted(files, key=lambda f: f["modified"], reverse=True)
+                    
                     table = Table(
                         title=f"🦞 {category.title()} Files",
                         box=box.ROUNDED,
@@ -309,7 +312,7 @@ def handle_command(command: str, client: AgentClient):
                     table.add_column("Modified", style="grey50")
                     table.add_column("Path", style="dim grey50")
                     
-                    for f in files:
+                    for f in files_sorted:
                         from datetime import datetime
                         size_kb = f["size"] / 1024
                         mod_time = datetime.fromtimestamp(f["modified"]).strftime("%Y-%m-%d %H:%M")
@@ -430,7 +433,7 @@ def handle_command(command: str, client: AgentClient):
         saved_items = client.data_manager.auto_save_state()
         
         if saved_items:
-            console.print("[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
+            console.print(f"[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
             for item in saved_items:
                 console.print(f"  • {item}")
         else:
@@ -492,7 +495,7 @@ def handle_command(command: str, client: AgentClient):
             console.print(f"[bold red]✓[/bold red] [white]Mode changed to:[/white] [bold red]{new_mode}[/bold red]")
             display_status(client)
         else:
-            # Display available profiles
+            # Display available profilescan you
             console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Invalid mode: {new_mode}[/red]")
             console.print("[white]Available modes:[/white]")
             for profile in sorted(available_profiles.keys()):

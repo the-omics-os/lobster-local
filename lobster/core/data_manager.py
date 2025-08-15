@@ -15,6 +15,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import scanpy as sc
 
+from ..utils.file_naming import BioinformaticsFileNaming
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -627,34 +629,232 @@ class DataManager:
 
         return saved_files
 
-    def save_data_to_workspace(self, filename: str = None):
-        """Save current data to the workspace data directory."""
+    def save_data_to_workspace(
+        self, 
+        filename: str = None, 
+        processing_step: str = None,
+        data_source: str = None,
+        dataset_id: str = None,
+        extension: str = None
+    ):
+        """
+        Save current data to the workspace data directory with professional naming.
+        
+        Args:
+            filename: Custom filename (overrides professional naming if provided)
+            processing_step: Current processing step (e.g., 'raw_matrix', 'filtered')
+            data_source: Data source (e.g., 'GEO', 'TCGA')
+            dataset_id: Dataset identifier (e.g., 'GSE235449')
+            extension: File extension (auto-selected based on processing step if None)
+        """
         if not self.has_data():
             logger.warning("No data to save")
             return None
 
-        if filename is None:
-            import datetime
-
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"data_{timestamp}.csv"
-
-        filepath = self.data_dir / filename
-
         try:
-            self.current_data.to_csv(filepath)
+            # If filename is provided, use it directly
+            if filename is not None:
+                filepath = self.data_dir / filename
+                file_extension = Path(filename).suffix.lstrip('.')
+            else:
+                # Extract information from metadata for professional naming
+                data_source = data_source or self.current_metadata.get('source', 'DATA')
+                dataset_id = dataset_id or self.current_metadata.get('dataset_id', 'unknown')
+                processing_step = processing_step or self.current_metadata.get('processing_step', 'processed')
+                
+                # Generate professional filename
+                filename = BioinformaticsFileNaming.generate_filename(
+                    data_source=data_source,
+                    dataset_id=dataset_id,
+                    processing_step=processing_step,
+                    extension=extension
+                )
+                filepath = self.data_dir / filename
+                file_extension = Path(filename).suffix.lstrip('.')
 
-            # Also save metadata if available
-            if self.current_metadata:
-                metadata_path = self.data_dir / f"{Path(filename).stem}_metadata.json"
+            # Save the data in appropriate format
+            if file_extension in ['csv', 'tsv']:
+                separator = '\t' if file_extension == 'tsv' else ','
+                self.current_data.to_csv(filepath, sep=separator)
+            elif file_extension == 'h5':
+                self.current_data.to_hdf(filepath, key='expression_data')
+            elif file_extension in ['xlsx', 'xls']:
+                self.current_data.to_excel(filepath)
+            elif file_extension == 'h5ad':
+                # Save as H5AD using scanpy if AnnData object is available
+                if self.adata is not None:
+                    self.adata.write_h5ad(filepath)
+                else:
+                    # Fallback to CSV if no AnnData object
+                    logger.warning("No AnnData object available, saving as CSV instead")
+                    csv_filepath = filepath.with_suffix('.csv')
+                    self.current_data.to_csv(csv_filepath)
+                    filepath = csv_filepath
+                    filename = csv_filepath.name
+            elif file_extension == 'npz':
+                # Save as compressed numpy format
+                import numpy as np
+                np.savez_compressed(filepath, data=self.current_data.values, 
+                                  index=self.current_data.index.values,
+                                  columns=self.current_data.columns.values)
+            else:
+                # Default to CSV
+                self.current_data.to_csv(filepath)
+
+            # Save metadata with matching filename
+            if self.current_metadata or processing_step or data_source or dataset_id:
+                metadata_filename = BioinformaticsFileNaming.generate_metadata_filename(filename)
+                metadata_path = self.data_dir / metadata_filename
+                
+                # Create enhanced metadata
+                enhanced_metadata = {
+                    **self.current_metadata,
+                    'saved_filename': filename,
+                    'saved_path': str(filepath),
+                    'save_timestamp': pd.Timestamp.now().isoformat(),
+                    'data_shape': list(self.current_data.shape),
+                    'memory_usage_mb': self.current_data.memory_usage(deep=True).sum() / 1024**2,
+                    'file_format': file_extension
+                }
+                
+                # Add processing information if provided
+                if processing_step:
+                    enhanced_metadata.update({
+                        'processing_step': processing_step,
+                        'processing_order': BioinformaticsFileNaming.get_processing_step_order(processing_step),
+                        'suggested_next_step': BioinformaticsFileNaming.suggest_next_step(processing_step)
+                    })
+                
+                if data_source:
+                    enhanced_metadata['data_source'] = data_source
+                if dataset_id:
+                    enhanced_metadata['dataset_id'] = dataset_id
+                
                 with open(metadata_path, "w") as f:
-                    json.dump(self.current_metadata, f, indent=2, default=str)
+                    json.dump(enhanced_metadata, f, indent=2, default=str)
+                
+                logger.info(f"Metadata saved to workspace: {metadata_path}")
 
-            logger.info(f"Data saved to workspace: {filepath}")
+            logger.info(f"Data saved to workspace with professional naming: {filepath}")
+            if processing_step:
+                next_step = BioinformaticsFileNaming.suggest_next_step(processing_step)
+                logger.info(f"Next suggested processing step: {next_step}")
+            
             return str(filepath)
 
         except Exception as e:
             logger.error(f"Failed to save data: {e}")
+            return None
+
+    def save_processed_data(
+        self,
+        processing_step: str,
+        data_source: str = None,
+        dataset_id: str = None,
+        processing_params: Dict[str, Any] = None
+    ) -> str:
+        """
+        Save processed data with professional naming and enhanced metadata tracking.
+        
+        Args:
+            processing_step: Current processing step (e.g., 'filtered', 'normalized')
+            data_source: Data source (extracted from metadata if not provided)
+            dataset_id: Dataset identifier (extracted from metadata if not provided)
+            processing_params: Parameters used in the processing step
+            
+        Returns:
+            str: Path to saved file
+        """
+        if not self.has_data():
+            logger.warning("No data to save")
+            return None
+
+        try:
+            # Extract information from metadata
+            data_source = data_source or self.current_metadata.get('source', 'DATA')
+            dataset_id = dataset_id or self.current_metadata.get('dataset_id', 'unknown')
+            
+            # If dataset_id is still unknown, try to extract from source
+            if dataset_id == 'unknown' and 'source' in self.current_metadata:
+                source = self.current_metadata['source']
+                if source.startswith('GSE'):
+                    dataset_id = source
+            
+            # Generate professional filename with auto-selected extension
+            filename = BioinformaticsFileNaming.generate_filename(
+                data_source=data_source,
+                dataset_id=dataset_id,
+                processing_step=processing_step
+            )
+            filepath = self.data_dir / filename
+            file_extension = Path(filename).suffix.lstrip('.')
+
+            # Save the data in appropriate format based on processing step
+            if file_extension in ['csv', 'tsv']:
+                separator = '\t' if file_extension == 'tsv' else ','
+                self.current_data.to_csv(filepath, sep=separator)
+            elif file_extension == 'h5ad':
+                if self.adata is not None:
+                    self.adata.write_h5ad(filepath)
+                else:
+                    logger.warning("No AnnData object for h5ad format, saving as CSV")
+                    csv_filepath = filepath.with_suffix('.csv')
+                    self.current_data.to_csv(csv_filepath)
+                    filepath = csv_filepath
+                    filename = csv_filepath.name
+            elif file_extension == 'npz':
+                import numpy as np
+                np.savez_compressed(filepath, 
+                                  data=self.current_data.values,
+                                  index=self.current_data.index.values,
+                                  columns=self.current_data.columns.values)
+            else:
+                self.current_data.to_csv(filepath)
+
+            # Create enhanced metadata
+            enhanced_metadata = {
+                **self.current_metadata,
+                'processing_step': processing_step,
+                'data_source': data_source,
+                'dataset_id': dataset_id,
+                'saved_filename': filename,
+                'saved_path': str(filepath),
+                'save_timestamp': pd.Timestamp.now().isoformat(),
+                'data_shape': list(self.current_data.shape),
+                'memory_usage_mb': self.current_data.memory_usage(deep=True).sum() / 1024**2,
+                'processing_params': processing_params or {},
+                'processing_order': BioinformaticsFileNaming.get_processing_step_order(processing_step),
+                'suggested_next_step': BioinformaticsFileNaming.suggest_next_step(processing_step),
+                'file_format': file_extension
+            }
+
+            # Save metadata
+            metadata_filename = BioinformaticsFileNaming.generate_metadata_filename(filename)
+            metadata_path = self.data_dir / metadata_filename
+            
+            with open(metadata_path, "w") as f:
+                json.dump(enhanced_metadata, f, indent=2, default=str)
+
+            # Update current metadata to include the processing step
+            self.current_metadata.update({
+                'processing_step': processing_step,
+                'data_source': data_source,
+                'dataset_id': dataset_id,
+                'last_saved_file': str(filepath)
+            })
+
+            # Log the processing step
+            self.processing_log.append(
+                f"Saved {processing_step} data: {self.current_data.shape[0]} samples × {self.current_data.shape[1]} features -> {filename}"
+            )
+
+            logger.info(f"Processed data saved with professional naming: {filepath}")
+            logger.info(f"Next suggested step: {enhanced_metadata['suggested_next_step']}")
+            
+            return str(filepath)
+
+        except Exception as e:
+            logger.error(f"Failed to save processed data: {e}")
             return None
 
     def list_workspace_files(self) -> Dict[str, List[Dict[str, Any]]]:

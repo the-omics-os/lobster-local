@@ -139,6 +139,8 @@ class GEOService:
             # Step 5: Store in data manager and save to workspace
             enhanced_metadata = {
                 "source": gse_id,
+                "dataset_id": gse_id,
+                "processing_step": "raw_matrix",
                 "geo_object": gse,
                 "n_samples": sample_count,
                 "n_cells": combined_matrix.shape[0],
@@ -153,9 +155,16 @@ class GEOService:
 
             self.data_manager.set_data(data=combined_matrix, metadata=enhanced_metadata)
 
-            # Auto-save the processed matrix to workspace for future use
-            saved_file = self._save_processed_matrix_to_workspace(
-                gse_id, combined_matrix, enhanced_metadata
+            # Auto-save the processed matrix to workspace using professional naming
+            saved_file = self.data_manager.save_processed_data(
+                processing_step="raw_matrix",
+                data_source="GEO",
+                dataset_id=gse_id,
+                processing_params={
+                    "geoparse_version": "GEOparse-based",
+                    "download_method": "supplementary_files" if supplementary_data is not None else "individual_samples",
+                    "n_samples_processed": sample_count
+                }
             )
 
             # Log successful download and save
@@ -1160,6 +1169,7 @@ class GEOService:
     ) -> Optional[Tuple[pd.DataFrame, Dict[str, Any]]]:
         """
         Check if processed data for a GSE ID already exists in workspace.
+        Uses professional naming patterns with backward compatibility.
 
         Args:
             gse_id: GEO series ID
@@ -1168,15 +1178,38 @@ class GEOService:
             Tuple of (DataFrame, metadata) if found, None otherwise
         """
         try:
-            # Look for processed data files in workspace
+            from ..utils.file_naming import BioinformaticsFileNaming
+            
+            # First, try professional naming pattern
+            data_dir = self.data_manager.data_dir
+            existing_file = BioinformaticsFileNaming.find_latest_file(
+                directory=data_dir,
+                data_source='GEO',
+                dataset_id=gse_id,
+                processing_step='raw_matrix'
+            )
+            
+            if existing_file and existing_file.exists():
+                logger.info(f"Found existing file with professional naming: {existing_file.name}")
+                
+                # Load the data
+                combined_matrix = pd.read_csv(existing_file, index_col=0)
+                
+                # Load associated metadata
+                metadata_file = existing_file.parent / BioinformaticsFileNaming.generate_metadata_filename(existing_file.name)
+                metadata = {}
+                if metadata_file.exists():
+                    with open(metadata_file, 'r') as f:
+                        metadata = json.load(f)
+                
+                logger.info(f"Successfully loaded existing data: {combined_matrix.shape}")
+                return combined_matrix, metadata
+            
+            # Backward compatibility: check for legacy naming patterns
             data_files = self.data_manager.list_workspace_files()["data"]
-
-            # Look for files matching the GSE ID pattern
             for file_info in data_files:
-                if f"{gse_id}_processed" in file_info["name"] and file_info[
-                    "name"
-                ].endswith(".csv"):
-                    logger.info(f"Found existing processed file: {file_info['name']}")
+                if f"{gse_id}_processed" in file_info["name"] and file_info["name"].endswith(".csv"):
+                    logger.info(f"Found existing legacy file: {file_info['name']}")
 
                     # Load the data
                     data_path = Path(file_info["path"])
@@ -1189,9 +1222,7 @@ class GEOService:
                         with open(metadata_path, "r") as f:
                             metadata = json.load(f)
 
-                    logger.info(
-                        f"Successfully loaded existing data: {combined_matrix.shape}"
-                    )
+                    logger.info(f"Successfully loaded legacy data: {combined_matrix.shape}")
                     return combined_matrix, metadata
 
             return None
@@ -1200,58 +1231,6 @@ class GEOService:
             logger.warning(f"Error checking workspace for existing data: {e}")
             return None
 
-    def _save_processed_matrix_to_workspace(
-        self, gse_id: str, combined_matrix: pd.DataFrame, metadata: Dict[str, Any]
-    ) -> str:
-        """
-        Save processed matrix and metadata to workspace for future reuse.
-
-        Args:
-            gse_id: GEO series ID
-            combined_matrix: Processed expression matrix
-            metadata: Associated metadata
-
-        Returns:
-            str: Path to saved file
-        """
-        try:
-            # Create filename with timestamp
-            timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{gse_id}_processed_{timestamp}.csv"
-
-            # Save the matrix
-            data_path = self.data_manager.data_dir / filename
-            combined_matrix.to_csv(data_path)
-
-            # Save metadata
-            metadata_path = (
-                self.data_manager.data_dir
-                / f"{gse_id}_processed_{timestamp}_metadata.json"
-            )
-
-            # Clean metadata for JSON serialization
-            clean_metadata = {}
-            for key, value in metadata.items():
-                if key == "geo_object":
-                    # Skip the GEOparse object as it's not JSON serializable
-                    continue
-                try:
-                    json.dumps(value)  # Test if it's JSON serializable
-                    clean_metadata[key] = value
-                except (TypeError, ValueError):
-                    clean_metadata[key] = str(value)
-
-            with open(metadata_path, "w") as f:
-                json.dump(clean_metadata, f, indent=2, default=str)
-
-            logger.info(f"Saved processed matrix to workspace: {data_path}")
-            logger.info(f"Saved metadata to workspace: {metadata_path}")
-
-            return str(data_path)
-
-        except Exception as e:
-            logger.error(f"Error saving processed matrix to workspace: {e}")
-            return "Error saving to workspace"
 
     def _format_download_response(
         self,

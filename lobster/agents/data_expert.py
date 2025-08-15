@@ -40,6 +40,7 @@ def data_expert(
     def download_geo_dataset(geo_id: str) -> str:
         """
         Download dataset from GEO using accession number.
+        First checks if the dataset already exists in workspace before downloading.
         
         Args:
             geo_id: GEO accession number (e.g., GSE12345)
@@ -49,36 +50,118 @@ def data_expert(
         """
         try:
             from ..tools import GEOService
+            from ..utils.file_naming import BioinformaticsFileNaming
+            import pandas as pd
+            import json
+            
+            # Clean the GEO ID
+            clean_geo_id = geo_id.strip().upper()
+            if not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Expected format: GSE12345"
+            
+            logger.info(f"Processing GEO dataset request: {clean_geo_id}")
+            
+            # Check if dataset already exists in workspace using professional naming
+            data_dir = data_manager.data_dir
+            existing_file = BioinformaticsFileNaming.find_latest_file(
+                directory=data_dir,
+                data_source='GEO',
+                dataset_id=clean_geo_id,
+                processing_step='raw_matrix'
+            )
+            
+            if existing_file and existing_file.exists():
+                logger.info(f"Found existing processed file: {existing_file.name}")
+                
+                try:
+                    # Load the existing data
+                    logger.info(f"Loading existing raw matrix: {existing_file}")
+                    existing_data = pd.read_csv(existing_file, index_col=0)
+                    
+                    # Look for corresponding metadata file
+                    metadata_file = existing_file.parent / BioinformaticsFileNaming.generate_metadata_filename(existing_file.name)
+                    existing_metadata = {}
+                    
+                    if metadata_file.exists():
+                        logger.info(f"Loading existing metadata: {metadata_file}")
+                        with open(metadata_file, 'r') as f:
+                            existing_metadata = json.load(f)
+                    
+                    # Set the data in data manager
+                    data_manager.set_data(data=existing_data, metadata=existing_metadata)
+                    
+                    # Ensure proper metadata structure
+                    data_manager.current_metadata['dataset_id'] = clean_geo_id
+                    data_manager.current_metadata['dataset_type'] = 'GEO'
+                    data_manager.current_metadata['source'] = f"GEO:{clean_geo_id}"
+                    data_manager.current_metadata['loaded_from_existing'] = True
+                    data_manager.current_metadata['existing_file'] = str(existing_file)
+                    
+                    # Log tool usage for loading existing data
+                    data_manager.log_tool_usage(
+                        tool_name="load_existing_geo_dataset",
+                        parameters={"geo_id": clean_geo_id, "file_path": str(existing_file)},
+                        description=f"Loaded existing processed GEO dataset {clean_geo_id} from workspace"
+                    )
+                    
+                    processing_date = existing_metadata.get('processing_date', 'Unknown')
+                    if isinstance(processing_date, str) and 'T' in processing_date:
+                        # Format ISO timestamp to readable format
+                        try:
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(processing_date.replace('Z', '+00:00'))
+                            processing_date = dt.strftime('%Y-%m-%d %H:%M:%S')
+                        except:
+                            pass
+                    
+                    return f"""Found and loaded existing dataset {clean_geo_id}!
+
+📁 Loaded from: {existing_file.name}
+📊 Matrix: {existing_data.shape[0]} cells × {existing_data.shape[1]} genes
+💾 No download needed - using cached data
+🕒 Originally processed: {processing_date}
+🔬 Samples: {existing_metadata.get('n_samples', 'Unknown')}
+⚡ Ready for immediate analysis!
+
+Use this dataset for quality control, filtering, or downstream analysis."""
+                    
+                except Exception as load_error:
+                    logger.warning(f"Failed to load existing file {existing_file}: {load_error}")
+                    logger.info("Proceeding with fresh download due to loading error")
+            
+            # No existing file found or loading failed - proceed with download
+            logger.info(f"No existing file found for {clean_geo_id}, proceeding with download")
             
             # Get console from data_manager for showing download progress
             console = getattr(data_manager, 'console', None)
             
             # Pass console to GEOService for download progress tracking
             geo_service = GEOService(data_manager, console=console)
-            result = geo_service.download_dataset(geo_id.strip())
+            result = geo_service.download_dataset(clean_geo_id)
             
             # Store identifier in metadata for reference
             if data_manager.has_data():
-                data_manager.current_metadata['dataset_id'] = geo_id.strip()
+                data_manager.current_metadata['dataset_id'] = clean_geo_id
                 data_manager.current_metadata['dataset_type'] = 'GEO'
-                data_manager.current_metadata['source'] = f"GEO:{geo_id.strip()}"
+                data_manager.current_metadata['source'] = f"GEO:{clean_geo_id}"
+                data_manager.current_metadata['loaded_from_existing'] = False
                 
-                # Auto-save the data with identifier
-                filename = f"GEO_{geo_id.strip()}_data.csv"
-                data_manager.save_data_to_workspace(filename)
+                # The GEO service now uses professional naming via DataManager.save_processed_data
+                # No need to manually save here as it's handled by the service
                 
                 # Log tool usage
                 data_manager.log_tool_usage(
                     tool_name="download_geo_dataset",
-                    parameters={"geo_id": geo_id},
-                    description=f"Downloaded GEO dataset {geo_id}"
+                    parameters={"geo_id": clean_geo_id},
+                    description=f"Downloaded GEO dataset {clean_geo_id}"
                 )
             
-            logger.info(f"Downloaded GEO dataset: {geo_id}")
+            logger.info(f"Downloaded GEO dataset: {clean_geo_id}")
             return result
+            
         except Exception as e:
-            logger.error(f"Error downloading GEO dataset {geo_id}: {e}")
-            return f"Error downloading dataset: {str(e)}"
+            logger.error(f"Error processing GEO dataset {geo_id}: {e}")
+            return f"Error processing dataset: {str(e)}"
 
     @tool
     def find_geo_from_doi(doi: str) -> str:
@@ -224,6 +307,7 @@ def data_expert(
             # Look for the dataset in workspace
             files = data_manager.list_workspace_files()
             data_files = files.get('data', [])
+            logger.info(f"Looking for datasets by ID - files: {data_files}")
             
             # Search for matching file
             found_file = None
