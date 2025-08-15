@@ -12,7 +12,6 @@ import json
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
-from langgraph.prebuilt.chat_agent_executor import AgentState
 
 from .data_manager import DataManager
 from ..agents.graph import create_bioinformatics_graph
@@ -364,7 +363,7 @@ class AgentClient:
         
         # Final logging before giving up
         logger.warning(f"❌ File '{filename}' not found in any location")
-        logger.info(f"📋 Search summary:")
+        logger.info("📋 Search summary:")
         logger.info(f"  - Workspace root: {self.workspace_path}")
         for search_dir in search_dirs:
             logger.info(f"  - {search_dir.name}/: {search_dir}")

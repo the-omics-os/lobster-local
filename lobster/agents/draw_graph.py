@@ -6,7 +6,6 @@ Simple script to generate a flow diagram of the Lobster bioinformatics agent gra
 import os
 import sys
 import argparse
-from pathlib import Path
 from langgraph.checkpoint.memory import InMemorySaver
 
 # Add the current directory to Python path to ensure imports work

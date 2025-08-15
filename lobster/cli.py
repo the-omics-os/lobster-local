@@ -211,7 +211,7 @@ def chat(
     while True:
         try:
             # Get user input with rich prompt - always show Lobster
-            user_input = Prompt.ask(f"\n[bold red]🦞 Lobster You[/bold red]")
+            user_input = Prompt.ask("\n[bold red]🦞 Lobster You[/bold red]")
             
             # Handle commands
             if user_input.startswith("/"):
@@ -430,7 +430,7 @@ def handle_command(command: str, client: AgentClient):
         saved_items = client.data_manager.auto_save_state()
         
         if saved_items:
-            console.print(f"[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
+            console.print("[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
             for item in saved_items:
                 console.print(f"  • {item}")
         else:

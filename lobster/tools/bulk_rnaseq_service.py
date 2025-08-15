@@ -9,8 +9,9 @@ import os
 import subprocess
 from pathlib import Path
 from typing import List, Optional
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
@@ -23,47 +24,49 @@ logger = get_logger(__name__)
 class BulkRNASeqService:
     """
     Service for bulk RNA-seq analysis workflows.
-    
+
     This class provides methods for quality control, quantification,
     and differential expression analysis of bulk RNA-seq data.
     """
-    
+
     def __init__(self, data_manager: DataManager):
         """
         Initialize the bulk RNA-seq service.
-        
+
         Args:
             data_manager: DataManager instance for data storage
         """
         logger.info("Initializing BulkRNASeqService")
         self.data_manager = data_manager
-        
+
         # Use a proper directory path that works in both development and testing
         data_dir = Path("data")
         if not data_dir.exists():
             logger.debug("Creating data directory")
             data_dir.mkdir(exist_ok=True)
-        
+
         self.results_dir = data_dir / "results"
         if not self.results_dir.exists():
             logger.debug(f"Creating results directory: {self.results_dir}")
             self.results_dir.mkdir(exist_ok=True)
-        
-        logger.info(f"BulkRNASeqService initialized with results_dir: {self.results_dir}")
-    
+
+        logger.info(
+            f"BulkRNASeqService initialized with results_dir: {self.results_dir}"
+        )
+
     def run_fastqc(self, fastq_files: List[str]) -> str:
         """
         Run FastQC quality control on FASTQ files.
-        
+
         Args:
             fastq_files: List of FASTQ file paths
-            
+
         Returns:
             str: Analysis results summary
         """
         logger.info(f"Starting FastQC analysis on {len(fastq_files)} FASTQ files")
         logger.debug(f"Input FASTQ files: {fastq_files}")
-        
+
         try:
             # Validate input files
             valid_files = []
@@ -74,38 +77,42 @@ class BulkRNASeqService:
                     valid_files.append(file_path)
                 else:
                     logger.warning(f"FASTQ file not found: {file_path}")
-            
+
             if not valid_files:
                 logger.error("No valid FASTQ files found for FastQC analysis")
                 return "No valid FASTQ files found for analysis"
-            
+
             logger.info(f"Processing {len(valid_files)} valid FASTQ files")
-            
+
             # Create output directory
             qc_dir = self.results_dir / "fastqc"
             logger.debug(f"Creating FastQC output directory: {qc_dir}")
             qc_dir.mkdir(exist_ok=True)
-            
+
             # Build FastQC command
             cmd = ["fastqc", "-o", str(qc_dir)] + valid_files
-            logger.info(f"Running FastQC command: {' '.join(cmd[:3])} ... ({len(valid_files)} files)")
-            
+            logger.info(
+                f"Running FastQC command: {' '.join(cmd[:3])} ... ({len(valid_files)} files)"
+            )
+
             # Run FastQC
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout
-            
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300
+            )  # 5 minute timeout
+
             if result.returncode != 0:
                 logger.error(f"FastQC failed with return code {result.returncode}")
                 logger.error(f"FastQC stderr: {result.stderr}")
                 logger.debug(f"FastQC stdout: {result.stdout}")
                 raise RuntimeError(f"FastQC failed: {result.stderr}")
-            
+
             logger.info("FastQC completed successfully")
             logger.debug(f"FastQC stdout: {result.stdout}")
-            
+
             # Parse results and create summary
             summary = self._parse_fastqc_results(qc_dir)
             logger.info(f"Generated FastQC summary: {summary}")
-            
+
             return f"""FastQC Analysis Complete!
 
 **Files Analyzed:** {len(valid_files)}
@@ -115,73 +122,77 @@ class BulkRNASeqService:
 {summary}
 
 Next suggested step: Run MultiQC to aggregate results or proceed with quantification using Salmon/Kallisto."""
-            
+
         except subprocess.TimeoutExpired:
             logger.error("FastQC analysis timed out after 5 minutes")
             return "FastQC analysis timed out. Large files may require more time."
         except Exception as e:
             logger.exception(f"Error in FastQC analysis: {e}")
             return f"Error running FastQC: {str(e)}"
-    
+
     def run_multiqc(self, input_dir: Optional[str] = None) -> str:
         """
         Run MultiQC to aggregate quality control results.
-        
+
         Args:
             input_dir: Directory containing QC results
-            
+
         Returns:
             str: MultiQC results summary
         """
         logger.info("Starting MultiQC analysis to aggregate QC results")
-        
+
         try:
             if input_dir is None:
                 input_dir = str(self.results_dir)
                 logger.debug(f"Using default input directory: {input_dir}")
             else:
                 logger.debug(f"Using provided input directory: {input_dir}")
-            
+
             # Validate input directory
             if not os.path.exists(input_dir):
                 logger.error(f"Input directory does not exist: {input_dir}")
                 return f"Input directory not found: {input_dir}"
-            
+
             # Check for QC files
             qc_files = []
-            for ext in ['*.html', '*.txt', '*.log', '*.json']:
+            for ext in ["*.html", "*.txt", "*.log", "*.json"]:
                 qc_files.extend(Path(input_dir).rglob(ext))
             logger.info(f"Found {len(qc_files)} potential QC files in {input_dir}")
-            
+
             # Create output directory
             multiqc_dir = self.results_dir / "multiqc"
             logger.debug(f"Creating MultiQC output directory: {multiqc_dir}")
             multiqc_dir.mkdir(exist_ok=True)
-            
+
             # Build MultiQC command
             cmd = ["multiqc", input_dir, "-o", str(multiqc_dir), "--force"]
             logger.info(f"Running MultiQC command: {' '.join(cmd)}")
-            
+
             # Run MultiQC
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)  # 3 minute timeout
-            
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=180
+            )  # 3 minute timeout
+
             if result.returncode != 0:
                 logger.error(f"MultiQC failed with return code {result.returncode}")
                 logger.error(f"MultiQC stderr: {result.stderr}")
                 logger.debug(f"MultiQC stdout: {result.stdout}")
                 raise RuntimeError(f"MultiQC failed: {result.stderr}")
-            
+
             logger.info("MultiQC completed successfully")
             logger.debug(f"MultiQC stdout: {result.stdout}")
-            
+
             # Check if report was generated
             report_path = multiqc_dir / "multiqc_report.html"
             if report_path.exists():
                 report_size = os.path.getsize(report_path)
-                logger.info(f"MultiQC report generated: {report_path} (size: {report_size} bytes)")
+                logger.info(
+                    f"MultiQC report generated: {report_path} (size: {report_size} bytes)"
+                )
             else:
                 logger.warning("MultiQC report file not found after execution")
-            
+
             return f"""MultiQC Analysis Complete!
 
 **Report Generated:** {multiqc_dir}/multiqc_report.html
@@ -190,124 +201,157 @@ Next suggested step: Run MultiQC to aggregate results or proceed with quantifica
 The MultiQC report aggregates all quality control metrics in an interactive HTML report.
 
 Next suggested step: Proceed with quantification if quality looks good, or investigate problematic samples."""
-            
+
         except subprocess.TimeoutExpired:
             logger.error("MultiQC analysis timed out after 3 minutes")
             return "MultiQC analysis timed out. Try with a smaller input directory."
         except Exception as e:
             logger.exception(f"Error in MultiQC analysis: {e}")
             return f"Error running MultiQC: {str(e)}"
-    
-    def run_salmon_quantification(self, fastq_files: List[str], index_path: str, 
-                                 sample_names: Optional[List[str]] = None) -> str:
+
+    def run_salmon_quantification(
+        self,
+        fastq_files: List[str],
+        index_path: str,
+        sample_names: Optional[List[str]] = None,
+    ) -> str:
         """
         Run Salmon quantification on FASTQ files.
-        
+
         Args:
             fastq_files: List of FASTQ file paths
             index_path: Path to Salmon index
             sample_names: Optional list of sample names
-            
+
         Returns:
             str: Quantification results summary
         """
         logger.info(f"Starting Salmon quantification on {len(fastq_files)} FASTQ files")
         logger.debug(f"Index path: {index_path}")
         logger.debug(f"Input files: {fastq_files}")
-        
+
         try:
             # Validate index path
             if not os.path.exists(index_path):
                 logger.error(f"Salmon index not found: {index_path}")
                 return f"Salmon index not found: {index_path}"
-            
+
             # Validate FASTQ files
             valid_files = []
             for file_path in fastq_files:
                 if os.path.exists(file_path):
                     file_size = os.path.getsize(file_path)
-                    logger.debug(f"FASTQ file {file_path}: exists, size={file_size} bytes")
+                    logger.debug(
+                        f"FASTQ file {file_path}: exists, size={file_size} bytes"
+                    )
                     valid_files.append(file_path)
                 else:
                     logger.warning(f"FASTQ file not found: {file_path}")
-            
+
             if not valid_files:
                 logger.error("No valid FASTQ files found for Salmon quantification")
                 return "No valid FASTQ files found for quantification"
-            
+
             # Generate sample names if not provided
             if sample_names is None:
                 sample_names = [f"sample_{i+1}" for i in range(len(valid_files))]
                 logger.debug(f"Generated sample names: {sample_names}")
-            
+
             logger.info(f"Processing {len(valid_files)} samples with Salmon")
-            
+
             # Create output directory
             salmon_dir = self.results_dir / "salmon"
             logger.debug(f"Creating Salmon output directory: {salmon_dir}")
             salmon_dir.mkdir(exist_ok=True)
-            
+
             results = []
             failed_samples = []
-            
-            for i, (fastq_file, sample_name) in enumerate(zip(valid_files, sample_names)):
-                logger.info(f"Processing sample {i+1}/{len(valid_files)}: {sample_name}")
+
+            for i, (fastq_file, sample_name) in enumerate(
+                zip(valid_files, sample_names)
+            ):
+                logger.info(
+                    f"Processing sample {i+1}/{len(valid_files)}: {sample_name}"
+                )
                 sample_dir = salmon_dir / sample_name
-                
+
                 # Build Salmon command
                 cmd = [
-                    "salmon", "quant",
-                    "-i", index_path,
-                    "-l", "A",  # Auto-detect library type
-                    "-r", fastq_file,
-                    "-o", str(sample_dir),
+                    "salmon",
+                    "quant",
+                    "-i",
+                    index_path,
+                    "-l",
+                    "A",  # Auto-detect library type
+                    "-r",
+                    fastq_file,
+                    "-o",
+                    str(sample_dir),
                     "--validateMappings",
-                    "--threads", "1"  # Use single thread for better logging
+                    "--threads",
+                    "1",  # Use single thread for better logging
                 ]
-                
-                logger.debug(f"Running Salmon command: {' '.join(cmd[:6])} ... (full command logged)")
-                
+
+                logger.debug(
+                    f"Running Salmon command: {' '.join(cmd[:6])} ... (full command logged)"
+                )
+
                 # Run Salmon with timeout
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)  # 10 minute timeout
-                
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=600
+                )  # 10 minute timeout
+
                 if result.returncode != 0:
-                    logger.error(f"Salmon failed for {sample_name} with return code {result.returncode}")
+                    logger.error(
+                        f"Salmon failed for {sample_name} with return code {result.returncode}"
+                    )
                     logger.error(f"Salmon stderr: {result.stderr}")
                     logger.debug(f"Salmon stdout: {result.stdout}")
                     failed_samples.append(sample_name)
                     continue
-                
+
                 logger.info(f"Salmon completed successfully for {sample_name}")
                 logger.debug(f"Salmon stdout: {result.stdout}")
-                
+
                 # Verify output files
                 quant_file = sample_dir / "quant.sf"
                 if quant_file.exists():
                     quant_size = os.path.getsize(quant_file)
-                    logger.debug(f"Quantification file created: {quant_file} (size: {quant_size} bytes)")
+                    logger.debug(
+                        f"Quantification file created: {quant_file} (size: {quant_size} bytes)"
+                    )
                     results.append(sample_name)
                 else:
-                    logger.error(f"Quantification file not found for {sample_name}: {quant_file}")
+                    logger.error(
+                        f"Quantification file not found for {sample_name}: {quant_file}"
+                    )
                     failed_samples.append(sample_name)
-            
+
             # Load and combine quantification results
             if results:
-                logger.info(f"Combining quantification results from {len(results)} successful samples")
+                logger.info(
+                    f"Combining quantification results from {len(results)} successful samples"
+                )
                 combined_data = self._combine_salmon_results(salmon_dir, results)
                 logger.info(f"Combined expression matrix shape: {combined_data.shape}")
-                
-                self.data_manager.set_data(combined_data, {
-                    'analysis_type': 'salmon_quantification',
-                    'samples': results,
-                    'n_samples': len(results),
-                    'failed_samples': failed_samples,
-                    'index_path': index_path
-                })
+
+                self.data_manager.set_data(
+                    combined_data,
+                    {
+                        "analysis_type": "salmon_quantification",
+                        "samples": results,
+                        "n_samples": len(results),
+                        "failed_samples": failed_samples,
+                        "index_path": index_path,
+                    },
+                )
                 logger.info("Expression data stored in data manager")
-            
+
             if failed_samples:
-                logger.warning(f"Failed to process {len(failed_samples)} samples: {failed_samples}")
-            
+                logger.warning(
+                    f"Failed to process {len(failed_samples)} samples: {failed_samples}"
+                )
+
             return f"""Salmon Quantification Complete!
 
 **Samples Processed:** {len(results)}/{len(valid_files)}
@@ -316,82 +360,97 @@ Next suggested step: Proceed with quantification if quality looks good, or inves
 **Combined Expression Matrix:** Loaded into data manager ({combined_data.shape if results else 'N/A'})
 
 Next suggested step: Import quantification data with tximport for differential expression analysis."""
-            
+
         except subprocess.TimeoutExpired:
             logger.error("Salmon quantification timed out after 10 minutes")
             return "Salmon quantification timed out. Consider using smaller files or increasing timeout."
         except Exception as e:
             logger.exception(f"Error in Salmon quantification: {e}")
             return f"Error running Salmon: {str(e)}"
-    
-    def run_deseq2_analysis(self, count_matrix: Optional[pd.DataFrame] = None,
-                           sample_info: Optional[pd.DataFrame] = None,
-                           design_formula: str = "~ condition") -> str:
+
+    def run_deseq2_analysis(
+        self,
+        count_matrix: Optional[pd.DataFrame] = None,
+        sample_info: Optional[pd.DataFrame] = None,
+        design_formula: str = "~ condition",
+    ) -> str:
         """
         Run DESeq2 differential expression analysis.
-        
+
         Args:
             count_matrix: Count matrix (genes x samples)
             sample_info: Sample metadata with conditions
             design_formula: Design formula for DESeq2
-            
+
         Returns:
             str: DESeq2 analysis results
         """
         try:
             logger.info("Running DESeq2 differential expression analysis")
-            
+
             # Use current data if not provided
             if count_matrix is None:
                 if not self.data_manager.has_data():
-                    return "No count data available. Please load or quantify data first."
-                count_matrix = self.data_manager.current_data.T  # Transpose for DESeq2 format
-            
+                    return (
+                        "No count data available. Please load or quantify data first."
+                    )
+                count_matrix = (
+                    self.data_manager.current_data.T
+                )  # Transpose for DESeq2 format
+
             # Create mock sample info if not provided
             if sample_info is None:
                 n_samples = count_matrix.shape[1]
-                sample_info = pd.DataFrame({
-                    'sample': count_matrix.columns,
-                    'condition': ['control'] * (n_samples // 2) + ['treatment'] * (n_samples - n_samples // 2)
-                })
-                sample_info.set_index('sample', inplace=True)
-            
+                sample_info = pd.DataFrame(
+                    {
+                        "sample": count_matrix.columns,
+                        "condition": ["control"] * (n_samples // 2)
+                        + ["treatment"] * (n_samples - n_samples // 2),
+                    }
+                )
+                sample_info.set_index("sample", inplace=True)
+
             # Run DESeq2 via R interface
             results_df = self._run_deseq2_r(count_matrix, sample_info, design_formula)
-            
+
             # Create volcano plot
             volcano_plot = self._create_volcano_plot(results_df)
-            
+
             dataset_info = {
                 "data_shape": count_matrix.shape,
-                "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                "source_dataset": self.data_manager.current_metadata.get(
+                    "source", "Current Dataset"
+                ),
                 "n_samples": count_matrix.shape[1],
-                "n_genes": count_matrix.shape[0]
+                "n_genes": count_matrix.shape[0],
             }
-            
+
             analysis_params = {
                 "design_formula": design_formula,
                 "analysis_type": "differential_expression",
-                "n_significant_genes": len(results_df[results_df['padj'] < 0.05])
+                "n_significant_genes": len(results_df[results_df["padj"] < 0.05]),
             }
-            
+
             self.data_manager.add_plot(
                 volcano_plot,
                 title="Volcano Plot - Differential Expression",
                 source="bulk_rnaseq_service",
                 dataset_info=dataset_info,
-                analysis_params=analysis_params
+                analysis_params=analysis_params,
             )
-            
+
             # Store results
-            self.data_manager.set_data(results_df, {
-                'analysis_type': 'deseq2_results',
-                'design_formula': design_formula,
-                'n_significant': len(results_df[results_df['padj'] < 0.05])
-            })
-            
-            n_significant = len(results_df[results_df['padj'] < 0.05])
-            
+            self.data_manager.set_data(
+                results_df,
+                {
+                    "analysis_type": "deseq2_results",
+                    "design_formula": design_formula,
+                    "n_significant": len(results_df[results_df["padj"] < 0.05]),
+                },
+            )
+
+            n_significant = len(results_df[results_df["padj"] < 0.05])
+
             return f"""DESeq2 Differential Expression Analysis Complete!
 
 **Design Formula:** {design_formula}
@@ -407,69 +466,76 @@ Next suggested step: Import quantification data with tximport for differential e
 Volcano plot generated showing differential expression results.
 
 Next suggested step: Run GO/KEGG enrichment analysis on significant genes."""
-            
+
         except Exception as e:
             logger.exception(f"Error in DESeq2 analysis: {e}")
             return f"Error running DESeq2: {str(e)}"
-    
-    def run_enrichment_analysis(self, gene_list: Optional[List[str]] = None,
-                               analysis_type: str = "GO") -> str:
+
+    def run_enrichment_analysis(
+        self, gene_list: Optional[List[str]] = None, analysis_type: str = "GO"
+    ) -> str:
         """
         Run GO/KEGG enrichment analysis.
-        
+
         Args:
             gene_list: List of genes for enrichment analysis
             analysis_type: Type of analysis ("GO" or "KEGG")
-            
+
         Returns:
             str: Enrichment analysis results
         """
         try:
             logger.info(f"Running {analysis_type} enrichment analysis")
-            
+
             # Get significant genes if not provided
             if gene_list is None:
                 if not self.data_manager.has_data():
                     return "No data available. Please run differential expression analysis first."
-                
+
                 # Extract significant genes from DESeq2 results
                 data = self.data_manager.current_data
-                if 'padj' in data.columns:
-                    significant_genes = data[data['padj'] < 0.05].index.tolist()
+                if "padj" in data.columns:
+                    significant_genes = data[data["padj"] < 0.05].index.tolist()
                     if not significant_genes:
                         return "No significantly differential genes found for enrichment analysis."
                     gene_list = significant_genes[:500]  # Limit to top 500 genes
                 else:
                     return "Current data doesn't appear to be DESeq2 results. Please run differential expression first."
-            
+
             # Run enrichment analysis via R
             enrichment_df = self._run_enrichment_r(gene_list, analysis_type)
-            
+
             # Create enrichment plot
             if not enrichment_df.empty:
-                enrichment_plot = self._create_enrichment_plot(enrichment_df, analysis_type)
-                
+                enrichment_plot = self._create_enrichment_plot(
+                    enrichment_df, analysis_type
+                )
+
                 dataset_info = {
-                    "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                    "source_dataset": self.data_manager.current_metadata.get(
+                        "source", "Current Dataset"
+                    ),
                     "n_genes_analyzed": len(gene_list),
-                    "analysis_type": "pathway_enrichment"
+                    "analysis_type": "pathway_enrichment",
                 }
-                
+
                 analysis_params = {
                     "enrichment_type": analysis_type,
                     "gene_list_size": len(gene_list),
-                    "n_significant_terms": len(enrichment_df[enrichment_df['p.adjust'] < 0.05]),
-                    "analysis_type": "enrichment_analysis"
+                    "n_significant_terms": len(
+                        enrichment_df[enrichment_df["p.adjust"] < 0.05]
+                    ),
+                    "analysis_type": "enrichment_analysis",
                 }
-                
+
                 self.data_manager.add_plot(
                     enrichment_plot,
                     title=f"{analysis_type} Enrichment Analysis",
                     source="bulk_rnaseq_service",
                     dataset_info=dataset_info,
-                    analysis_params=analysis_params
+                    analysis_params=analysis_params,
                 )
-            
+
             return f"""{analysis_type} Enrichment Analysis Complete!
 
 **Genes Analyzed:** {len(gene_list)}
@@ -479,61 +545,64 @@ Next suggested step: Run GO/KEGG enrichment analysis on significant genes."""
 {self._format_enrichment_results(enrichment_df)}
 
 Next suggested step: Export results or perform additional pathway analysis."""
-            
+
         except Exception as e:
             logger.exception(f"Error in enrichment analysis: {e}")
             return f"Error running {analysis_type} enrichment: {str(e)}"
-    
+
     def _parse_fastqc_results(self, qc_dir: Path) -> str:
         """Parse FastQC results and create summary."""
         html_files = list(qc_dir.glob("*.html"))
         return f"Generated {len(html_files)} FastQC reports. Check individual HTML files for detailed quality metrics."
-    
-    def _combine_salmon_results(self, salmon_dir: Path, sample_names: List[str]) -> pd.DataFrame:
+
+    def _combine_salmon_results(
+        self, salmon_dir: Path, sample_names: List[str]
+    ) -> pd.DataFrame:
         """Combine Salmon quantification results into a single matrix."""
         dfs = []
         for sample in sample_names:
             quant_file = salmon_dir / sample / "quant.sf"
             if quant_file.exists():
-                df = pd.read_csv(quant_file, sep='\t')
-                df = df.set_index('Name')['TPM']
+                df = pd.read_csv(quant_file, sep="\t")
+                df = df.set_index("Name")["TPM"]
                 df.name = sample
                 dfs.append(df)
-        
+
         if dfs:
             combined = pd.concat(dfs, axis=1)
             return combined.fillna(0)
         else:
             raise ValueError("No valid Salmon results found")
-    
-    def _run_deseq2_r(self, count_matrix: pd.DataFrame, sample_info: pd.DataFrame, 
-                      design_formula: str) -> pd.DataFrame:
+
+    def _run_deseq2_r(
+        self, count_matrix: pd.DataFrame, sample_info: pd.DataFrame, design_formula: str
+    ) -> pd.DataFrame:
         """Run DESeq2 analysis using R interface."""
         try:
             # Use mock DESeq2 results for testing since we don't need actual R integration for tests
             return self._create_mock_deseq2_results(count_matrix)
-            
+
             # The following code is kept but commented out for reference
             """
             import rpy2.robjects as robjects
             from rpy2.robjects import pandas2ri
             from rpy2.robjects.packages import importr
             from rpy2.robjects.conversion import localconverter
-            
+
             # Import R packages
             deseq2 = importr('DESeq2')
             base = importr('base')
-            
+
             # Convert pandas to R using the context manager approach
             with localconverter(robjects.default_converter + pandas2ri.converter):
                 r_counts = robjects.conversion.py2rpy(count_matrix.astype(int))
                 r_coldata = robjects.conversion.py2rpy(sample_info)
-            
+
             # Create DESeq2 dataset
             robjects.r.assign("counts", r_counts)
             robjects.r.assign("coldata", r_coldata)
             robjects.r.assign("design", design_formula)
-            
+
             # Run DESeq2
             robjects.r('''
             dds <- DESeqDataSetFromMatrix(countData = counts,
@@ -543,40 +612,45 @@ Next suggested step: Export results or perform additional pathway analysis."""
             res <- results(dds)
             res_df <- as.data.frame(res)
             ''')
-            
+
             # Get results back to Python
             with localconverter(robjects.default_converter + pandas2ri.converter):
                 results_df = robjects.conversion.rpy2py(robjects.r['res_df'])
             results_df.index = count_matrix.index
-            
+
             return results_df.dropna()
             """
-            
+
         except ImportError:
             logger.warning("rpy2 not available, creating mock DESeq2 results")
             return self._create_mock_deseq2_results(count_matrix)
-    
+
     def _create_mock_deseq2_results(self, count_matrix: pd.DataFrame) -> pd.DataFrame:
         """Create mock DESeq2 results for demonstration."""
         n_genes = len(count_matrix)
-        
+
         # Generate realistic-looking results
-        results_df = pd.DataFrame({
-            'baseMean': np.random.lognormal(5, 2, n_genes),
-            'log2FoldChange': np.random.normal(0, 1.5, n_genes),
-            'lfcSE': np.random.gamma(2, 0.2, n_genes),
-            'stat': np.random.normal(0, 2, n_genes),
-            'pvalue': np.random.beta(0.5, 3, n_genes),
-            'padj': np.random.beta(0.3, 5, n_genes)
-        }, index=count_matrix.index)
-        
+        results_df = pd.DataFrame(
+            {
+                "baseMean": np.random.lognormal(5, 2, n_genes),
+                "log2FoldChange": np.random.normal(0, 1.5, n_genes),
+                "lfcSE": np.random.gamma(2, 0.2, n_genes),
+                "stat": np.random.normal(0, 2, n_genes),
+                "pvalue": np.random.beta(0.5, 3, n_genes),
+                "padj": np.random.beta(0.3, 5, n_genes),
+            },
+            index=count_matrix.index,
+        )
+
         return results_df
-    
-    def _run_enrichment_r(self, gene_list: List[str], analysis_type: str) -> pd.DataFrame:
+
+    def _run_enrichment_r(
+        self, gene_list: List[str], analysis_type: str
+    ) -> pd.DataFrame:
         """Run enrichment analysis using R interface."""
         # Use mock enrichment results for testing since we don't need actual R integration for tests
         return self._create_mock_enrichment_results(gene_list, analysis_type)
-        
+
         # The following code is kept but commented out for reference
         """
         try:
@@ -584,14 +658,14 @@ Next suggested step: Export results or perform additional pathway analysis."""
             from rpy2.robjects import pandas2ri
             from rpy2.robjects.packages import importr
             from rpy2.robjects.conversion import localconverter
-            
+
             # Import required packages
             clusterprofiler = importr('clusterProfiler')
             org_hs_eg_db = importr('org.Hs.eg.db')
-            
+
             # Convert gene list to R
             r_genes = robjects.StrVector(gene_list)
-            
+
             # Run enrichment
             if analysis_type == "GO":
                 robjects.r.assign("genes", r_genes)
@@ -617,14 +691,16 @@ Next suggested step: Export results or perform additional pathway analysis."""
                 ''')
                 with localconverter(robjects.default_converter + pandas2ri.converter):
                     results_df = robjects.conversion.rpy2py(robjects.r['kk_df'])
-            
+
             return results_df
         except ImportError:
             logger.warning("rpy2 not available, creating mock enrichment results")
             return self._create_mock_enrichment_results(gene_list, analysis_type)
         """
-    
-    def _create_mock_enrichment_results(self, gene_list: List[str], analysis_type: str) -> pd.DataFrame:
+
+    def _create_mock_enrichment_results(
+        self, gene_list: List[str], analysis_type: str
+    ) -> pd.DataFrame:
         """Create mock enrichment results for demonstration."""
         if analysis_type == "GO":
             terms = [
@@ -632,7 +708,7 @@ Next suggested step: Export results or perform additional pathway analysis."""
                 "cell cycle process",
                 "apoptotic process",
                 "immune response",
-                "metabolic process"
+                "metabolic process",
             ]
         else:  # KEGG
             terms = [
@@ -640,100 +716,132 @@ Next suggested step: Export results or perform additional pathway analysis."""
                 "Cell cycle",
                 "Apoptosis",
                 "TNF signaling pathway",
-                "PI3K-Akt signaling pathway"
+                "PI3K-Akt signaling pathway",
             ]
-        
+
         n_terms = len(terms)
-        results_df = pd.DataFrame({
-            'ID': [f"{analysis_type}:{i:07d}" for i in range(n_terms)],
-            'Description': terms,
-            'GeneRatio': [f"{np.random.randint(5, 50)}/{len(gene_list)}" for _ in range(n_terms)],
-            'BgRatio': [f"{np.random.randint(100, 1000)}/20000" for _ in range(n_terms)],
-            'pvalue': np.random.beta(0.1, 10, n_terms),
-            'p.adjust': np.random.beta(0.05, 15, n_terms),
-            'qvalue': np.random.beta(0.05, 15, n_terms),
-            'Count': np.random.randint(5, 50, n_terms)
-        })
-        
-        return results_df.sort_values('p.adjust')
-    
+        results_df = pd.DataFrame(
+            {
+                "ID": [f"{analysis_type}:{i:07d}" for i in range(n_terms)],
+                "Description": terms,
+                "GeneRatio": [
+                    f"{np.random.randint(5, 50)}/{len(gene_list)}"
+                    for _ in range(n_terms)
+                ],
+                "BgRatio": [
+                    f"{np.random.randint(100, 1000)}/20000" for _ in range(n_terms)
+                ],
+                "pvalue": np.random.beta(0.1, 10, n_terms),
+                "p.adjust": np.random.beta(0.05, 15, n_terms),
+                "qvalue": np.random.beta(0.05, 15, n_terms),
+                "Count": np.random.randint(5, 50, n_terms),
+            }
+        )
+
+        return results_df.sort_values("p.adjust")
+
     def _create_volcano_plot(self, results_df: pd.DataFrame) -> go.Figure:
         """Create volcano plot from DESeq2 results."""
         # Add significance categories
-        results_df['significance'] = 'Not Significant'
-        results_df.loc[(results_df['padj'] < 0.05) & (results_df['log2FoldChange'] > 1), 'significance'] = 'Upregulated'
-        results_df.loc[(results_df['padj'] < 0.05) & (results_df['log2FoldChange'] < -1), 'significance'] = 'Downregulated'
-        
+        results_df["significance"] = "Not Significant"
+        results_df.loc[
+            (results_df["padj"] < 0.05) & (results_df["log2FoldChange"] > 1),
+            "significance",
+        ] = "Upregulated"
+        results_df.loc[
+            (results_df["padj"] < 0.05) & (results_df["log2FoldChange"] < -1),
+            "significance",
+        ] = "Downregulated"
+
         fig = px.scatter(
             results_df,
-            x='log2FoldChange',
-            y=-np.log10(results_df['padj']),
-            color='significance',
-            title='Volcano Plot - Differential Expression Results',
-            labels={
-                'x': 'Log2 Fold Change',
-                'y': '-Log10 Adjusted P-value'
-            },
+            x="log2FoldChange",
+            y=-np.log10(results_df["padj"]),
+            color="significance",
+            title="Volcano Plot - Differential Expression Results",
+            labels={"x": "Log2 Fold Change", "y": "-Log10 Adjusted P-value"},
             color_discrete_map={
-                'Not Significant': 'gray',
-                'Upregulated': 'red',
-                'Downregulated': 'blue'
+                "Not Significant": "gray",
+                "Upregulated": "red",
+                "Downregulated": "blue",
             },
             height=500,
-            width=700
+            width=700,
         )
-        
+
         # Add significance threshold lines
-        fig.add_hline(y=-np.log10(0.05), line_dash="dash", line_color="black", opacity=0.5)
+        fig.add_hline(
+            y=-np.log10(0.05), line_dash="dash", line_color="black", opacity=0.5
+        )
         fig.add_vline(x=1, line_dash="dash", line_color="black", opacity=0.5)
         fig.add_vline(x=-1, line_dash="dash", line_color="black", opacity=0.5)
-        
+
         return fig
-    
-    def _create_enrichment_plot(self, enrichment_df: pd.DataFrame, analysis_type: str) -> go.Figure:
+
+    def _create_enrichment_plot(
+        self, enrichment_df: pd.DataFrame, analysis_type: str
+    ) -> go.Figure:
         """Create enrichment analysis plot."""
         top_terms = enrichment_df.head(10)
-        
-        fig = go.Figure(data=go.Bar(
-            x=-np.log10(top_terms['p.adjust']),
-            y=top_terms['Description'],
-            orientation='h',
-            marker=dict(
-                color=-np.log10(top_terms['p.adjust']),
-                colorscale='Viridis',
-                colorbar=dict(title='-Log10 Adjusted P-value')
+
+        fig = go.Figure(
+            data=go.Bar(
+                x=-np.log10(top_terms["p.adjust"]),
+                y=top_terms["Description"],
+                orientation="h",
+                marker=dict(
+                    color=-np.log10(top_terms["p.adjust"]),
+                    colorscale="Viridis",
+                    colorbar=dict(title="-Log10 Adjusted P-value"),
+                ),
             )
-        ))
-        
-        fig.update_layout(
-            title=f'Top {analysis_type} Enriched Terms',
-            xaxis_title='-Log10 Adjusted P-value',
-            yaxis_title='Terms',
-            height=500,
-            margin=dict(l=300)
         )
-        
+
+        fig.update_layout(
+            title=f"Top {analysis_type} Enriched Terms",
+            xaxis_title="-Log10 Adjusted P-value",
+            yaxis_title="Terms",
+            height=500,
+            margin=dict(l=300),
+        )
+
         return fig
-    
-    def _format_top_genes(self, results_df: pd.DataFrame, direction: str = 'up', n: int = 5) -> str:
+
+    def _format_top_genes(
+        self, results_df: pd.DataFrame, direction: str = "up", n: int = 5
+    ) -> str:
         """Format top differential genes for display."""
-        if direction == 'up':
-            top_genes = results_df[results_df['log2FoldChange'] > 0].nlargest(n, 'log2FoldChange')
+        if direction == "up":
+            top_genes = results_df[results_df["log2FoldChange"] > 0].nlargest(
+                n, "log2FoldChange"
+            )
         else:
-            top_genes = results_df[results_df['log2FoldChange'] < 0].nsmallest(n, 'log2FoldChange')
-        
+            top_genes = results_df[results_df["log2FoldChange"] < 0].nsmallest(
+                n, "log2FoldChange"
+            )
+
         formatted_genes = []
         for gene, row in top_genes.iterrows():
-            formatted_genes.append(f"- {gene}: FC={row['log2FoldChange']:.2f}, padj={row['padj']:.2e}")
-        
-        return '\n'.join(formatted_genes) if formatted_genes else "None found"
-    
-    def _format_enrichment_results(self, enrichment_df: pd.DataFrame, n: int = 5) -> str:
+            formatted_genes.append(
+                f"- {gene}: FC={row['log2FoldChange']:.2f}, padj={row['padj']:.2e}"
+            )
+
+        return "\n".join(formatted_genes) if formatted_genes else "None found"
+
+    def _format_enrichment_results(
+        self, enrichment_df: pd.DataFrame, n: int = 5
+    ) -> str:
         """Format enrichment results for display."""
         top_terms = enrichment_df.head(n)
-        
+
         formatted_terms = []
         for _, row in top_terms.iterrows():
-            formatted_terms.append(f"- {row['Description']}: p.adj={row['p.adjust']:.2e}")
-        
-        return '\n'.join(formatted_terms) if formatted_terms else "No significant terms found"
+            formatted_terms.append(
+                f"- {row['Description']}: p.adj={row['p.adjust']:.2e}"
+            )
+
+        return (
+            "\n".join(formatted_terms)
+            if formatted_terms
+            else "No significant terms found"
+        )

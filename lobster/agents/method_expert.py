@@ -8,7 +8,7 @@ import re
 from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_aws import ChatBedrock, ChatBedrockConverse
+from langchain_aws import ChatBedrockConverse
 
 from datetime import date
 

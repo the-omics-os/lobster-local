@@ -6,7 +6,6 @@ capture routing metadata, agent-specific working memory, and intermediate output
 """
 
 from typing import Dict, Any, List
-from langgraph.graph import MessagesState
 from langgraph.prebuilt.chat_agent_executor import AgentState
 
 

@@ -12,7 +12,7 @@ import tarfile
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List, Union
 
-from rich.progress import Progress, DownloadColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TimeRemainingColumn, TransferSpeedColumn
+from rich.progress import Progress, DownloadColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, TransferSpeedColumn
 from rich.console import Console
 
 from ..config.settings import get_settings
