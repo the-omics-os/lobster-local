@@ -1,6 +1,8 @@
 #open deep research 
 open_deep_research/*
 data/*
+.geo_cache/
+.geo_cache/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -150,14 +150,17 @@ class DataManager:
             except Exception:
                 self.adata = None
     
-    def add_plot(self, plot: go.Figure, title: str = None, source: str = None):
+    def add_plot(self, plot: go.Figure, title: str = None, source: str = None, 
+                 dataset_info: Dict[str, Any] = None, analysis_params: Dict[str, Any] = None):
         """
-        Add a plot to the collection with a unique ID and metadata.
+        Add a plot to the collection with a unique ID and comprehensive metadata.
         
         Args:
             plot: Plotly Figure object
             title: Optional title for the plot
             source: Optional source identifier (e.g., service name)
+            dataset_info: Optional information about the dataset used
+            analysis_params: Optional parameters used for the analysis
             
         Returns:
             str: The unique ID assigned to the plot
@@ -169,9 +172,6 @@ class DataManager:
             if not isinstance(plot, go.Figure):
                 raise ValueError("Plot must be a plotly Figure object.")
             
-            if title:
-                plot.update_layout(title=title)
-            
             # Generate a unique identifier for the plot
             self.plot_counter += 1
             plot_id = f"plot_{self.plot_counter}"
@@ -179,15 +179,49 @@ class DataManager:
             # Create timestamp for chronological tracking
             import datetime
             timestamp = datetime.datetime.now().isoformat()
+            human_timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
-            # Store plot with metadata
+            # Get current dataset information for context
+            current_dataset_info = dataset_info or {}
+            if self.has_data() and not current_dataset_info:
+                current_dataset_info = {
+                    "data_shape": self.current_data.shape,
+                    "data_type": self.current_metadata.get('analysis_type', 'unknown'),
+                    "source_dataset": self.current_metadata.get('source', 'unknown'),
+                    "n_cells": self.current_metadata.get('n_cells', self.current_data.shape[0]),
+                    "n_genes": self.current_metadata.get('n_genes', self.current_data.shape[1])
+                }
+            
+            # Create comprehensive title with dataset context
+            enhanced_title = title or "Untitled"
+            if current_dataset_info and 'source_dataset' in current_dataset_info:
+                source_id = current_dataset_info['source_dataset']
+                enhanced_title = f"{enhanced_title} ({source_id} - {human_timestamp})"
+            elif current_dataset_info and 'data_shape' in current_dataset_info:
+                shape_info = f"{current_dataset_info['data_shape'][0]}x{current_dataset_info['data_shape'][1]}"
+                enhanced_title = f"{enhanced_title} (Data: {shape_info} - {human_timestamp})"
+            else:
+                enhanced_title = f"{enhanced_title} ({human_timestamp})"
+            
+            # Update plot title
+            plot.update_layout(title=enhanced_title)
+            
+            # Store plot with comprehensive metadata
             plot_entry = {
                 "id": plot_id,
                 "figure": plot,
-                "title": title or "Untitled",
+                "title": enhanced_title,
+                "original_title": title or "Untitled",
                 "timestamp": timestamp,
-                "source": source,
-                "created_at": datetime.datetime.now()
+                "human_timestamp": human_timestamp,
+                "source": source or "unknown",
+                "dataset_info": current_dataset_info,
+                "analysis_params": analysis_params or {},
+                "created_at": datetime.datetime.now(),
+                "data_context": {
+                    "has_data": self.has_data(),
+                    "metadata_keys": list(self.current_metadata.keys()) if self.current_metadata else []
+                }
             }
             
             # Add to the queue
@@ -197,7 +231,7 @@ class DataManager:
             if len(self.latest_plots) > self.max_plots_history:
                 self.latest_plots.pop(0)  # Remove oldest plot
             
-            logger.info(f"Plot added: {title or 'Untitled'} with ID {plot_id}")
+            logger.info(f"Plot added: '{enhanced_title}' with ID {plot_id} from {source}")
             return plot_id
             
         except Exception as e:
@@ -629,7 +663,101 @@ class DataManager:
         if self.has_data():
             status["current_data"] = self.get_data_summary()
         
+        # Add information about processed GEO datasets
+        geo_datasets = self.list_processed_geo_datasets()
+        if geo_datasets:
+            status["processed_geo_datasets"] = geo_datasets
+        
         return status
+    
+    def list_processed_geo_datasets(self) -> List[Dict[str, Any]]:
+        """List all processed GEO datasets available in workspace."""
+        geo_datasets = []
+        
+        try:
+            data_files = self.list_workspace_files()['data']
+            
+            for file_info in data_files:
+                filename = file_info['name']
+                if '_processed_' in filename and filename.endswith('.csv'):
+                    # Extract GSE ID from filename
+                    try:
+                        gse_id = filename.split('_processed_')[0]
+                        if gse_id.startswith('GSE'):
+                            # Look for associated metadata
+                            metadata_path = Path(file_info['path']).parent / f"{Path(filename).stem}_metadata.json"
+                            metadata = {}
+                            if metadata_path.exists():
+                                with open(metadata_path, 'r') as f:
+                                    metadata = json.load(f)
+                            
+                            dataset_info = {
+                                'gse_id': gse_id,
+                                'filename': filename,
+                                'size_mb': round(file_info['size'] / (1024*1024), 2),
+                                'modified': file_info['modified'],
+                                'processing_date': metadata.get('processing_date', 'Unknown'),
+                                'n_cells': metadata.get('n_cells', 'Unknown'),
+                                'n_genes': metadata.get('n_genes', 'Unknown'),
+                                'n_samples': metadata.get('n_samples', 'Unknown'),
+                                'title': metadata.get('title', 'Unknown')
+                            }
+                            geo_datasets.append(dataset_info)
+                    except Exception as e:
+                        logger.warning(f"Error parsing GEO dataset info from {filename}: {e}")
+            
+            # Sort by modification time (most recent first)
+            geo_datasets.sort(key=lambda x: x['modified'], reverse=True)
+            
+        except Exception as e:
+            logger.error(f"Error listing processed GEO datasets: {e}")
+        
+        return geo_datasets
+    
+    def load_processed_geo_dataset(self, gse_id: str) -> bool:
+        """
+        Load a specific processed GEO dataset from workspace.
+        
+        Args:
+            gse_id: GEO series ID to load
+            
+        Returns:
+            bool: True if successfully loaded, False otherwise
+        """
+        try:
+            geo_datasets = self.list_processed_geo_datasets()
+            
+            # Find the most recent version of the requested dataset
+            target_dataset = None
+            for dataset in geo_datasets:
+                if dataset['gse_id'] == gse_id:
+                    target_dataset = dataset
+                    break
+            
+            if not target_dataset:
+                logger.warning(f"No processed dataset found for {gse_id}")
+                return False
+            
+            # Load the data
+            data_path = self.data_dir / target_dataset['filename']
+            combined_matrix = pd.read_csv(data_path, index_col=0)
+            
+            # Load metadata
+            metadata_path = self.data_dir / f"{Path(target_dataset['filename']).stem}_metadata.json"
+            metadata = {}
+            if metadata_path.exists():
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+            
+            # Set the data
+            self.set_data(data=combined_matrix, metadata=metadata)
+            
+            logger.info(f"Successfully loaded processed dataset {gse_id}: {combined_matrix.shape}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error loading processed GEO dataset {gse_id}: {e}")
+            return False
     
     def auto_save_state(self):
         """Automatically save current state including data and plots."""

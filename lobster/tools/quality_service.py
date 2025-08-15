@@ -60,11 +60,41 @@ class QualityService:
             # Create plots
             plots = self._create_quality_plots(qc_metrics)
             
-            # Add plots to data manager with source information
+            # Add plots to data manager with comprehensive metadata
             plot_ids = []
+            dataset_info = {
+                "data_shape": data.shape,
+                "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                "n_cells": data.shape[0],
+                "n_genes": data.shape[1]
+            }
+            
+            analysis_params = {
+                "min_genes": min_genes,
+                "max_mt_pct": max_mt_pct,
+                "max_ribo_pct": max_ribo_pct,
+                "min_housekeeping_score": min_housekeeping_score,
+                "analysis_type": "quality_control"
+            }
+            
+            plot_titles = [
+                "Mitochondrial Gene Distribution",
+                "Ribosomal Gene Distribution", 
+                "Housekeeping Gene Score Distribution",
+                "Cell Quality Metrics (Mitochondrial)",
+                "Cell Quality Metrics (Ribosomal)",
+                "Features vs RNA Count Correlation"
+            ]
+            
             for i, plot in enumerate(plots):
-                title = f"Quality Plot {i+1}" if i > 0 else "Quality Distribution"
-                plot_id = self.data_manager.add_plot(plot, title=title, source="quality_service")
+                title = plot_titles[i] if i < len(plot_titles) else f"Quality Plot {i+1}"
+                plot_id = self.data_manager.add_plot(
+                    plot, 
+                    title=title, 
+                    source="quality_service",
+                    dataset_info=dataset_info,
+                    analysis_params=analysis_params
+                )
                 plot_ids.append(plot_id)
             
             # Filter cells based on QC metrics

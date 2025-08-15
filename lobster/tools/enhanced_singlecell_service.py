@@ -148,16 +148,33 @@ class EnhancedSingleCellService:
                 
                 logger.info(f"Fallback: Generated {np.sum(predicted_doublets)} synthetic doublets")
             
+            # Store results in metadata
+            n_doublets = np.sum(predicted_doublets)
+            
             # Create doublet score plot
             doublet_plot = self._create_doublet_plot(doublet_scores, predicted_doublets)
+            
+            dataset_info = {
+                "data_shape": (len(predicted_doublets), counts_matrix.shape[1]),
+                "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                "n_cells": len(predicted_doublets),
+                "n_genes": counts_matrix.shape[1]
+            }
+            
+            analysis_params = {
+                "expected_doublet_rate": expected_doublet_rate,
+                "threshold": threshold,
+                "analysis_type": "doublet_detection",
+                "n_doublets_detected": n_doublets
+            }
+            
             self.data_manager.add_plot(
                 doublet_plot,
                 title="Doublet Score Distribution",
-                source="enhanced_singlecell_service"
+                source="enhanced_singlecell_service",
+                dataset_info=dataset_info,
+                analysis_params=analysis_params
             )
-            
-            # Store results in metadata
-            n_doublets = np.sum(predicted_doublets)
             doublet_rate = n_doublets / len(predicted_doublets)
             
             self.data_manager.current_metadata.update({
@@ -214,10 +231,27 @@ Next suggested step: Filter out doublets or proceed with cell type annotation.""
             
             # Create annotation plot
             annotation_plot = self._create_annotation_plot(cluster_annotations)
+            
+            dataset_info = {
+                "data_shape": self.data_manager.adata.shape,
+                "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                "n_cells": self.data_manager.adata.n_obs,
+                "n_genes": self.data_manager.adata.n_vars,
+                "n_clusters": len(self.data_manager.adata.obs['leiden'].unique())
+            }
+            
+            analysis_params = {
+                "markers_used": list(markers.keys()),
+                "n_marker_sets": len(markers),
+                "analysis_type": "cell_type_annotation"
+            }
+            
             self.data_manager.add_plot(
                 annotation_plot,
                 title="Cell Type Marker Scores by Cluster",
-                source="enhanced_singlecell_service"
+                source="enhanced_singlecell_service",
+                dataset_info=dataset_info,
+                analysis_params=analysis_params
             )
             
             # Add annotations to AnnData

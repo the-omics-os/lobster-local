@@ -213,32 +213,61 @@ class ClusteringService:
             logger.info("Generating visualizations")
             self._update_progress("Generating visualizations")
             
+            # Calculate number of clusters for metadata
+            n_clusters = len(adata.obs['leiden'].unique())
+            
+            # Prepare dataset and analysis information for plots
+            dataset_info = {
+                "data_shape": adata.shape,
+                "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                "n_cells": adata.n_obs,
+                "n_genes": adata.n_vars,
+                "n_clusters": n_clusters
+            }
+            
+            analysis_params = {
+                "resolution": resolution,
+                "batch_correction": batch_correction,
+                "batch_key": batch_key,
+                "demo_mode": demo_mode,
+                "subsample_size": subsample_size,
+                "analysis_type": "clustering"
+            }
+            
             # Create UMAP plots
             logger.debug("Creating main UMAP plot")
             umap_plot = self._create_umap_plot(adata)
             self.data_manager.add_plot(
                 umap_plot, 
                 title="UMAP Visualization with Leiden Clusters",
-                source="clustering_service"
+                source="clustering_service",
+                dataset_info=dataset_info,
+                analysis_params=analysis_params
             )
             
             if batch_key:
                 # Also create a batch-colored UMAP if batch information is available
                 logger.debug("Creating batch-colored UMAP plot")
                 batch_umap = self._create_batch_umap(adata, batch_key)
+                batch_analysis_params = {**analysis_params, "colored_by": batch_key}
                 self.data_manager.add_plot(
                     batch_umap,
                     title=f"UMAP Visualization by {batch_key}",
-                    source="clustering_service"
+                    source="clustering_service",
+                    dataset_info=dataset_info,
+                    analysis_params=batch_analysis_params
                 )
             
             # Create cluster size distribution plot
             logger.debug("Creating cluster distribution plot")
             cluster_dist_plot = self._create_cluster_distribution_plot(adata)
+            distribution_analysis_params = {**analysis_params, "plot_type": "cluster_distribution"}
             self.data_manager.add_plot(
                 cluster_dist_plot,
                 title="Cluster Size Distribution",
-                source="clustering_service"
+                source="clustering_service",
+                dataset_info=dataset_info,
+                analysis_params=distribution_analysis_params
             )
             
             # Update metadata

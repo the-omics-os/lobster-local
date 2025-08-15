@@ -361,7 +361,27 @@ Next suggested step: Import quantification data with tximport for differential e
             
             # Create volcano plot
             volcano_plot = self._create_volcano_plot(results_df)
-            self.data_manager.add_plot(volcano_plot)
+            
+            dataset_info = {
+                "data_shape": count_matrix.shape,
+                "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                "n_samples": count_matrix.shape[1],
+                "n_genes": count_matrix.shape[0]
+            }
+            
+            analysis_params = {
+                "design_formula": design_formula,
+                "analysis_type": "differential_expression",
+                "n_significant_genes": len(results_df[results_df['padj'] < 0.05])
+            }
+            
+            self.data_manager.add_plot(
+                volcano_plot,
+                title="Volcano Plot - Differential Expression",
+                source="bulk_rnaseq_service",
+                dataset_info=dataset_info,
+                analysis_params=analysis_params
+            )
             
             # Store results
             self.data_manager.set_data(results_df, {
@@ -428,7 +448,27 @@ Next suggested step: Run GO/KEGG enrichment analysis on significant genes."""
             # Create enrichment plot
             if not enrichment_df.empty:
                 enrichment_plot = self._create_enrichment_plot(enrichment_df, analysis_type)
-                self.data_manager.add_plot(enrichment_plot)
+                
+                dataset_info = {
+                    "source_dataset": self.data_manager.current_metadata.get('source', 'Current Dataset'),
+                    "n_genes_analyzed": len(gene_list),
+                    "analysis_type": "pathway_enrichment"
+                }
+                
+                analysis_params = {
+                    "enrichment_type": analysis_type,
+                    "gene_list_size": len(gene_list),
+                    "n_significant_terms": len(enrichment_df[enrichment_df['p.adjust'] < 0.05]),
+                    "analysis_type": "enrichment_analysis"
+                }
+                
+                self.data_manager.add_plot(
+                    enrichment_plot,
+                    title=f"{analysis_type} Enrichment Analysis",
+                    source="bulk_rnaseq_service",
+                    dataset_info=dataset_info,
+                    analysis_params=analysis_params
+                )
             
             return f"""{analysis_type} Enrichment Analysis Complete!
 

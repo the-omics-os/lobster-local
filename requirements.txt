@@ -29,6 +29,7 @@ igraph>=0.10.4
 scrublet>=0.2.3
 h5py>=3.9.0
 tables>=3.8.0
+GEOparse>=2.0.3
 
 # Visualization
 seaborn>=0.12.0
