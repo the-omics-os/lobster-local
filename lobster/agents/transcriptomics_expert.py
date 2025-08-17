@@ -11,10 +11,10 @@ from langchain_aws import ChatBedrockConverse
 
 from datetime import date
 
-from .state import TranscriptomicsExpertState
-from ..config.settings import get_settings
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.agents.state import TranscriptomicsExpertState
+from lobster.config.settings import get_settings
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -56,7 +56,7 @@ def transcriptomics_expert(
     def assess_data_quality(query: str) -> str:
         """Run basic QC metrics (cell/gene counts, mitochondrial %, etc.)."""
         try:
-            from ..tools import QualityService
+            from lobster.tools import QualityService
             result = QualityService(data_manager).assess_quality()
             analysis_results["details"]["quality_assessment"] = result
             return result
@@ -83,7 +83,7 @@ def transcriptomics_expert(
             save_corrected: Whether to save corrected data to workspace
         """
         try:
-            from ..tools.preprocessing_service import PreprocessingService
+            from lobster.tools.preprocessing_service import PreprocessingService
             preprocessing_service = PreprocessingService(data_manager)
             result = preprocessing_service.correct_ambient_rna(
                 contamination_fraction=contamination_fraction,
@@ -122,7 +122,7 @@ def transcriptomics_expert(
             save_filtered: Whether to save filtered data to workspace
         """
         try:
-            from ..tools.preprocessing_service import PreprocessingService
+            from lobster.tools.preprocessing_service import PreprocessingService
             preprocessing_service = PreprocessingService(data_manager)
             result = preprocessing_service.filter_and_normalize_cells(
                 min_genes_per_cell=min_genes_per_cell,
@@ -163,7 +163,7 @@ def transcriptomics_expert(
             save_integrated: Whether to save integrated data to workspace
         """
         try:
-            from ..tools.preprocessing_service import PreprocessingService
+            from lobster.tools.preprocessing_service import PreprocessingService
             preprocessing_service = PreprocessingService(data_manager)
             result = preprocessing_service.integrate_and_batch_correct(
                 batch_key=batch_key,
@@ -187,7 +187,7 @@ def transcriptomics_expert(
     def cluster_cells(query: str) -> str:
         """Perform clustering and UMAP visualization."""
         try:
-            from ..tools import ClusteringService
+            from lobster.tools import ClusteringService
             result = ClusteringService(data_manager).cluster_and_visualize()
             analysis_results["details"]["clustering"] = result
             return result
@@ -198,7 +198,7 @@ def transcriptomics_expert(
     def detect_doublets(query: str) -> str:
         """Detect doublets in single-cell data."""
         try:
-            from ..tools import EnhancedSingleCellService
+            from lobster.tools import EnhancedSingleCellService
             result = EnhancedSingleCellService(data_manager).detect_doublets()
             analysis_results["details"]["doublet_detection"] = result
             return result
@@ -209,7 +209,7 @@ def transcriptomics_expert(
     def annotate_cell_types(query: str) -> str:
         """Annotate cell types based on marker genes."""
         try:
-            from ..tools import EnhancedSingleCellService
+            from lobster.tools import EnhancedSingleCellService
             result = EnhancedSingleCellService(data_manager).annotate_cell_types()
             analysis_results["details"]["cell_annotation"] = result
             return result
@@ -220,7 +220,7 @@ def transcriptomics_expert(
     def find_marker_genes(query: str) -> str:
         """Find marker genes for clusters."""
         try:
-            from ..tools import EnhancedSingleCellService
+            from lobster.tools import EnhancedSingleCellService
             result = EnhancedSingleCellService(data_manager).find_marker_genes()
             analysis_results["details"]["marker_genes"] = result
             return result

@@ -22,8 +22,8 @@ try:
 except ImportError:
     GEOparse = None
 
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -1178,7 +1178,7 @@ class GEOService:
             Tuple of (DataFrame, metadata) if found, None otherwise
         """
         try:
-            from ..utils.file_naming import BioinformaticsFileNaming
+            from lobster.utils.file_naming import BioinformaticsFileNaming
             
             # First, try professional naming pattern
             data_dir = self.data_manager.data_dir

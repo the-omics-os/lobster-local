@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Optional
 
 import typer
+import tabulate
+from tabulate import tabulate
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -18,10 +20,11 @@ from rich.prompt import Prompt, Confirm
 from rich import box
 from rich import console
 
-from .core import AgentClient
-# Import the proper callback handler
-from .utils import TerminalCallbackHandler
-from .config.agent_config import get_agent_configurator, initialize_configurator
+from lobster.core import AgentClient
+# Implobsterort the proper callback handler
+from lobster.utils import TerminalCallbackHandler
+from lobster.config.agent_config import get_agent_configurator, initialize_configurator, LobsterAgentConfigurator
+import json
 
 
 def change_mode(new_mode: str, current_client: AgentClient) -> AgentClient:
@@ -62,6 +65,13 @@ app = typer.Typer(
     rich_markup_mode="rich"
 )
 
+# Create a subcommand for configuration management
+config_app = typer.Typer(
+    name="config",
+    help="Configuration management for Lobster agents",
+)
+app.add_typer(config_app, name="config")
+
 # Global client instance
 client: Optional[AgentClient] = None
 
@@ -80,7 +90,7 @@ def init_client(
     workspace.mkdir(parents=True, exist_ok=True)
     
     # Initialize DataManager with workspace support and console for progress tracking
-    from .core.data_manager import DataManager
+    from lobster.core.data_manager import DataManager
     data_manager = DataManager(workspace_path=workspace, console=console)
     
     # Create reasoning callback using the terminal_callback_handler
@@ -589,6 +599,263 @@ def serve(
     console.print(f"[red]🦞 Starting Lobster API server on {host}:{port}[/red]")
     uvicorn.run(api, host=host, port=port)
 
+
+# Config subcommands
+@config_app.command(name="list-models")
+def list_models():
+    """List all available model presets."""
+    configurator = LobsterAgentConfigurator()
+    models = configurator.list_available_models()
+    
+    console.print("\n[cyan]🤖 Available Model Presets[/cyan]")
+    console.print("[cyan]" + "=" * 60 + "[/cyan]")
+    
+    table = Table(
+        box=box.ROUNDED,
+        border_style="cyan",
+        title="🤖 Available Model Presets",
+        title_style="bold cyan"
+    )
+    
+    table.add_column("Preset Name", style="bold white")
+    table.add_column("Tier", style="cyan")
+    table.add_column("Region", style="white")
+    table.add_column("Temperature", style="white")
+    table.add_column("Description", style="white")
+    
+    for name, config in models.items():
+        description = config.description[:40] + "..." if len(config.description) > 40 else config.description
+        table.add_row(
+            name,
+            config.tier.value.title(),
+            config.region,
+            f"{config.temperature}",
+            description
+        )
+    
+    console.print(table)
+
+@config_app.command(name="list-profiles")
+def list_profiles():
+    """List all available testing profiles."""
+    configurator = LobsterAgentConfigurator()
+    profiles = configurator.list_available_profiles()
+    
+    console.print("\n[cyan]⚙️  Available Testing Profiles[/cyan]")
+    console.print("[cyan]" + "=" * 60 + "[/cyan]")
+    
+    for profile_name, config in profiles.items():
+        console.print(f"\n[yellow]📋 {profile_name.title()}[/yellow]")
+        for agent, model in config.items():
+            console.print(f"   {agent}: {model}")
+
+@config_app.command(name="show-config")
+def show_config(profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Profile to show")):
+    """Show current configuration."""
+    configurator = initialize_configurator(profile=profile) if profile else LobsterAgentConfigurator()
+    configurator.print_current_config()
+
+@config_app.command(name="test")
+def test(
+    profile: str = typer.Option(..., "--profile", "-p", help="Profile to test"),
+    agent: Optional[str] = typer.Option(None, "--agent", "-a", help="Specific agent to test")
+):
+    """Test a specific configuration."""
+    try:
+        configurator = initialize_configurator(profile=profile)
+        
+        if agent:
+            # Test specific agent
+            try:
+                config = configurator.get_agent_config(agent)
+                params = configurator.get_llm_params(agent)
+                
+                console.print(f"\n[green]✅ Agent '{agent}' configuration is valid[/green]")
+                console.print(f"   Model: {config.model_config.model_id}")
+                console.print(f"   Tier: {config.model_config.tier.value}")
+                console.print(f"   Region: {config.model_config.region}")
+                
+            except KeyError:
+                console.print(f"\n[red]❌ Agent '{agent}' not found in profile '{profile}'[/red]")
+                return False
+        else:
+            # Test all agents dynamically
+            console.print(f"\n[yellow]🧪 Testing Profile: {profile}[/yellow]")
+            all_valid = True
+            
+            # Get all agents from the configurator's DEFAULT_AGENTS
+            available_agents = configurator.DEFAULT_AGENTS
+            
+            for agent_name in available_agents:
+                try:
+                    config = configurator.get_agent_config(agent_name)
+                    params = configurator.get_llm_params(agent_name)
+                    console.print(f"   [green]✅ {agent_name}: {config.model_config.model_id}[/green]")
+                except Exception as e:
+                    console.print(f"   [red]❌ {agent_name}: {str(e)}[/red]")
+                    all_valid = False
+            
+            if all_valid:
+                console.print(f"\n[green]🎉 Profile '{profile}' is fully configured and valid![/green]")
+            else:
+                console.print(f"\n[yellow]⚠️  Profile '{profile}' has configuration issues[/yellow]")
+        
+        return True
+        
+    except Exception as e:
+        console.print(f"\n[red]❌ Error testing configuration: {str(e)}[/red]")
+        return False
+
+@config_app.command(name="create-custom")
+def create_custom():
+    """Interactive creation of custom configuration."""
+    console.print("\n[cyan]🛠️  Create Custom Configuration[/cyan]")
+    console.print("[cyan]" + "=" * 50 + "[/cyan]")
+    
+    configurator = LobsterAgentConfigurator()
+    available_models = configurator.list_available_models()
+    
+    # Show available models
+    console.print("\n[yellow]Available models:[/yellow]")
+    for i, (name, config) in enumerate(available_models.items(), 1):
+        console.print(f"{i:2}. {name} ({config.tier.value}, {config.region})")
+    
+    config_data = {
+        "profile": "custom",
+        "agents": {}
+    }
+    
+    # Use dynamic agent list
+    agents = configurator.DEFAULT_AGENTS
+    
+    for agent in agents:
+        console.print(f"\n[yellow]Configuring {agent}:[/yellow]")
+        console.print("Choose a model preset (enter number or name):")
+        
+        choice = Prompt.ask(f"Model for {agent}")
+        
+        # Handle numeric choice
+        if choice.isdigit():
+            idx = int(choice) - 1
+            if 0 <= idx < len(available_models):
+                model_name = list(available_models.keys())[idx]
+            else:
+                console.print("[yellow]Invalid choice, using default (claude-sonnet)[/yellow]")
+                model_name = "claude-sonnet"
+        else:
+            # Handle name choice
+            if choice in available_models:
+                model_name = choice
+            else:
+                console.print("[yellow]Invalid choice, using default (claude-sonnet)[/yellow]")
+                model_name = "claude-sonnet"
+        
+        model_config = available_models[model_name]
+        config_data["agents"][agent] = {
+            "model_config": {
+                "provider": model_config.provider.value,
+                "model_id": model_config.model_id,
+                "tier": model_config.tier.value,
+                "temperature": model_config.temperature,
+                "region": model_config.region,
+                "description": model_config.description
+            },
+            "enabled": True,
+            "custom_params": {}
+        }
+        
+        console.print(f"   [green]Selected: {model_name}[/green]")
+    
+    # Save configuration
+    config_file = "config/custom_agent_config.json"
+    with open(config_file, 'w') as f:
+        json.dump(config_data, f, indent=2)
+    
+    console.print(f"\n[green]✅ Custom configuration saved to: {config_file}[/green]")
+    console.print("[yellow]To use this configuration, set:[/yellow]")
+    console.print(f"   export GENIE_CONFIG_FILE={config_file}", style="yellow")
+
+@config_app.command(name="generate-env")
+def generate_env():
+    """Generate .env template with all available options."""
+    template = """# Genie AI Configuration Template
+# Copy this file to .env and configure as needed
+
+# =============================================================================
+# API KEYS (Required)
+# =============================================================================
+OPENAI_API_KEY="your-openai-api-key-here"
+AWS_BEDROCK_ACCESS_KEY="your-aws-access-key-here"
+AWS_BEDROCK_SECRET_ACCESS_KEY="your-aws-secret-key-here"
+NCBI_API_KEY="your-ncbi-api-key-here"
+
+# =============================================================================
+# AGENT CONFIGURATION (Professional System)
+# =============================================================================
+
+# Profile-based configuration (recommended)
+# Available profiles: development, production, high-performance, cost-optimized, eu-compliant
+GENIE_PROFILE=production
+
+# OR use custom configuration file
+# GENIE_CONFIG_FILE=config/custom_agent_config.json
+
+# Per-agent model overrides (optional)
+# Available models: claude-haiku, claude-sonnet, claude-sonnet-eu, claude-opus, claude-opus-eu, claude-3-7-sonnet, claude-3-7-sonnet-eu
+# GENIE_SUPERVISOR_MODEL=claude-haiku
+# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
+# GENIE_METHOD_AGENT_MODEL=claude-sonnet
+# GENIE_GENERAL_CONVERSATION_MODEL=claude-haiku
+
+# Global model override (overrides all agents)
+# GENIE_GLOBAL_MODEL=claude-sonnet
+
+# Per-agent temperature overrides
+# GENIE_SUPERVISOR_TEMPERATURE=0.5
+# GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
+# GENIE_METHOD_AGENT_TEMPERATURE=0.3
+
+# =============================================================================
+# APPLICATION SETTINGS
+# =============================================================================
+
+# Server configuration
+PORT=8501
+HOST=0.0.0.0
+DEBUG=False
+
+# Data processing
+GENIE_MAX_FILE_SIZE_MB=500
+GENIE_CLUSTER_RESOLUTION=0.5
+GENIE_CACHE_DIR=data/cache
+
+# =============================================================================
+# EXAMPLE CONFIGURATIONS
+# =============================================================================
+
+# Example 1: Lightweight development setup
+# GENIE_PROFILE=development
+# GENIE_SUPERVISOR_MODEL=claude-haiku
+# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-sonnet
+
+# Example 2: High-performance research setup
+# GENIE_PROFILE=high-performance
+# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-3-7-sonnet
+
+# Example 3: EU compliance
+# GENIE_PROFILE=eu-compliant
+# AWS_REGION=eu-central-1
+
+# Example 4: Cost-optimized setup
+# GENIE_PROFILE=cost-optimized
+# GENIE_GLOBAL_MODEL=claude-haiku
+"""
+    
+    with open('.env.template', 'w') as f:
+        f.write(template)
+    
+    console.print("[green]✅ Environment template saved to: .env.template[/green]")
+    console.print("[yellow]Copy this file to .env and configure your API keys[/yellow]")
 
 if __name__ == "__main__":
     app()

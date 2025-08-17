@@ -12,10 +12,10 @@ from langchain_aws import ChatBedrockConverse
 
 from datetime import date
 
-from .state import DataExpertState
-from ..config.settings import get_settings
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.agents.state import DataExpertState
+from lobster.config.settings import get_settings
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -49,8 +49,8 @@ def data_expert(
             str: Summary of downloaded data with identifier information
         """
         try:
-            from ..tools import GEOService
-            from ..utils.file_naming import BioinformaticsFileNaming
+            from lobster.tools import GEOService
+            from lobster.utils.file_naming import BioinformaticsFileNaming
             import pandas as pd
             import json
             
@@ -178,7 +178,7 @@ Use this dataset for quality control, filtering, or downstream analysis."""
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
             
-            from ..tools import PubMedService
+            from lobster.tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             results = pubmed_service.find_geo_from_doi(doi)
             
@@ -259,7 +259,7 @@ Use this dataset for quality control, filtering, or downstream analysis."""
             str: Summary of uploaded data
         """
         try:
-            from ..tools import FileUploadService
+            from lobster.tools import FileUploadService
             upload_service = FileUploadService(data_manager)
             result = upload_service.upload_file(file_path)
             

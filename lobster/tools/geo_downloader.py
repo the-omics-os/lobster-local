@@ -15,8 +15,8 @@ from typing import Optional, Dict, Tuple, List, Union
 from rich.progress import Progress, DownloadColumn, BarColumn, TimeElapsedColumn, TimeRemainingColumn, TransferSpeedColumn
 from rich.console import Console
 
-from ..config.settings import get_settings
-from ..utils.logger import get_logger
+from lobster.config.settings import get_settings
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 settings = get_settings()

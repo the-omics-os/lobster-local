@@ -12,9 +12,9 @@ from langchain_aws import ChatBedrockConverse
 
 from datetime import date
 
-from ..config.settings import get_settings
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.config.settings import get_settings
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -38,8 +38,8 @@ def method_expert(
     @tool
     def search_pubmed(
         query: str,
-        top_k_results: int = 3,
-        doc_content_chars_max: int = 4000,
+        top_k_results: int = 5,
+        doc_content_chars_max: int = 5000,
         max_query_length: int = 300
     ) -> str:
         """
@@ -52,7 +52,7 @@ def method_expert(
             max_query_length: Maximum query length (default: 300, range: 100-500)
         """
         try:
-            from ..tools import PubMedService
+            from lobster.tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             results = pubmed_service.search_pubmed(
                 query=query,
@@ -84,7 +84,7 @@ def method_expert(
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
             
-            from ..tools import PubMedService
+            from lobster.tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
             # Search for the publication with enhanced parameters
@@ -119,7 +119,7 @@ def method_expert(
             doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
         """
         try:
-            from ..tools import PubMedService
+            from lobster.tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
             # Parse parameters from query
@@ -160,7 +160,7 @@ def method_expert(
             doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
         """
         try:
-            from ..tools import PubMedService
+            from lobster.tools import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             results = pubmed_service.find_protocol_information(
                 technique=technique,
@@ -225,10 +225,11 @@ When providing parameter recommendations:
 <Response Format>
 Provide your findings in clear, structured text that includes:
 - Recommended parameter values with justification
-- Citations to supporting literature
+- Citations to supporting literature as a link
 - Any relevant GitHub repositories or protocols
 - Context about when different parameters should be used
 - If datasets are mentioned, note their identifiers for the data expert
+- Reference to all the found publications with links
 
 Today's date is {date}. Max iterations before timeout: {max_iterations}
 """.format(

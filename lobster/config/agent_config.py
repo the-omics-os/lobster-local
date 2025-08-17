@@ -236,10 +236,10 @@ class LobsterAgentConfigurator:
         },
         
         "ultra-performance": {
-            "supervisor": "claude-3-7-sonnet",
-            "transcriptomics_expert": "claude-3-7-sonnet",
-            "method_agent": "claude-4-1-opus",
-            "data_expert": "claude-3-5-haiku",
+            "supervisor": "claude-4-sonnet",
+            "transcriptomics_expert": "claude-4-sonnet",
+            "method_agent": "claude-4-sonnet",
+            "data_expert": "claude-4-sonnet",
             "general_conversation": "claude-4-sonnet"
         },
         

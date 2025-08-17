@@ -10,15 +10,15 @@ from langgraph_supervisor import create_supervisor
 from langgraph_supervisor.handoff import create_forward_message_tool
 from langchain_aws import ChatBedrockConverse
 
-from .supervisor import create_supervisor_prompt
-from .data_expert import data_expert
-from .transcriptomics_expert import transcriptomics_expert
-from .method_expert import method_expert
-from .state import OverallState
-from ..config.settings import get_settings
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
-from ..tools.handoff_tool import create_custom_handoff_tool
+from lobster.agents.supervisor import create_supervisor_prompt
+from lobster.agents.data_expert import data_expert
+from lobster.agents.transcriptomics_expert import transcriptomics_expert
+from lobster.agents.method_expert import method_expert
+from lobster.agents.state import OverallState
+from lobster.config.settings import get_settings
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
+from lobster.tools.handoff_tool import create_custom_handoff_tool
 
 logger = get_logger(__name__)
 

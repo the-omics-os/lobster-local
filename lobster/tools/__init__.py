@@ -11,13 +11,13 @@ This module contains various services and tools for bioinformatics analysis:
 - Preprocessing service for advanced single-cell preprocessing
 """
 
-from .clustering_service import ClusteringService
-from .bulk_rnaseq_service import BulkRNASeqService
-from .geo_service import GEOService
-from .quality_service import QualityService
-from .pubmed_service import PubMedService
-from .enhanced_singlecell_service import EnhancedSingleCellService
-from .preprocessing_service import PreprocessingService
+from lobster.tools.clustering_service import ClusteringService
+from lobster.tools.bulk_rnaseq_service import BulkRNASeqService
+from lobster.tools.geo_service import GEOService
+from lobster.tools.quality_service import QualityService
+from lobster.tools.pubmed_service import PubMedService
+from lobster.tools.enhanced_singlecell_service import EnhancedSingleCellService
+from lobster.tools.preprocessing_service import PreprocessingService
 
 __all__ = [
     'ClusteringService',

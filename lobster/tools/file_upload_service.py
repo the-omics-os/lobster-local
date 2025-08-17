@@ -11,8 +11,8 @@ from typing import Optional, Dict, Any, List, Tuple
 import pandas as pd
 import scanpy as sc
 
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

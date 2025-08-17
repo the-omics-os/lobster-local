@@ -16,7 +16,7 @@ from tabulate import tabulate
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from config.agent_config import LobsterAgentConfigurator, initialize_configurator
+from lobster.config.agent_config import LobsterAgentConfigurator, initialize_configurator
 
 def print_colored(text: str, color: str = "white"):
     """Print colored text to terminal."""

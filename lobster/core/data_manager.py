@@ -15,7 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import scanpy as sc
 
-from ..utils.file_naming import BioinformaticsFileNaming
+from lobster.utils.file_naming import BioinformaticsFileNaming
 
 # Configure logging
 logger = logging.getLogger(__name__)

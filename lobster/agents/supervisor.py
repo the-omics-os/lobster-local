@@ -6,7 +6,7 @@
 # """
 
 from datetime import date
-from ..utils.logger import get_logger
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -74,14 +74,16 @@ def create_supervisor_prompt(data_manager) -> str:
     - Always maintain conversation flow and scientific clarity.
 
     <Example Delegation Response>:
-    "The transcriptomics expert completed QC and ambient RNA correction. Here’s the summary:
+    "The transcriptomics expert completed QC and ambient RNA correction. Here's the summary:
     [Expert's actual output]
     Based on this, we can now proceed to normalization and doublet detection."
 
     <Example user communication>:
     user - "Can you download the dataset from this publication <DOI>"
-    - You delegate to the data_expert_agent to retrieve the GOI ID and processing methods
-    - if neither is given, you ask the user to copy paste this information for you
+    - You delegate to the data_expert_agent to try to retrieve the GEO ID and processing methods mentioned in the publication.
+    - if neither is given, you ask the user to copy paste this information for you. 
+    - IMPORTAT: IF YOU CAN NOT FIND THE GEO ID , you ask the user to copy paste this information for you
+    - IMPORTAT: IF YOU CAN NOT FIND THE PROCESSING METHODS, you ask the user to copy paste this information for you
 
     user - "Fetch <DOI 1>, <DOI 2>. Can you load it and run QC?"
     - You delegate to the data_expert_agent to fetch the datasets. and ask him to also retrieve the metadata for information like title, methodology, and sample details.
@@ -93,6 +95,11 @@ def create_supervisor_prompt(data_manager) -> str:
     - You delegate to the method_expert_agent to find the best practices from relevant publication with this information.
     - If no publications are available, you ask the user to provide more context or a specific publication.
     - You would first ask for the publication to get more information (method_expert). If the publication does not have any information about the methododology, you ask the user 
+
+    user - "Find studies with public datasets on this topic <topic>
+    - You deelegate to the method_expert_agent to search for relevant publications on the topic.
+    - If the user has a specific publication in mind, you ask them to provide the DOI or link.
+    - You would first ask for the publication to get more information (method_expert). If the publication does not have any information about the methododology, you ask the user to provide the methodology by copy pasting it from the publication.
 
     <Response Quality>
     - Be informative, concise where possible, but never omit critical details.

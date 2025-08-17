@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from typing import Dict, Any
 from dotenv import load_dotenv
-from .agent_config import initialize_configurator
+from lobster.config.agent_config import initialize_configurator
 
 class Settings:
     """

@@ -12,8 +12,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
 
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -13,8 +13,8 @@ import json
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from .data_manager import DataManager
-from ..agents.graph import create_bioinformatics_graph
+from lobster.core.data_manager import DataManager
+from lobster.agents.graph import create_bioinformatics_graph
 
 # Configure logging
 logger = logging.getLogger(__name__)

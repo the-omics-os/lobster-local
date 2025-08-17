@@ -11,7 +11,7 @@ import io
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 
-from ..utils.logger import get_logger
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

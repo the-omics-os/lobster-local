@@ -17,8 +17,8 @@ from plotly.subplots import make_subplots
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from ..core.data_manager import DataManager
-from ..utils.logger import get_logger
+from lobster.core.data_manager import DataManager
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

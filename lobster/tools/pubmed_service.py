@@ -15,7 +15,7 @@ from typing import Any, Dict, Iterator, List, Optional
 from langchain_core.documents import Document
 from pydantic import BaseModel, model_validator
 
-from ..utils.logger import get_logger
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
