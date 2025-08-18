@@ -214,6 +214,10 @@ print(result['response'])
 - [API Reference](docs/api.md)
 - [Example Notebooks](docs/examples/)
 
+## Connect to EC2 via VScode: 
+
+[tutorial](https://medium.com/@bobbycxy/detailed-guide-to-connect-ec2-with-vscode-2c084c265e36)
+
 ## 🤝 Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
