@@ -50,5 +50,14 @@ xmltodict>=0.13.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 
+# Payment Integration
+stripe>=7.8.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+
+# Database (optional for user management)
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
 # Testing (basic)
 pytest>=7.0.0

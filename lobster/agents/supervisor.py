@@ -67,6 +67,7 @@ def create_supervisor_prompt(data_manager) -> str:
       5. method_expert_agent consulted at parameter decision points if needed.
 
     <CRITICAL RESPONSE RULES>
+    - YOU DO NOT RESPOND TO THE USER THAT YOU 'passed your question directly to <agent>'. YOU USE THE HANDOFF TOOL AND WAIT UNTIL THE EXPERT ANSWERS.
     - When you receive an expert's output:
       1. Present the full expert result to the user.  
       2. Optionally add context or next-step suggestions.  

@@ -75,6 +75,7 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "scikit-misc>=0.5.1",
+    "python-multipart>=0.0.20",
 ]
 
 [project.optional-dependencies]
