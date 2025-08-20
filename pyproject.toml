@@ -76,6 +76,8 @@ dependencies = [
     "uvicorn>=0.23.0",
     "scikit-misc>=0.5.1",
     "python-multipart>=0.0.20",
+    "streamlit>=1.48.1",
+    "GEOparse"
 ]
 
 [project.optional-dependencies]
