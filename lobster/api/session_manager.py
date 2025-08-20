@@ -132,13 +132,29 @@ class Session:
         # Create a copy of connections to avoid modification during iteration
         connections = self.websocket_connections.copy()
         
+        # Convert any UUID objects to strings for JSON serialization
+        serializable_message = self._make_json_serializable(message)
+        
         for websocket in connections:
             try:
-                await websocket.send_json(message)
+                await websocket.send_json(serializable_message)
             except Exception as e:
                 logger.warning(f"Failed to send message to WebSocket in session {self.session_id}: {e}")
                 # Remove failed connection
                 self.websocket_connections.discard(websocket)
+    
+    def _make_json_serializable(self, obj):
+        """Convert objects to JSON-serializable format."""
+        if isinstance(obj, UUID):
+            return str(obj)
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {key: self._make_json_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._make_json_serializable(item) for item in obj]
+        else:
+            return obj
     
     def to_session_info(self) -> SessionInfo:
         """Convert to SessionInfo model for API responses."""

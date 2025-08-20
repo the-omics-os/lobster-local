@@ -315,3 +315,64 @@ class ExportResponse(BaseResponse):
     download_url: str
     expires_at: datetime
     size_bytes: int
+
+
+# File Metadata and Preview Models
+class WorkspaceFileMetadata(BaseModel):
+    """Workspace file metadata model for performance-optimized file listing."""
+    name: str
+    path: str
+    relative_path: str
+    directory: str
+    size_bytes: int
+    created_at: datetime
+    modified_at: datetime
+    file_type: str
+    file_format: str
+    is_data_file: bool
+    row_count: Optional[int] = None
+    column_count: Optional[int] = None
+    session_id: Optional[str] = None
+    
+    # Additional metadata for specific formats
+    has_header: Optional[bool] = None
+    delimiter: Optional[str] = None
+    compressed: Optional[bool] = None
+    format_info: Optional[Dict[str, Any]] = None
+    analysis_error: Optional[str] = None
+
+
+class FilePreviewRequest(BaseModel):
+    """File preview request model."""
+    file_path: str = Field(..., description="Relative path to the file within the session workspace")
+    max_rows: int = Field(default=10, ge=1, le=100, description="Maximum number of rows to include in preview")
+    max_columns: int = Field(default=20, ge=1, le=50, description="Maximum number of columns to include in preview")
+
+
+class FilePreviewData(BaseModel):
+    """File preview data structure."""
+    headers: List[str]
+    rows: List[List[str]]
+    total_rows: Union[int, str]  # Can be 'unknown' for compressed files
+    total_columns: int
+    is_truncated: bool
+    preview_rows: int
+    preview_columns: int
+    delimiter: Optional[str] = None
+    format_info: Optional[Dict[str, Any]] = None
+
+
+class FilePreviewResponse(BaseResponse):
+    """File preview response model."""
+    preview_data: Optional[FilePreviewData] = None
+    file_info: Optional[WorkspaceFileMetadata] = None
+
+
+class WorkspaceFileListResponse(BaseResponse):
+    """Workspace file list response with metadata-only approach."""
+    files: List[WorkspaceFileMetadata]
+    total_files: int
+    total_size_bytes: int
+    data_files_count: int = 0
+    plot_files_count: int = 0
+    other_files_count: int = 0

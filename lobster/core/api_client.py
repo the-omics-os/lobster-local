@@ -13,8 +13,10 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from lobster.core.client import AgentClient
 from lobster.core.websocket_callback import APICallbackManager
+from lobster.core.websocket_logging_handler import setup_websocket_logging, remove_websocket_logging
 from lobster.core.data_manager import DataManager
 from lobster.utils.logger import get_logger
+from lobster.api.file_service import FileService
 
 logger = get_logger(__name__)
 
@@ -57,6 +59,9 @@ class APIAgentClient:
         # Set up API callbacks for WebSocket streaming
         self.callback_manager = APICallbackManager(session_id, session_manager)
         
+        # Set up WebSocket logging handler to capture tool/agent logs
+        self.websocket_logging_handler = setup_websocket_logging(self.callback_manager)
+        
         # Initialize the base AgentClient with API callbacks
         self.agent_client = AgentClient(
             data_manager=self.data_manager,
@@ -65,7 +70,7 @@ class APIAgentClient:
             custom_callbacks=self.callback_manager.get_callbacks()
         )
         
-        logger.info(f"Initialized API AgentClient for session {session_id}")
+        logger.info(f"Initialized API AgentClient for session {session_id} with WebSocket logging")
     
     async def query(self, user_input: str, stream: bool = False) -> Dict[str, Any]:
         """
@@ -280,7 +285,72 @@ class APIAgentClient:
             }
     
     def list_workspace_files(self, directory: str = None) -> List[Dict[str, Any]]:
-        """List files in the session workspace."""
+        """
+        List files in the session workspace using optimized metadata approach.
+        
+        This method now uses the FileService for performance-optimized file listing
+        that extracts metadata without loading full file content.
+        
+        Args:
+            directory: Optional directory filter (data, plots, exports)
+            
+        Returns:
+            List of file dictionaries with comprehensive metadata
+        """
+        try:
+            # Use the new FileService for optimized metadata extraction
+            files_metadata = FileService.get_session_files_metadata(
+                session_id=self.session_id,
+                workspace_base_path="workspaces",
+                directory=directory
+            )
+            
+            # Convert to the expected format for backward compatibility
+            files = []
+            for file_meta in files_metadata:
+                # Map new metadata format to legacy format while preserving new information
+                file_dict = {
+                    # Legacy format fields
+                    "name": file_meta.get("name", ""),
+                    "path": file_meta.get("relative_path", file_meta.get("path", "")),
+                    "full_path": file_meta.get("path", ""),
+                    "size": file_meta.get("size_bytes", 0),
+                    "modified": file_meta.get("modified_at", datetime.now()).isoformat() if isinstance(file_meta.get("modified_at"), datetime) else str(file_meta.get("modified_at", "")),
+                    "directory": file_meta.get("directory", ""),
+                    
+                    # Enhanced metadata fields
+                    "file_type": file_meta.get("file_type", "unknown"),
+                    "file_format": file_meta.get("file_format", "unknown"),
+                    "is_data_file": file_meta.get("is_data_file", False),
+                    "size_bytes": file_meta.get("size_bytes", 0),
+                    "created_at": file_meta.get("created_at", datetime.now()).isoformat() if isinstance(file_meta.get("created_at"), datetime) else str(file_meta.get("created_at", "")),
+                    "row_count": file_meta.get("row_count"),
+                    "column_count": file_meta.get("column_count"),
+                    "has_header": file_meta.get("has_header"),
+                    "delimiter": file_meta.get("delimiter"),
+                    "compressed": file_meta.get("compressed", False),
+                    "format_info": file_meta.get("format_info"),
+                    "analysis_error": file_meta.get("analysis_error")
+                }
+                files.append(file_dict)
+            
+            logger.info(f"Retrieved {len(files)} files with metadata for session {self.session_id}")
+            return files
+            
+        except Exception as e:
+            logger.error(f"Error listing workspace files for session {self.session_id}: {e}")
+            # Fallback to basic file listing if metadata extraction fails
+            try:
+                return self._fallback_list_workspace_files(directory)
+            except Exception as fallback_error:
+                logger.error(f"Fallback file listing also failed: {fallback_error}")
+                return []
+    
+    def _fallback_list_workspace_files(self, directory: str = None) -> List[Dict[str, Any]]:
+        """
+        Fallback method for basic file listing without metadata optimization.
+        Used when the optimized metadata approach fails.
+        """
         try:
             if directory:
                 search_path = self.workspace_path / directory
@@ -291,21 +361,36 @@ class APIAgentClient:
             if search_path.exists():
                 for file_path in search_path.rglob("*"):
                     if file_path.is_file():
+                        stat_info = file_path.stat()
                         files.append({
+                            # Legacy format fields
                             "name": file_path.name,
                             "path": str(file_path.relative_to(self.workspace_path)),
                             "full_path": str(file_path),
-                            "size": file_path.stat().st_size,
-                            "modified": datetime.fromtimestamp(
-                                file_path.stat().st_mtime
-                            ).isoformat(),
-                            "directory": str(file_path.parent.relative_to(self.workspace_path))
+                            "size": stat_info.st_size,
+                            "modified": datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+                            "directory": str(file_path.parent.relative_to(self.workspace_path)),
+                            
+                            # Basic metadata fields
+                            "file_type": "unknown",
+                            "file_format": "unknown",
+                            "is_data_file": False,
+                            "size_bytes": stat_info.st_size,
+                            "created_at": datetime.fromtimestamp(stat_info.st_ctime).isoformat(),
+                            "row_count": None,
+                            "column_count": None,
+                            "has_header": None,
+                            "delimiter": None,
+                            "compressed": False,
+                            "format_info": None,
+                            "analysis_error": None
                         })
             
+            logger.warning(f"Used fallback file listing for {len(files)} files")
             return files
             
         except Exception as e:
-            logger.error(f"Error listing workspace files: {e}")
+            logger.error(f"Fallback file listing failed: {e}")
             return []
     
     def reset_conversation(self):
@@ -315,7 +400,10 @@ class APIAgentClient:
     async def cleanup(self):
         """Clean up resources for this API client."""
         try:
-            # Any cleanup needed for the API client
-            logger.info(f"Cleaning up API AgentClient for session {self.session_id}")
+            # Remove WebSocket logging handler to prevent memory leaks
+            if hasattr(self, 'websocket_logging_handler'):
+                remove_websocket_logging(self.websocket_logging_handler)
+            
+            logger.info(f"Cleaned up API AgentClient for session {self.session_id}")
         except Exception as e:
             logger.error(f"Error during API client cleanup: {e}")

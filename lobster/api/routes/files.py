@@ -19,10 +19,16 @@ from lobster.api.models import (
     BaseResponse,
     DatasetInfo,
     DatasetStatus,
-    FileType
+    FileType,
+    WorkspaceFileMetadata,
+    WorkspaceFileListResponse,
+    FilePreviewRequest,
+    FilePreviewResponse,
+    FilePreviewData
 )
 from lobster.api.session_manager import SessionManager
 from lobster.core.api_client import APIAgentClient
+from lobster.api.file_service import FileService
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -445,4 +451,200 @@ async def get_file_info(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get file information: {str(e)}"
+        )
+
+
+@router.get("/sessions/{session_id}/workspace/files/metadata", response_model=WorkspaceFileListResponse)
+async def get_workspace_files_metadata(
+    session_id: UUID,
+    directory: Optional[str] = Query(None, description="Directory to list (data, plots, exports, or None for all)"),
+    session_manager: SessionManager = Depends(get_session_manager)
+):
+    """
+    Get metadata for all files in the session workspace (performance optimized).
+    
+    This endpoint provides file metadata without loading file content,
+    optimized for large bioinformatics datasets.
+    
+    Args:
+        session_id: Session UUID
+        directory: Optional directory filter (data, plots, exports)
+    """
+    try:
+        # Get the session
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail="Session not found or expired"
+            )
+        
+        # Get files metadata using the optimized service with correct workspace path
+        files_metadata = FileService.get_session_files_metadata(
+            session_id=session_id,
+            workspace_base_path=str(session.workspace_path.parent),
+            directory=directory
+        )
+        
+        # Convert to WorkspaceFileMetadata objects and calculate statistics
+        workspace_files = []
+        total_size = 0
+        data_files_count = 0
+        plot_files_count = 0
+        other_files_count = 0
+        
+        for file_meta in files_metadata:
+            # Create WorkspaceFileMetadata object
+            workspace_file = WorkspaceFileMetadata(**file_meta)
+            workspace_files.append(workspace_file)
+            
+            # Update statistics
+            total_size += file_meta.get('size_bytes', 0)
+            
+            if file_meta.get('file_type') == 'plot':
+                plot_files_count += 1
+            elif file_meta.get('is_data_file', False):
+                data_files_count += 1
+            else:
+                other_files_count += 1
+        
+        # Update session activity
+        session.update_activity()
+        
+        # Create response
+        response = WorkspaceFileListResponse(
+            success=True,
+            message=f"Retrieved metadata for {len(workspace_files)} files",
+            files=workspace_files,
+            total_files=len(workspace_files),
+            total_size_bytes=total_size,
+            data_files_count=data_files_count,
+            plot_files_count=plot_files_count,
+            other_files_count=other_files_count
+        )
+        
+        logger.info(f"Retrieved metadata for {len(workspace_files)} files in session {session_id}")
+        return response
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workspace files metadata for session {session_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get workspace files metadata: {str(e)}"
+        )
+
+
+@router.post("/sessions/{session_id}/workspace/files/preview", response_model=FilePreviewResponse)
+async def get_file_preview(
+    session_id: UUID,
+    request: FilePreviewRequest,
+    session_manager: SessionManager = Depends(get_session_manager)
+):
+    """
+    Generate a preview of file content with specified limits.
+    
+    This endpoint generates on-demand previews for supported bioinformatics file formats
+    without loading the entire file into memory.
+    
+    Args:
+        session_id: Session UUID
+        request: File preview request with file path and limits
+    """
+    try:
+        # Get the session
+        session = session_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail="Session not found or expired"
+            )
+        
+        # Validate file_path parameter
+        if not request.file_path or request.file_path.strip() == "":
+            raise HTTPException(
+                status_code=400,
+                detail="File path cannot be empty"
+            )
+        
+        # Construct full file path using the session's workspace path
+        full_file_path = session.workspace_path / request.file_path
+        
+        # Security check: ensure the file is within the workspace
+        try:
+            full_file_path.resolve().relative_to(session.workspace_path.resolve())
+        except ValueError:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied: File path outside workspace"
+            )
+        
+        # Check if file exists
+        if not full_file_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found: {request.file_path}"
+            )
+        
+        # Generate file preview by calling the service directly with the full path
+        from lobster.utils.file_analyzer import FileAnalyzer
+        
+        # Get file metadata
+        file_metadata = FileAnalyzer.analyze_file_metadata(full_file_path)
+        
+        # Check if file can be previewed
+        if not file_metadata.get('is_data_file', False):
+            raise HTTPException(
+                status_code=400,
+                detail="File format not supported for preview"
+            )
+        
+        # Generate preview using FileService with the correct workspace path
+        preview_result = FileService.generate_file_preview(
+            session_id=session_id,
+            file_path=request.file_path,
+            workspace_base_path=str(session.workspace_path.parent),
+            max_rows=request.max_rows,
+            max_columns=request.max_columns
+        )
+        
+        # Check if preview generation was successful
+        if not preview_result.get('success', False):
+            raise HTTPException(
+                status_code=400,
+                detail=preview_result.get('error', 'Preview generation failed')
+            )
+        
+        # Convert to response models
+        file_info = None
+        preview_data = None
+        
+        if preview_result.get('file_info'):
+            file_info = WorkspaceFileMetadata(**preview_result['file_info'])
+        
+        if preview_result.get('preview_data'):
+            preview_data = FilePreviewData(**preview_result['preview_data'])
+        
+        # Update session activity
+        session.update_activity()
+        
+        # Create response
+        response = FilePreviewResponse(
+            success=True,
+            message=preview_result.get('message', 'Preview generated successfully'),
+            preview_data=preview_data,
+            file_info=file_info
+        )
+        
+        logger.info(f"Generated preview for file {request.file_path} in session {session_id}")
+        return response
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating file preview for session {session_id}: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate file preview: {str(e)}"
         )
