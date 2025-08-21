@@ -1,0 +1,259 @@
+name: Deploy Lobster AI to AWS App Runner
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # Allow manual triggering
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: lobster-ai
+  APP_RUNNER_SERVICE: lobster-ai-streamlit
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to AWS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        platforms: linux/amd64
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=raw,value=latest,enable={{is_default_branch}}
+          type=sha,format=short
+
+    - name: Build and push Docker image
+      id: build-image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile.streamlit
+        push: true
+        platforms: linux/amd64
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        build-args: |
+          BUILDKIT_INLINE_CACHE=1
+
+    - name: Create App Runner configuration
+      run: |
+        cat > apprunner.yaml << EOF
+        version: 1.0
+        runtime: docker
+        build:
+          commands:
+            build:
+              - echo "Build stage - using pre-built image"
+        run:
+          runtime-version: latest
+          command: streamlit run lobster/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+          network:
+            port: 8501
+            env: PORT
+          env:
+            - name: PORT
+              value: "8501"
+            - name: PYTHONUNBUFFERED
+              value: "1"
+            - name: STREAMLIT_SERVER_HEADLESS
+              value: "true"
+            - name: OPENAI_API_KEY
+              value: "${{ secrets.OPENAI_API_KEY }}"
+            - name: AWS_BEDROCK_ACCESS_KEY
+              value: "${{ secrets.AWS_BEDROCK_ACCESS_KEY }}"
+            - name: AWS_BEDROCK_SECRET_ACCESS_KEY
+              value: "${{ secrets.AWS_BEDROCK_SECRET_ACCESS_KEY }}"
+            - name: NCBI_API_KEY
+              value: "${{ secrets.NCBI_API_KEY }}"
+            - name: GENIE_PROFILE
+              value: "${{ secrets.GENIE_PROFILE }}"
+            - name: LANGFUSE_PUBLIC_KEY
+              value: "${{ secrets.LANGFUSE_PUBLIC_KEY }}"
+            - name: LANGFUSE_SECRET_KEY
+              value: "${{ secrets.LANGFUSE_SECRET_KEY }}"
+            - name: LANGFUSE_HOST
+              value: "${{ secrets.LANGFUSE_HOST }}"
+            - name: STRIPE_PUBLISHABLE_KEY
+              value: "${{ secrets.STRIPE_PUBLISHABLE_KEY }}"
+            - name: STRIPE_SECRET_KEY
+              value: "${{ secrets.STRIPE_SECRET_KEY }}"
+            - name: STRIPE_WEBHOOK_SECRET
+              value: "${{ secrets.STRIPE_WEBHOOK_SECRET }}"
+        EOF
+
+    - name: Deploy to App Runner
+      run: |
+        # Get the image URI from the build step
+        IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
+        
+        # Check if App Runner service exists
+        if aws apprunner describe-service --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ steps.login-ecr.outputs.registry_id }}:service/${{ env.APP_RUNNER_SERVICE }}" --region ${{ env.AWS_REGION }} 2>/dev/null; then
+          echo "Service exists, updating..."
+          
+          # Create service configuration
+          cat > service-config.json << EOF
+        {
+          "ServiceName": "${{ env.APP_RUNNER_SERVICE }}",
+          "SourceConfiguration": {
+            "ImageRepository": {
+              "ImageIdentifier": "${IMAGE_URI}",
+              "ImageConfiguration": {
+                "Port": "8501",
+                "RuntimeEnvironmentVariables": {
+                  "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
+                  "AWS_BEDROCK_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_ACCESS_KEY }}",
+                  "AWS_BEDROCK_SECRET_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_SECRET_ACCESS_KEY }}",
+                  "NCBI_API_KEY": "${{ secrets.NCBI_API_KEY }}",
+                  "GENIE_PROFILE": "${{ secrets.GENIE_PROFILE }}",
+                  "LANGFUSE_PUBLIC_KEY": "${{ secrets.LANGFUSE_PUBLIC_KEY }}",
+                  "LANGFUSE_SECRET_KEY": "${{ secrets.LANGFUSE_SECRET_KEY }}",
+                  "LANGFUSE_HOST": "${{ secrets.LANGFUSE_HOST }}",
+                  "STRIPE_PUBLISHABLE_KEY": "${{ secrets.STRIPE_PUBLISHABLE_KEY }}",
+                  "STRIPE_SECRET_KEY": "${{ secrets.STRIPE_SECRET_KEY }}",
+                  "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
+                  "PORT": "8501",
+                  "PYTHONUNBUFFERED": "1",
+                  "STREAMLIT_SERVER_HEADLESS": "true"
+                }
+              },
+              "ImageRepositoryType": "ECR"
+            },
+            "AutoDeploymentsEnabled": true
+          },
+          "InstanceConfiguration": {
+            "Cpu": "1 vCPU",
+            "Memory": "2 GB"
+          }
+        }
+        EOF
+          
+          # Update the service
+          aws apprunner update-service \
+            --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ steps.login-ecr.outputs.registry_id }}:service/${{ env.APP_RUNNER_SERVICE }}" \
+            --source-configuration file://service-config.json \
+            --region ${{ env.AWS_REGION }}
+        else
+          echo "Service does not exist, creating..."
+          
+          # Create service configuration for new service
+          cat > create-service-config.json << EOF
+        {
+          "ServiceName": "${{ env.APP_RUNNER_SERVICE }}",
+          "SourceConfiguration": {
+            "ImageRepository": {
+              "ImageIdentifier": "${IMAGE_URI}",
+              "ImageConfiguration": {
+                "Port": "8501",
+                "RuntimeEnvironmentVariables": {
+                  "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
+                  "AWS_BEDROCK_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_ACCESS_KEY }}",
+                  "AWS_BEDROCK_SECRET_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_SECRET_ACCESS_KEY }}",
+                  "NCBI_API_KEY": "${{ secrets.NCBI_API_KEY }}",
+                  "GENIE_PROFILE": "${{ secrets.GENIE_PROFILE }}",
+                  "LANGFUSE_PUBLIC_KEY": "${{ secrets.LANGFUSE_PUBLIC_KEY }}",
+                  "LANGFUSE_SECRET_KEY": "${{ secrets.LANGFUSE_SECRET_KEY }}",
+                  "LANGFUSE_HOST": "${{ secrets.LANGFUSE_HOST }}",
+                  "STRIPE_PUBLISHABLE_KEY": "${{ secrets.STRIPE_PUBLISHABLE_KEY }}",
+                  "STRIPE_SECRET_KEY": "${{ secrets.STRIPE_SECRET_KEY }}",
+                  "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
+                  "PORT": "8501",
+                  "PYTHONUNBUFFERED": "1",
+                  "STREAMLIT_SERVER_HEADLESS": "true"
+                }
+              },
+              "ImageRepositoryType": "ECR"
+            },
+            "AutoDeploymentsEnabled": true
+          },
+          "InstanceConfiguration": {
+            "Cpu": "1 vCPU",
+            "Memory": "2 GB"
+          },
+          "Tags": [
+            {
+              "Key": "Environment",
+              "Value": "Production"
+            },
+            {
+              "Key": "Application",
+              "Value": "LobsterAI"
+            }
+          ]
+        }
+        EOF
+          
+          # Create the service
+          aws apprunner create-service \
+            --cli-input-json file://create-service-config.json \
+            --region ${{ env.AWS_REGION }}
+        fi
+
+    - name: Wait for deployment completion
+      run: |
+        echo "Waiting for App Runner service to be ready..."
+        aws apprunner wait service-ready \
+          --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ steps.login-ecr.outputs.registry_id }}:service/${{ env.APP_RUNNER_SERVICE }}" \
+          --region ${{ env.AWS_REGION }}
+
+    - name: Get service URL
+      id: get-url
+      run: |
+        SERVICE_URL=$(aws apprunner describe-service \
+          --service-arn "arn:aws:apprunner:${{ env.AWS_REGION }}:${{ steps.login-ecr.outputs.registry_id }}:service/${{ env.APP_RUNNER_SERVICE }}" \
+          --region ${{ env.AWS_REGION }} \
+          --query 'Service.ServiceUrl' \
+          --output text)
+        echo "SERVICE_URL=${SERVICE_URL}" >> $GITHUB_OUTPUT
+        echo "🚀 App deployed at: https://${SERVICE_URL}"
+
+    - name: Run health check
+      run: |
+        echo "Running health check..."
+        sleep 30  # Wait for service to be ready
+        SERVICE_URL="${{ steps.get-url.outputs.SERVICE_URL }}"
+        
+        # Check if the service is responding
+        if curl -f -s "https://${SERVICE_URL}" > /dev/null; then
+          echo "✅ Health check passed - service is running!"
+        else
+          echo "❌ Health check failed - service may not be ready yet"
+          echo "Please check the service manually at: https://${SERVICE_URL}"
+        fi
+
+    - name: Deployment summary
+      run: |
+        echo "## 🦞 Lobster AI Deployment Complete! 🦞" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Service URL:** https://${{ steps.get-url.outputs.SERVICE_URL }}" >> $GITHUB_STEP_SUMMARY
+        echo "**AWS Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+        echo "**ECR Repository:** ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}" >> $GITHUB_STEP_SUMMARY
+        echo "**Image Tag:** latest" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🎉 Your Streamlit app is now live and ready to use!"

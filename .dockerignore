@@ -1,0 +1,139 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation (keep README.md for package build)
+CONTRIBUTING.md
+INSTALLATION.md
+docs/
+INSTALLATION.md
+AWS_DEPLOYMENT_GUIDE.md
+
+#workspace data
+.lobster_workspace/
+.lobster_workspace/*
+.geo_cache/
+.geo_cache/*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+*.log
+logs/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Local workspace (runtime directories)
+.lobster_workspace/
+workspaces/
+exports/
+
+# Cache directories
+.cache/
+data/cache/
+
+# Test data
+tests/data/
+tests/results.json
+tests/tmp.*
+
+# Build artifacts
+lobster_ai.egg-info/
+lobster.egg-info/
+
+# Lock files (keep uv.lock for reproducible builds)
+# uv.lock - keep this for reproducible builds
+
+# Scripts that aren't needed in container
+scripts/
+test_*.py
+test_*.sh
+
+# Large files that aren't needed
+*.h5
+*.h5ad
+*.csv
+*.xlsx
+*.parquet
