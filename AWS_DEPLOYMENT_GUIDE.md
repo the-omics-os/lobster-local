@@ -31,6 +31,17 @@ Enter your credentials:
 - **Default region**: `us-east-2`
 - **Default output format**: `json`
 
+### 1.1.1 Activate STS for Required Regions
+
+⚠️ **Important:** You need to activate AWS STS (Security Token Service) for the region you're deploying to. By default, only `us-east-1` is activated.
+
+1. Go to AWS Console → **IAM** → **Account settings**
+2. Scroll down to **Security Token Service (STS)**
+3. Find **us-east-2 (US East - Ohio)** and click **Activate**
+4. Wait a few minutes for activation to complete
+
+Without this, you may encounter "STS is not activated in this region" errors during deployment.
+
 ### 1.2 Create IAM User for GitHub Actions
 
 ```bash
@@ -43,118 +54,23 @@ aws iam create-access-key --user-name github-actions-lobster
 
 **📝 Save the Access Key ID and Secret Access Key - you'll need them for GitHub Secrets!**
 
-### 1.3 Create IAM Policy for GitHub Actions
+### 1.6 Automated Setup (Recommended)
+
+🚀 **Easy Option:** Use the automated setup script instead of manual steps:
 
 ```bash
-# Create policy document
-cat > github-actions-policy.json << 'EOF'
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "ecr:GetAuthorizationToken",
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-                "ecr:InitiateLayerUpload",
-                "ecr:UploadLayerPart",
-                "ecr:CompleteLayerUpload",
-                "ecr:PutImage",
-                "ecr:CreateRepository",
-                "ecr:DescribeRepositories"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "apprunner:CreateService",
-                "apprunner:UpdateService",
-                "apprunner:DescribeService",
-                "apprunner:ListServices",
-                "apprunner:DeleteService",
-                "apprunner:TagResource",
-                "apprunner:UntagResource",
-                "apprunner:ListTagsForResource"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "iam:CreateRole",
-                "iam:GetRole",
-                "iam:AttachRolePolicy",
-                "iam:PassRole"
-            ],
-            "Resource": [
-                "arn:aws:iam::*:role/AppRunnerECRAccessRole"
-            ]
-        }
-    ]
-}
-EOF
-
-# Create the policy
-aws iam create-policy \
-    --policy-name GitHubActionsLobsterPolicy \
-    --policy-document file://github-actions-policy.json
-
-# Attach policy to user
-aws iam attach-user-policy \
-    --user-name github-actions-lobster \
-    --policy-arn arn:aws:iam::$(aws sts get-caller-identity --query Account --output text):policy/GitHubActionsLobsterPolicy
+# Run the automated setup script from project root
+bash scripts/setup-aws.sh
 ```
 
-### 1.4 Create ECR Repository
+This script will:
+- ✅ Create IAM user and policies
+- ✅ Generate access keys  
+- ✅ Create ECR repository
+- ✅ Set up App Runner role with correct trust policy
+- ✅ Display all necessary GitHub secrets
 
-```bash
-# Create ECR repository
-aws ecr create-repository \
-    --repository-name homara \
-    --region us-east-2
-
-# Get repository URI (save this for later)
-aws ecr describe-repositories \
-    --repository-names homara \
-    --region us-east-2 \
-    --query 'repositories[0].repositoryUri' \
-    --output text
-
-output: 649207544517.dkr.ecr.us-east-2.amazonaws.com/homara
-```
-
-### 1.5 Create App Runner Service Role
-
-```bash
-# Create trust policy for App Runner
-cat > apprunner-trust-policy.json << 'EOF'
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "build.apprunner.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
-
-# Create the role (ALREADY EXISTS
-aws iam create-role \
-    --role-name AppRunnerECRAccessRole \
-    --assume-role-policy-document file://apprunner-trust-policy.json
-
-# Attach the managed policy
-aws iam attach-role-policy \
-    --role-name AppRunnerECRAccessRole \
-    --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
-```
+**Note:** Make sure to save the displayed credentials for GitHub Secrets!
 
 ---
 
@@ -218,8 +134,29 @@ git push origin main
 - Check for any errors in the logs
 
 3. **Get your app URL:**
-- At the end of the workflow, you'll see the deployment summary
-- Your app will be available at: `https://[random-id].us-east-2.awsapprunner.com`
+There are several ways to find your deployed app URL:
+
+**Option A: AWS Console (Most Reliable)**
+1. Go to AWS Console: https://console.aws.amazon.com/apprunner/
+2. Make sure you're in the `us-east-2` region (Ohio)
+3. Look for your service named `lobster-streamlit`
+4. Click on the service name
+5. The **Service URL** will be displayed at the top
+
+**Option B: GitHub Actions Output**
+- Check the workflow logs in the "App Runner output" step
+- Look for the service URL (if displayed)
+
+**Option C: AWS CLI**
+```bash
+aws apprunner describe-service \
+    --service-arn $(aws apprunner list-services --query 'ServiceSummaryList[?ServiceName==`lobster-streamlit`].ServiceArn' --output text --region us-east-2) \
+    --query 'Service.ServiceUrl' \
+    --output text \
+    --region us-east-2
+```
+
+Your app will be available at: `https://[random-id].us-east-2.awsapprunner.com`
 
 ---
 

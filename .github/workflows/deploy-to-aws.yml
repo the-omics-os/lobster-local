@@ -1,4 +1,4 @@
-name: Deploy to App Runner - Image based
+name: Deploy to AWS Fargate - ECS
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     
     steps:      
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
           
@@ -25,7 +25,7 @@ jobs:
 
       - name: Login to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1        
+        uses: aws-actions/amazon-ecr-login@v2        
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
@@ -37,19 +37,20 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.streamlit .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-          
-      - name: Deploy to App Runner
-        id: deploy-apprunner
-        uses: awslabs/amazon-app-runner-deploy@main        
+
+      - name: Get AWS Account ID
+        id: account-id
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account-id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          service: lobster-streamlit
-          image: ${{ steps.build-image.outputs.image }}          
-          access-role-arn: ${{ secrets.ROLE_ARN }}
-          region: ${{ secrets.AWS_REGION }}
-          cpu : 1
-          memory : 2
-          port: 8501
-          wait-for-service-stability-seconds: 1200
+          task-definition: scripts/ecs-task-definition.json
+          container-name: lobster-streamlit
+          image: ${{ steps.build-image.outputs.image }}
           environment-variables: |
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             AWS_BEDROCK_ACCESS_KEY=${{ secrets.AWS_BEDROCK_ACCESS_KEY }}
@@ -62,9 +63,96 @@ jobs:
             STRIPE_PUBLISHABLE_KEY=${{ secrets.STRIPE_PUBLISHABLE_KEY }}
             STRIPE_SECRET_KEY=${{ secrets.STRIPE_SECRET_KEY }}
             STRIPE_WEBHOOK_SECRET=${{ secrets.STRIPE_WEBHOOK_SECRET }}
-            PORT=8501
-            PYTHONUNBUFFERED=1
-            STREAMLIT_SERVER_HEADLESS=true
+
+      - name: Update task definition with account ID
+        id: update-task-def
+        run: |
+          # Replace placeholders in task definition
+          sed -i "s/ACCOUNT_ID/${{ steps.account-id.outputs.account-id }}/g" ${{ steps.task-def.outputs.task-definition }}
+          sed -i "s/IMAGE_TAG/${{ github.sha }}/g" ${{ steps.task-def.outputs.task-definition }}
+          echo "Updated task definition with account ID and image tag"
+
+      - name: Deploy Amazon ECS task definition
+        id: deploy-ecs
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE_NAME }}
+          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
+          wait-for-service-stability: true
+          wait-for-minutes: 10
+
+      - name: Create or Update ECS Service (if not exists)
+        id: create-service
+        run: |
+          # Check if service exists
+          if ! aws ecs describe-services --cluster ${{ secrets.ECS_CLUSTER_NAME }} --services ${{ secrets.ECS_SERVICE_NAME }} --region ${{ secrets.AWS_REGION }} --query 'services[?status==`ACTIVE`]' --output text | grep -q ${{ secrets.ECS_SERVICE_NAME }}; then
+            echo "Service does not exist, creating..."
+            
+            # Get default VPC and subnets
+            DEFAULT_VPC=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region ${{ secrets.AWS_REGION }})
+            SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" --query 'Subnets[*].SubnetId' --output text --region ${{ secrets.AWS_REGION }} | tr '\t' ',')
+            ECS_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=lobster-ecs-sg" "Name=vpc-id,Values=$DEFAULT_VPC" --query 'SecurityGroups[0].GroupId' --output text --region ${{ secrets.AWS_REGION }})
+            
+            # Create ALB and Target Group
+            ALB_ARN=$(aws elbv2 create-load-balancer \
+              --name lobster-alb \
+              --subnets $SUBNETS \
+              --security-groups $(aws ec2 describe-security-groups --filters "Name=group-name,Values=lobster-alb-sg" "Name=vpc-id,Values=$DEFAULT_VPC" --query 'SecurityGroups[0].GroupId' --output text --region ${{ secrets.AWS_REGION }}) \
+              --scheme internet-facing \
+              --type application \
+              --ip-address-type ipv4 \
+              --region ${{ secrets.AWS_REGION }} \
+              --query 'LoadBalancers[0].LoadBalancerArn' \
+              --output text 2>/dev/null || aws elbv2 describe-load-balancers --names lobster-alb --region ${{ secrets.AWS_REGION }} --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+            
+            TG_ARN=$(aws elbv2 create-target-group \
+              --name lobster-tg \
+              --protocol HTTP \
+              --port 8501 \
+              --vpc-id $DEFAULT_VPC \
+              --target-type ip \
+              --health-check-path /healthz \
+              --health-check-protocol HTTP \
+              --health-check-interval-seconds 30 \
+              --healthy-threshold-count 2 \
+              --unhealthy-threshold-count 3 \
+              --region ${{ secrets.AWS_REGION }} \
+              --query 'TargetGroups[0].TargetGroupArn' \
+              --output text 2>/dev/null || aws elbv2 describe-target-groups --names lobster-tg --region ${{ secrets.AWS_REGION }} --query 'TargetGroups[0].TargetGroupArn' --output text)
+            
+            # Create listener
+            aws elbv2 create-listener \
+              --load-balancer-arn $ALB_ARN \
+              --protocol HTTP \
+              --port 80 \
+              --default-actions Type=forward,TargetGroupArn=$TG_ARN \
+              --region ${{ secrets.AWS_REGION }} 2>/dev/null || true
+            
+            # Create ECS service
+            aws ecs create-service \
+              --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+              --service-name ${{ secrets.ECS_SERVICE_NAME }} \
+              --task-definition lobster-streamlit-task \
+              --desired-count 1 \
+              --launch-type FARGATE \
+              --platform-version LATEST \
+              --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$ECS_SG],assignPublicIp=ENABLED}" \
+              --load-balancers targetGroupArn=$TG_ARN,containerName=lobster-streamlit,containerPort=8501 \
+              --region ${{ secrets.AWS_REGION }}
+            
+            echo "Service created successfully"
+            
+            # Get ALB DNS name
+            ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --region ${{ secrets.AWS_REGION }} --query 'LoadBalancers[0].DNSName' --output text)
+            echo "Application will be available at: http://$ALB_DNS"
+          else
+            echo "Service already exists, deployment completed via task definition update"
+          fi
       
-      - name: App Runner output
-        run: echo "App runner output ${{ steps.deploy-apprunner.outputs.service-id }}"
+      - name: ECS Deployment output
+        run: |
+          echo "ECS Service: ${{ secrets.ECS_SERVICE_NAME }}"
+          echo "ECS Cluster: ${{ secrets.ECS_CLUSTER_NAME }}"
+          echo "Task Definition: lobster-streamlit-task"
+          echo "Image: ${{ steps.build-image.outputs.image }}"

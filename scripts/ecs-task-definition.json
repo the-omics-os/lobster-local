@@ -1,0 +1,97 @@
+{
+  "family": "lobster-streamlit-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "lobster-streamlit",
+      "image": "ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/homara:IMAGE_TAG",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8501,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "PORT",
+          "value": "8501"
+        },
+        {
+          "name": "PYTHONUNBUFFERED",
+          "value": "1"
+        },
+        {
+          "name": "STREAMLIT_SERVER_HEADLESS",
+          "value": "true"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "OPENAI_API_KEY",
+          "valueFrom": "OPENAI_API_KEY"
+        },
+        {
+          "name": "AWS_BEDROCK_ACCESS_KEY",
+          "valueFrom": "AWS_BEDROCK_ACCESS_KEY"
+        },
+        {
+          "name": "AWS_BEDROCK_SECRET_ACCESS_KEY",
+          "valueFrom": "AWS_BEDROCK_SECRET_ACCESS_KEY"
+        },
+        {
+          "name": "NCBI_API_KEY",
+          "valueFrom": "NCBI_API_KEY"
+        },
+        {
+          "name": "GENIE_PROFILE",
+          "valueFrom": "GENIE_PROFILE"
+        },
+        {
+          "name": "LANGFUSE_PUBLIC_KEY",
+          "valueFrom": "LANGFUSE_PUBLIC_KEY"
+        },
+        {
+          "name": "LANGFUSE_SECRET_KEY",
+          "valueFrom": "LANGFUSE_SECRET_KEY"
+        },
+        {
+          "name": "LANGFUSE_HOST",
+          "valueFrom": "LANGFUSE_HOST"
+        },
+        {
+          "name": "STRIPE_PUBLISHABLE_KEY",
+          "valueFrom": "STRIPE_PUBLISHABLE_KEY"
+        },
+        {
+          "name": "STRIPE_SECRET_KEY",
+          "valueFrom": "STRIPE_SECRET_KEY"
+        },
+        {
+          "name": "STRIPE_WEBHOOK_SECRET",
+          "valueFrom": "STRIPE_WEBHOOK_SECRET"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/lobster-streamlit",
+          "awslogs-region": "us-east-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8501/healthz || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
