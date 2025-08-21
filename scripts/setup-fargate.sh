@@ -13,14 +13,14 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-AWS_REGION="us-east-2"
+AWS_REGION="us-east-1"
 ECR_REPO_NAME="homara"
-IAM_USER_NAME="github-actions-homara-lobster"
+IAM_USER_NAME="git-deployer"
 IAM_POLICY_NAME="GitHubActionsLobsterFargatePolicy"
 ECS_TASK_EXECUTION_ROLE="ecsTaskExecutionRole"
 ECS_TASK_ROLE="ecsTaskRole"
-ECS_CLUSTER_NAME="lobster-cluster"
-ECS_SERVICE_NAME="lobster-streamlit-service"
+ECS_CLUSTER_NAME="LobsterStreamlitProduction"
+ECS_SERVICE_NAME="LobsterStreamlitService"
 ALB_NAME="lobster-alb"
 TARGET_GROUP_NAME="lobster-tg"
 SECURITY_GROUP_ALB="lobster-alb-sg"

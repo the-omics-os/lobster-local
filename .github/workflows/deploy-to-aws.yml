@@ -21,7 +21,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}     
+          aws-region: ${{ vars.AWS_REGION }}     
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -86,25 +86,25 @@ jobs:
         id: create-service
         run: |
           # Check if service exists
-          if ! aws ecs describe-services --cluster ${{ secrets.ECS_CLUSTER_NAME }} --services ${{ secrets.ECS_SERVICE_NAME }} --region ${{ secrets.AWS_REGION }} --query 'services[?status==`ACTIVE`]' --output text | grep -q ${{ secrets.ECS_SERVICE_NAME }}; then
+          if ! aws ecs describe-services --cluster ${{ secrets.ECS_CLUSTER_NAME }} --services ${{ secrets.ECS_SERVICE_NAME }} --region ${{ vars.AWS_REGION }} --query 'services[?status==`ACTIVE`]' --output text | grep -q ${{ secrets.ECS_SERVICE_NAME }}; then
             echo "Service does not exist, creating..."
             
             # Get default VPC and subnets
-            DEFAULT_VPC=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region ${{ secrets.AWS_REGION }})
-            SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" --query 'Subnets[*].SubnetId' --output text --region ${{ secrets.AWS_REGION }} | tr '\t' ',')
-            ECS_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=lobster-ecs-sg" "Name=vpc-id,Values=$DEFAULT_VPC" --query 'SecurityGroups[0].GroupId' --output text --region ${{ secrets.AWS_REGION }})
+            DEFAULT_VPC=$(aws ec2 describe-vpcs --filters "Name=is-default,Values=true" --query 'Vpcs[0].VpcId' --output text --region ${{ vars.AWS_REGION }})
+            SUBNETS=$(aws ec2 describe-subnets --filters "Name=vpc-id,Values=$DEFAULT_VPC" --query 'Subnets[*].SubnetId' --output text --region ${{ vars.AWS_REGION }} | tr '\t' ',')
+            ECS_SG=$(aws ec2 describe-security-groups --filters "Name=group-name,Values=lobster-ecs-sg" "Name=vpc-id,Values=$DEFAULT_VPC" --query 'SecurityGroups[0].GroupId' --output text --region ${{ vars.AWS_REGION }})
             
             # Create ALB and Target Group
             ALB_ARN=$(aws elbv2 create-load-balancer \
               --name lobster-alb \
               --subnets $SUBNETS \
-              --security-groups $(aws ec2 describe-security-groups --filters "Name=group-name,Values=lobster-alb-sg" "Name=vpc-id,Values=$DEFAULT_VPC" --query 'SecurityGroups[0].GroupId' --output text --region ${{ secrets.AWS_REGION }}) \
+              --security-groups $(aws ec2 describe-security-groups --filters "Name=group-name,Values=lobster-alb-sg" "Name=vpc-id,Values=$DEFAULT_VPC" --query 'SecurityGroups[0].GroupId' --output text --region ${{ vars.AWS_REGION }}) \
               --scheme internet-facing \
               --type application \
               --ip-address-type ipv4 \
-              --region ${{ secrets.AWS_REGION }} \
+              --region ${{ vars.AWS_REGION }} \
               --query 'LoadBalancers[0].LoadBalancerArn' \
-              --output text 2>/dev/null || aws elbv2 describe-load-balancers --names lobster-alb --region ${{ secrets.AWS_REGION }} --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+              --output text 2>/dev/null || aws elbv2 describe-load-balancers --names lobster-alb --region ${{ vars.AWS_REGION }} --query 'LoadBalancers[0].LoadBalancerArn' --output text)
             
             TG_ARN=$(aws elbv2 create-target-group \
               --name lobster-tg \
@@ -117,9 +117,9 @@ jobs:
               --health-check-interval-seconds 30 \
               --healthy-threshold-count 2 \
               --unhealthy-threshold-count 3 \
-              --region ${{ secrets.AWS_REGION }} \
+              --region ${{ vars.AWS_REGION }} \
               --query 'TargetGroups[0].TargetGroupArn' \
-              --output text 2>/dev/null || aws elbv2 describe-target-groups --names lobster-tg --region ${{ secrets.AWS_REGION }} --query 'TargetGroups[0].TargetGroupArn' --output text)
+              --output text 2>/dev/null || aws elbv2 describe-target-groups --names lobster-tg --region ${{ vars.AWS_REGION }} --query 'TargetGroups[0].TargetGroupArn' --output text)
             
             # Create listener
             aws elbv2 create-listener \
@@ -127,7 +127,7 @@ jobs:
               --protocol HTTP \
               --port 80 \
               --default-actions Type=forward,TargetGroupArn=$TG_ARN \
-              --region ${{ secrets.AWS_REGION }} 2>/dev/null || true
+              --region ${{ vars.AWS_REGION }} 2>/dev/null || true
             
             # Create ECS service
             aws ecs create-service \
@@ -139,12 +139,12 @@ jobs:
               --platform-version LATEST \
               --network-configuration "awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$ECS_SG],assignPublicIp=ENABLED}" \
               --load-balancers targetGroupArn=$TG_ARN,containerName=lobster-streamlit,containerPort=8501 \
-              --region ${{ secrets.AWS_REGION }}
+              --region ${{ vars.AWS_REGION }}
             
             echo "Service created successfully"
             
             # Get ALB DNS name
-            ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --region ${{ secrets.AWS_REGION }} --query 'LoadBalancers[0].DNSName' --output text)
+            ALB_DNS=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --region ${{ vars.AWS_REGION }} --query 'LoadBalancers[0].DNSName' --output text)
             echo "Application will be available at: http://$ALB_DNS"
           else
             echo "Service already exists, deployment completed via task definition update"
