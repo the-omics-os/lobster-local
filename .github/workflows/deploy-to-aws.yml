@@ -1,4 +1,4 @@
-name: Deploy Lobster AI to AWS App Runner
+name: Deploy Lobster AI to AWS App Runner.
 
 on:
   push:
