@@ -7,8 +7,8 @@ on:
 
 env:
   AWS_REGION: us-east-2
-  ECR_REPOSITORY: lobster-ai
-  APP_RUNNER_SERVICE: lobster-ai-streamlit
+  ECR_REPOSITORY: homara
+  APP_RUNNER_SERVICE: lobster-streamlit
 
 jobs:
   build-and-deploy:
