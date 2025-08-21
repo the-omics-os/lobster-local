@@ -55,7 +55,7 @@
             "Action": [
                 "iam:PassRole"
             ],
-            "Resource": "arn:aws:iam::*:role/AppRunnerECRAccessRole",
+            "Resource": "arn:aws:iam::*:role/AppRunner*",
             "Condition": {
                 "StringEquals": {
                     "iam:PassedToService": "apprunner.amazonaws.com"
