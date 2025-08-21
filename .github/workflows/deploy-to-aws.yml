@@ -193,7 +193,9 @@ jobs:
               },
               "ImageRepositoryType": "ECR"
             },
-            "AccessRoleArn": "arn:aws:iam::${{ steps.login-ecr.outputs.registry_id }}:role/AppRunnerECRAccessRole",
+            "AuthenticationConfiguration": {
+              "AccessRoleArn": "arn:aws:iam::${{ steps.login-ecr.outputs.registry_id }}:role/AppRunnerECRAccessRole"
+            },
             "AutoDeploymentsEnabled": true
           },
           "InstanceConfiguration": {
