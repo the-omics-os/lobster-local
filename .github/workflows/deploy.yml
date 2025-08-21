@@ -34,7 +34,7 @@ jobs:
       - name: Deploy to Lightsail Container Service
         run: |
           aws lightsail create-container-service-deployment \
-            --service-name streamlit-service \
+            --service-name lobster \
             --containers "{
               \"streamlit\": {
                 \"image\": \"${{ steps.login-ecr.outputs.registry }}/lobster:latest\",

@@ -84,7 +84,7 @@ jobs:
       - name: Build & Push Docker Image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: streamlit-app
+          ECR_REPOSITORY: homara
           IMAGE_TAG: latest
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
@@ -93,17 +93,17 @@ jobs:
       - name: Deploy to Lightsail Container Service
         run: |
           aws lightsail create-container-service-deployment \
-            --service-name streamlit-service \
-            --containers "{\
-              \"streamlit\": {\
-                \"image\": \"${{ steps.login-ecr.outputs.registry }}/streamlit-app:latest\",\
-                \"ports\": {\"8501\": \"HTTP\"}\
-              }\
+            --service-name lobster \
+            --containers "{
+              \"streamlit\": {
+                \"image\": \"${{ steps.login-ecr.outputs.registry }}/lobster:latest\",
+                \"ports\": {\"8501\": \"HTTP\"}
+              }
             }" \
-            --public-endpoint "{\
-              \"containerName\": \"streamlit\",\
-              \"containerPort\": 8501,\
-              \"healthCheck\": {\"path\": \"/\"}\
+            --public-endpoint "{
+              \"containerName\": \"streamlit\",
+              \"containerPort\": 8501,
+              \"healthCheck\": {\"path\": \"/\"}
             }"
 ```
 
