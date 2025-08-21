@@ -36,8 +36,7 @@
             "Action": [
                 "iam:CreateRole",
                 "iam:GetRole",
-                "iam:AttachRolePolicy",
-                "iam:PassRole"
+                "iam:AttachRolePolicy"
             ],
             "Resource": [
                 "arn:aws:iam::*:role/AppRunnerECRAccessRole",
@@ -53,9 +52,6 @@
         },
         {
             "Effect": "Allow",
-            "Action": [
-                "iam:PassRole"
-            ],
             "Resource": "arn:aws:iam::*:role/AppRunnerECRAccessRole",
             "Condition": {
                 "StringEquals": {
