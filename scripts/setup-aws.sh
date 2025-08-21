@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 AWS_REGION="us-east-2"
-ECR_REPO_NAME="lobster-ai"
+ECR_REPO_NAME="homara"
 IAM_USER_NAME="github-actions-lobster"
 IAM_POLICY_NAME="GitHubActionsLobsterPolicy"
 IAM_ROLE_NAME="AppRunnerECRAccessRole"
