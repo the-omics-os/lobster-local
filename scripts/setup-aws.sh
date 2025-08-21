@@ -115,11 +115,25 @@ else
                 "iam:CreateRole",
                 "iam:GetRole",
                 "iam:AttachRolePolicy",
-                "iam:PassRole"
+                "iam:PassRole",
+                "iam:CreateServiceLinkedRole"
             ],
             "Resource": [
-                "arn:aws:iam::*:role/AppRunnerECRAccessRole"
+                "arn:aws:iam::*:role/AppRunnerECRAccessRole",
+                "arn:aws:iam::*:role/aws-service-role/apprunner.amazonaws.com/AWSServiceRoleForAppRunner"
             ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:PassRole"
+            ],
+            "Resource": "arn:aws:iam::*:role/AppRunnerECRAccessRole",
+            "Condition": {
+                "StringEquals": {
+                    "iam:PassedToService": "apprunner.amazonaws.com"
+                }
+            }
         }
     ]
 }
@@ -187,7 +201,7 @@ else
     {
       "Effect": "Allow",
       "Principal": {
-        "Service": "build.apprunner.amazonaws.com"
+        "Service": "tasks.apprunner.amazonaws.com"
       },
       "Action": "sts:AssumeRole"
     }
