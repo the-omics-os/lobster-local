@@ -75,73 +75,17 @@ echo -e "\n${YELLOW}📝 Step 2: Creating IAM Policy${NC}"
 if resource_exists "policy" "$IAM_POLICY_NAME"; then
     echo -e "${YELLOW}⚠️  IAM policy '$IAM_POLICY_NAME' already exists${NC}"
 else
-    cat > /tmp/github-actions-policy.json << 'EOF'
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "ecr:GetAuthorizationToken",
-                "ecr:BatchCheckLayerAvailability",
-                "ecr:GetDownloadUrlForLayer",
-                "ecr:BatchGetImage",
-                "ecr:InitiateLayerUpload",
-                "ecr:UploadLayerPart",
-                "ecr:CompleteLayerUpload",
-                "ecr:PutImage",
-                "ecr:CreateRepository",
-                "ecr:DescribeRepositories"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "apprunner:CreateService",
-                "apprunner:UpdateService",
-                "apprunner:DescribeService",
-                "apprunner:ListServices",
-                "apprunner:DeleteService",
-                "apprunner:TagResource",
-                "apprunner:UntagResource",
-                "apprunner:ListTagsForResource"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "iam:CreateRole",
-                "iam:GetRole",
-                "iam:AttachRolePolicy",
-                "iam:PassRole",
-                "iam:CreateServiceLinkedRole"
-            ],
-            "Resource": [
-                "arn:aws:iam::*:role/AppRunnerECRAccessRole",
-                "arn:aws:iam::*:role/aws-service-role/apprunner.amazonaws.com/AWSServiceRoleForAppRunner"
-            ]
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "iam:PassRole"
-            ],
-            "Resource": "arn:aws:iam::*:role/AppRunnerECRAccessRole",
-            "Condition": {
-                "StringEquals": {
-                    "iam:PassedToService": "apprunner.amazonaws.com"
-                }
-            }
-        }
-    ]
-}
-EOF
+    # Check if policy file exists
+    if [ ! -f "github-actions-policy.json" ]; then
+        echo -e "${RED}❌ Policy file 'github-actions-policy.json' not found!${NC}"
+        echo -e "${BLUE}ℹ️  Please run this script from the project root directory${NC}"
+        exit 1
+    fi
 
+    echo -e "${BLUE}📄 Using policy from github-actions-policy.json${NC}"
     aws iam create-policy \
         --policy-name "$IAM_POLICY_NAME" \
-        --policy-document file:///tmp/github-actions-policy.json
+        --policy-document file://github-actions-policy.json
 
     # Attach policy to user
     aws iam attach-user-policy \
@@ -194,24 +138,17 @@ echo -e "\n${YELLOW}📝 Step 5: Creating App Runner Service Role${NC}"
 if resource_exists "role" "$IAM_ROLE_NAME"; then
     echo -e "${YELLOW}⚠️  IAM role '$IAM_ROLE_NAME' already exists${NC}"
 else
-    cat > /tmp/apprunner-trust-policy.json << 'EOF'
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "tasks.apprunner.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+    # Check if trust policy file exists
+    if [ ! -f "apprunner-trust-policy.json" ]; then
+        echo -e "${RED}❌ Trust policy file 'apprunner-trust-policy.json' not found!${NC}"
+        echo -e "${BLUE}ℹ️  Please run this script from the project root directory${NC}"
+        exit 1
+    fi
 
+    echo -e "${BLUE}📄 Using trust policy from apprunner-trust-policy.json${NC}"
     aws iam create-role \
         --role-name "$IAM_ROLE_NAME" \
-        --assume-role-policy-document file:///tmp/apprunner-trust-policy.json
+        --assume-role-policy-document file://apprunner-trust-policy.json
 
     aws iam attach-role-policy \
         --role-name "$IAM_ROLE_NAME" \
