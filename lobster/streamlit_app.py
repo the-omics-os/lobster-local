@@ -32,21 +32,39 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(
-    page_title="🦞 Lobster AI - Bioinformatics Analysis",
+    page_title="Lobster",
     page_icon="🦞",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+# --- UI Enhancements ---
 st.markdown("""
 <style>
-    .main { padding-top: 1rem; }
-    .terminal-output { background:#1e1e1e;color:#00ff00;font-family:'Courier New',monospace;padding:10px;border-radius:6px;max-height:420px;overflow-y:auto;white-space:pre-wrap;font-size:12px; }
-    .status-box { background:#f8f9fa;padding:8px;border-radius:6px;margin:5px 0;font-size:13px;border-left:4px solid #ff4b4b; }
-    .status-item { display:flex;justify-content:space-between;align-items:center;margin:3px 0;font-size:12px; }
-    .status-label { font-weight:600;color:#666; }
-    .status-value { color:#333; }
-    .plot-container { margin: 10px 0; padding: 10px; background:#f8f9fa; border-radius:6px; }
+    /* Respect Streamlit theme instead of forcing */
+    [data-testid="stSidebar"] {
+        background-color: inherit !important;
+    }
+    .stChatMessage.user {
+        background: rgba(37, 99, 235, 0.15);
+        border-left: 3px solid #2563eb;
+        border-radius: 8px;
+        padding: 10px;
+    }
+    .stChatMessage.assistant {
+        background: rgba(148, 163, 184, 0.15);
+        border-left: 3px solid #64748b;
+        border-radius: 8px;
+        padding: 10px;
+    }
+    .stCodeBlock {
+        font-size: 13px !important;
+        border-radius: 6px !important;
+    }
+    div.stButton > button {
+        border-radius: 6px;
+        font-weight: 600;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -72,7 +90,7 @@ class SimpleLogCollector:
     def get_formatted_logs(self) -> str:
         if not self.logs:
             return "No logs available"
-        icon_map = {"START":"🤖","TOOL":"🔧","COMPLETE":"✅","ERROR":"❌","INFO":"ℹ️"}
+        icon_map = {"START":"🤖","TOOL":"🔧","COMPLETE":"✅","ERROR":"❌","INFO":"ℹ️","REASONING":"💭","THINKING":"💭"}
         out = []
         for log in self.logs:
             agent = (log["agent"] or "System").replace("_"," ").title()
@@ -99,21 +117,85 @@ class StreamlitCallbackHandler(TerminalCallbackHandler):
         self.log_collector.add_log("START", agent_name, "Starting analysis...")
 
     def on_llm_end(self, response, **kwargs) -> None:
-        if self.current_agent:
-            self.log_collector.add_log("COMPLETE", self.current_agent, "Analysis complete")
+        if not self.current_agent:
+            return
+        
+        # Extract response content for reasoning display
+        content = ""
+        if response.generations and response.generations[0]:
+            content = response.generations[0][0].text
+        
+        # Show reasoning if enabled and content exists
+        if self.show_reasoning and content:
+            # Truncate reasoning content for display
+            reasoning_content = self._truncate_content(content)
+            self.log_collector.add_log("REASONING", self.current_agent, reasoning_content)
+        
+        # Log completion
+        self.log_collector.add_log("COMPLETE", self.current_agent, "Analysis complete")
 
     def on_tool_start(self, serialized: Dict[str, Any], input_str: str, **kwargs) -> None:
         tool_name = serialized.get("name", "unknown_tool") if serialized else "unknown_tool"
         agent = self.current_agent or "system"
         self.log_collector.add_log("TOOL", agent, f"Using tool: {tool_name}")
+        
+        # Show tool input if verbose and reasoning is enabled
+        if self.show_reasoning and input_str:
+            truncated_input = self._truncate_content(str(input_str))
+            self.log_collector.add_log("INFO", agent, f"Tool input: {truncated_input}")
 
     def on_tool_end(self, output: str, **kwargs) -> None:
         agent = self.current_agent or "system"
         self.log_collector.add_log("COMPLETE", agent, "Tool execution complete")
+        
+        # Show tool output if verbose and reasoning is enabled
+        if self.show_reasoning and output:
+            truncated_output = self._truncate_content(str(output))
+            self.log_collector.add_log("INFO", agent, f"Tool result: {truncated_output}")
 
     def on_tool_error(self, error, **kwargs) -> None:
         agent = self.current_agent or "system"
         self.log_collector.add_log("ERROR", agent, f"Tool error: {str(error)[:200]}...")
+
+    def on_chain_start(self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs) -> None:
+        """Called when a chain starts - detect agent handoffs."""
+        # Handle None values
+        if serialized is None:
+            serialized = {}
+        if inputs is None:
+            inputs = {}
+            
+        chain_name = serialized.get("name", "")
+        
+        # Detect agent transitions
+        agent_names = ["supervisor", "transcriptomics_expert", "method_agent", "clarify_with_user"]
+        for agent_name in agent_names:
+            if agent_name in chain_name.lower():
+                if agent_name != self.current_agent:
+                    # This is a handoff
+                    from_agent = self.current_agent or "system"
+                    formatted_from = (from_agent or "System").replace("_", " ").title()
+                    formatted_to = agent_name.replace("_", " ").title()
+                    
+                    handoff_message = f"Handoff: {formatted_from} → {formatted_to}"
+                    self.log_collector.add_log("INFO", "system", handoff_message)
+                    
+                    # Log the task being handed off if available
+                    task = inputs.get("task", "")
+                    if task and self.show_reasoning:
+                        task_message = f"Task: {self._truncate_content(task)}"
+                        self.log_collector.add_log("INFO", "system", task_message)
+                break
+
+    def _truncate_content(self, content: str) -> str:
+        """Truncate content if too long for display."""
+        if not content:
+            return ""
+        content = str(content).strip()
+        max_length = 500  # Reasonable length for Streamlit display
+        if len(content) > max_length:
+            return content[:max_length] + "..."
+        return content
 
 
 # -----------------------
@@ -209,7 +291,7 @@ def display_sidebar():
         profiles = list(getattr(configurator, "list_available_profiles")().keys())
         # Fallback if production not present
         if st.session_state.current_mode not in profiles and profiles:
-            st.session_state.current_mode = profiles[0]
+            st.session_state.current_mode = 'ultra-performance'
 
         selected = st.selectbox("Operation Mode", options=profiles, index=profiles.index(st.session_state.current_mode))
         if selected != st.session_state.current_mode and st.button("🔄 Apply Mode"):
@@ -221,8 +303,23 @@ def display_sidebar():
             # Recreate client next run
             st.session_state.client = None
 
+        # Check if reasoning setting changed
+        old_reasoning = st.session_state.enable_reasoning
         st.session_state.enable_reasoning = st.checkbox("Show Agent Reasoning", value=st.session_state.enable_reasoning)
         st.session_state.show_terminal = st.checkbox("Show Terminal Output", value=st.session_state.show_terminal)
+        
+        # If reasoning setting changed, update callback and recreate client
+        if old_reasoning != st.session_state.enable_reasoning:
+            # Update the callback handler with new reasoning setting
+            st.session_state.callbacks = [
+                StreamlitCallbackHandler(
+                    log_collector=st.session_state.log_collector,
+                    show_reasoning=st.session_state.enable_reasoning,
+                    verbose=True
+                )
+            ]
+            # Force client recreation with new callbacks
+            st.session_state.client = None
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📤 **Upload File**")

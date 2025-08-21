@@ -103,8 +103,8 @@ def create_bioinformatics_graph(
                                        description="Assign analysis tasks to the transcriptomics expert"),
             create_custom_handoff_tool(agent_name='method_expert_agent',
                                        name="handoff_to_method_expert",
-                                       description="Assign literature/method tasks to the method expert"),
-            forwarding_tool
+                                       description="Assign literature/method tasks to the method expert")
+            # forwarding_tool
             ]
         # tools=[forwarding_tool]
     )

@@ -1137,6 +1137,22 @@ wheels = [
 ]
 
 [[package]]
+name = "geoparse"
+version = "2.0.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy", version = "1.26.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "pandas" },
+    { name = "requests" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c5/a9/0a2621953ddffd6957cd2db0f3553e6ee9ce1401bbd87167800561f8c977/geoparse-2.0.4.tar.gz", hash = "sha256:f2185310e5f7c6bd551c763476ad8a296cf7c355afa3136881e4bad5a5dad81a", size = 277953, upload-time = "2024-04-23T19:02:04.594Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e7/4a/b6a3e141c21e4d4b72b0c11231c1d88a8bae127f43921c5dea391b299b2a/GEOparse-2.0.4-py3-none-any.whl", hash = "sha256:5982e38d1e66314bd20ad5ad8313a6adef8cf9c29e44583aaca13261e404d622", size = 29043, upload-time = "2024-04-23T19:02:01.807Z" },
+]
+
+[[package]]
 name = "ghp-import"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1989,6 +2005,7 @@ dependencies = [
     { name = "biopython" },
     { name = "boto3" },
     { name = "fastapi" },
+    { name = "geoparse" },
     { name = "h5py" },
     { name = "igraph" },
     { name = "kaleido" },
@@ -2006,6 +2023,7 @@ dependencies = [
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "openai" },
     { name = "openpyxl" },
+    { name = "packaging" },
     { name = "pandas" },
     { name = "plotly" },
     { name = "pyarrow" },
@@ -2022,6 +2040,7 @@ dependencies = [
     { name = "seaborn" },
     { name = "streamlit" },
     { name = "tables" },
+    { name = "tabulate" },
     { name = "typer" },
     { name = "uvicorn" },
     { name = "xmltodict" },
@@ -2087,6 +2106,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.100.0" },
     { name = "flake8", marker = "extra == 'all'", specifier = ">=6.0.0" },
     { name = "flake8", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "geoparse" },
     { name = "h5py", specifier = ">=3.9.0" },
     { name = "igraph", specifier = ">=0.10.4" },
     { name = "isort", marker = "extra == 'all'", specifier = ">=5.12.0" },
@@ -2113,6 +2133,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.23.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "openpyxl", specifier = ">=3.1.0" },
+    { name = "packaging", specifier = ">=25.0" },
     { name = "pandas", specifier = ">=1.5.0" },
     { name = "plotly", specifier = ">=5.0.0" },
     { name = "pre-commit", marker = "extra == 'all'", specifier = ">=3.0.0" },
@@ -2142,6 +2163,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.12.0" },
     { name = "streamlit", specifier = ">=1.48.1" },
     { name = "tables", specifier = ">=3.8.0" },
+    { name = "tabulate", specifier = ">=0.9.0" },
     { name = "tabulate", marker = "extra == 'all'", specifier = ">=0.9.0" },
     { name = "tabulate", marker = "extra == 'dev'", specifier = ">=0.9.0" },
     { name = "twine", marker = "extra == 'all'", specifier = ">=4.0.0" },
