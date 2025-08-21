@@ -37,13 +37,19 @@
                 "iam:CreateRole",
                 "iam:GetRole",
                 "iam:AttachRolePolicy",
-                "iam:PassRole",
-                "iam:CreateServiceLinkedRole"
+                "iam:PassRole"
             ],
             "Resource": [
                 "arn:aws:iam::*:role/AppRunnerECRAccessRole",
                 "arn:aws:iam::*:role/aws-service-role/apprunner.amazonaws.com/AWSServiceRoleForAppRunner"
             ]
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "iam:CreateServiceLinkedRole"
+            ],
+            "Resource": "arn:aws:iam::*:role/aws-service-role/*"
         },
         {
             "Effect": "Allow",

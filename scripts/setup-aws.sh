@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 # Configuration
 AWS_REGION="us-east-2"
 ECR_REPO_NAME="homara"
-IAM_USER_NAME="github-actions-lobster"
+IAM_USER_NAME="github-actions-homara-lobster"
 IAM_POLICY_NAME="GitHubActionsLobsterPolicy"
 IAM_ROLE_NAME="AppRunnerECRAccessRole"
 
@@ -220,8 +220,18 @@ EOF
     echo -e "${GREEN}✅ Created App Runner service role: $IAM_ROLE_NAME${NC}"
 fi
 
-# 6. Set up billing alert (optional)
-echo -e "\n${YELLOW}📝 Step 6: Setting up billing alert (optional)${NC}"
+# 6. Create App Runner Service-Linked Role
+echo -e "\n${YELLOW}📝 Step 6: Creating App Runner Service-Linked Role${NC}"
+if aws iam get-role --role-name AWSServiceRoleForAppRunner &> /dev/null; then
+    echo -e "${GREEN}✅ App Runner service-linked role already exists${NC}"
+else
+    echo -e "${BLUE}Creating App Runner service-linked role...${NC}"
+    aws iam create-service-linked-role --aws-service-name apprunner.amazonaws.com || true
+    echo -e "${GREEN}✅ Service-linked role created${NC}"
+fi
+
+# 7. Set up billing alert (optional)
+echo -e "\n${YELLOW}📝 Step 7: Setting up billing alert (optional)${NC}"
 read -p "Do you want to set up a $20/month billing alert? (y/n): " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
