@@ -74,18 +74,22 @@ fi
 echo -e "\n${YELLOW}📝 Step 2: Creating IAM Policy${NC}"
 if resource_exists "policy" "$IAM_POLICY_NAME"; then
     echo -e "${YELLOW}⚠️  IAM policy '$IAM_POLICY_NAME' already exists${NC}"
+    # Ensure policy is attached to user even if it already exists
+    aws iam attach-user-policy \
+        --user-name "$IAM_USER_NAME" \
+        --policy-arn "arn:aws:iam::${ACCOUNT_ID}:policy/$IAM_POLICY_NAME" 2>/dev/null || true
 else
     # Check if policy file exists
-    if [ ! -f "github-actions-policy.json" ]; then
-        echo -e "${RED}❌ Policy file 'github-actions-policy.json' not found!${NC}"
+    if [ ! -f "scripts/github-actions-policy.json" ]; then
+        echo -e "${RED}❌ Policy file 'scripts/github-actions-policy.json' not found!${NC}"
         echo -e "${BLUE}ℹ️  Please run this script from the project root directory${NC}"
         exit 1
     fi
 
-    echo -e "${BLUE}📄 Using policy from github-actions-policy.json${NC}"
+    echo -e "${BLUE}📄 Using policy from scripts/github-actions-policy.json${NC}"
     aws iam create-policy \
         --policy-name "$IAM_POLICY_NAME" \
-        --policy-document file://github-actions-policy.json
+        --policy-document file://scripts/github-actions-policy.json
 
     # Attach policy to user
     aws iam attach-user-policy \
@@ -144,16 +148,16 @@ if resource_exists "role" "$IAM_ROLE_NAME"; then
 fi
 
 # Check if trust policy file exists
-if [ ! -f "apprunner-trust-policy.json" ]; then
-    echo -e "${RED}❌ Trust policy file 'apprunner-trust-policy.json' not found!${NC}"
+if [ ! -f "scripts/apprunner-trust-policy.json" ]; then
+    echo -e "${RED}❌ Trust policy file 'scripts/apprunner-trust-policy.json' not found!${NC}"
     echo -e "${BLUE}ℹ️  Please run this script from the project root directory${NC}"
     exit 1
 fi
 
-echo -e "${BLUE}📄 Using trust policy from apprunner-trust-policy.json${NC}"
+echo -e "${BLUE}📄 Using trust policy from scripts/apprunner-trust-policy.json${NC}"
 aws iam create-role \
     --role-name "$IAM_ROLE_NAME" \
-    --assume-role-policy-document file://apprunner-trust-policy.json
+    --assume-role-policy-document file://scripts/apprunner-trust-policy.json
 
 aws iam attach-role-policy \
     --role-name "$IAM_ROLE_NAME" \

@@ -17,7 +17,7 @@ jobs:
           
       - name: Configure AWS credentials
         id: aws-credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -36,7 +36,7 @@ jobs:
         run: |
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.streamlit .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"  
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
           
       - name: Deploy to App Runner
         id: deploy-apprunner
@@ -45,12 +45,11 @@ jobs:
           service: lobster-streamlit
           image: ${{ steps.build-image.outputs.image }}          
           access-role-arn: ${{ secrets.ROLE_ARN }}
-          runtime: PYTHON_3          
           region: ${{ secrets.AWS_REGION }}
           cpu : 1
           memory : 2
           port: 8501
-          wait-for-service-stability: true
+          wait-for-service-stability-seconds: 1200
           environment-variables: |
             OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
             AWS_BEDROCK_ACCESS_KEY=${{ secrets.AWS_BEDROCK_ACCESS_KEY }}
