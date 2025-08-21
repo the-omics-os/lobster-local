@@ -31,52 +31,6 @@
           "value": "true"
         }
       ],
-      "secrets": [
-        {
-          "name": "OPENAI_API_KEY",
-          "valueFrom": "OPENAI_API_KEY"
-        },
-        {
-          "name": "AWS_BEDROCK_ACCESS_KEY",
-          "valueFrom": "AWS_BEDROCK_ACCESS_KEY"
-        },
-        {
-          "name": "AWS_BEDROCK_SECRET_ACCESS_KEY",
-          "valueFrom": "AWS_BEDROCK_SECRET_ACCESS_KEY"
-        },
-        {
-          "name": "NCBI_API_KEY",
-          "valueFrom": "NCBI_API_KEY"
-        },
-        {
-          "name": "GENIE_PROFILE",
-          "valueFrom": "GENIE_PROFILE"
-        },
-        {
-          "name": "LANGFUSE_PUBLIC_KEY",
-          "valueFrom": "LANGFUSE_PUBLIC_KEY"
-        },
-        {
-          "name": "LANGFUSE_SECRET_KEY",
-          "valueFrom": "LANGFUSE_SECRET_KEY"
-        },
-        {
-          "name": "LANGFUSE_HOST",
-          "valueFrom": "LANGFUSE_HOST"
-        },
-        {
-          "name": "STRIPE_PUBLISHABLE_KEY",
-          "valueFrom": "STRIPE_PUBLISHABLE_KEY"
-        },
-        {
-          "name": "STRIPE_SECRET_KEY",
-          "valueFrom": "STRIPE_SECRET_KEY"
-        },
-        {
-          "name": "STRIPE_WEBHOOK_SECRET",
-          "valueFrom": "STRIPE_WEBHOOK_SECRET"
-        }
-      ],
       "logConfiguration": {
         "logDriver": "awslogs",
         "options": {
