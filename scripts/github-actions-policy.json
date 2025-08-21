@@ -8,6 +8,7 @@
                 "ecr:BatchCheckLayerAvailability",
                 "ecr:GetDownloadUrlForLayer",
                 "ecr:BatchGetImage",
+                "ecr:DescribeImages",
                 "ecr:InitiateLayerUpload",
                 "ecr:UploadLayerPart",
                 "ecr:CompleteLayerUpload",
@@ -20,47 +21,17 @@
         {
             "Effect": "Allow",
             "Action": [
+                "apprunner:ListServices",
                 "apprunner:CreateService",
                 "apprunner:UpdateService",
                 "apprunner:DescribeService",
-                "apprunner:ListServices",
                 "apprunner:DeleteService",
                 "apprunner:TagResource",
                 "apprunner:UntagResource",
-                "apprunner:ListTagsForResource"
-            ],
-            "Resource": "*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "iam:CreateRole",
-                "iam:GetRole",
-                "iam:AttachRolePolicy"
-            ],
-            "Resource": [
-                "arn:aws:iam::*:role/AppRunnerECRAccessRole",
-                "arn:aws:iam::*:role/aws-service-role/apprunner.amazonaws.com/AWSServiceRoleForAppRunner"
-            ]
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
-                "iam:CreateServiceLinkedRole"
-            ],
-            "Resource": "arn:aws:iam::*:role/aws-service-role/*"
-        },
-        {
-            "Effect": "Allow",
-            "Action": [
+                "apprunner:ListTagsForResource",
                 "iam:PassRole"
             ],
-            "Resource": "arn:aws:iam::*:role/AppRunner*",
-            "Condition": {
-                "StringEquals": {
-                    "iam:PassedToService": "apprunner.amazonaws.com"
-                }
-            }
+            "Resource": "*"
         }
     ]
 }

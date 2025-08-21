@@ -13,7 +13,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-AWS_REGION="us-east-2"
+AWS_REGION="us-east-1"
 ECR_REPO_NAME="homara"
 IAM_USER_NAME="github-actions-homara-lobster"
 IAM_POLICY_NAME="GitHubActionsLobsterPolicy"
