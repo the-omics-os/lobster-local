@@ -52,6 +52,9 @@
         },
         {
             "Effect": "Allow",
+            "Action": [
+                "iam:PassRole"
+            ],
             "Resource": "arn:aws:iam::*:role/AppRunnerECRAccessRole",
             "Condition": {
                 "StringEquals": {

@@ -136,26 +136,34 @@ echo -e "${BLUE}📦 ECR Repository URI: ${ECR_URI}${NC}"
 # 5. Create App Runner Service Role
 echo -e "\n${YELLOW}📝 Step 5: Creating App Runner Service Role${NC}"
 if resource_exists "role" "$IAM_ROLE_NAME"; then
-    echo -e "${YELLOW}⚠️  IAM role '$IAM_ROLE_NAME' already exists${NC}"
-else
-    # Check if trust policy file exists
-    if [ ! -f "apprunner-trust-policy.json" ]; then
-        echo -e "${RED}❌ Trust policy file 'apprunner-trust-policy.json' not found!${NC}"
-        echo -e "${BLUE}ℹ️  Please run this script from the project root directory${NC}"
-        exit 1
-    fi
-
-    echo -e "${BLUE}📄 Using trust policy from apprunner-trust-policy.json${NC}"
-    aws iam create-role \
-        --role-name "$IAM_ROLE_NAME" \
-        --assume-role-policy-document file://apprunner-trust-policy.json
-
-    aws iam attach-role-policy \
-        --role-name "$IAM_ROLE_NAME" \
-        --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
-
-    echo -e "${GREEN}✅ Created App Runner service role: $IAM_ROLE_NAME${NC}"
+    echo -e "${YELLOW}⚠️  IAM role '$IAM_ROLE_NAME' already exists, recreating with correct trust policy...${NC}"
+    # Delete and recreate the role to ensure correct trust policy
+    aws iam detach-role-policy --role-name "$IAM_ROLE_NAME" --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess 2>/dev/null || true
+    aws iam delete-role --role-name "$IAM_ROLE_NAME" 2>/dev/null || true
+    echo -e "${BLUE}🔄 Recreating role with correct trust policy...${NC}"
 fi
+
+# Check if trust policy file exists
+if [ ! -f "apprunner-trust-policy.json" ]; then
+    echo -e "${RED}❌ Trust policy file 'apprunner-trust-policy.json' not found!${NC}"
+    echo -e "${BLUE}ℹ️  Please run this script from the project root directory${NC}"
+    exit 1
+fi
+
+echo -e "${BLUE}📄 Using trust policy from apprunner-trust-policy.json${NC}"
+aws iam create-role \
+    --role-name "$IAM_ROLE_NAME" \
+    --assume-role-policy-document file://apprunner-trust-policy.json
+
+aws iam attach-role-policy \
+    --role-name "$IAM_ROLE_NAME" \
+    --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+
+echo -e "${GREEN}✅ Created App Runner service role: $IAM_ROLE_NAME${NC}"
+
+# Get the role ARN for GitHub secrets
+ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${IAM_ROLE_NAME}"
+echo -e "${BLUE}🔑 Role ARN: ${ROLE_ARN}${NC}"
 
 # 6. Create App Runner Service-Linked Role
 echo -e "\n${YELLOW}📝 Step 6: Creating App Runner Service-Linked Role${NC}"
@@ -191,9 +199,12 @@ rm -f /tmp/github-actions-policy.json /tmp/apprunner-trust-policy.json
 echo -e "\n${GREEN}🎉 AWS Infrastructure Setup Complete!${NC}"
 echo "=============================================="
 echo -e "${BLUE}Next Steps:${NC}"
-echo -e "1. Add the AWS credentials to GitHub Secrets:"
+echo -e "1. Add the following secrets to GitHub:"
 echo -e "   - Go to: https://github.com/YOUR_USERNAME/lobster/settings/secrets/actions"
-echo -e "   - Add: AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+echo -e "   - Add AWS_ACCESS_KEY_ID (from above output)"
+echo -e "   - Add AWS_SECRET_ACCESS_KEY (from above output)"
+echo -e "   - Add AWS_REGION: ${AWS_REGION}"
+echo -e "   - Add ROLE_ARN: ${ROLE_ARN}"
 echo -e "2. Add your other environment variables as GitHub Secrets"
 echo -e "3. Push to main branch to trigger deployment"
 echo -e "4. Monitor deployment at: https://github.com/YOUR_USERNAME/lobster/actions"
@@ -203,6 +214,12 @@ echo -e "\n${GREEN}🦞 Your Lobster AI app will be live at: https://[random-id]
 echo -e "\n${BLUE}📋 Resources Created:${NC}"
 echo -e "• IAM User: ${IAM_USER_NAME}"
 echo -e "• IAM Policy: ${IAM_POLICY_NAME}"
-echo -e "• IAM Role: ${IAM_ROLE_NAME}"
+echo -e "• IAM Role: ${IAM_ROLE_NAME} (ARN: ${ROLE_ARN})"
 echo -e "• ECR Repository: ${ECR_URI}"
 echo -e "• AWS Region: ${AWS_REGION}"
+
+echo -e "\n${RED}🔑 CRITICAL: Add these GitHub Secrets:${NC}"
+echo -e "${YELLOW}AWS_ACCESS_KEY_ID: [from above output]${NC}"
+echo -e "${YELLOW}AWS_SECRET_ACCESS_KEY: [from above output]${NC}"
+echo -e "${YELLOW}AWS_REGION: ${AWS_REGION}${NC}"
+echo -e "${YELLOW}ROLE_ARN: ${ROLE_ARN}${NC}"
