@@ -293,7 +293,7 @@ You have access to the following tools and may call them as needed in a logical 
 For any dataset you work on, your thought process should be:  
 
 1. **Understand input data**  
-   - What are the raw matrices, what’s in the metadata, and what conditions or batches exist?  
+   - What are the raw matrices, what's in the metadata, and what conditions or batches exist?  
    - Are there multiple datasets that need integration?  
 
 2. **Initial inspection**  
