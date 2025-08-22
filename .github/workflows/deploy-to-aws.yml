@@ -59,94 +59,20 @@ jobs:
 
     - name: Deploy to App Runner
       run: |
-        IMAGE_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest"
-
-        # Get service ARN if exists
-        SERVICE_ARN=$(aws apprunner list-services \
-          --query "ServiceSummaryList[?ServiceName=='${{ env.APP_RUNNER_SERVICE }}'].ServiceArn" \
-          --output text)
-
-        if [ -n "$SERVICE_ARN" ]; then
-          echo "Service exists, updating..."
-          cat > service-config.json << EOF
-        {
-          "SourceConfiguration": {
+        aws apprunner update-service \
+          --service-arn arn:aws:apprunner:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:service/lobster-ai/<random-id> \
+          --source-configuration '{
             "ImageRepository": {
-              "ImageIdentifier": "${IMAGE_URI}",
+              "ImageIdentifier": "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}",
+              "ImageRepositoryType": "ECR",
               "ImageConfiguration": {
-                "Port": "8501",
-                "RuntimeEnvironmentVariables": {
-                  "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
-                  "AWS_BEDROCK_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_ACCESS_KEY }}",
-                  "AWS_BEDROCK_SECRET_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_SECRET_ACCESS_KEY }}",
-                  "NCBI_API_KEY": "${{ secrets.NCBI_API_KEY }}",
-                  "GENIE_PROFILE": "${{ secrets.GENIE_PROFILE }}",
-                  "LANGFUSE_PUBLIC_KEY": "${{ secrets.LANGFUSE_PUBLIC_KEY }}",
-                  "LANGFUSE_SECRET_KEY": "${{ secrets.LANGFUSE_SECRET_KEY }}",
-                  "LANGFUSE_HOST": "${{ secrets.LANGFUSE_HOST }}",
-                  "STRIPE_PUBLISHABLE_KEY": "${{ secrets.STRIPE_PUBLISHABLE_KEY }}",
-                  "STRIPE_SECRET_KEY": "${{ secrets.STRIPE_SECRET_KEY }}",
-                  "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
-                  "PORT": "8501",
-                  "PYTHONUNBUFFERED": "1",
-                  "STREAMLIT_SERVER_HEADLESS": "true"
-                }
-              },
-              "ImageRepositoryType": "ECR"
+                "Port": "3000"
+              }
             },
-            "AutoDeploymentsEnabled": true
-          },
-          "InstanceConfiguration": {
-            "Cpu": "1024",
-            "Memory": "2048"
-          }
-        }
-        EOF
-
-          aws apprunner update-service \
-            --service-arn "$SERVICE_ARN" \
-            --source-configuration file://service-config.json
-        else
-          echo "Service does not exist, creating..."
-          cat > create-service-config.json << EOF
-        {
-          "ServiceName": "${{ env.APP_RUNNER_SERVICE }}",
-          "SourceConfiguration": {
-            "ImageRepository": {
-              "ImageIdentifier": "${IMAGE_URI}",
-              "ImageConfiguration": {
-                "Port": "8501",
-                "RuntimeEnvironmentVariables": {
-                  "OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}",
-                  "AWS_BEDROCK_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_ACCESS_KEY }}",
-                  "AWS_BEDROCK_SECRET_ACCESS_KEY": "${{ secrets.AWS_BEDROCK_SECRET_ACCESS_KEY }}",
-                  "NCBI_API_KEY": "${{ secrets.NCBI_API_KEY }}",
-                  "GENIE_PROFILE": "${{ secrets.GENIE_PROFILE }}",
-                  "LANGFUSE_PUBLIC_KEY": "${{ secrets.LANGFUSE_PUBLIC_KEY }}",
-                  "LANGFUSE_SECRET_KEY": "${{ secrets.LANGFUSE_SECRET_KEY }}",
-                  "LANGFUSE_HOST": "${{ secrets.LANGFUSE_HOST }}",
-                  "STRIPE_PUBLISHABLE_KEY": "${{ secrets.STRIPE_PUBLISHABLE_KEY }}",
-                  "STRIPE_SECRET_KEY": "${{ secrets.STRIPE_SECRET_KEY }}",
-                  "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
-                  "PORT": "8501",
-                  "PYTHONUNBUFFERED": "1",
-                  "STREAMLIT_SERVER_HEADLESS": "true"
-                }
-              },
-              "ImageRepositoryType": "ECR"
-            },
-            "AutoDeploymentsEnabled": true
-          },
-          "InstanceConfiguration": {
-            "Cpu": "1024",
-            "Memory": "2048"
-          }
-        }
-        EOF
-
-          aws apprunner create-service \
-            --cli-input-json file://create-service-config.json
-        fi
+            "AuthenticationConfiguration": {
+              "AccessRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AppRunnerECRAccessRole"
+            }
+          }'
 
     - name: Wait for deployment completion
       run: |

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Lobster",
-    page_icon="🦞",
+    page_icon="🔻",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -214,8 +214,8 @@ def init_session_state():
     st.session_state.data_manager = DataManager(workspace_path=workspace_path)
 
     # Chat / agent state
-    st.session_state.messages: List[Dict[str, Any]] = []
-    st.session_state.client: Optional[AgentClient] = None
+    st.session_state.messages = []
+    st.session_state.client = None
     st.session_state.current_mode = "production"
     st.session_state.enable_reasoning = True
     st.session_state.show_terminal = True
