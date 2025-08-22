@@ -23,8 +23,24 @@ from rich.console import Console
 from lobster.core.client import AgentClient
 from lobster.core.data_manager import DataManager
 from lobster.utils.callbacks import TerminalCallbackHandler
+from lobster.utils.auth import Auth
+from lobster.config.settings import get_settings
 from lobster.config.agent_config import get_agent_configurator, initialize_configurator
 
+# -----------------------
+# Basic login
+# -----------------------
+settings = get_settings()
+# Initialise CognitoAuthenticator
+authenticator = Auth.get_authenticator(settings.SECRETS_MANAGER_ID, settings.REGION)
+
+# Authenticate user, and stop here if not logged in
+is_logged_in = authenticator.login()
+if not is_logged_in:
+    st.stop()
+
+def logout():
+    authenticator.logout()
 # -----------------------
 # Basic setup & styling
 # -----------------------
@@ -259,6 +275,8 @@ def display_sidebar():
     dm: DataManager = st.session_state.data_manager
     st.sidebar.markdown("## 🦞 **Lobster AI**")
     st.sidebar.markdown("*Multi-Agent Bioinformatics System*")
+    st.sidebar.markdown("---")
+    st.button("Logout", "logout_btn", on_click=logout)
     st.sidebar.markdown("---")
 
     with st.sidebar.expander("📊 **System Status**", expanded=True):

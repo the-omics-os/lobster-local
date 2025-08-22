@@ -25,6 +25,22 @@ class Settings:
         # Load dotenv
         load_dotenv()
 
+        #CDK variables
+        self.STACK_NAME = 'LobsterStack'
+        self.CUSTOM_HEADER_VALUE = 'HomaraBeatsKepler'
+        self.SECRETS_MANAGER_ID = f"{self.STACK_NAME}ParamCognitoSecret"
+        self.CDK_DEPLY_ACCOUNT = '649207544517'
+        # AWS Fargate CPU/Memory options summary:
+        # - 256 (.25 vCPU): 512 MiB, 1 GB, 2 GB (Linux)
+        # - 512 (.5 vCPU): 1 GB, 2 GB, 3 GB, 4 GB (Linux)
+        # - 1024 (1 vCPU): 2-8 GB (Linux, Windows)
+        # - 2048 (2 vCPU): 4-16 GB (Linux, Windows, 1 GB steps)
+        # - 4096 (4 vCPU): 8-30 GB (Linux, Windows, 1 GB steps)
+        # - 8192 (8 vCPU, Linux 1.4.0+): 16-60 GB (4 GB steps)
+        # - 16384 (16 vCPU, Linux 1.4.0+): 32-120 GB (8 GB steps)
+        # See AWS docs for full details.        
+        self.MEMORY = 24576
+        self.CPU = 8192
         # Initialize agent configurator based on environment
         profile = os.environ.get('GENIE_PROFILE', 'production')
         config_file = os.environ.get('GENIE_CONFIG_FILE')

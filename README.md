@@ -33,38 +33,35 @@ This will:
 - ✅ Set up environment configuration
 - ✅ Provide clear next steps
 
-### Alternative Methods
+# Command Line Interface
 
-#### Using pip
+## 🎯 Quick Start
+
+### Interactive Chat Mode
 
 ```bash
-pip install lobster-ai
+lobster chat
 ```
-
-#### Using Docker (not tested)
-
-```bash
-docker run -it --rm \
-  -v ~/.lobster:/root/.lobster \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  homaraai/lobster:latest
-```
-
-<!-- #### One-line installer (inactive)
-
-```bash
-curl -sSL https://get.lobster-ai.com | bash
-``` -->
-
-## � Command Line Interface
 
 ### Key Commands
 
-- `/read <file>` - Read file from workspace/subdirectories or any absolute path
-- `/files` - List all workspace files with metadata
-- `/data` - Show current dataset information
-- `/plots` - List all generated visualizations
-- `/help` - Show all available commands
+### 🦞 Lobster CLI Commands
+
+| Command            | Description                                 |
+|--------------------|---------------------------------------------|
+| `/help`            | Show help message with all commands         |
+| `/status`          | Show system status                          |
+| `/files`           | List workspace files                        |
+| `/data`            | Show current data summary                   |
+| `/plots`           | List generated plots                        |
+| `/save`            | Save current state to workspace             |
+| `/read <file>`     | Read a file from workspace                  |
+| `/export`          | Export session data                         |
+| `/reset`           | Reset conversation                          |
+| `/mode <name>`     | Change operation mode                       |
+| `/modes`           | List available modes                        |
+| `/clear`           | Clear screen                                |
+| `/exit`            | Exit the chat                               |
 
 ### Enhanced File Reading
 
@@ -74,14 +71,7 @@ The `/read` command now supports:
 - Case-insensitive matching
 - Detailed debug logging
 
-### User-Friendly Welcome Screen
-
-The welcome screen now displays:
-- Key bioinformatics tasks Lobster can perform
-- Most important commands with brief descriptions
-- Clear usage instructions for beginners
-
-## �🔧 Configuration
+## 🔧 Configuration
 
 ### Quick Setup
 
@@ -89,6 +79,8 @@ The welcome screen now displays:
 Read config/README_CONFIGURATION.md
 ```
 
+In short: 
+1. Populate .env file
 This interactive command will help you set up:
 - API keys (OpenAI, AWS Bedrock, NCBI)
 - Model preferences
@@ -109,14 +101,6 @@ NCBI_API_KEY=your-ncbi-key
 GENIE_PROFILE=production
 ```
 
-## 🎯 Quick Start
-
-### Interactive Chat Mode
-
-```bash
-lobster chat
-```
-
 ### Interactive Chat Mode for debugging
 
 ```bash
@@ -133,6 +117,20 @@ lobster query "Download and analyze GSE109564 from GEO"
 
 ```bash
 lobster chat --workspace ./my-analysis
+```
+
+# Streamlit
+
+## local run
+```bash
+streamlit run lobster/streamlit_app.py
+```
+
+### Using Docker
+
+```bash
+docker build -f Dockerfile -t lobster-ai:py313 .
+docker run -p 8501:8501 --env-file .env lobster-ai:py313
 ```
 
 ## 💬 Example Usage
@@ -159,7 +157,7 @@ lobster chat --workspace ./my-analysis
 The data quality looks good overall. Would you like me to proceed with clustering?
 ```
 
-## 🧬 Available Analyses
+# 🧬 Available Analyses
 
 - **Data Download**: GEO datasets, CSV/H5 file uploads
 - **Quality Control**: Cell/gene filtering, doublet detection
@@ -170,12 +168,6 @@ The data quality looks good overall. Would you like me to proceed with clusterin
 - **Literature Integration**: Find parameters and validation from PubMed
 
 ## 📊 Export & Reproducibility
-
-Export your entire analysis:
-
-```bash
-lobster export
-```
 
 This creates a ZIP file containing:
 - Raw and processed data
@@ -207,16 +199,29 @@ result = client.query("Analyze my single-cell data for T cell markers")
 print(result['response'])
 ```
 
-## 📖 Documentation
+## Deploy Streamlit to AWS fargate via CDK
 
-- [Installation Guide](docs/installation.md)
-- [Configuration Options](docs/configuration.md)
-- [API Reference](docs/api.md)
-- [Example Notebooks](docs/examples/)
+Taken from [aws-examples repo](https://github.com/aws-samples/deploy-streamlit-app)
 
-## Connect to EC2 via VScode: 
+```bash
+cdk bootstrap
+cdk deploy
+```
 
-[tutorial](https://medium.com/@bobbycxy/detailed-guide-to-connect-ec2-with-vscode-2c084c265e36)
+The deployment takes 5 to 10 minutes.
+
+Make a note of the output, in which you will find the CloudFront distribution URL
+and the Cognito user pool id.
+
+4. Create a user in the Cognito UserPool that has been created. You can perform this action from your AWS Console. 
+5. From your browser, connect to the CloudFront distribution url.
+6. Log in to the Streamlit app with the user you have created in Cognito.
+
+## Some limitations
+
+* The connection between CloudFront and the ALB is in HTTP, not SSL encrypted.
+This means traffic between CloudFront and the ALB is unencrypted.
+It is **strongly recommended** to configure HTTPS by bringing your own domain name and SSL/TLS certificate to the ALB.
 
 ## 🤝 Contributing
 

@@ -2,7 +2,7 @@
 # Optimized for AWS App Runner deployment
 
 # Stage 1: Base image with system dependencies
-FROM python:3.13-slim as base
+FROM --platform=linux/amd64 python:3.13 AS base
 
 # Install system dependencies required for bioinformatics packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,13 +24,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Stage 2: Builder stage for Python dependencies
-FROM base as builder
+FROM base AS builder
 
 # Set working directory
 WORKDIR /app
 
 # Copy dependency definitions
-COPY pyproject.toml ./
+COPY ../pyproject.toml ./
 
 # Create virtual environment
 RUN python -m venv /opt/venv
@@ -44,7 +44,7 @@ COPY . .
 RUN pip install --no-cache-dir .
 
 # Stage 3: Final runtime image
-FROM base as runtime
+FROM base AS runtime
 
 # Create non-root user for security
 RUN useradd -m -u 1000 -s /bin/bash lobsteruser && \
