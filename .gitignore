@@ -5,6 +5,8 @@ data/*
 .geo_cache/*
 workspaces/
 workspaces/*
+cdk.out/
+cdk.out/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
