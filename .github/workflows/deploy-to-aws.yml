@@ -1,114 +1,55 @@
-name: Deploy Lobster AI to AWS App Runner
+name: Deploy to AWS App Runner
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches:
+      - main
 
 env:
+  # 🔧 Configuration (edit these)
   AWS_REGION: us-east-1
   ECR_REPOSITORY: homara
-  APP_RUNNER_SERVICE: lobster
+  APP_PORT: 8501
+
+  # These two come from your AWS setup (copy from console or IAM)
+  SERVICE_ARN: arn:aws:apprunner:us-east-1:649207544517:service/lobster/76fff8fb36564c2990c7c11d9c243edb
+  ACCESS_ROLE_ARN: arn:aws:iam::649207544517:role/service-role/AppRunnerECRAccessRole_v2
 
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Configure AWS credentials
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Login to Amazon ECR
-      id: login-ecr
-      uses: aws-actions/amazon-ecr-login@v2
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-      with:
-        platforms: linux/amd64
+      - name: Build, tag, and push Docker image
+        run: |
+          IMAGE_TAG=${{ github.sha }}
+          ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}
+          IMAGE_URI=$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:$IMAGE_TAG
+          
+          echo "🔨 Building Docker image..."
+          docker build -t $IMAGE_URI .
+          echo "📤 Pushing Docker image..."
+          docker push $IMAGE_URI
+          
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
 
-    - name: Extract metadata
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}
-        tags: |
-          type=ref,event=branch
-          type=raw,value=latest,enable={{is_default_branch}}
-          type=sha,format=short
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        file: ./Dockerfile
-        push: true
-        platforms: linux/amd64
-        tags: ${{ steps.meta.outputs.tags }}
-        labels: ${{ steps.meta.outputs.labels }}
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-    - name: Deploy to App Runner
-      run: |
-        aws apprunner update-service \
-          --service-arn arn:aws:apprunner:us-east-1:${{ secrets.AWS_ACCOUNT_ID }}:service/lobster-ai/<random-id> \
-          --source-configuration '{
-            "ImageRepository": {
-              "ImageIdentifier": "${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}",
-              "ImageRepositoryType": "ECR",
-              "ImageConfiguration": {
-                "Port": "3000"
-              }
-            },
-            "AuthenticationConfiguration": {
-              "AccessRoleArn": "arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/AppRunnerECRAccessRole"
-            }
-          }'
-
-    - name: Wait for deployment completion
-      run: |
-        echo "Waiting for App Runner service to be ready..."
-        SERVICE_ARN=$(aws apprunner list-services \
-          --query "ServiceSummaryList[?ServiceName=='${{ env.APP_RUNNER_SERVICE }}'].ServiceArn" \
-          --output text)
-        aws apprunner wait service-ready --service-arn "$SERVICE_ARN"
-
-    - name: Get service URL
-      id: get-url
-      run: |
-        SERVICE_ARN=$(aws apprunner list-services \
-          --query "ServiceSummaryList[?ServiceName=='${{ env.APP_RUNNER_SERVICE }}'].ServiceArn" \
-          --output text)
-        SERVICE_URL=$(aws apprunner describe-service \
-          --service-arn "$SERVICE_ARN" \
-          --query 'Service.ServiceUrl' \
-          --output text)
-        echo "SERVICE_URL=${SERVICE_URL}" >> $GITHUB_OUTPUT
-        echo "🚀 App deployed at: https://${SERVICE_URL}"
-
-    - name: Run health check
-      run: |
-        echo "Running health check..."
-        sleep 30
-        if curl -f -s "https://${{ steps.get-url.outputs.SERVICE_URL }}" > /dev/null; then
-          echo "✅ Health check passed!"
-        else
-          echo "❌ Health check failed - check manually"
-        fi
-
-    - name: Deployment summary
-      run: |
-        echo "## 🦞 Lobster AI Deployment Complete! 🦞" >> $GITHUB_STEP_SUMMARY
-        echo "**Service URL:** https://${{ steps.get-url.outputs.SERVICE_URL }}" >> $GITHUB_STEP_SUMMARY
-        echo "**AWS Region:** ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
-        echo "**ECR Repository:** ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}" >> $GITHUB_STEP_SUMMARY
-        echo "**Image Tag:** latest" >> $GITHUB_STEP_SUMMARY
+      - name: Deploy to App Runner
+        run: |
+          echo "🚀 Deploying to App Runner service: ${{ env.SERVICE_ARN }}"
+          aws apprunner update-service \
+            --service-arn ${{ env.SERVICE_ARN }} \
+            --source-configuration "ImageRepository={ImageIdentifier=${{ env.IMAGE_URI }},ImageRepositoryType=ECR,ImageConfiguration={Port=${{ env.APP_PORT }}}},AuthenticationConfiguration={AccessRoleArn=${{ env.ACCESS_ROLE_ARN }}}"
