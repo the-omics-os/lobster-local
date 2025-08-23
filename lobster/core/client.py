@@ -132,7 +132,7 @@ class AgentClient:
             events = []
             
             # Execute graph
-            for event in self.graph.stream(
+            for event in self.graph.invoke(
                 input=graph_input, 
                 config=config,
                 stream_mode='debug'

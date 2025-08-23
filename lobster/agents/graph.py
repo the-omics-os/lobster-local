@@ -120,7 +120,6 @@ def create_bioinformatics_graph(
                                        description="Assign literature/method tasks to the method expert")
             # forwarding_tool
             ]
-        # tools=[forwarding_tool]
     )
     
     # Compile the graph with the provided checkpointer

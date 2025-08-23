@@ -6,6 +6,9 @@ Installable via pip or curl, with rich terminal interface.
 
 from pathlib import Path
 from typing import Optional
+import os
+import subprocess
+import shutil
 
 import typer
 import tabulate
@@ -20,7 +23,7 @@ from rich.prompt import Prompt, Confirm
 from rich import box
 from rich import console
 
-from lobster.core import AgentClient
+from lobster.core.client import AgentClient
 # Implobsterort the proper callback handler
 from lobster.utils import TerminalCallbackHandler
 from lobster.config.agent_config import get_agent_configurator, initialize_configurator, LobsterAgentConfigurator
@@ -75,6 +78,9 @@ app.add_typer(config_app, name="config")
 # Global client instance
 client: Optional[AgentClient] = None
 
+# Global current directory tracking
+current_directory = Path.cwd()
+
 def init_client(
     workspace: Optional[Path] = None,
     reasoning: bool = True,
@@ -112,6 +118,209 @@ def init_client(
     )
     
     return client
+
+
+def execute_shell_command(command: str) -> bool:
+    """Execute shell commands and return True if successful."""
+    global current_directory
+    
+    parts = command.strip().split()
+    if not parts:
+        return False
+    
+    cmd = parts[0].lower()
+    
+    try:
+        if cmd == "cd":
+            # Handle cd command
+            if len(parts) == 1:
+                # cd with no arguments goes to home
+                new_dir = Path.home()
+            else:
+                target = " ".join(parts[1:])  # Handle paths with spaces
+                if target == "~":
+                    new_dir = Path.home()
+                elif target.startswith("~/"):
+                    new_dir = Path.home() / target[2:]
+                else:
+                    new_dir = current_directory / target if not Path(target).is_absolute() else Path(target)
+                
+                new_dir = new_dir.resolve()
+            
+            if new_dir.exists() and new_dir.is_dir():
+                current_directory = new_dir
+                os.chdir(current_directory)
+                console.print(f"[grey74]{current_directory}[/grey74]")
+                return True
+            else:
+                console.print(f"[red]cd: no such file or directory: {target}[/red]")
+                return True  # We handled it, even if it failed
+        
+        elif cmd == "pwd":
+            # Print working directory
+            console.print(f"[grey74]{current_directory}[/grey74]")
+            return True
+        
+        elif cmd == "ls":
+            # List directory contents with structured output
+            target_dir = current_directory
+            show_path = ""
+            if len(parts) > 1:
+                target_path = parts[1]
+                show_path = target_path
+                if target_path.startswith("~/"):
+                    target_dir = Path.home() / target_path[2:]
+                else:
+                    target_dir = current_directory / target_path if not Path(target_path).is_absolute() else Path(target_path)
+            
+            if target_dir.exists() and target_dir.is_dir():
+                items = list(target_dir.iterdir())
+                if not items:
+                    console.print(f"[grey50]Empty directory: {show_path or str(target_dir)}[/grey50]")
+                    return True
+                
+                # Create a structured table for ls output
+                table = Table(
+                    title=f"📁 Directory Contents: {show_path or target_dir.name}",
+                    box=box.SIMPLE,
+                    border_style="blue",
+                    show_header=True,
+                    title_style="bold blue"
+                )
+                table.add_column("Name", style="white", min_width=20)
+                table.add_column("Type", style="cyan", width=10)
+                table.add_column("Size", style="grey74", width=10)
+                table.add_column("Modified", style="grey50", width=16)
+                
+                # Sort: directories first, then files
+                dirs = [item for item in items if item.is_dir()]
+                files = [item for item in items if item.is_file()]
+                sorted_items = sorted(dirs, key=lambda x: x.name.lower()) + sorted(files, key=lambda x: x.name.lower())
+                
+                for item in sorted_items:
+                    try:
+                        stat = item.stat()
+                        if item.is_dir():
+                            name = f"[bold blue]{item.name}/[/bold blue]"
+                            type_str = "📁 DIR"
+                            size_str = "-"
+                        else:
+                            name = f"[white]{item.name}[/white]"
+                            type_str = "📄 FILE"
+                            size = stat.st_size
+                            if size < 1024:
+                                size_str = f"{size}B"
+                            elif size < 1024**2:
+                                size_str = f"{size/1024:.1f}KB"
+                            elif size < 1024**3:
+                                size_str = f"{size/1024**2:.1f}MB"
+                            else:
+                                size_str = f"{size/1024**3:.1f}GB"
+                        
+                        # Format modification time
+                        from datetime import datetime
+                        mod_time = datetime.fromtimestamp(stat.st_mtime)
+                        mod_str = mod_time.strftime("%Y-%m-%d %H:%M")
+                        
+                        table.add_row(name, type_str, size_str, mod_str)
+                    except (OSError, PermissionError):
+                        # If we can't get stats, just show the name
+                        name = f"[bold blue]{item.name}/[/bold blue]" if item.is_dir() else f"[white]{item.name}[/white]"
+                        table.add_row(name, "?", "?", "?")
+                
+                console.print(table)
+                console.print(f"\n[grey50]Total: {len(dirs)} directories, {len(files)} files[/grey50]")
+                return True
+            else:
+                console.print(f"[red]ls: cannot access '{parts[1] if len(parts) > 1 else target_dir}': No such file or directory[/red]")
+                return True
+        
+        elif cmd == "cat":
+            # Enhanced cat command with syntax highlighting
+            if len(parts) < 2:
+                console.print("[red]cat: missing file argument[/red]")
+                return True
+            
+            file_path = " ".join(parts[1:])  # Handle paths with spaces
+            if not file_path.startswith("/") and not file_path.startswith("~/"):
+                file_path = current_directory / file_path
+            else:
+                file_path = Path(file_path).expanduser()
+            
+            try:
+                if file_path.exists() and file_path.is_file():
+                    content = file_path.read_text(encoding='utf-8', errors='replace')
+                    
+                    # Try to guess syntax from extension for highlighting
+                    import mimetypes
+                    ext = file_path.suffix.lower()
+                    
+                    # Map common extensions to syntax highlighting
+                    language_map = {
+                        '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+                        '.html': 'html', '.css': 'css', '.json': 'json',
+                        '.xml': 'xml', '.yaml': 'yaml', '.yml': 'yaml',
+                        '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash',
+                        '.sql': 'sql', '.md': 'markdown', '.txt': 'text',
+                        '.log': 'text', '.conf': 'text', '.cfg': 'text'
+                    }
+                    
+                    language = language_map.get(ext, 'text')
+                    
+                    if content.strip():
+                        syntax = Syntax(content, language, theme="monokai", line_numbers=True)
+                        console.print(Panel(
+                            syntax,
+                            title=f"[bold blue]📄 {file_path.name}[/bold blue]",
+                            border_style="blue",
+                            box=box.ROUNDED
+                        ))
+                    else:
+                        console.print(f"[grey50]📄 {file_path.name} (empty file)[/grey50]")
+                else:
+                    console.print(f"[red]cat: {file_path}: No such file or directory[/red]")
+            except PermissionError:
+                console.print(f"[red]cat: {file_path}: Permission denied[/red]")
+            except UnicodeDecodeError:
+                console.print(f"[red]cat: {file_path}: Binary file (cannot display)[/red]")
+            except Exception as e:
+                console.print(f"[red]cat: {file_path}: {e}[/red]")
+            
+            return True
+        
+        elif cmd in ["cp", "mv", "mkdir", "touch", "rm"]:
+            # Execute other shell commands with improved output formatting
+            result = subprocess.run(command, shell=True, cwd=current_directory, 
+                                  capture_output=True, text=True)
+            
+            # Format success messages
+            if result.returncode == 0:
+                if cmd == "mkdir" and len(parts) > 1:
+                    console.print(f"[green]📁 Created directory: {parts[1]}[/green]")
+                elif cmd == "touch" and len(parts) > 1:
+                    console.print(f"[green]📄 Created file: {parts[1]}[/green]")
+                elif cmd == "cp" and len(parts) > 2:
+                    console.print(f"[green]📋 Copied: {parts[1]} → {parts[2]}[/green]")
+                elif cmd == "mv" and len(parts) > 2:
+                    console.print(f"[green]📦 Moved: {parts[1]} → {parts[2]}[/green]")
+                elif cmd == "rm" and len(parts) > 1:
+                    console.print(f"[green]🗑️  Removed: {parts[1]}[/green]")
+                elif result.stdout:
+                    console.print(result.stdout.rstrip())
+            
+            # Always show errors
+            if result.stderr:
+                console.print(f"[red]{result.stderr.rstrip()}[/red]")
+            
+            return True
+        
+        else:
+            # Not a recognized shell command
+            return False
+    
+    except Exception as e:
+        console.print(f"[red]Error executing command: {e}[/red]")
+        return True  # We handled it, even if it failed
 
 
 def get_current_agent_name() -> str:
@@ -229,12 +438,19 @@ def chat(
     
     while True:
         try:
-            # Get user input with rich prompt - always show Lobster
-            user_input = Prompt.ask(f"\n[bold red]🦞 Lobster You[/bold red]")
+            # Get user input with rich prompt - show current directory
+            current_path = str(current_directory.name) if current_directory != Path.home() else "~"
+            if current_directory == Path.cwd():
+                current_path = str(current_directory.name)
+            user_input = Prompt.ask(f"\n[bold red]🦞 {current_path}[/bold red]")
             
             # Handle commands
             if user_input.startswith("/"):
                 handle_command(user_input, client)
+                continue
+            
+            # Check if it's a shell command first
+            if execute_shell_command(user_input):
                 continue
             
             # Process query
@@ -302,6 +518,18 @@ def handle_command(command: str, client: AgentClient):
         [red]/modes[/red]        [grey50]-[/grey50] List available modes
         [red]/clear[/red]        [grey50]-[/grey50] Clear screen
         [red]/exit[/red]         [grey50]-[/grey50] Exit the chat
+        
+        [bold white]Shell Commands:[/bold white] [grey50](execute directly without /)[/grey50]
+        
+        [yellow]cd[/yellow] <path>      [grey50]-[/grey50] Change directory
+        [yellow]pwd[/yellow]            [grey50]-[/grey50] Print current directory
+        [yellow]ls[/yellow] [path]      [grey50]-[/grey50] List directory contents
+        [yellow]mkdir[/yellow] <dir>    [grey50]-[/grey50] Create directory
+        [yellow]touch[/yellow] <file>   [grey50]-[/grey50] Create file
+        [yellow]cp[/yellow] <src> <dst> [grey50]-[/grey50] Copy file/directory
+        [yellow]mv[/yellow] <src> <dst> [grey50]-[/grey50] Move/rename file/directory
+        [yellow]rm[/yellow] <file>      [grey50]-[/grey50] Remove file
+        [yellow]cat[/yellow] <file>     [grey50]-[/grey50] Display file contents
         """
         console.print(Panel(
             help_text, 
