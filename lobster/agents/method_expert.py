@@ -1,7 +1,9 @@
 """
-Simplified Method Agent for literature research.
+Method Expert Agent for literature research and computational methodology extraction.
 
-Following LangGraph 0.2.x multi-agent template pattern.
+This agent specializes in finding and extracting best practice parameters from
+scientific literature using the modular DataManagerV2 system for enhanced
+data management and provenance tracking.
 """
 
 import re
@@ -13,19 +15,19 @@ from langchain_aws import ChatBedrockConverse
 from datetime import date
 
 from lobster.config.settings import get_settings
-from lobster.core.data_manager import DataManager
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def method_expert(
-    data_manager: DataManager, 
+    data_manager: DataManagerV2, 
     callback_handler=None, 
     agent_name: str = "method_expert_agent",
     handoff_tools: List = None
 ):
-    """Create method agent following template pattern."""
+    """Create method agent using DataManagerV2 for modular data management."""
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('method_agent')
@@ -53,7 +55,9 @@ def method_expert(
         """
         try:
             from lobster.tools import PubMedService
+            
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
+            
             results = pubmed_service.search_pubmed(
                 query=query,
                 top_k_results=top_k_results,
@@ -85,6 +89,7 @@ def method_expert(
                 return "Invalid DOI format. DOI should start with '10.'"
             
             from lobster.tools import PubMedService
+            
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
             # Search for the publication with enhanced parameters
@@ -94,9 +99,13 @@ def method_expert(
                 doc_content_chars_max=doc_content_chars_max
             )
             
-            # Store DOI-based parameters in metadata
+            # Store DOI-based parameters in metadata using DataManagerV2's tool logging
             if "parameters" in results.lower() or "methods" in results.lower():
-                data_manager.current_metadata[f'methods_from_doi_{doi}'] = results
+                data_manager.log_tool_usage(
+                    tool_name="find_method_parameters_from_doi",
+                    parameters={"doi": doi, "found_parameters": True},
+                    description=f"Found method parameters for DOI: {doi}"
+                )
                 
             logger.info(f"Method search completed for DOI: {doi} (k={top_k_results})")
             return results
@@ -120,6 +129,7 @@ def method_expert(
         """
         try:
             from lobster.tools import PubMedService
+            
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
             # Parse parameters from query
@@ -161,7 +171,9 @@ def method_expert(
         """
         try:
             from lobster.tools import PubMedService
+            
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
+            
             results = pubmed_service.find_protocol_information(
                 technique=technique,
                 top_k_results=top_k_results,
@@ -173,11 +185,87 @@ def method_expert(
             logger.error(f"Error finding protocol info: {e}")
             return f"Error finding protocol information: {str(e)}"
 
+    @tool
+    def find_method_parameters_for_modality(
+        modality_name: str,
+        analysis_type: str,
+        top_k_results: int = 5
+    ) -> str:
+        """
+        Find method parameters specifically for a loaded modality.
+        
+        Args:
+            modality_name: Name of the loaded modality to find parameters for
+            analysis_type: Type of analysis (e.g., 'clustering', 'differential_expression', 'quality_control')
+            top_k_results: Number of results to retrieve
+            
+        Returns:
+            str: Method parameters specific to the modality type
+        """
+        try:
+            # Get the modality to understand its characteristics
+            try:
+                adata = data_manager.get_modality(modality_name)
+                metrics = data_manager.get_quality_metrics(modality_name)
+            except ValueError:
+                return f"Modality '{modality_name}' not found. Available modalities: {data_manager.list_modalities()}"
+            
+            # Determine modality type from adapter info
+            adapter_info = data_manager.get_adapter_info()
+            modality_type = "single_cell"  # Default
+            
+            for adapter_name, info in adapter_info.items():
+                if modality_name in adapter_name or info['modality_name'] in modality_name.lower():
+                    if 'single_cell' in info['schema']['modality']:
+                        modality_type = "single-cell RNA-seq"
+                    elif 'bulk' in info['schema']['modality']:
+                        modality_type = "bulk RNA-seq"
+                    elif 'proteomics' in info['schema']['modality']:
+                        modality_type = "proteomics"
+                    break
+            
+            # Build search query based on modality and analysis type
+            search_query = f"{modality_type} {analysis_type} parameters methods"
+            
+            # Add data characteristics to search
+            if adata.n_obs > 1000 and adata.n_vars > 10000:
+                search_query += " large-scale"
+            elif adata.n_obs < 100:
+                search_query += " small-scale"
+            
+            # Search for relevant methods using DataManagerV2
+            from lobster.tools import PubMedService
+            pubmed_service = PubMedService(parse=None, data_manager=data_manager)
+            
+            results = pubmed_service.search_pubmed(
+                query=search_query,
+                top_k_results=top_k_results,
+                doc_content_chars_max=6000
+            )
+            
+            # Add modality context to results
+            context_info = f"""
+## Modality Context for '{modality_name}'
+- **Data type**: {modality_type}
+- **Shape**: {adata.n_obs} obs × {adata.n_vars} vars
+- **Analysis type**: {analysis_type}
+- **Key metrics**: {len([k for k, v in metrics.items() if isinstance(v, (int, float))])} calculated
+
+## Literature-Based Method Parameters:
+"""
+            
+            return context_info + results
+            
+        except Exception as e:
+            logger.error(f"Error finding modality parameters: {e}")
+            return f"Error finding method parameters: {str(e)}"
+
     base_tools = [
         search_pubmed,
         find_method_parameters_from_doi,
         find_marker_genes,
-        find_protocol_information
+        find_protocol_information,
+        find_method_parameters_for_modality
     ]
     
     # Combine base tools with handoff tools if provided
@@ -187,7 +275,7 @@ def method_expert(
 You are a computational bioinformatics methods specialist with expertise in finding and extracting best practice parameters from scientific literature.
 
 <Role>
-Your primary focus is identifying, extracting, and documenting computational methodologies and parameters used in bioinformatics analyses, particularly for single-cell genomics and other omics data types.
+Your primary focus is identifying, extracting, and documenting computational methodologies and parameters used in bioinformatics analyses, particularly for single-cell genomics, bulk RNA-seq, and proteomics data types using the modular DataManagerV2 system.
 </Role>
 
 <Task>
@@ -199,6 +287,7 @@ Given a research question about computational methods, you will:
 5. **Document method workflows** with clear parameter recommendations
 6. **Cross-reference multiple studies** to identify consensus parameters
 7. **Note associated datasets** for the data expert to retrieve
+8. **Consider modality-specific requirements** when using DataManagerV2
 </Task>
 
 <Available Enhanced Tools>
@@ -207,15 +296,10 @@ Given a research question about computational methods, you will:
   * doc_content_chars_max: 2000-10000 (higher for detailed extraction)
   * max_query_length: 100-500 characters
 
-- `extract_computational_methods`: Extract methods from specific publications
+- `find_method_parameters_from_doi`: Extract methods from specific publications
   * Automatically extracts preprocessing parameters, QC thresholds, normalization methods
   * Identifies clustering resolutions, integration methods, and tool versions
   * Finds GitHub links and supplementary materials
-
-- `find_geo_from_publication`: Comprehensive dataset discovery from papers
-  * Searches multiple databases (GEO, SRA, ArrayExpress)
-  * Includes linked and supplementary datasets
-  * Provides direct download commands
 
 - `find_marker_genes`: Literature-based marker gene identification
   * Cell type specific searches with disease context
@@ -224,130 +308,120 @@ Given a research question about computational methods, you will:
 - `find_protocol_information`: Protocol and workflow extraction
   * Step-by-step method documentation
   * Parameter ranges and recommendations
-</Available>
+
+- `find_method_parameters_for_modality`: Context-aware parameter search (DataManagerV2 only)
+  * Searches for parameters specific to loaded modality characteristics
+  * Considers data dimensions and type for relevant parameter extraction
+
+<DataManagerV2 Integration>
+When working with DataManagerV2, you can provide modality-specific parameter recommendations:
+
+```python
+# Find parameters for a specific loaded modality
+find_method_parameters_for_modality("geo_gse12345", "quality_control")
+find_method_parameters_for_modality("proteomics_sample1", "normalization")
+```
+
+This provides context-aware parameter recommendations based on the actual data characteristics.
 
 <Query Optimization Strategies>
 
 ## Example 1: Single-cell RNA-seq Preprocessing Parameters
 
-Initial broad search to understand landscape
+```python
+# Initial broad search to understand landscape
+search_pubmed(
+    query="single-cell RNA-seq quality control filtering parameters mitochondrial", 
+    top_k_results=8,  # Get more results for comprehensive view
+    doc_content_chars_max=6000  # Extended content for parameter extraction
+)
 
-search_pubmed( query="single-cell RNA-seq quality control filtering parameters mitochondrial", top_k_results=8, # Get more results for comprehensive view doc_content_chars_max=6000 # Extended content for parameter extraction )
-Focused search for specific cell types
+# Focused search for specific cell types
+search_pubmed(
+    query='"T cells" AND "single cell" AND (filtering OR "quality control") AND "UMI count"',
+    top_k_results=5,
+    doc_content_chars_max=4000
+)
+```
 
-search_pubmed( query='"T cells" AND "single cell" AND (filtering OR "quality control") AND "UMI count"', top_k_results=5, doc_content_chars_max=4000 )
-Extract from high-impact paper
+## Example 2: Proteomics Method Parameters
 
-extract_computational_methods( doi_or_pmid="10.1038/s41587-019-0114-2", # Seurat v3 paper method_type="preprocessing", include_parameters=True )
+```python
+# Search for MS proteomics normalization methods
+search_pubmed(
+    query="mass spectrometry proteomics normalization missing values imputation",
+    top_k_results=6,
+    doc_content_chars_max=5000
+)
 
-
-## Example 2: Finding Clustering Resolution Parameters
-
-Search for clustering resolution in specific tissue
-
-search_pubmed( query='("clustering resolution" OR "resolution parameter") AND "single cell" AND liver', top_k_results=6, doc_content_chars_max=5000 )
-Look for Leiden/Louvain specific parameters
-
-search_pubmed( query='Leiden algorithm resolution single-cell "0.5" OR "0.8" OR "1.0"', top_k_results=5, doc_content_chars_max=4000 )
-
-
-## Example 3: Integration Method Parameters
-
-Search for integration benchmarks
-
-search_pubmed( query='"batch correction" OR "data integration" single-cell benchmark comparison', top_k_results=10, # More results for benchmarks doc_content_chars_max=8000 # Extended for detailed comparisons )
-Find Harmony specific parameters
-
-search_pubmed( query='Harmony "theta" parameter single-cell integration', top_k_results=3, doc_content_chars_max=4000 )
-
-
-## Example 4: Finding Associated Datasets and Code
-
-First find the methods paper
-
-result = search_pubmed( query="macrophage polarization single-cell RNA-seq", top_k_results=5 )
-Then extract datasets from promising papers
-
-find_geo_from_publication( doi="10.1038/s41590-021-00867-8", # Example DOI from search include_related=True )
-Extract computational workflow
-
-extract_computational_methods( doi_or_pmid="33594378", # PMID from search method_type="all", include_parameters=True )
-
-
-</Query>
+# Find peptide-to-protein mapping methods
+search_pubmed(
+    query="peptide protein identification FDR threshold proteomics",
+    top_k_results=4,
+    doc_content_chars_max=4000
+)
+```
 
 <Parameter Extraction Guidelines>
 
-When extracting parameters, focus on:
-1. **Filtering thresholds**
-   - Minimum genes per cell (typically 200-500)
-   - Minimum cells per gene (typically 3-10)
-   - Mitochondrial percentage cutoff (typically 5-20%)
-   - UMI count thresholds
+When extracting parameters, focus on modality-specific requirements:
 
-2. **Normalization parameters**
-   - Scale factor (typically 10,000)
-   - Log transformation base
-   - Regression variables
+**Transcriptomics (Single-cell):**
+1. **Quality Control**: min_genes_per_cell (200-500), max_pct_mt (5-20%)
+2. **Normalization**: target_sum (10,000), log_base (natural log)
+3. **Feature Selection**: n_top_genes (2000-5000)
+4. **Clustering**: resolution (0.4-1.2), n_pcs (10-50)
 
-3. **Clustering parameters**
-   - Resolution (typically 0.4-1.2)
-   - Number of PCs (typically 10-50)
-   - k for k-nearest neighbors (typically 10-30)
+**Transcriptomics (Bulk):**
+1. **Quality Control**: min_reads_per_sample (1M-10M)
+2. **Normalization**: TMM, DESeq2, or RPKM/TPM
+3. **Batch Correction**: ComBat, limma, or Harmony
 
-4. **Integration parameters**
-   - Number of anchors
-   - Theta for Harmony
-   - k for MNN
-
-</Guidelines>
+**Proteomics:**
+1. **Quality Control**: max_missing_per_protein (70-80%), min_peptides_per_protein (1-2)
+2. **Normalization**: median, quantile, or VSN
+3. **Missing Value Handling**: imputation methods (KNN, MinProb, etc.)
 
 <Response Format>
 Structure your findings as:
 
-## Recommended Parameters for [Analysis Type]
+## Recommended Parameters for [Analysis Type] - [Modality Type]
 
 ### Quality Control Thresholds
-- **Minimum genes/cell**: [value] (Citation: PMID [number])
-- **Mitochondrial %**: <[value]% (Citation: DOI [number])
-- **Evidence**: [X] studies analyzed, consensus range: [range]
+- **Parameter**: value (Citation: PMID/DOI)
+- **Evidence**: X studies analyzed, consensus range: [range]
 
-### [Method Step] Parameters
-- **Parameter name**: [value] ± [std if available]
-- **Tool/Package**: [name] v[version]
-- **GitHub**: [repository link]
-- **Rationale**: [Brief explanation from paper]
+### Method-Specific Parameters  
+- **Tool/Package**: name version
+- **Key parameters**: values with rationale
+- **GitHub**: repository links
 
-### Associated Datasets
-- GEO: [GSE numbers] - [brief description]
-- Note for data_expert: "Please retrieve GSE[number] for validation"
+### Modality-Specific Considerations
+- **Data characteristics**: What affects parameter choice
+- **Common variations**: Tissue/condition-specific adjustments
 
-### Code Availability
-- Repository: [GitHub link]
-- Scripts: [specific file names if mentioned]
-- Docker/Singularity: [container if available]
+### Associated Datasets for Validation
+- **GEO**: GSE numbers with descriptions
+- **Note for data_expert**: "Please retrieve GSE[number] for parameter validation"
 
 ### Literature Support
-1. [PMID/DOI] - [First Author Year] - [Key finding]
-2. [PMID/DOI] - [First Author Year] - [Parameter validation]
+1. PMID/DOI - First Author Year - Key finding
+2. PMID/DOI - First Author Year - Parameter validation
 
 </Response>
 
 <Important Notes>
-- Always search with increasing specificity: broad → focused → specific papers
-- Use higher top_k_results (8-15) for parameter surveys, lower (1-3) for specific papers
-- Increase doc_content_chars_max when looking for detailed methods sections
-- Cross-reference at least 3 papers when recommending parameter ranges
-- Note any tissue/cell-type specific parameter variations
-- Flag when parameters are controversial or dataset-dependent
-</Important>
+- **Search with increasing specificity**: broad → focused → specific papers
+- **Use higher top_k_results** (8-15) for parameter surveys, lower (1-3) for specific papers
+- **Cross-reference multiple studies** when recommending parameter ranges
+- **Consider modality characteristics** when using DataManagerV2
+- **Flag controversial or dataset-dependent parameters**
+- **Always provide literature citations** for recommended parameters
 
-Today's date is {date}. Maximum iterations: {max_iterations}
+Today's date is {date}. Maximum iterations: 5
 """.format(
-    date=date.today(),
-    max_iterations=5
+    date=date.today()
 )
-
 
     return create_react_agent(
         model=llm,

@@ -5,38 +5,47 @@ This service extends the basic clustering functionality with doublet detection,
 cell type annotation, and advanced visualization capabilities.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+import anndata
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
-import scrublet as scr
 
-from lobster.core.data_manager import DataManager
+try:
+    import scrublet as scr
+    SCRUBLET_AVAILABLE = True
+except ImportError:
+    SCRUBLET_AVAILABLE = False
+    scr = None
+
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+class SingleCellError(Exception):
+    """Base exception for single-cell analysis operations."""
+    pass
+
+
 class EnhancedSingleCellService:
     """
-    Enhanced service for single-cell RNA-seq analysis.
+    Stateless enhanced service for single-cell RNA-seq analysis.
 
     This class provides advanced single-cell analysis capabilities including
     doublet detection, cell type annotation, and pathway analysis.
     """
 
-    def __init__(self, data_manager: DataManager):
+    def __init__(self):
         """
         Initialize the enhanced single-cell service.
-
-        Args:
-            data_manager: DataManager instance for data access
+        
+        This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing EnhancedSingleCellService")
-        self.data_manager = data_manager
+        logger.info("Initializing stateless EnhancedSingleCellService")
 
         # Cell type markers database (simplified version)
         self.cell_type_markers = {
@@ -57,374 +66,377 @@ class EnhancedSingleCellService:
         logger.info("EnhancedSingleCellService initialized successfully")
 
     def detect_doublets(
-        self, expected_doublet_rate: float = 0.025, threshold: Optional[float] = None
-    ) -> str:
+        self, 
+        adata: anndata.AnnData,
+        expected_doublet_rate: float = 0.025, 
+        threshold: Optional[float] = None
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
-        Detect doublets using Scrublet.
+        Detect doublets using Scrublet or fallback method.
 
         Args:
+            adata: AnnData object for doublet detection
             expected_doublet_rate: Expected doublet rate
+            threshold: Custom threshold for doublet calling
 
         Returns:
-            str: Doublet detection results
+            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with doublet scores and detection stats
+            
+        Raises:
+            SingleCellError: If doublet detection fails
         """
         try:
-            if not self.data_manager.has_data():
-                return "No data loaded. Please load single-cell data first."
+            logger.info(f"Starting doublet detection with expected rate: {expected_doublet_rate}")
+            
+            # Create working copy
+            adata_doublets = adata.copy()
+            
+            # Get count matrix for doublet detection
+            if adata_doublets.raw is not None:
+                logger.info("Using raw counts for doublet detection")
+                counts_matrix = adata_doublets.raw.X
+            else:
+                logger.info("Using current matrix for doublet detection")
+                counts_matrix = adata_doublets.X
+            
+            # Convert to dense array if sparse
+            if hasattr(counts_matrix, 'toarray'):
+                counts_matrix = counts_matrix.toarray()
+            
+            logger.info(f"Doublet detection matrix shape: {counts_matrix.shape}")
 
-            # Log current data shape to help debug
-            logger.info(f"Current data shape: {self.data_manager.current_data.shape}")
-            logger.info(
-                f"Available gene names: {len(self.data_manager.current_data.columns)}"
-            )
-            logger.info(
-                f"First few gene names: {list(self.data_manager.current_data.columns[:5])}"
-            )
-            logger.info("Running doublet detection with Scrublet")
+            # Check if we have enough features
+            if counts_matrix.shape[1] == 0:
+                raise SingleCellError("Expression matrix has no gene features")
 
-            # Get count matrix - ensure we have features (columns)
-            if self.data_manager.adata is not None:
-                # Use raw AnnData values directly
+            # Run doublet detection
+            if SCRUBLET_AVAILABLE:
                 try:
-                    # Try to access raw data first if available (original non-normalized counts)
-                    if (
-                        hasattr(self.data_manager.adata, "raw")
-                        and self.data_manager.adata.raw is not None
-                    ):
-                        logger.info("Using raw AnnData matrix")
-                        counts_matrix = self.data_manager.adata.raw.X
-                    else:
-                        logger.info("Using processed AnnData matrix")
-                        counts_matrix = self.data_manager.adata.X
-
-                    logger.info(f"AnnData matrix shape: {counts_matrix.shape}")
-                    logger.info(
-                        f"AnnData var_names count: {len(self.data_manager.adata.var_names)}"
+                    logger.info("Running Scrublet doublet detection")
+                    scrub = scr.Scrublet(counts_matrix, expected_doublet_rate=expected_doublet_rate)
+                    
+                    doublet_scores, predicted_doublets = scrub.scrub_doublets(
+                        min_counts=2,
+                        min_cells=3,
+                        min_gene_variability_pctl=85,
+                        n_prin_comps=30,
+                        verbose=False,
                     )
 
-                    # Fall back to original data if AnnData has no features
-                    if counts_matrix.shape[1] == 0:
-                        logger.warning(
-                            "AnnData matrix has 0 features, falling back to original data"
-                        )
-                        df = self.data_manager.current_data
-                        counts_matrix = df.values
-                        logger.info(
-                            f"Using original DataFrame values with shape: {counts_matrix.shape}"
-                        )
+                    # Apply custom threshold if provided
+                    if threshold is not None:
+                        logger.info(f"Using custom doublet threshold: {threshold}")
+                        predicted_doublets = scrub.call_doublets(threshold=threshold)
+                        
+                    detection_method = "scrublet"
+                    
                 except Exception as e:
-                    logger.error(f"Error accessing AnnData matrix: {e}")
-                    # Fall back to original data
-                    df = self.data_manager.current_data
-                    counts_matrix = df.values
-                    logger.info(
-                        f"Fallback to DataFrame values with shape: {counts_matrix.shape}"
+                    logger.warning(f"Scrublet failed: {e}. Using fallback method.")
+                    doublet_scores, predicted_doublets, detection_method = self._fallback_doublet_detection(
+                        counts_matrix, expected_doublet_rate
                     )
             else:
-                # Use the DataFrame directly, transposed to match Scrublet expectations
-                # Scrublet expects cells as rows, genes as columns
-                df = self.data_manager.current_data
-                # Verify data structure is correct
-                if df.shape[1] == 0:
-                    return "Error: The expression matrix has no gene features."
-
-                counts_matrix = df.values
-                logger.info(f"Using DataFrame values with shape: {counts_matrix.shape}")
-
-            # Initialize Scrublet with proper checks
-            if counts_matrix.shape[1] == 0:
-                return "Error: The expression matrix has no gene features (columns)."
-
-            scrub = scr.Scrublet(
-                counts_matrix, expected_doublet_rate=expected_doublet_rate
-            )
-            logger.info(
-                f"Scrublet initialized with counts_matrix shape: {counts_matrix.shape}"
-            )
-
-            try:
-                # Run doublet detection with parameters similar to the publication
-                doublet_scores, predicted_doublets = scrub.scrub_doublets(
-                    min_counts=2,
-                    min_cells=3,
-                    min_gene_variability_pctl=85,
-                    n_prin_comps=30,
-                    verbose=True,
+                logger.info("Scrublet not available, using fallback doublet detection")
+                doublet_scores, predicted_doublets, detection_method = self._fallback_doublet_detection(
+                    counts_matrix, expected_doublet_rate
                 )
 
-                # Apply custom threshold if provided (similar to publication approach)
-                if threshold is not None:
-                    logger.info(f"Using custom doublet threshold: {threshold}")
-                    predicted_doublets = scrub.call_doublets(threshold=threshold)
-            except Exception as e:
-                logger.error(
-                    f"Scrublet failed: {e}. Using fallback synthetic doublet detection."
-                )
-                # Generate synthetic doublet scores as fallback for testing
-                n_cells = counts_matrix.shape[0]
+            # Add doublet information to AnnData
+            adata_doublets.obs["doublet_score"] = doublet_scores
+            adata_doublets.obs["predicted_doublet"] = predicted_doublets
 
-                # Generate synthetic doublet scores (random values between 0 and 1)
-                np.random.seed(42)  # For reproducible results
-                doublet_scores = np.random.beta(1, 10, size=n_cells)
-
-                # Generate synthetic predicted doublets (about 8% of cells)
-                doublet_threshold = np.percentile(doublet_scores, 92)
-                predicted_doublets = doublet_scores > doublet_threshold
-
-                logger.info(
-                    f"Fallback: Generated {np.sum(predicted_doublets)} synthetic doublets"
-                )
-
-            # Store results in metadata
+            # Calculate detection statistics
             n_doublets = np.sum(predicted_doublets)
-
-            # Create doublet score plot
-            doublet_plot = self._create_doublet_plot(doublet_scores, predicted_doublets)
-
-            dataset_info = {
-                "data_shape": (len(predicted_doublets), counts_matrix.shape[1]),
-                "source_dataset": self.data_manager.current_metadata.get(
-                    "source", "Current Dataset"
-                ),
-                "n_cells": len(predicted_doublets),
-                "n_genes": counts_matrix.shape[1],
-            }
-
-            analysis_params = {
-                "expected_doublet_rate": expected_doublet_rate,
-                "threshold": threshold,
-                "analysis_type": "doublet_detection",
-                "n_doublets_detected": n_doublets,
-            }
-
-            self.data_manager.add_plot(
-                doublet_plot,
-                title="Doublet Score Distribution",
-                source="enhanced_singlecell_service",
-                dataset_info=dataset_info,
-                analysis_params=analysis_params,
-            )
             doublet_rate = n_doublets / len(predicted_doublets)
 
-            self.data_manager.current_metadata.update(
-                {
-                    "doublet_scores": doublet_scores.tolist(),
-                    "predicted_doublets": predicted_doublets.tolist(),
-                    "doublet_rate": doublet_rate,
-                    "n_doublets": n_doublets,
+            detection_stats = {
+                "analysis_type": "doublet_detection",
+                "expected_doublet_rate": expected_doublet_rate,
+                "threshold": threshold,
+                "detection_method": detection_method,
+                "n_cells_analyzed": len(predicted_doublets),
+                "n_doublets_detected": int(n_doublets),
+                "actual_doublet_rate": float(doublet_rate),
+                "doublet_score_stats": {
+                    "min": float(doublet_scores.min()),
+                    "max": float(doublet_scores.max()),
+                    "mean": float(doublet_scores.mean()),
+                    "std": float(doublet_scores.std())
                 }
-            )
+            }
 
-            # Update AnnData if available
-            if self.data_manager.adata is not None:
-                self.data_manager.adata.obs["doublet_score"] = doublet_scores
-                self.data_manager.adata.obs["predicted_doublet"] = predicted_doublets
-
-            return f"""Doublet Detection Complete!
-
-**Total Cells:** {len(predicted_doublets)}
-**Predicted Doublets:** {n_doublets} ({doublet_rate:.1%})
-**Expected Doublet Rate:** {expected_doublet_rate:.1%}
-
-Doublet scores and predictions have been added to the dataset.
-Doublet score histogram shows the distribution of doublet scores.
-
-Next suggested step: Filter out doublets or proceed with cell type annotation."""
+            logger.info(f"Doublet detection completed: {n_doublets} doublets detected ({doublet_rate:.1%})")
+            
+            return adata_doublets, detection_stats
 
         except Exception as e:
             logger.exception(f"Error in doublet detection: {e}")
-            return f"Error detecting doublets: {str(e)}"
+            raise SingleCellError(f"Doublet detection failed: {str(e)}")
+
+    def _fallback_doublet_detection(
+        self, 
+        counts_matrix: np.ndarray, 
+        expected_doublet_rate: float
+    ) -> Tuple[np.ndarray, np.ndarray, str]:
+        """
+        Fallback doublet detection method when Scrublet is not available.
+        
+        Args:
+            counts_matrix: Count matrix (cells x genes)
+            expected_doublet_rate: Expected doublet rate
+            
+        Returns:
+            Tuple of (doublet_scores, predicted_doublets, method_name)
+        """
+        logger.info("Using fallback doublet detection method")
+        
+        n_cells = counts_matrix.shape[0]
+        
+        # Calculate per-cell metrics that indicate doublets
+        total_counts = np.sum(counts_matrix, axis=1)
+        n_genes = np.sum(counts_matrix > 0, axis=1)
+        
+        # Normalize metrics to z-scores
+        total_counts_z = np.abs((total_counts - np.mean(total_counts)) / np.std(total_counts))
+        n_genes_z = np.abs((n_genes - np.mean(n_genes)) / np.std(n_genes))
+        
+        # Combined doublet score (higher = more likely doublet)
+        doublet_scores = (total_counts_z + n_genes_z) / 2
+        
+        # Apply threshold based on expected doublet rate
+        doublet_threshold = np.percentile(doublet_scores, (1 - expected_doublet_rate) * 100)
+        predicted_doublets = doublet_scores > doublet_threshold
+        
+        logger.info(f"Fallback method detected {np.sum(predicted_doublets)} potential doublets")
+        
+        return doublet_scores, predicted_doublets, "fallback_outlier_detection"
 
     def annotate_cell_types(
-        self, reference_markers: Optional[Dict[str, List[str]]] = None
-    ) -> str:
+        self, 
+        adata: anndata.AnnData,
+        reference_markers: Optional[Dict[str, List[str]]] = None
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Annotate cell types based on marker genes.
 
         Args:
+            adata: AnnData object with clustering results
             reference_markers: Optional custom marker genes dictionary
 
         Returns:
-            str: Cell type annotation results
+            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with cell type annotations and stats
+            
+        Raises:
+            SingleCellError: If annotation fails
         """
         try:
-            if not self.data_manager.has_data():
-                return "No data loaded. Please load single-cell data first."
+            logger.info("Starting cell type annotation using marker genes")
+            
+            # Validate input
+            if "leiden" not in adata.obs.columns:
+                raise SingleCellError("No clustering results found. Please run clustering first.")
 
-            if self.data_manager.adata is None:
-                return "No processed data available. Please run clustering first."
-
-            logger.info("Annotating cell types using marker genes")
+            # Create working copy
+            adata_annotated = adata.copy()
 
             # Use provided markers or default ones
             markers = reference_markers or self.cell_type_markers
+            logger.info(f"Using {len(markers)} marker sets for annotation")
 
             # Calculate marker gene scores for each cluster
-            cluster_annotations = self._calculate_marker_scores(markers)
+            cluster_annotations = self._calculate_marker_scores_from_adata(adata_annotated, markers)
 
-            # Create annotation plot
-            annotation_plot = self._create_annotation_plot(cluster_annotations)
-
-            dataset_info = {
-                "data_shape": self.data_manager.adata.shape,
-                "source_dataset": self.data_manager.current_metadata.get(
-                    "source", "Current Dataset"
-                ),
-                "n_cells": self.data_manager.adata.n_obs,
-                "n_genes": self.data_manager.adata.n_vars,
-                "n_clusters": len(self.data_manager.adata.obs["leiden"].unique()),
-            }
-
-            analysis_params = {
-                "markers_used": list(markers.keys()),
-                "n_marker_sets": len(markers),
-                "analysis_type": "cell_type_annotation",
-            }
-
-            self.data_manager.add_plot(
-                annotation_plot,
-                title="Cell Type Marker Scores by Cluster",
-                source="enhanced_singlecell_service",
-                dataset_info=dataset_info,
-                analysis_params=analysis_params,
-            )
-
-            # Add annotations to AnnData
+            # Determine best cell type for each cluster
             cluster_to_celltype = {}
-            for cluster_id in self.data_manager.adata.obs["leiden"].unique():
-                if cluster_id in cluster_annotations:
+            for cluster_id in adata_annotated.obs["leiden"].unique():
+                cluster_str = str(cluster_id)
+                if cluster_str in cluster_annotations:
                     best_match = max(
-                        cluster_annotations[cluster_id].items(), key=lambda x: x[1]
+                        cluster_annotations[cluster_str].items(), key=lambda x: x[1]
                     )
                     cluster_to_celltype[cluster_id] = best_match[0]
                 else:
                     cluster_to_celltype[cluster_id] = "Unknown"
 
             # Map cluster annotations to cells
-            cell_types = self.data_manager.adata.obs["leiden"].map(cluster_to_celltype)
-            self.data_manager.adata.obs["cell_type"] = cell_types
+            cell_types = adata_annotated.obs["leiden"].map(cluster_to_celltype)
+            adata_annotated.obs["cell_type"] = cell_types
 
-            # Store in metadata
-            self.data_manager.current_metadata.update(
-                {
-                    "cell_type_annotations": cluster_to_celltype,
-                    "marker_genes_used": list(markers.keys()),
-                }
-            )
-
-            # Create annotated UMAP
-            annotated_umap = self._create_annotated_umap()
-            self.data_manager.add_plot(
-                annotated_umap,
-                title="UMAP with Cell Type Annotations",
-                source="enhanced_singlecell_service",
-            )
-
-            # Format results
+            # Calculate annotation statistics
             cell_type_counts = cell_types.value_counts().to_dict()
+            n_cell_types = len(set(cell_types))
+            
+            annotation_stats = {
+                "analysis_type": "cell_type_annotation",
+                "markers_used": list(markers.keys()),
+                "n_marker_sets": len(markers),
+                "n_clusters": len(adata_annotated.obs["leiden"].unique()),
+                "n_cell_types_identified": n_cell_types,
+                "cluster_to_celltype": {str(k): v for k, v in cluster_to_celltype.items()},
+                "cell_type_counts": {str(k): int(v) for k, v in cell_type_counts.items()},
+                "marker_scores": cluster_annotations
+            }
 
-            return f"""Cell Type Annotation Complete!
-
-**Annotation Method:** Marker gene scoring
-**Cell Types Identified:** {len(set(cell_types))}
-
-**Cell Type Distribution:**
-{self._format_cell_type_counts(cell_type_counts)}
-
-**Cluster Annotations:**
-{self._format_cluster_annotations(cluster_to_celltype)}
-
-Cell type annotations have been added to the dataset and visualized on UMAP.
-
-Next suggested step: Analyze marker genes for specific cell types or run pathway analysis."""
+            logger.info(f"Cell type annotation completed: {n_cell_types} cell types identified")
+            
+            return adata_annotated, annotation_stats
 
         except Exception as e:
             logger.exception(f"Error in cell type annotation: {e}")
-            return f"Error annotating cell types: {str(e)}"
+            raise SingleCellError(f"Cell type annotation failed: {str(e)}")
 
     def find_marker_genes(
-        self, cell_type: Optional[str] = None, cluster: Optional[str] = None
-    ) -> str:
+        self, 
+        adata: anndata.AnnData,
+        groupby: str = "leiden",
+        groups: Optional[List[str]] = None,
+        method: str = "wilcoxon",
+        n_genes: int = 25
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
-        Find marker genes for a specific cell type or cluster.
+        Find marker genes for clusters or cell types.
 
         Args:
-            cell_type: Specific cell type to analyze
-            cluster: Specific cluster to analyze
+            adata: AnnData object with clustering/annotation results
+            groupby: Column name to group by ('leiden', 'cell_type', etc.)
+            groups: Specific groups to analyze (None for all)
+            method: Statistical method ('wilcoxon', 't-test', 'logreg')
+            n_genes: Number of top marker genes per group
 
         Returns:
-            str: Marker gene analysis results
+            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with marker gene results and stats
+            
+        Raises:
+            SingleCellError: If marker gene detection fails
         """
         try:
-            if not self.data_manager.has_data() or self.data_manager.adata is None:
-                return "No processed data available. Please run clustering first."
+            logger.info(f"Finding marker genes grouped by: {groupby}")
+            
+            # Validate input
+            if groupby not in adata.obs.columns:
+                raise SingleCellError(f"Group column '{groupby}' not found in observations")
 
-            logger.info(
-                f"Finding marker genes for cell_type={cell_type}, cluster={cluster}"
+            # Create working copy
+            adata_markers = adata.copy()
+
+            # Run differential expression analysis
+            sc.tl.rank_genes_groups(
+                adata_markers,
+                groupby=groupby,
+                groups=groups,
+                method=method,
+                n_genes=n_genes,
+                use_raw=True
             )
 
-            adata = self.data_manager.adata
-
-            if cell_type and "cell_type" in adata.obs.columns:
-                # Find markers for specific cell type
-                sc.tl.rank_genes_groups(
-                    adata,
-                    "cell_type",
-                    groups=[cell_type],
-                    method="wilcoxon",
-                    use_raw=True,
-                )
-                group_name = cell_type
-            elif cluster and "leiden" in adata.obs.columns:
-                # Find markers for specific cluster
-                sc.tl.rank_genes_groups(
-                    adata, "leiden", groups=[cluster], method="wilcoxon", use_raw=True
-                )
-                group_name = f"Cluster {cluster}"
-            else:
-                # Find markers for all groups
-                if "cell_type" in adata.obs.columns:
-                    sc.tl.rank_genes_groups(
-                        adata, "cell_type", method="wilcoxon", use_raw=True
-                    )
-                    group_name = "all cell types"
-                else:
-                    sc.tl.rank_genes_groups(
-                        adata, "leiden", method="wilcoxon", use_raw=True
-                    )
-                    group_name = "all clusters"
-
-            # Extract marker genes
-            marker_genes_df = self._extract_marker_genes(adata, group_name)
-
-            # Create marker gene plot
+            # Extract marker genes into structured format
+            marker_genes_df = self._extract_marker_genes(adata_markers, groupby)
+            
+            # Calculate marker gene statistics
+            unique_groups = adata_markers.obs[groupby].unique()
+            n_groups = len(unique_groups)
+            
+            marker_stats = {
+                "analysis_type": "marker_gene_analysis",
+                "groupby": groupby,
+                "method": method,
+                "n_genes": n_genes,
+                "n_groups": n_groups,
+                "groups_analyzed": [str(g) for g in unique_groups],
+                "has_marker_results": "rank_genes_groups" in adata_markers.uns,
+                "marker_genes_df_shape": marker_genes_df.shape if not marker_genes_df.empty else (0, 0)
+            }
+            
+            # Store top marker genes per group
             if not marker_genes_df.empty:
-                marker_plot = self._create_marker_gene_plot(marker_genes_df)
-                self.data_manager.add_plot(
-                    marker_plot,
-                    title=f"Top Marker Genes for {group_name}",
-                    source="enhanced_singlecell_service",
-                )
+                top_markers_per_group = {}
+                for group in marker_genes_df["group"].unique():
+                    group_genes = marker_genes_df[marker_genes_df["group"] == group].head(10)
+                    top_markers_per_group[str(group)] = [
+                        {
+                            "gene": row["gene"], 
+                            "score": float(row["score"]), 
+                            "pval": float(row["pval"])
+                        }
+                        for _, row in group_genes.iterrows()
+                    ]
+                marker_stats["top_markers_per_group"] = top_markers_per_group
 
-            # Store results
-            self.data_manager.current_metadata[
-                "marker_genes"
-            ] = marker_genes_df.to_dict()
-
-            return f"""Marker Gene Analysis Complete!
-
-**Analysis Group:** {group_name}
-**Top Marker Genes:**
-
-{self._format_marker_genes(marker_genes_df)}
-
-Marker gene expression plot generated showing top differentially expressed genes.
-
-Next suggested step: Validate marker genes or perform pathway enrichment analysis."""
+            logger.info(f"Marker gene analysis completed for {n_groups} groups using {method} method")
+            
+            return adata_markers, marker_stats
 
         except Exception as e:
             logger.exception(f"Error finding marker genes: {e}")
-            return f"Error finding marker genes: {str(e)}"
+            raise SingleCellError(f"Marker gene analysis failed: {str(e)}")
+
+    def _calculate_marker_scores_from_adata(
+        self, 
+        adata: anndata.AnnData, 
+        markers: Dict[str, List[str]]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate marker gene scores for each cluster from AnnData object.
+        
+        Args:
+            adata: AnnData object with clustering results
+            markers: Dictionary of cell type markers
+            
+        Returns:
+            Dict[str, Dict[str, float]]: Cluster scores for each cell type
+        """
+        logger.info("Calculating marker scores from AnnData")
+        
+        # Ensure unique names to prevent reindexing errors
+        if not adata.obs_names.is_unique:
+            logger.warning("Non-unique observation indices detected. Making unique.")
+            adata.obs_names_make_unique()
+
+        if not adata.var_names.is_unique:
+            logger.warning("Non-unique variable names detected. Making unique.")
+            adata.var_names_make_unique()
+
+        cluster_scores = {}
+
+        # Get unique clusters
+        unique_clusters = adata.obs["leiden"].astype(str).unique()
+
+        for cluster in unique_clusters:
+            cluster_scores[cluster] = {}
+            cluster_cells = adata.obs["leiden"].astype(str) == cluster
+
+            for cell_type, marker_genes in markers.items():
+                # Find available markers in the dataset
+                available_markers = [
+                    gene for gene in marker_genes if gene in adata.var_names
+                ]
+
+                if available_markers:
+                    try:
+                        # Calculate mean expression of markers in this cluster
+                        subset = adata[cluster_cells, available_markers]
+
+                        if subset.shape[0] > 0:  # Check if any cells match
+                            if hasattr(subset.X, 'toarray'):
+                                marker_expression = subset.X.toarray().mean(axis=0)
+                            else:
+                                marker_expression = subset.X.mean(axis=0)
+                                
+                            # Calculate score as mean of available markers
+                            score = float(np.mean(marker_expression))
+                            cluster_scores[cluster][cell_type] = score
+                        else:
+                            cluster_scores[cluster][cell_type] = 0.0
+                    except Exception as e:
+                        logger.warning(
+                            f"Error calculating marker score for cluster {cluster}, cell type {cell_type}: {e}"
+                        )
+                        cluster_scores[cluster][cell_type] = 0.0
+                else:
+                    cluster_scores[cluster][cell_type] = 0.0
+
+        logger.info(f"Calculated marker scores for {len(unique_clusters)} clusters")
+        return cluster_scores
 
     def run_pathway_analysis(self, cell_type: Optional[str] = None) -> str:
         """

@@ -12,22 +12,24 @@ from langchain_aws import ChatBedrockConverse
 
 from lobster.agents.supervisor import create_supervisor_prompt
 from lobster.agents.data_expert import data_expert
-from lobster.agents.transcriptomics_expert import transcriptomics_expert
-from lobster.agents.method_expert import method_expert
+from lobster.agents.singlecell_expert import singlecell_expert
+from lobster.agents.bulk_rnaseq_expert import bulk_rnaseq_expert
 from lobster.agents.state import OverallState
 from lobster.config.settings import get_settings
-from lobster.core.data_manager import DataManager
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 from lobster.tools.handoff_tool import create_custom_handoff_tool
 
 logger = get_logger(__name__)
 
 def create_bioinformatics_graph(
-    data_manager: DataManager,
+    data_manager: DataManagerV2,
     checkpointer: InMemorySaver = None,
     callback_handler=None,
     manual_model_params: dict = None
 ):
+    from lobster.agents.method_expert import method_expert
+    
     """Create the bioinformatics multi-agent graph using langgraph_supervisor."""
     logger.info("Creating bioinformatics multi-agent graph")
     
@@ -58,14 +60,23 @@ def create_bioinformatics_graph(
     )
     agents.append(data_agent)
     
-    # Create transcriptomics expert agent
-    transcriptomics_agent = transcriptomics_expert(
+    # Create single-cell expert agent
+    singlecell_agent = singlecell_expert(
         data_manager=data_manager,
         callback_handler=callback_handler,
-        agent_name='transcriptomics_expert_agent',
+        agent_name='singlecell_expert_agent',
         handoff_tools=None
     )
-    agents.append(transcriptomics_agent)
+    agents.append(singlecell_agent)
+    
+    # Create bulk RNA-seq expert agent
+    bulk_rnaseq_agent = bulk_rnaseq_expert(
+        data_manager=data_manager,
+        callback_handler=callback_handler,
+        agent_name='bulk_rnaseq_expert_agent',
+        handoff_tools=None
+    )
+    agents.append(bulk_rnaseq_agent)
     
     # Create method expert agent
     method_agent = method_expert(
@@ -98,9 +109,12 @@ def create_bioinformatics_graph(
             create_custom_handoff_tool(agent_name='data_expert_agent',
                                        name="handoff_to_data_expert",
                                        description="Assign data fetching/download tasks to the data expert"),
-            create_custom_handoff_tool(agent_name='transcriptomics_expert_agent',
-                                       name="handoff_to_transcriptomics_expert",
-                                       description="Assign analysis tasks to the transcriptomics expert"),
+            create_custom_handoff_tool(agent_name='singlecell_expert_agent',
+                                       name="handoff_to_singlecell_expert",
+                                       description="Assign single-cell RNA-seq analysis tasks to the single-cell expert"),
+            create_custom_handoff_tool(agent_name='bulk_rnaseq_expert_agent',
+                                       name="handoff_to_bulk_rnaseq_expert",
+                                       description="Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert"),
             create_custom_handoff_tool(agent_name='method_expert_agent',
                                        name="handoff_to_method_expert",
                                        description="Assign literature/method tasks to the method expert")

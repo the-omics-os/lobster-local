@@ -5,108 +5,78 @@ This service provides methods for evaluating the quality of single-cell
 RNA-seq data, generating quality metrics and plots.
 """
 
-from typing import List
+from typing import Dict, List, Tuple, Any
 
+import anndata
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from lobster.core.data_manager import DataManager
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+class QualityError(Exception):
+    """Base exception for quality assessment operations."""
+    pass
+
+
 class QualityService:
     """
-    Service for assessing single-cell RNA-seq data quality.
+    Stateless service for assessing single-cell RNA-seq data quality.
 
     This class provides methods to calculate quality metrics and generate
     visualizations for evaluating the quality of single-cell RNA-seq data.
     """
 
-    def __init__(self, data_manager: DataManager):
+    def __init__(self):
         """
         Initialize the quality assessment service.
-
-        Args:
-            data_manager: DataManager instance for accessing data
+        
+        This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing QualityService")
-        self.data_manager = data_manager
+        logger.info("Initializing stateless QualityService")
         logger.info("QualityService initialized successfully")
 
     def assess_quality(
         self,
+        adata: anndata.AnnData,
         min_genes: int = 500,
         max_mt_pct: float = 20.0,
         max_ribo_pct: float = 50.0,
         min_housekeeping_score: float = 1.0,
-    ) -> str:
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
-        Perform quality assessment on the current dataset.
+        Perform quality assessment on single-cell RNA-seq data.
 
         Args:
+            adata: AnnData object to assess
             min_genes: Minimum number of genes per cell
             max_mt_pct: Maximum percentage of mitochondrial genes
             max_ribo_pct: Maximum percentage of ribosomal genes
             min_housekeeping_score: Minimum housekeeping gene score
 
         Returns:
-            str: Quality assessment report
+            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with QC metrics and assessment stats
+            
+        Raises:
+            QualityError: If quality assessment fails
         """
-        if not self.data_manager.has_data():
-            return "No data loaded. Please download a dataset first."
-
         try:
-            data = self.data_manager.current_data
+            logger.info("Starting quality assessment")
+            
+            # Create working copy
+            adata_qc = adata.copy()
+            
+            # Calculate QC metrics from expression matrix
+            qc_metrics = self._calculate_qc_metrics_from_adata(adata_qc)
 
-            # Calculate QC metrics
-            qc_metrics = self._calculate_qc_metrics(data)
-
-            # Create plots
-            plots = self._create_quality_plots(qc_metrics)
-
-            # Add plots to data manager with comprehensive metadata
-            plot_ids = []
-            dataset_info = {
-                "data_shape": data.shape,
-                "source_dataset": self.data_manager.current_metadata.get(
-                    "source", "Current Dataset"
-                ),
-                "n_cells": data.shape[0],
-                "n_genes": data.shape[1],
-            }
-
-            analysis_params = {
-                "min_genes": min_genes,
-                "max_mt_pct": max_mt_pct,
-                "max_ribo_pct": max_ribo_pct,
-                "min_housekeeping_score": min_housekeeping_score,
-                "analysis_type": "quality_control",
-            }
-
-            plot_titles = [
-                "Mitochondrial Gene Distribution",
-                "Ribosomal Gene Distribution",
-                "Housekeeping Gene Score Distribution",
-                "Cell Quality Metrics (Mitochondrial)",
-                "Cell Quality Metrics (Ribosomal)",
-                "Features vs RNA Count Correlation",
-            ]
-
-            for i, plot in enumerate(plots):
-                title = (
-                    plot_titles[i] if i < len(plot_titles) else f"Quality Plot {i+1}"
-                )
-                plot_id = self.data_manager.add_plot(
-                    plot,
-                    title=title,
-                    source="quality_service",
-                    dataset_info=dataset_info,
-                    analysis_params=analysis_params,
-                )
-                plot_ids.append(plot_id)
+            # Add QC metrics to observations
+            adata_qc.obs["mt_pct"] = qc_metrics["mt_pct"]
+            adata_qc.obs["ribo_pct"] = qc_metrics["ribo_pct"]
+            adata_qc.obs["housekeeping_score"] = qc_metrics["housekeeping_score"]
 
             # Filter cells based on QC metrics
             passing_cells = (
@@ -116,59 +86,144 @@ class QualityService:
                 & (qc_metrics["housekeeping_score"] >= min_housekeeping_score)
             )
 
+            # Add QC pass/fail flag to observations
+            adata_qc.obs["qc_pass"] = passing_cells
+
             cells_before = len(qc_metrics)
             cells_after = passing_cells.sum()
 
             # Generate summary
             summary = self._generate_qc_summary(qc_metrics)
 
-            # Store QC results in metadata
-            self.data_manager.current_metadata["qc_metrics"] = {
-                "mean_total_counts": qc_metrics["total_counts"].mean(),
-                "mean_genes_per_cell": qc_metrics["n_genes"].mean(),
-                "mean_mt_pct": qc_metrics["mt_pct"].mean(),
-                "mean_ribo_pct": qc_metrics["ribo_pct"].mean(),
-                "mean_housekeeping_score": qc_metrics["housekeeping_score"].mean(),
+            # Compile assessment statistics
+            assessment_stats = {
+                "analysis_type": "quality_assessment",
+                "min_genes": min_genes,
+                "max_mt_pct": max_mt_pct,
+                "max_ribo_pct": max_ribo_pct,
+                "min_housekeeping_score": min_housekeeping_score,
                 "cells_before_qc": cells_before,
                 "cells_after_qc": cells_after,
                 "cells_removed": cells_before - cells_after,
-                "quality_status": "Pass"
-                if cells_after / cells_before > 0.7
-                else "Warning",
-                "filter_params": {
-                    "min_genes": min_genes,
-                    "max_mt_pct": max_mt_pct,
-                    "max_ribo_pct": max_ribo_pct,
-                    "min_housekeeping_score": min_housekeeping_score,
+                "cells_retained_pct": (cells_after / cells_before) * 100,
+                "quality_status": "Pass" if cells_after / cells_before > 0.7 else "Warning",
+                "mean_total_counts": float(qc_metrics["total_counts"].mean()),
+                "mean_genes_per_cell": float(qc_metrics["n_genes"].mean()),
+                "mean_mt_pct": float(qc_metrics["mt_pct"].mean()),
+                "mean_ribo_pct": float(qc_metrics["ribo_pct"].mean()),
+                "mean_housekeeping_score": float(qc_metrics["housekeeping_score"].mean()),
+                "qc_summary": summary,
+                "mt_stats": {
+                    "min": float(qc_metrics["mt_pct"].min()),
+                    "max": float(qc_metrics["mt_pct"].max()),
+                    "mean": float(qc_metrics["mt_pct"].mean()),
+                    "std": float(qc_metrics["mt_pct"].std())
                 },
+                "ribo_stats": {
+                    "min": float(qc_metrics["ribo_pct"].min()),
+                    "max": float(qc_metrics["ribo_pct"].max()),
+                    "mean": float(qc_metrics["ribo_pct"].mean()),
+                    "std": float(qc_metrics["ribo_pct"].std())
+                },
+                "housekeeping_stats": {
+                    "min": float(qc_metrics["housekeeping_score"].min()),
+                    "max": float(qc_metrics["housekeeping_score"].max()),
+                    "mean": float(qc_metrics["housekeeping_score"].mean()),
+                    "std": float(qc_metrics["housekeeping_score"].std())
+                }
             }
 
-            # If we have AnnData object, update it with QC info
-            if self.data_manager.adata is not None:
-                self.data_manager.adata.obs["mt_pct"] = qc_metrics["mt_pct"]
-                self.data_manager.adata.obs["ribo_pct"] = qc_metrics["ribo_pct"]
-                self.data_manager.adata.obs["housekeeping_score"] = qc_metrics[
-                    "housekeeping_score"
-                ]
-                self.data_manager.adata.obs["qc_pass"] = passing_cells
-
-            # Filter the data if needed in the future - this would need to be integrated with the data manager
-            # filtered_data = data.loc[passing_cells]
-
-            return self._format_quality_report(
-                qc_metrics,
-                summary,
-                cells_before,
-                cells_after,
-                min_genes,
-                max_mt_pct,
-                max_ribo_pct,
-                min_housekeeping_score,
-            )
+            logger.info(f"Quality assessment completed: {cells_after}/{cells_before} cells pass QC ({assessment_stats['cells_retained_pct']:.1f}%)")
+            
+            return adata_qc, assessment_stats
 
         except Exception as e:
             logger.exception(f"Error in quality assessment: {e}")
-            return f"Error assessing quality: {str(e)}"
+            raise QualityError(f"Quality assessment failed: {str(e)}")
+
+    def _calculate_qc_metrics_from_adata(self, adata: anndata.AnnData) -> pd.DataFrame:
+        """
+        Calculate quality control metrics from AnnData object.
+
+        Args:
+            adata: AnnData object
+
+        Returns:
+            DataFrame: DataFrame with QC metrics
+        """
+        logger.info("Calculating quality metrics from AnnData")
+
+        # Identify mitochondrial genes
+        mt_genes = adata.var_names.str.startswith("MT-") | adata.var_names.str.startswith("mt-")
+        
+        # Identify ribosomal genes
+        ribo_genes = (
+            adata.var_names.str.startswith("RPS") | 
+            adata.var_names.str.startswith("RPL") |
+            adata.var_names.str.startswith("rps") | 
+            adata.var_names.str.startswith("rpl")
+        )
+
+        # Identify housekeeping genes for score
+        housekeeping_genes = ["ACTB", "GAPDH", "MALAT1"]
+
+        # Calculate basic metrics
+        if hasattr(adata.X, 'toarray'):
+            # Sparse matrix
+            total_counts = np.array(adata.X.sum(axis=1)).flatten()
+            n_genes = np.array((adata.X > 0).sum(axis=1)).flatten()
+        else:
+            # Dense matrix
+            total_counts = adata.X.sum(axis=1)
+            n_genes = (adata.X > 0).sum(axis=1)
+
+        # Calculate mitochondrial percentage
+        if mt_genes.sum() > 0:
+            if hasattr(adata.X, 'toarray'):
+                mt_counts = np.array(adata[:, mt_genes].X.sum(axis=1)).flatten()
+            else:
+                mt_counts = adata[:, mt_genes].X.sum(axis=1)
+            mt_pct = (mt_counts / (total_counts + 1e-8)) * 100  # Add small epsilon to avoid division by zero
+        else:
+            logger.warning("No mitochondrial genes found. Setting mitochondrial percentage to 0.")
+            mt_pct = np.zeros(adata.n_obs)
+
+        # Calculate ribosomal percentage
+        if ribo_genes.sum() > 0:
+            if hasattr(adata.X, 'toarray'):
+                ribo_counts = np.array(adata[:, ribo_genes].X.sum(axis=1)).flatten()
+            else:
+                ribo_counts = adata[:, ribo_genes].X.sum(axis=1)
+            ribo_pct = (ribo_counts / (total_counts + 1e-8)) * 100
+        else:
+            logger.warning("No ribosomal genes found. Setting ribosomal percentage to 0.")
+            ribo_pct = np.zeros(adata.n_obs)
+
+        # Calculate housekeeping gene score
+        available_hk_genes = [gene for gene in housekeeping_genes if gene in adata.var_names]
+        if available_hk_genes:
+            if hasattr(adata.X, 'toarray'):
+                housekeeping_score = np.array(adata[:, available_hk_genes].X.sum(axis=1)).flatten()
+            else:
+                housekeeping_score = adata[:, available_hk_genes].X.sum(axis=1)
+        else:
+            logger.warning("No housekeeping genes found. Setting housekeeping score to 0.")
+            housekeeping_score = np.zeros(adata.n_obs)
+
+        # Combine metrics into a DataFrame
+        qc_df = pd.DataFrame(
+            {
+                "total_counts": total_counts,
+                "n_genes": n_genes,
+                "mt_pct": mt_pct,
+                "ribo_pct": ribo_pct,
+                "housekeeping_score": housekeeping_score,
+            },
+            index=adata.obs_names
+        )
+
+        logger.info(f"Generated QC metrics for {len(qc_df)} cells")
+        return qc_df
 
     def _calculate_qc_metrics(self, data: pd.DataFrame) -> pd.DataFrame:
         """

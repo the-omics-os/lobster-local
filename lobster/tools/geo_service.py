@@ -1,8 +1,9 @@
 """
-Professional GEO data service using GEOparse.
+Professional GEO data service using GEOparse for DataManagerV2.
 
 This service provides a unified interface for downloading and processing
-data from the Gene Expression Omnibus (GEO) database using GEOparse library.
+data from the Gene Expression Omnibus (GEO) database using GEOparse library
+and the modular DataManagerV2 system.
 """
 
 import json
@@ -22,7 +23,7 @@ try:
 except ImportError:
     GEOparse = None
 
-from lobster.core.data_manager import DataManager
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -30,20 +31,21 @@ logger = get_logger(__name__)
 
 class GEOService:
     """
-    Professional service for accessing and processing GEO data using GEOparse.
+    Professional service for accessing and processing GEO data using GEOparse and DataManagerV2.
 
     This class provides a high-level interface for working with GEO data,
-    handling the downloading, parsing, and processing of datasets using GEOparse.
+    handling the downloading, parsing, and processing of datasets using GEOparse
+    and storing them as modalities in the DataManagerV2 system.
     """
 
     def __init__(
-        self, data_manager: DataManager, cache_dir: Optional[str] = None, console=None
+        self, data_manager: DataManagerV2, cache_dir: Optional[str] = None, console=None
     ):
         """
         Initialize the GEO service.
 
         Args:
-            data_manager: DataManager instance for storing processed data
+            data_manager: DataManagerV2 instance for storing processed data as modalities
             cache_dir: Directory to cache downloaded files
             console: Rich console instance for display (creates new if None)
         """
@@ -53,142 +55,185 @@ class GEOService:
             )
 
         self.data_manager = data_manager
-        self.cache_dir = Path(cache_dir) if cache_dir else Path.cwd() / ".geo_cache"
+        self.cache_dir = Path(cache_dir) if cache_dir else self.data_manager.cache_dir / "geo"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.console = console
 
-        logger.info("GEOService initialized with GEOparse backend")
+        logger.info("GEOService initialized with GEOparse backend and DataManagerV2")
 
-    def download_dataset(self, query: str) -> str:
+    def fetch_metadata_only(self, geo_id: str) -> str:
+        """
+        Fetch and validate GEO metadata without downloading expression data.
+        
+        This function only downloads the SOFT file metadata and validates it against
+        the transcriptomics schema, storing the metadata in data_manager for user review.
+        
+        Args:
+            geo_id: GEO accession ID (e.g., GSE194247)
+            
+        Returns:
+            str: Formatted metadata summary for user review
+        """
+        try:
+            logger.info(f"Fetching metadata for GEO ID: {geo_id}")
+            
+            # Clean the GEO ID
+            clean_geo_id = geo_id.strip().upper()
+            if not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession (e.g., GSE194247)."
+            
+            # Download SOFT data using GEOparse (metadata only)
+            logger.info(f"Downloading SOFT metadata for {clean_geo_id}...")
+            gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
+            
+            # Extract comprehensive metadata
+            metadata = self._extract_metadata(gse)
+            logger.info(f"Extracted metadata for {clean_geo_id}")
+            
+            # Validate metadata against transcriptomics schema
+            validation_result = self._validate_geo_metadata(metadata)
+            
+            # Store metadata in data_manager for future use
+            # metadata_modality_name = f"geo_{clean_geo_id.lower()}_metadata"
+            # self.data_manager.metadata_store = getattr(self.data_manager, 'metadata_store', {})
+            if clean_geo_id in self.data_manager.metadata_store:
+                return f'{clean_geo_id} already stored in metadata_store.'
+            
+            self.data_manager.metadata_store[clean_geo_id] = {
+                'metadata': metadata,
+                'validation': validation_result,
+                'fetch_timestamp': pd.Timestamp.now().isoformat()
+            }
+            
+            # Log the metadata fetch operation
+            self.data_manager.log_tool_usage(
+                tool_name="fetch_geo_metadata",
+                parameters={"geo_id": clean_geo_id},
+                description=f"Fetched metadata for GEO dataset {clean_geo_id}"
+            )
+            
+            # Format comprehensive metadata summary
+            summary = self._format_metadata_summary(clean_geo_id, metadata, validation_result)
+            
+            logger.info(f"Successfully fetched and validated metadata for {clean_geo_id}")
+            return summary
+            
+        except Exception as e:
+            logger.exception(f"Error fetching metadata for {geo_id}: {e}")
+            return f"Error fetching metadata for {geo_id}: {str(e)}"
+
+    def download_dataset(self, clean_geo_id: str) -> str:
         """
         Download and process a dataset from GEO using GEOparse.
 
         Args:
-            query: Query string containing a GEO accession number
+            clean_geo_id: Cleaned GEO accession ID
 
         Returns:
             str: Status message with detailed information
         """
         try:
-            logger.info(f"Processing GEO query: {query}")
+            logger.info(f"Processing GEO query: {clean_geo_id}")
 
-            gse_id = self._extract_gse_id(query)
-            if not gse_id:
-                return "Please provide a valid GSE accession number (e.g., GSE109564)"
+            # Check if metadata already exists (should be fetched first)
+            if clean_geo_id not in self.data_manager.metadata_store:
+                return f"Please fetch metadata first using fetch_metadata_only('{clean_geo_id}') before downloading the dataset."
 
-            logger.info(f"Identified GSE ID: {gse_id}")
+            # Check if modality already exists in DataManagerV2
+            modality_name = f"geo_{clean_geo_id.lower()}"
+            existing_modalities = self.data_manager.list_modalities()
 
-            # Check if processed matrix already exists in workspace
-            existing_data = self._check_workspace_for_processed_data(gse_id)
-            if existing_data is not None:
-                logger.info(f"Found existing processed data for {gse_id} in workspace")
-                combined_matrix, saved_metadata = existing_data
+            # Step 1: Use existing metadata
+            cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
+            logger.info(f"Using cached metadata for {clean_geo_id}")
 
-                # Load into data manager
-                self.data_manager.set_data(
-                    data=combined_matrix, metadata=saved_metadata
-                )
-
-                # Log reuse of existing data
-                self.data_manager.log_tool_usage(
-                    tool_name="load_existing_geo_dataset",
-                    parameters={"geo_id": gse_id},
-                    description=f"Loaded existing processed GEO dataset {gse_id} from workspace",
-                )
-
-                return f"""Successfully loaded existing processed data for {gse_id}!
-
-📊 Combined expression matrix: {combined_matrix.shape[0]} cells × {combined_matrix.shape[1]} genes
-💾 Loaded from workspace (no re-downloading needed)
-🕒 Originally processed: {saved_metadata.get('processing_date', 'Unknown')}
-🔬 Samples: {saved_metadata.get('n_samples', 'Unknown')}
-⚡ Ready for immediate analysis!"""
-
-            # Step 1: Download SOFT data using GEOparse
-            logger.info(f"Downloading SOFT data for {gse_id} using GEOparse...")
-            gse = GEOparse.get_GEO(geo=gse_id, destdir=str(self.cache_dir))
-
-            # Step 2: Extract metadata from SOFT
-            metadata = self._extract_metadata(gse)
-            logger.info(f"Extracted metadata for {gse_id}")
+            # Step 2: Download SOFT data using GEOparse (re-download for expression data processing)
+            logger.info(f"Downloading SOFT data for {clean_geo_id} using GEOparse...")
+            gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
 
             # Step 3: Check for supplementary files (TAR, etc.) first
-            supplementary_data = self._process_supplementary_files(gse, gse_id)
+            supplementary_data = self._process_supplementary_files(gse, clean_geo_id)
 
             if supplementary_data is not None and not supplementary_data.empty:
-                logger.info(f"Successfully processed supplementary files for {gse_id}")
+                logger.info(f"Successfully processed supplementary files for {clean_geo_id}")
                 combined_matrix = supplementary_data
                 sample_count = len(gse.gsms) if hasattr(gse, "gsms") else 0
             else:
                 # Step 4: Fallback to individual sample matrices
                 sample_info = self._get_sample_info(gse)
-                logger.info(f"Found {len(sample_info)} samples in {gse_id}")
+                logger.info(f"Found {len(sample_info)} samples in {clean_geo_id}")
 
-                sample_matrices = self._download_sample_matrices(sample_info, gse_id)
+                sample_matrices = self._download_sample_matrices(sample_info, clean_geo_id)
                 validated_matrices = self._validate_matrices(sample_matrices)
 
                 if not validated_matrices:
-                    return f"No valid expression matrices found for {gse_id}. The dataset may not contain downloadable expression data matrices."
+                    return f"No valid expression matrices found for {clean_geo_id}. The dataset may not contain downloadable expression data matrices."
 
-                combined_matrix = self._concatenate_matrices(validated_matrices, gse_id)
+                combined_matrix = self._concatenate_matrices(validated_matrices, clean_geo_id)
                 sample_count = len(validated_matrices)
 
             if combined_matrix is None:
-                return f"Failed to process expression data for {gse_id}"
+                return f"Failed to process expression data for {clean_geo_id}"
 
-            # Step 5: Store in data manager and save to workspace
+            # Step 5: Store as modality in DataManagerV2
             enhanced_metadata = {
-                "source": gse_id,
-                "dataset_id": gse_id,
-                "processing_step": "raw_matrix",
-                "geo_object": gse,
+                "dataset_id": clean_geo_id,
+                "dataset_type": "GEO",
+                "source_metadata": cached_metadata,
                 "n_samples": sample_count,
-                "n_cells": combined_matrix.shape[0],
-                "n_genes": combined_matrix.shape[1],
                 "data_source": "supplementary_files"
                 if supplementary_data is not None
                 else "individual_samples",
                 "processing_date": pd.Timestamp.now().isoformat(),
-                "geoparse_version": "GEOparse-based",
-                **metadata,
+                "geoparse_version": "GEOparse-based"
             }
 
-            self.data_manager.set_data(data=combined_matrix, metadata=enhanced_metadata)
+            # Determine appropriate adapter based on data characteristics
+            n_obs, n_vars = combined_matrix.shape
+            if n_obs > 1000 and n_vars > 5000:
+                adapter_name = "transcriptomics_single_cell"
+            elif n_obs < 100:
+                adapter_name = "transcriptomics_bulk"
+            else:
+                adapter_name = "transcriptomics_single_cell"  # Default for GEO
 
-            # Auto-save the processed matrix to workspace using professional naming
-            saved_file = self.data_manager.save_processed_data(
-                processing_step="raw_matrix",
-                data_source="GEO",
-                dataset_id=gse_id,
-                processing_params={
-                    "geoparse_version": "GEOparse-based",
-                    "download_method": "supplementary_files" if supplementary_data is not None else "individual_samples",
-                    "n_samples_processed": sample_count
-                }
+            # Load as modality in DataManagerV2
+            modality_name = f"geo_{clean_geo_id.lower()}"
+            adata = self.data_manager.load_modality(
+                name=modality_name,
+                source=combined_matrix,
+                adapter=adapter_name,
+                validate=True,
+                **enhanced_metadata
             )
+
+            # Save to workspace
+            save_path = f"{clean_geo_id.lower()}_raw.h5ad"
+            saved_file = self.data_manager.save_modality(modality_name, save_path)
 
             # Log successful download and save
             self.data_manager.log_tool_usage(
                 tool_name="download_geo_dataset_geoparse",
-                parameters={"geo_id": gse_id},
-                description=f"Downloaded and processed GEO dataset {gse_id} using GEOparse, saved to {saved_file}",
+                parameters={"geo_id": clean_geo_id},
+                description=f"Downloaded and processed GEO dataset {clean_geo_id} using GEOparse, saved to {saved_file}",
             )
 
             # Auto-save current state
             self.data_manager.auto_save_state()
 
-            return self._format_download_response(
-                gse_id, combined_matrix, metadata, sample_count, saved_file
-            )
+            return f"""Successfully downloaded and loaded GEO dataset {clean_geo_id}!
+
+📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
+🔬 Adapter: {adapter_name}
+💾 Saved to: {save_path}
+🎯 Source: GEO Database
+⚡ Ready for quality control and downstream analysis!
+
+The dataset is now available as modality '{modality_name}' for other agents to use."""
 
         except Exception as e:
             logger.exception(f"Error downloading dataset: {e}")
             return f"Error downloading dataset: {str(e)}"
-
-    def _extract_gse_id(self, query: str) -> Optional[str]:
-        """Extract GSE ID from query string."""
-        match = re.search(r"GSE\d+", query.upper())
-        return match.group(0) if match else None
 
     def _process_supplementary_files(self, gse, gse_id: str) -> Optional[pd.DataFrame]:
         """
@@ -860,6 +905,230 @@ class GEOService:
         except Exception as e:
             logger.error(f"Error extracting metadata: {e}")
             return {}
+
+    def _validate_geo_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate GEO metadata against transcriptomics schema.
+        
+        Args:
+            metadata: Extracted GEO metadata dictionary
+            
+        Returns:
+            Dict containing validation results and schema alignment
+        """
+        try:
+            from lobster.core.schemas.transcriptomics import TranscriptomicsSchema
+            
+            # Get the single-cell schema (covers most GEO datasets)
+            schema = TranscriptomicsSchema.get_single_cell_schema()
+            uns_schema = schema.get('uns', {}).get('optional', [])
+            
+            # Check which metadata fields align with our schema
+            schema_aligned = {}
+            schema_missing = []
+            extra_fields = []
+            
+            # Check alignment for each field in metadata
+            for field in metadata.keys():
+                if field in uns_schema:
+                    schema_aligned[field] = metadata[field]
+                else:
+                    extra_fields.append(field)
+            
+            # Check for schema fields not present in metadata
+            for schema_field in uns_schema:
+                if schema_field not in metadata:
+                    schema_missing.append(schema_field)
+            
+            # Determine data type based on metadata
+            data_type = self._determine_data_type_from_metadata(metadata)
+            
+            validation_result = {
+                'schema_aligned_fields': len(schema_aligned),
+                'schema_missing_fields': len(schema_missing),
+                'extra_fields_count': len(extra_fields),
+                'alignment_percentage': (len(schema_aligned) / len(uns_schema) * 100) if uns_schema else 0.0,
+                'aligned_metadata': schema_aligned,
+                'missing_fields': schema_missing[:10],  # Limit for display
+                'extra_fields': extra_fields[:10],  # Limit for display
+                'predicted_data_type': data_type,
+                'validation_status': 'PASS' if len(schema_aligned) > len(schema_missing) else 'WARNING'
+            }
+            
+            logger.info(f"Metadata validation: {validation_result['alignment_percentage']:.1f}% schema alignment")
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating metadata: {e}")
+            return {
+                'validation_status': 'ERROR',
+                'error_message': str(e),
+                'schema_aligned_fields': 0,
+                'alignment_percentage': 0.0
+            }
+
+    def _determine_data_type_from_metadata(self, metadata: Dict[str, Any]) -> str:
+        """
+        Determine likely data type (single-cell vs bulk) from metadata.
+        
+        Args:
+            metadata: GEO metadata dictionary
+            
+        Returns:
+            str: Predicted data type
+        """
+        try:
+            # Check platform information
+            platforms = metadata.get('platforms', {})
+            platform_info = str(platforms).lower()
+            
+            # Check overall design
+            overall_design = str(metadata.get('overall_design', '')).lower()
+            
+            # Check sample characteristics  
+            samples = metadata.get('samples', {})
+            sample_chars = []
+            for sample in samples.values():
+                chars = sample.get('characteristics_ch1', [])
+                if isinstance(chars, list):
+                    sample_chars.extend([str(c).lower() for c in chars])
+            
+            sample_text = ' '.join(sample_chars)
+            
+            # Keywords that suggest single-cell
+            single_cell_keywords = [
+                'single cell', 'single-cell', 'scrnaseq', 'scrna-seq', 
+                '10x', 'chromium', 'droplet', 'microwell', 'smart-seq',
+                'cell sorting', 'sorted cells', 'individual cells'
+            ]
+            
+            # Keywords that suggest bulk
+            bulk_keywords = [
+                'bulk', 'tissue', 'whole', 'total rna', 'population'
+            ]
+            
+            combined_text = f"{platform_info} {overall_design} {sample_text}"
+            
+            # Count keyword matches
+            single_cell_score = sum(1 for keyword in single_cell_keywords if keyword in combined_text)
+            bulk_score = sum(1 for keyword in bulk_keywords if keyword in combined_text)
+            
+            # Make prediction
+            if single_cell_score > bulk_score:
+                return 'single_cell_rna_seq'
+            elif bulk_score > single_cell_score:
+                return 'bulk_rna_seq'
+            else:
+                # Default to single-cell for GEO datasets (more common)
+                return 'single_cell_rna_seq'
+                
+        except Exception as e:
+            logger.warning(f"Error determining data type: {e}")
+            return 'single_cell_rna_seq'  # Default
+
+    def _format_metadata_summary(
+        self, 
+        geo_id: str, 
+        metadata: Dict[str, Any], 
+        validation_result: Dict[str, Any]
+    ) -> str:
+        """
+        Format comprehensive metadata summary for user review.
+        
+        Args:
+            geo_id: GEO accession ID
+            metadata: Extracted metadata dictionary
+            validation_result: Validation results
+            
+        Returns:
+            str: Formatted metadata summary
+        """
+        try:
+            # Extract key information
+            title = metadata.get('title', 'N/A')
+            summary = metadata.get('summary', 'N/A')[:500] + ('...' if len(str(metadata.get('summary', ''))) > 500 else '')
+            overall_design = metadata.get('overall_design', 'N/A')[:300] + ('...' if len(str(metadata.get('overall_design', ''))) > 300 else '')
+            
+            # Sample information
+            samples = metadata.get('samples', {})
+            sample_count = len(samples)
+            
+            # Platform information
+            platforms = metadata.get('platforms', {})
+            platform_info = []
+            for platform_id, platform_data in platforms.items():
+                platform_info.append(f"{platform_id}: {platform_data.get('title', 'N/A')}")
+            
+            # Contact information
+            contact_name = metadata.get('contact_name', 'N/A')
+            contact_institute = metadata.get('contact_institute', 'N/A')
+            
+            # Publication info
+            pubmed_id = metadata.get('pubmed_id', 'Not available')
+            
+            # Dates
+            submission_date = metadata.get('submission_date', 'N/A')
+            last_update = metadata.get('last_update_date', 'N/A')
+            
+            # Sample characteristics preview
+            sample_preview = []
+            for i, (sample_id, sample_data) in enumerate(samples.items()):
+                if i < 3:  # Show first 3 samples
+                    chars = sample_data.get('characteristics_ch1', [])
+                    if isinstance(chars, list) and chars:
+                        sample_preview.append(f"  - {sample_id}: {chars[0]}")
+                    else:
+                        sample_preview.append(f"  - {sample_id}: {sample_data.get('title', 'No title')}")
+            
+            if sample_count > 3:
+                sample_preview.append(f"  ... and {sample_count - 3} more samples")
+            
+            # Validation status
+            validation_status = validation_result.get('validation_status', 'UNKNOWN')
+            alignment_pct = validation_result.get('alignment_percentage', 0.0)
+            predicted_type = validation_result.get('predicted_data_type', 'unknown')
+            
+            # Format the summary
+            summary_text = f"""📊 **GEO Dataset Metadata Summary: {geo_id}**
+
+🔬 **Study Information:**
+- **Title:** {title}
+- **Summary:** {summary}
+- **Design:** {overall_design}
+- **Predicted Type:** {predicted_type.replace('_', ' ').title()}
+
+👥 **Research Details:**
+- **Contact:** {contact_name} ({contact_institute})
+- **PubMed ID:** {pubmed_id}
+- **Submission:** {submission_date}
+- **Last Update:** {last_update}
+
+🧪 **Platform Information:**
+{chr(10).join(platform_info) if platform_info else '- No platform information available'}
+
+🔢 **Sample Information ({sample_count} samples):**
+{chr(10).join(sample_preview) if sample_preview else '- No sample information available'}
+
+✅ **Schema Validation:**
+- **Status:** {validation_status}
+- **Schema Alignment:** {alignment_pct:.1f}% of expected fields present
+- **Aligned Fields:** {validation_result.get('schema_aligned_fields', 0)}
+- **Missing Fields:** {validation_result.get('schema_missing_fields', 0)}
+
+📋 **Next Steps:**
+1. **Review this metadata** to ensure it matches your research needs
+2. **Confirm the predicted data type** is correct for your analysis
+3. **Proceed to download** the full dataset if satisfied
+4. **Use:** `download_geo_dataset('{geo_id}')` to download expression data
+
+💡 **Note:** This metadata has been cached and validated against our transcriptomics schema. 
+The actual expression data download will be much faster now that metadata is prepared."""
+
+            return summary_text
+            
+        except Exception as e:
+            logger.error(f"Error formatting metadata summary: {e}")
+            return f"Error formatting metadata summary for {geo_id}: {str(e)}"
 
     def _get_sample_info(self, gse) -> Dict[str, Dict[str, Any]]:
         """

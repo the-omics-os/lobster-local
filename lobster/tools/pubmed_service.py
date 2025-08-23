@@ -3,6 +3,7 @@ Enhanced PubMed and NCBI Entrez service for scientific literature and dataset di
 
 This service provides comprehensive functionality for searching PubMed articles
 and discovering omics datasets from NCBI databases including GEO, SRA, and others.
+Now optimized for DataManagerV2 integration.
 """
 
 import json
@@ -11,13 +12,14 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import re
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from datetime import datetime
 from enum import Enum
 
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field, model_validator
 
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -752,6 +754,15 @@ class PubMedService(BaseModel):
     ) -> str:
         """Enhanced version that uses the new comprehensive method."""
         return self.find_geo_from_publication(doi=doi, include_related=True)
+
+    def find_geo_from_pmid(
+        self,
+        pmid: str,
+        top_k_results: Optional[int] = None,
+        doc_content_chars_max: Optional[int] = None
+    ) -> str:
+        """Enhanced version that uses the new comprehensive method."""
+        return self.find_geo_from_publication(pmid=pmid, include_related=True)
 
     # Keep other original methods with minimal changes for compatibility
     def _load_with_params(self, query: str, top_k_results: int) -> List[dict]:

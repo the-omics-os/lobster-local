@@ -3,18 +3,31 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-**Multi-Agent Bioinformatics Analysis System powered by LangGraph**
+**Multi-Omics Multi-Agent Bioinformatics Analysis System powered by LangGraph**
 
-Lobster AI is a powerful command-line tool that uses specialized AI agents to analyze RNA sequencing data. It combines state-of-the-art language models with proven bioinformatics tools to provide intelligent, reproducible analyses.
+Lobster AI is a powerful bioinformatics platform that uses specialized AI agents to analyze multi-omics data including transcriptomics and proteomics. Built on a modular architecture, it combines state-of-the-art language models with proven bioinformatics tools to provide intelligent, reproducible analyses.
 
 ## 🚀 Features
 
-- **Multi-Agent System**: Specialized agents for different analysis tasks
+### Core Capabilities
+- **🤖 Multi-Agent System**: Specialized agents for data management, transcriptomics, proteomics, and literature research
+- **🧬 Multi-Omics Support**: Integrated analysis of transcriptomics and proteomics data
+- **🏗️ Modular Architecture**: DataManagerV2 with extensible adapters and backends
+- **📊 MuData Integration**: Professional multi-modal data analysis and visualization
+- **☁️ Cloud-Ready**: S3-ready design for scalable cloud deployment
+
+### Data Management
 - **GEO Integration**: Download and analyze datasets from Gene Expression Omnibus
-- **Single-Cell Analysis**: Quality control, clustering, cell type annotation
+- **Format Support**: CSV, TSV, Excel, H5AD, 10X MTX, and more
+- **Schema Validation**: Flexible validation with warnings (not failures) for exploratory analysis
+- **Provenance Tracking**: Complete W3C-PROV-like audit trail for reproducibility
+
+### Analysis Capabilities
+- **Single-Cell RNA-seq**: Quality control, filtering, normalization, clustering, marker genes
+- **Bulk RNA-seq**: Differential expression, pathway analysis, batch correction
+- **Proteomics**: Mass spectrometry and affinity data, missing value handling, peptide mapping
 - **Literature Mining**: PubMed integration for method parameters and validation
-- **Reproducible Workflows**: Complete audit trail and export capabilities
-- **Flexible Configuration**: Support for multiple LLM providers and models
+- **Multi-Modal Integration**: Cross-omics analysis using MuData framework
 
 ## 📦 Installation
 
@@ -133,39 +146,182 @@ docker build -f Dockerfile -t lobster-ai:py313 .
 docker run -p 8501:8501 --env-file .env lobster-ai:py313
 ```
 
-## 💬 Example Usage
+## 🏗️ Modular DataManagerV2 Architecture
 
-```bash
-🦞 You: Download GSE109564 and perform quality control
+Lobster AI now features a **modular, extensible architecture** that supports multi-omics analysis through specialized adapters and storage backends.
 
-🦞 Lobster: I'll download GSE109564 and perform quality control analysis...
+### Architecture Overview
+![Architecture](docs/architecture_diagram.md)
 
-[Downloading GEO dataset...]
-✓ Downloaded GSE109564: 5,000 cells × 20,000 genes
-✓ Study: Single-cell RNA-seq of mouse neurons
+```mermaid
+graph TB
+    subgraph "AI Agents"
+        DE[Data Expert<br/>🔄 Multi-Omics Data Management]
+        TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]  
+        PE[Proteomics Expert<br/>🧪 Protein Analysis]
+        ME[Method Expert<br/>📚 Literature Research]
+    end
 
-[Performing quality control...]
-✓ Mitochondrial gene percentage: 5-15% (healthy range)
-✓ Gene counts per cell: 2,000-8,000 (good coverage)
-✓ Identified 523 low-quality cells for removal
+    subgraph "DataManagerV2"
+        DM2[Central Orchestrator<br/>🎯 Modality Management]
+        MODS[Loaded Modalities<br/>📊 In-Memory Storage]
+    end
 
-[Visualizations created:]
-- QC metrics violin plot
-- Gene count distribution
-- Mitochondrial percentage scatter plot
+    subgraph "Modality Adapters"
+        TRA[TranscriptomicsAdapter<br/>Single-cell & Bulk RNA-seq]
+        PRA[ProteomicsAdapter<br/>MS & Affinity Proteomics]
+    end
 
-The data quality looks good overall. Would you like me to proceed with clustering?
+    subgraph "Storage Backends"
+        H5BE[H5AD Backend<br/>💾 AnnData Storage]
+        MUBE[MuData Backend<br/>🔗 Multi-Modal Storage]
+    end
+
+    DE --> DM2
+    TE --> DM2
+    PE --> DM2
+    ME --> DM2
+    
+    DM2 --> TRA
+    DM2 --> PRA
+    DM2 --> MODS
+    
+    MODS --> H5BE
+    MODS --> MUBE
+
+    classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef orchestrator fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
+    classDef adapter fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
+    classDef backend fill:#fff3e0,stroke:#e65100,stroke-width:2px
+
+    class DE,TE,PE,ME agent
+    class DM2,MODS orchestrator
+    class TRA,PRA adapter
+    class H5BE,MUBE backend
 ```
 
-# 🧬 Available Analyses
+### Key Components
 
-- **Data Download**: GEO datasets, CSV/H5 file uploads
-- **Quality Control**: Cell/gene filtering, doublet detection
-- **Clustering**: Leiden/Louvain algorithms, UMAP visualization
-- **Cell Annotation**: Marker-based and reference-based methods
-- **Differential Expression**: Between clusters or conditions
-- **Pathway Analysis**: GO/KEGG enrichment
-- **Literature Integration**: Find parameters and validation from PubMed
+#### 🎯 **DataManagerV2** - Central Orchestrator
+- **Modality Management**: Load, store, and manage multiple data modalities
+- **Schema Validation**: Flexible validation with warnings for exploratory analysis
+- **Provenance Tracking**: Complete audit trail for reproducible research
+- **Multi-Modal Integration**: MuData support for integrated omics analysis
+
+#### 🔌 **Modality Adapters**
+- **TranscriptomicsAdapter**: Single-cell and bulk RNA-seq with automatic gene flagging
+- **ProteomicsAdapter**: Mass spectrometry and affinity data with missing value handling
+- **Extensible**: Easy to add new modalities (metabolomics, imaging, etc.)
+
+#### 💾 **Storage Backends** 
+- **H5ADBackend**: AnnData storage with S3-ready path handling
+- **MuDataBackend**: Multi-modal data storage for integrated analysis
+- **Cloud-Ready**: Designed for seamless S3 integration
+
+## 💬 Multi-Omics Example Usage
+
+### Single-Cell RNA-seq Analysis
+```bash
+🦞 You: Download GSE109564 and perform single-cell analysis
+
+🦞 Lobster: I'll download and analyze the single-cell dataset...
+
+[Data Expert Agent]
+✓ Downloaded GSE109564 as modality 'geo_gse109564'
+✓ Loaded: 5,000 cells × 20,000 genes using transcriptomics_single_cell adapter
+✓ Schema validation: 2 warnings, no errors
+
+[Transcriptomics Expert Agent]  
+✓ Quality assessment: Mean 3,500 genes/cell, 8.2% mitochondrial
+✓ Filtered modality: 4,477 cells × 18,543 genes (removed low-quality data)
+✓ Clustered modality: 12 clusters identified using Leiden algorithm
+✓ Marker genes: Found distinctive markers for each cluster
+
+[Visualizations created:]
+- Quality control metrics
+- UMAP clustering plot  
+- Marker gene heatmap
+
+Analysis complete! The dataset shows 12 distinct cell populations.
+```
+
+### Multi-Omics Integrated Analysis
+```bash
+🦞 You: Load transcriptomics data GSE12345 and proteomics data proteins.csv, then perform integrated analysis
+
+🦞 Lobster: I'll set up multi-omics analysis with both datasets...
+
+[Data Expert Agent]
+✓ Loaded transcriptomics: 'geo_gse12345' (3,200 cells × 15,000 genes)
+✓ Loaded proteomics: 'ms_proteins' (3,200 cells × 1,247 proteins) 
+✓ Created MuData: integrated_analysis.h5mu
+
+[Multi-Modal Analysis]
+✓ Cross-modal correlation analysis
+✓ Integrated dimensionality reduction
+✓ Multi-omics clustering with 8 joint clusters
+✓ Protein-RNA correlation networks
+
+The integrated analysis reveals 8 multi-omics cell states with distinct protein-RNA signatures.
+```
+
+## 🧬 Specialized Analysis Capabilities
+
+### 🧬 **Transcriptomics** (Single-cell & Bulk)
+- **Quality Control**: Automated filtering with literature-based thresholds
+- **Preprocessing**: Normalization, scaling, highly variable gene selection
+- **Clustering**: Leiden/Louvain algorithms with resolution optimization
+- **Cell Annotation**: Marker-based and reference atlas approaches
+- **Differential Expression**: Between clusters, conditions, or time points
+- **Integration**: Batch correction and dataset integration methods
+
+### 🧪 **Proteomics** (Mass Spec & Affinity)
+- **Missing Value Handling**: Multiple imputation strategies for sparse proteomics data
+- **Quality Control**: Contaminant detection, reverse hit removal, CV filtering
+- **Normalization**: Median, quantile, and total sum normalization methods
+- **Peptide Mapping**: Integration of peptide-to-protein relationships for MS data
+- **Statistical Analysis**: Differential protein expression with multiple testing correction
+- **Pattern Analysis**: PCA, clustering, and correlation analysis
+
+### 📚 **Literature Integration**
+- **Parameter Optimization**: Method-specific parameter recommendations from literature
+- **Validation**: Cross-reference results with published studies
+- **Protocol Discovery**: Find detailed protocols and best practices
+- **Dataset Discovery**: Identify related datasets for validation and comparison
+
+## 🔄 Migration from Legacy System
+
+The system maintains backward compatibility while providing enhanced capabilities:
+
+### Legacy Usage (Still Supported)
+```python
+from lobster.core.data_manager import DataManager
+dm = DataManager()
+dm.set_data(dataframe)
+```
+
+### New Modular Usage (Recommended)
+```python
+from lobster.core.data_manager_v2 import DataManagerV2
+dm = DataManagerV2()
+
+# Load multiple modalities
+dm.load_modality("rna_seq", "data.csv", "transcriptomics_single_cell")
+dm.load_modality("proteins", "proteins.csv", "proteomics_ms")
+
+# Integrated analysis
+mudata = dm.to_mudata()
+dm.save_mudata("integrated_study.h5mu")
+```
+
+## 🎯 Available Data Adapters
+
+| Adapter | Data Type | Supported Formats | Key Features |
+|---------|-----------|-------------------|--------------|
+| `transcriptomics_single_cell` | Single-cell RNA-seq | CSV, TSV, Excel, H5AD, MTX | Mitochondrial flagging, doublet detection |
+| `transcriptomics_bulk` | Bulk RNA-seq | CSV, TSV, Excel, H5AD | Batch effect handling, DE analysis |
+| `proteomics_ms` | Mass Spectrometry | CSV, TSV, Excel | Missing value strategies, contaminant removal |
+| `proteomics_affinity` | Antibody Arrays | CSV, TSV, Excel | Signal-to-background analysis |
 
 ## 📊 Export & Reproducibility
 
@@ -223,7 +379,7 @@ and the Cognito user pool id.
 This means traffic between CloudFront and the ALB is unencrypted.
 It is **strongly recommended** to configure HTTPS by bringing your own domain name and SSL/TLS certificate to the ALB.
 
-## 🤝 Contributing
+## � Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
 

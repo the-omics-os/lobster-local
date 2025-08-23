@@ -10,7 +10,13 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 # Add the current directory to Python path to ensure imports work
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
+##########################################
+##########################################
+##########################################
+## NEEDS Migration to DATAMANGER 2
+##########################################
+##########################################
+##########################################
 # Import required components
 from lobster.core.data_manager import DataManager
 from lobster.agents.graph import create_bioinformatics_graph

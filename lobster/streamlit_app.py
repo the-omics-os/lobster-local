@@ -21,7 +21,8 @@ from rich.console import Console
 
 # --- Your core stack ---
 from lobster.core.client import AgentClient
-from lobster.core.data_manager import DataManager
+# Updated to use DataManagerV2 - Modern modular data management
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.callbacks import TerminalCallbackHandler
 from lobster.utils.auth import Auth
 from lobster.config.settings import get_settings
@@ -227,7 +228,7 @@ def init_session_state():
 
     st.session_state.initialized = True
     st.session_state.workspace_path = workspace_path
-    st.session_state.data_manager = DataManager(workspace_path=workspace_path)
+    st.session_state.data_manager = DataManagerV2(workspace_path=workspace_path)
 
     # Chat / agent state
     st.session_state.messages = []
@@ -272,7 +273,7 @@ def init_client() -> AgentClient:
 # Sidebar
 # -----------------------
 def display_sidebar():
-    dm: DataManager = st.session_state.data_manager
+    dm: DataManagerV2 = st.session_state.data_manager
     st.sidebar.markdown("## 🦞 **Lobster AI**")
     st.sidebar.markdown("*Multi-Agent Bioinformatics System*")
     st.sidebar.markdown("---")

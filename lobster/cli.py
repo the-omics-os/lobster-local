@@ -89,9 +89,9 @@ def init_client(
     
     workspace.mkdir(parents=True, exist_ok=True)
     
-    # Initialize DataManager with workspace support and console for progress tracking
-    from lobster.core.data_manager import DataManager
-    data_manager = DataManager(workspace_path=workspace, console=console)
+    # Initialize DataManagerV2 with workspace support and console for progress tracking
+    from lobster.core.data_manager_v2 import DataManagerV2
+    data_manager = DataManagerV2(workspace_path=workspace, console=console)
     
     # Create reasoning callback using the terminal_callback_handler
     callbacks = []
@@ -153,11 +153,20 @@ def display_welcome():
     • Access GEO & literature databases
     
     [bold white]Essential Commands:[/bold white]
-    [red]/read[/red] <file>  - Read file from workspace or absolute path (supports subdirectories)
-    [red]/files[/red]        - List all workspace files
-    [red]/data[/red]         - Show current dataset information  
-    [red]/plots[/red]        - List all generated visualizations
     [red]/help[/red]         - Show all available commands
+    [red]/status[/red]       - Show system status  
+    [red]/files[/red]        - List all workspace files
+    [red]/data[/red]         - Show current dataset information
+    [red]/metadata[/red]     - Show detailed metadata information
+    [red]/workspace[/red]    - Show workspace status and configuration
+    [red]/plots[/red]        - List all generated visualizations
+    [red]/read[/red] <file>  - Read file from workspace (supports subdirectories)
+    [red]/modes[/red]        - List available operation modes
+    
+    [bold white]Additional Features:[/bold white]
+    • Configuration management via [red]lobster config[/red] subcommands
+    • Single query mode via [red]lobster query[/red] command  
+    • API server mode via [red]lobster serve[/red] command
     
     [dim grey50]Powered by LangGraph | © 2025 homara AI[/dim grey50]
     """
@@ -277,19 +286,22 @@ def handle_command(command: str, client: AgentClient):
         help_text = """
         [bold white]Available Commands:[/bold white]
         
-        [red]/help[/red]       [grey50]-[/grey50] Show this help message
-        [red]/status[/red]     [grey50]-[/grey50] Show system status
-        [red]/files[/red]      [grey50]-[/grey50] List workspace files
-        [red]/data[/red]       [grey50]-[/grey50] Show current data summary
-        [red]/plots[/red]      [grey50]-[/grey50] List generated plots
-        [red]/save[/red]       [grey50]-[/grey50] Save current state to workspace
-        [red]/read[/red] <file> [grey50]-[/grey50] Read a file from workspace
-        [red]/export[/red]     [grey50]-[/grey50] Export session data
-        [red]/reset[/red]      [grey50]-[/grey50] Reset conversation
-        [red]/mode[/red] <name> [grey50]-[/grey50] Change operation mode
-        [red]/modes[/red]      [grey50]-[/grey50] List available modes
-        [red]/clear[/red]      [grey50]-[/grey50] Clear screen
-        [red]/exit[/red]       [grey50]-[/grey50] Exit the chat
+        [red]/help[/red]         [grey50]-[/grey50] Show this help message
+        [red]/status[/red]       [grey50]-[/grey50] Show system status
+        [red]/files[/red]        [grey50]-[/grey50] List workspace files
+        [red]/data[/red]         [grey50]-[/grey50] Show current data summary
+        [red]/metadata[/red]     [grey50]-[/grey50] Show detailed metadata information
+        [red]/workspace[/red]    [grey50]-[/grey50] Show workspace status and information
+        [red]/modalities[/red]   [grey50]-[/grey50] Show detailed modality information
+        [red]/plots[/red]        [grey50]-[/grey50] List generated plots
+        [red]/save[/red]         [grey50]-[/grey50] Save current state to workspace
+        [red]/read[/red] <file>  [grey50]-[/grey50] Read a file from workspace
+        [red]/export[/red]       [grey50]-[/grey50] Export session data
+        [red]/reset[/red]        [grey50]-[/grey50] Reset conversation
+        [red]/mode[/red] <name>  [grey50]-[/grey50] Change operation mode
+        [red]/modes[/red]        [grey50]-[/grey50] List available modes
+        [red]/clear[/red]        [grey50]-[/grey50] Clear screen
+        [red]/exit[/red]         [grey50]-[/grey50] Exit the chat
         """
         console.print(Panel(
             help_text, 
@@ -370,7 +382,7 @@ def handle_command(command: str, client: AgentClient):
             console.print("[bold red]✓[/bold red] [white]Conversation reset[/white]")
     
     elif cmd == "/data":
-        # Show current data summary
+        # Show current data summary with enhanced metadata display
         if client.data_manager.has_data():
             summary = client.data_manager.get_data_summary()
             
@@ -393,15 +405,265 @@ def handle_command(command: str, client: AgentClient):
                     cols_preview += f" ... (+{len(summary['columns'])-5} more)"
                 table.add_row("Columns", cols_preview)
             
+            if summary.get("sample_names"):
+                samples_preview = ", ".join(summary["sample_names"][:3])
+                if len(summary.get("sample_names", [])) > 3:
+                    samples_preview += f" ... (+{len(summary['sample_names'])-3} more)"
+                table.add_row("Samples", samples_preview)
+            
             if summary.get("metadata_keys"):
                 meta_preview = ", ".join(summary["metadata_keys"][:3])
                 if len(summary["metadata_keys"]) > 3:
                     meta_preview += f" ... (+{len(summary['metadata_keys'])-3} more)"
-                table.add_row("Metadata", meta_preview)
+                table.add_row("Metadata Keys", meta_preview)
+            
+            if summary.get("processing_log"):
+                recent_steps = summary["processing_log"][-2:] if len(summary["processing_log"]) > 2 else summary["processing_log"]
+                table.add_row("Recent Steps", "; ".join(recent_steps))
             
             console.print(table)
+            
+            # Show detailed metadata if available
+            if hasattr(client.data_manager, 'current_metadata') and client.data_manager.current_metadata:
+                metadata = client.data_manager.current_metadata
+                console.print("\n[bold red]📋 Detailed Metadata:[/bold red]")
+                
+                metadata_table = Table(
+                    box=box.SIMPLE,
+                    border_style="red",
+                    show_header=True
+                )
+                metadata_table.add_column("Key", style="bold grey93")
+                metadata_table.add_column("Value", style="white")
+                
+                for key, value in list(metadata.items())[:10]:  # Show first 10 items
+                    # Format value for display
+                    if isinstance(value, (list, dict)):
+                        display_value = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                    else:
+                        display_value = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
+                    metadata_table.add_row(key, display_value)
+                
+                if len(metadata) > 10:
+                    metadata_table.add_row("...", f"(+{len(metadata)-10} more items)")
+                
+                console.print(metadata_table)
         else:
             console.print("[grey50]No data currently loaded[/grey50]")
+    
+    elif cmd == "/metadata":
+        # Show metadata store contents (for DataManagerV2) and current metadata
+        console.print("[bold red]📋 Metadata Information[/bold red]\n")
+        
+        # Check if using DataManagerV2 with metadata_store
+        if hasattr(client.data_manager, 'metadata_store'):
+            metadata_store = client.data_manager.metadata_store
+            if metadata_store:
+                console.print("[bold white]🗄️  Metadata Store (Cached GEO/External Data):[/bold white]")
+                
+                store_table = Table(
+                    box=box.ROUNDED,
+                    border_style="red",
+                    title="🗄️ Metadata Store",
+                    title_style="bold red on white"
+                )
+                store_table.add_column("Dataset ID", style="bold white")
+                store_table.add_column("Type", style="cyan")
+                store_table.add_column("Title", style="white")
+                store_table.add_column("Samples", style="grey74")
+                store_table.add_column("Cached", style="grey50")
+                
+                for dataset_id, metadata_info in metadata_store.items():
+                    metadata = metadata_info.get('metadata', {})
+                    validation = metadata_info.get('validation', {})
+                    
+                    # Extract key information
+                    title = str(metadata.get('title', 'N/A'))[:40] + "..." if len(str(metadata.get('title', 'N/A'))) > 40 else str(metadata.get('title', 'N/A'))
+                    data_type = validation.get('predicted_data_type', 'unknown').replace('_', ' ').title()
+                    samples = len(metadata.get('samples', {})) if metadata.get('samples') else 'N/A'
+                    
+                    # Parse timestamp
+                    timestamp = metadata_info.get('fetch_timestamp', '')
+                    try:
+                        from datetime import datetime
+                        cached_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        cached_str = cached_time.strftime("%Y-%m-%d %H:%M")
+                    except:
+                        cached_str = timestamp[:16] if timestamp else "N/A"
+                    
+                    store_table.add_row(
+                        dataset_id,
+                        data_type,
+                        title,
+                        str(samples),
+                        cached_str
+                    )
+                
+                console.print(store_table)
+                console.print()
+            else:
+                console.print("[grey50]No cached metadata in metadata store[/grey50]\n")
+        
+        # Show current data metadata
+        if hasattr(client.data_manager, 'current_metadata') and client.data_manager.current_metadata:
+            console.print("[bold white]📊 Current Data Metadata:[/bold white]")
+            metadata = client.data_manager.current_metadata
+            
+            metadata_table = Table(
+                box=box.SIMPLE,
+                border_style="red",
+                show_header=True
+            )
+            metadata_table.add_column("Key", style="bold grey93", width=25)
+            metadata_table.add_column("Value", style="white", width=50)
+            
+            for key, value in metadata.items():
+                # Format value for display
+                if isinstance(value, dict):
+                    display_value = f"Dict with {len(value)} keys: {', '.join(list(value.keys())[:3])}"
+                    if len(value) > 3:
+                        display_value += f" ... (+{len(value)-3} more)"
+                elif isinstance(value, list):
+                    display_value = f"List with {len(value)} items"
+                    if len(value) > 0:
+                        display_value += f": {', '.join(str(v) for v in value[:3])}"
+                        if len(value) > 3:
+                            display_value += f" ... (+{len(value)-3} more)"
+                else:
+                    display_value = str(value)
+                    if len(display_value) > 60:
+                        display_value = display_value[:60] + "..."
+                
+                metadata_table.add_row(key, display_value)
+            
+            console.print(metadata_table)
+        else:
+            console.print("[grey50]No current data metadata available[/grey50]")
+    
+    elif cmd == "/workspace":
+        # Show workspace status and information
+        console.print("[bold red]🏗️  Workspace Information[/bold red]\n")
+        
+        # Check if using DataManagerV2
+        if hasattr(client.data_manager, 'get_workspace_status'):
+            workspace_status = client.data_manager.get_workspace_status()
+            
+            # Main workspace info
+            workspace_table = Table(
+                title="🏗️ Workspace Status",
+                box=box.ROUNDED,
+                border_style="red",
+                title_style="bold red on white"
+            )
+            workspace_table.add_column("Property", style="bold grey93")
+            workspace_table.add_column("Value", style="white")
+            
+            workspace_table.add_row("Workspace Path", workspace_status.get("workspace_path", "N/A"))
+            workspace_table.add_row("Modalities Loaded", str(workspace_status.get("modalities_loaded", 0)))
+            workspace_table.add_row("Registered Backends", str(len(workspace_status.get("registered_backends", []))))
+            workspace_table.add_row("Registered Adapters", str(len(workspace_status.get("registered_adapters", []))))
+            workspace_table.add_row("Default Backend", workspace_status.get("default_backend", "N/A"))
+            workspace_table.add_row("Provenance Enabled", "✓" if workspace_status.get("provenance_enabled") else "✗")
+            workspace_table.add_row("MuData Available", "✓" if workspace_status.get("mudata_available") else "✗")
+            
+            console.print(workspace_table)
+            
+            # Show directories
+            if workspace_status.get("directories"):
+                dirs = workspace_status["directories"]
+                console.print(f"\n[bold white]📁 Directories:[/bold white]")
+                for dir_type, path in dirs.items():
+                    console.print(f"  • {dir_type.title()}: [grey74]{path}[/grey74]")
+            
+            # Show loaded modalities
+            if workspace_status.get("modality_names"):
+                console.print(f"\n[bold white]🧬 Loaded Modalities:[/bold white]")
+                for modality in workspace_status["modality_names"]:
+                    console.print(f"  • {modality}")
+            
+            # Show available backends and adapters
+            console.print(f"\n[bold white]🔧 Available Backends:[/bold white]")
+            for backend in workspace_status.get("registered_backends", []):
+                console.print(f"  • {backend}")
+            
+            console.print(f"\n[bold white]🔌 Available Adapters:[/bold white]")
+            for adapter in workspace_status.get("registered_adapters", []):
+                console.print(f"  • {adapter}")
+        else:
+            # Fallback for older DataManager
+            console.print("[bold white]📁 Basic Workspace Info:[/bold white]")
+            if hasattr(client.data_manager, 'workspace_path'):
+                console.print(f"  • Path: [grey74]{client.data_manager.workspace_path}[/grey74]")
+            if hasattr(client.data_manager, 'has_data'):
+                console.print(f"  • Data Loaded: {'✓' if client.data_manager.has_data() else '✗'}")
+    
+    elif cmd == "/modalities":
+        # Show detailed modality information (DataManagerV2 specific)
+        if hasattr(client.data_manager, 'list_modalities'):
+            modalities = client.data_manager.list_modalities()
+            
+            if modalities:
+                console.print("[bold red]🧬 Modality Details[/bold red]\n")
+                
+                for modality_name in modalities:
+                    try:
+                        adata = client.data_manager.get_modality(modality_name)
+                        
+                        # Create modality table
+                        mod_table = Table(
+                            title=f"🧬 {modality_name}",
+                            box=box.ROUNDED,
+                            border_style="cyan",
+                            title_style="bold cyan on white"
+                        )
+                        mod_table.add_column("Property", style="bold grey93")
+                        mod_table.add_column("Value", style="white")
+                        
+                        mod_table.add_row("Shape", f"{adata.n_obs} obs × {adata.n_vars} vars")
+                        
+                        # Show obs columns
+                        obs_cols = list(adata.obs.columns)
+                        if obs_cols:
+                            cols_preview = ", ".join(obs_cols[:5])
+                            if len(obs_cols) > 5:
+                                cols_preview += f" ... (+{len(obs_cols)-5} more)"
+                            mod_table.add_row("Obs Columns", cols_preview)
+                        
+                        # Show var columns
+                        var_cols = list(adata.var.columns)
+                        if var_cols:
+                            var_preview = ", ".join(var_cols[:5])
+                            if len(var_cols) > 5:
+                                var_preview += f" ... (+{len(var_cols)-5} more)"
+                            mod_table.add_row("Var Columns", var_preview)
+                        
+                        # Show layers
+                        if adata.layers:
+                            layers_str = ", ".join(list(adata.layers.keys()))
+                            mod_table.add_row("Layers", layers_str)
+                        
+                        # Show obsm
+                        if adata.obsm:
+                            obsm_str = ", ".join(list(adata.obsm.keys()))
+                            mod_table.add_row("Obsm", obsm_str)
+                        
+                        # Show some uns info
+                        if adata.uns:
+                            uns_keys = list(adata.uns.keys())[:5]
+                            uns_str = ", ".join(uns_keys)
+                            if len(adata.uns) > 5:
+                                uns_str += f" ... (+{len(adata.uns)-5} more)"
+                            mod_table.add_row("Uns Keys", uns_str)
+                        
+                        console.print(mod_table)
+                        console.print()
+                        
+                    except Exception as e:
+                        console.print(f"[red]Error accessing modality {modality_name}: {e}[/red]")
+            else:
+                console.print("[grey50]No modalities loaded[/grey50]")
+        else:
+            console.print("[grey50]Modality information not available (using legacy DataManager)[/grey50]")
     
     elif cmd == "/plots":
         # Show generated plots

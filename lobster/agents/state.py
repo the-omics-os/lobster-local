@@ -20,7 +20,9 @@ class OverallState(AgentState):
 
     # Sub-states for each agent
     data_expert_state: "DataExpertState"
-    transcriptomics_expert_state: "TranscriptomicsExpertState"
+    transcriptomics_expert_state: "TranscriptomicsExpertState"  # Legacy support
+    singlecell_expert_state: "SingleCellExpertState"
+    bulk_rnaseq_expert_state: "BulkRNASeqExpertState"
     method_state: "MethodState"
     
 
@@ -54,6 +56,44 @@ class TranscriptomicsExpertState(AgentState):
     methodology_parameters: Dict[str, Any] 
     data_context: str                    # Type/source of transcriptomics data (RNA-seq, microarray)
     quality_control_metrics: Dict[str, Any]
+    intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
+
+
+class SingleCellExpertState(AgentState):
+    """
+    State for the single-cell RNA-seq expert agent.
+    """
+    next: str
+
+    # Single-cell specific context
+    analysis_results: Dict[str, Any]     # Single-cell analysis results, clustering, etc.
+    clustering_parameters: Dict[str, Any] # Leiden resolution, batch correction settings
+    cell_type_annotations: Dict[str, Any] # Cell type assignment results
+    quality_control_metrics: Dict[str, Any] # QC metrics specific to single-cell
+    doublet_detection_results: Dict[str, Any] # Doublet detection outcomes
+    marker_genes: Dict[str, Any]        # Marker genes per cluster
+    file_paths: List[str]               # Paths to input/output files
+    methodology_parameters: Dict[str, Any]
+    data_context: str                   # Single-cell data context
+    intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
+
+
+class BulkRNASeqExpertState(AgentState):
+    """
+    State for the bulk RNA-seq expert agent.
+    """
+    next: str
+
+    # Bulk RNA-seq specific context
+    analysis_results: Dict[str, Any]     # Bulk RNA-seq analysis results, DE genes, etc.
+    differential_expression_results: Dict[str, Any] # DE analysis outcomes
+    pathway_enrichment_results: Dict[str, Any] # Pathway analysis results
+    experimental_design: Dict[str, Any]  # Sample grouping and experimental setup
+    quality_control_metrics: Dict[str, Any] # QC metrics specific to bulk RNA-seq
+    statistical_parameters: Dict[str, Any] # Statistical method parameters
+    file_paths: List[str]               # Paths to input/output files
+    methodology_parameters: Dict[str, Any]
+    data_context: str                   # Bulk RNA-seq data context
     intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
 
 

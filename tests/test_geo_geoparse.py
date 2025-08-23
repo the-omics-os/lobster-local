@@ -20,7 +20,13 @@ sys.path.insert(0, str(project_root))
 
 try:
     import pandas as pd
-
+##########################################
+##########################################
+##########################################
+## NEEDS Migration to DATAMANGER 2
+##########################################
+##########################################
+##########################################
     from lobster.core.data_manager import DataManager
     from lobster.tools.geo_service import GEOService
 

@@ -8,51 +8,51 @@ quality control, quantification, and differential expression analysis.
 import os
 import subprocess
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple, Any
 
+import anndata
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from lobster.core.data_manager import DataManager
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+class BulkRNASeqError(Exception):
+    """Base exception for bulk RNA-seq operations."""
+    pass
+
+
 class BulkRNASeqService:
     """
-    Service for bulk RNA-seq analysis workflows.
+    Stateless service for bulk RNA-seq analysis workflows.
 
     This class provides methods for quality control, quantification,
     and differential expression analysis of bulk RNA-seq data.
     """
 
-    def __init__(self, data_manager: DataManager):
+    def __init__(self, results_dir: Optional[Path] = None):
         """
         Initialize the bulk RNA-seq service.
 
         Args:
-            data_manager: DataManager instance for data storage
+            results_dir: Optional directory for storing analysis results
         """
-        logger.info("Initializing BulkRNASeqService")
-        self.data_manager = data_manager
+        logger.info("Initializing stateless BulkRNASeqService")
 
-        # Use a proper directory path that works in both development and testing
-        data_dir = Path("data")
-        if not data_dir.exists():
-            logger.debug("Creating data directory")
+        # Set up results directory
+        if results_dir is None:
+            data_dir = Path("data")
             data_dir.mkdir(exist_ok=True)
-
-        self.results_dir = data_dir / "results"
-        if not self.results_dir.exists():
-            logger.debug(f"Creating results directory: {self.results_dir}")
-            self.results_dir.mkdir(exist_ok=True)
-
-        logger.info(
-            f"BulkRNASeqService initialized with results_dir: {self.results_dir}"
-        )
+            self.results_dir = data_dir / "bulk_results"
+        else:
+            self.results_dir = Path(results_dir)
+            
+        self.results_dir.mkdir(exist_ok=True)
+        logger.info(f"BulkRNASeqService initialized with results_dir: {self.results_dir}")
 
     def run_fastqc(self, fastq_files: List[str]) -> str:
         """
@@ -368,187 +368,342 @@ Next suggested step: Import quantification data with tximport for differential e
             logger.exception(f"Error in Salmon quantification: {e}")
             return f"Error running Salmon: {str(e)}"
 
-    def run_deseq2_analysis(
+    def run_differential_expression_analysis(
         self,
-        count_matrix: Optional[pd.DataFrame] = None,
-        sample_info: Optional[pd.DataFrame] = None,
-        design_formula: str = "~ condition",
-    ) -> str:
+        adata: anndata.AnnData,
+        groupby: str,
+        group1: str,
+        group2: str,
+        method: str = "deseq2_like",
+        min_expression_threshold: float = 1.0
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
-        Run DESeq2 differential expression analysis.
+        Run differential expression analysis on bulk RNA-seq data.
 
         Args:
-            count_matrix: Count matrix (genes x samples)
-            sample_info: Sample metadata with conditions
-            design_formula: Design formula for DESeq2
+            adata: AnnData object with bulk RNA-seq data
+            groupby: Column name for grouping (e.g., 'condition', 'treatment')
+            group1: First group for comparison (e.g., 'control')
+            group2: Second group for comparison (e.g., 'treatment')
+            method: Analysis method ('deseq2_like', 'wilcoxon', 't_test')
+            min_expression_threshold: Minimum expression threshold for filtering
 
         Returns:
-            str: DESeq2 analysis results
+            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with results and DE stats
+            
+        Raises:
+            BulkRNASeqError: If differential expression analysis fails
         """
         try:
-            logger.info("Running DESeq2 differential expression analysis")
-
-            # Use current data if not provided
-            if count_matrix is None:
-                if not self.data_manager.has_data():
-                    return (
-                        "No count data available. Please load or quantify data first."
-                    )
-                count_matrix = (
-                    self.data_manager.current_data.T
-                )  # Transpose for DESeq2 format
-
-            # Create mock sample info if not provided
-            if sample_info is None:
-                n_samples = count_matrix.shape[1]
-                sample_info = pd.DataFrame(
-                    {
-                        "sample": count_matrix.columns,
-                        "condition": ["control"] * (n_samples // 2)
-                        + ["treatment"] * (n_samples - n_samples // 2),
-                    }
-                )
-                sample_info.set_index("sample", inplace=True)
-
-            # Run DESeq2 via R interface
-            results_df = self._run_deseq2_r(count_matrix, sample_info, design_formula)
-
-            # Create volcano plot
-            volcano_plot = self._create_volcano_plot(results_df)
-
-            dataset_info = {
-                "data_shape": count_matrix.shape,
-                "source_dataset": self.data_manager.current_metadata.get(
-                    "source", "Current Dataset"
-                ),
-                "n_samples": count_matrix.shape[1],
-                "n_genes": count_matrix.shape[0],
-            }
-
-            analysis_params = {
-                "design_formula": design_formula,
+            logger.info(f"Running differential expression analysis: {group1} vs {group2}")
+            
+            # Create working copy
+            adata_de = adata.copy()
+            
+            # Validate groupby column and groups exist
+            if groupby not in adata_de.obs.columns:
+                raise BulkRNASeqError(f"Group column '{groupby}' not found in observations")
+                
+            available_groups = adata_de.obs[groupby].unique()
+            if group1 not in available_groups:
+                raise BulkRNASeqError(f"Group '{group1}' not found in {groupby}. Available: {available_groups}")
+            if group2 not in available_groups:
+                raise BulkRNASeqError(f"Group '{group2}' not found in {groupby}. Available: {available_groups}")
+            
+            # Filter genes by expression threshold
+            if min_expression_threshold > 0:
+                gene_filter = (adata_de.X > min_expression_threshold).sum(axis=0) >= 2
+                if hasattr(gene_filter, 'A1'):
+                    gene_filter = gene_filter.A1
+                adata_de = adata_de[:, gene_filter].copy()
+                logger.info(f"Filtered to {adata_de.n_vars} genes above expression threshold")
+            
+            # Create comparison matrix
+            group1_mask = adata_de.obs[groupby] == group1
+            group2_mask = adata_de.obs[groupby] == group2
+            
+            group1_data = adata_de[group1_mask]
+            group2_data = adata_de[group2_mask]
+            
+            if group1_data.n_obs == 0 or group2_data.n_obs == 0:
+                raise BulkRNASeqError(f"One or both groups have no samples: {group1}={group1_data.n_obs}, {group2}={group2_data.n_obs}")
+            
+            # Run differential expression based on method
+            if method == "deseq2_like":
+                results_df = self._run_deseq2_like_analysis(group1_data, group2_data, group1, group2)
+            elif method == "wilcoxon":
+                results_df = self._run_wilcoxon_test(group1_data, group2_data, group1, group2)
+            elif method == "t_test":
+                results_df = self._run_ttest_analysis(group1_data, group2_data, group1, group2)
+            else:
+                raise BulkRNASeqError(f"Unknown differential expression method: {method}")
+            
+            # Add results to AnnData
+            adata_de.uns[f'de_results_{group1}_vs_{group2}'] = results_df.to_dict()
+            
+            # Count significant genes
+            significant_genes = results_df[results_df['padj'] < 0.05]
+            upregulated = significant_genes[significant_genes['log2FoldChange'] > 0]
+            downregulated = significant_genes[significant_genes['log2FoldChange'] < 0]
+            
+            # Compile analysis statistics
+            de_stats = {
                 "analysis_type": "differential_expression",
-                "n_significant_genes": len(results_df[results_df["padj"] < 0.05]),
+                "method": method,
+                "groupby": groupby,
+                "group1": group1,
+                "group2": group2,
+                "n_samples_group1": group1_data.n_obs,
+                "n_samples_group2": group2_data.n_obs,
+                "n_genes_tested": len(results_df),
+                "n_significant_genes": len(significant_genes),
+                "n_upregulated": len(upregulated),
+                "n_downregulated": len(downregulated),
+                "significant_genes_list": significant_genes.index.tolist()[:100],  # Top 100
+                "top_upregulated": upregulated.nlargest(10, 'log2FoldChange').index.tolist(),
+                "top_downregulated": downregulated.nsmallest(10, 'log2FoldChange').index.tolist(),
+                "de_results_key": f'de_results_{group1}_vs_{group2}'
             }
-
-            self.data_manager.add_plot(
-                volcano_plot,
-                title="Volcano Plot - Differential Expression",
-                source="bulk_rnaseq_service",
-                dataset_info=dataset_info,
-                analysis_params=analysis_params,
-            )
-
-            # Store results
-            self.data_manager.set_data(
-                results_df,
-                {
-                    "analysis_type": "deseq2_results",
-                    "design_formula": design_formula,
-                    "n_significant": len(results_df[results_df["padj"] < 0.05]),
-                },
-            )
-
-            n_significant = len(results_df[results_df["padj"] < 0.05])
-
-            return f"""DESeq2 Differential Expression Analysis Complete!
-
-**Design Formula:** {design_formula}
-**Total Genes Tested:** {len(results_df)}
-**Significantly Differential Genes (padj < 0.05):** {n_significant}
-
-**Top Upregulated Genes:**
-{self._format_top_genes(results_df, direction='up')}
-
-**Top Downregulated Genes:**
-{self._format_top_genes(results_df, direction='down')}
-
-Volcano plot generated showing differential expression results.
-
-Next suggested step: Run GO/KEGG enrichment analysis on significant genes."""
+            
+            logger.info(f"Differential expression completed: {len(significant_genes)} significant genes found")
+            
+            return adata_de, de_stats
 
         except Exception as e:
-            logger.exception(f"Error in DESeq2 analysis: {e}")
-            return f"Error running DESeq2: {str(e)}"
+            logger.exception(f"Error in differential expression analysis: {e}")
+            raise BulkRNASeqError(f"Differential expression analysis failed: {str(e)}")
 
-    def run_enrichment_analysis(
-        self, gene_list: Optional[List[str]] = None, analysis_type: str = "GO"
-    ) -> str:
+    def run_pathway_enrichment(
+        self,
+        gene_list: List[str],
+        analysis_type: str = "GO",
+        background_genes: Optional[List[str]] = None
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
-        Run GO/KEGG enrichment analysis.
+        Run pathway enrichment analysis on a gene list.
 
         Args:
             gene_list: List of genes for enrichment analysis
             analysis_type: Type of analysis ("GO" or "KEGG")
+            background_genes: Background gene set (None for default)
 
         Returns:
-            str: Enrichment analysis results
+            Tuple[pd.DataFrame, Dict[str, Any]]: Enrichment results and stats
+            
+        Raises:
+            BulkRNASeqError: If enrichment analysis fails
         """
         try:
-            logger.info(f"Running {analysis_type} enrichment analysis")
+            logger.info(f"Running {analysis_type} enrichment analysis on {len(gene_list)} genes")
 
-            # Get significant genes if not provided
-            if gene_list is None:
-                if not self.data_manager.has_data():
-                    return "No data available. Please run differential expression analysis first."
+            if len(gene_list) == 0:
+                raise BulkRNASeqError("Gene list is empty. Cannot perform enrichment analysis.")
 
-                # Extract significant genes from DESeq2 results
-                data = self.data_manager.current_data
-                if "padj" in data.columns:
-                    significant_genes = data[data["padj"] < 0.05].index.tolist()
-                    if not significant_genes:
-                        return "No significantly differential genes found for enrichment analysis."
-                    gene_list = significant_genes[:500]  # Limit to top 500 genes
-                else:
-                    return "Current data doesn't appear to be DESeq2 results. Please run differential expression first."
-
-            # Run enrichment analysis via R
-            enrichment_df = self._run_enrichment_r(gene_list, analysis_type)
-
-            # Create enrichment plot
-            if not enrichment_df.empty:
-                enrichment_plot = self._create_enrichment_plot(
-                    enrichment_df, analysis_type
-                )
-
-                dataset_info = {
-                    "source_dataset": self.data_manager.current_metadata.get(
-                        "source", "Current Dataset"
-                    ),
-                    "n_genes_analyzed": len(gene_list),
-                    "analysis_type": "pathway_enrichment",
-                }
-
-                analysis_params = {
-                    "enrichment_type": analysis_type,
-                    "gene_list_size": len(gene_list),
-                    "n_significant_terms": len(
-                        enrichment_df[enrichment_df["p.adjust"] < 0.05]
-                    ),
-                    "analysis_type": "enrichment_analysis",
-                }
-
-                self.data_manager.add_plot(
-                    enrichment_plot,
-                    title=f"{analysis_type} Enrichment Analysis",
-                    source="bulk_rnaseq_service",
-                    dataset_info=dataset_info,
-                    analysis_params=analysis_params,
-                )
-
-            return f"""{analysis_type} Enrichment Analysis Complete!
-
-**Genes Analyzed:** {len(gene_list)}
-**Significant Pathways Found:** {len(enrichment_df[enrichment_df['p.adjust'] < 0.05])}
-
-**Top Enriched Terms:**
-{self._format_enrichment_results(enrichment_df)}
-
-Next suggested step: Export results or perform additional pathway analysis."""
+            # Run enrichment analysis
+            enrichment_df = self._run_enrichment_analysis(gene_list, analysis_type, background_genes)
+            
+            # Calculate enrichment statistics
+            significant_terms = enrichment_df[enrichment_df["p.adjust"] < 0.05]
+            
+            enrichment_stats = {
+                "analysis_type": f"{analysis_type.lower()}_enrichment",
+                "enrichment_database": analysis_type,
+                "n_genes_input": len(gene_list),
+                "n_terms_total": len(enrichment_df),
+                "n_significant_terms": len(significant_terms),
+                "significance_threshold": 0.05,
+                "top_terms": significant_terms.head(10)['Description'].tolist() if not significant_terms.empty else [],
+                "enrichment_results": enrichment_df.to_dict('records')[:20]  # Top 20 terms
+            }
+            
+            logger.info(f"Pathway enrichment completed: {len(significant_terms)} significant terms found")
+            
+            return enrichment_df, enrichment_stats
 
         except Exception as e:
-            logger.exception(f"Error in enrichment analysis: {e}")
-            return f"Error running {analysis_type} enrichment: {str(e)}"
+            logger.exception(f"Error in pathway enrichment analysis: {e}")
+            raise BulkRNASeqError(f"Pathway enrichment analysis failed: {str(e)}")
+
+    def _run_deseq2_like_analysis(
+        self, 
+        group1_data: anndata.AnnData, 
+        group2_data: anndata.AnnData, 
+        group1_name: str, 
+        group2_name: str
+    ) -> pd.DataFrame:
+        """Run DESeq2-like differential expression analysis."""
+        logger.info(f"Running DESeq2-like analysis: {group1_name} vs {group2_name}")
+        
+        # Extract expression matrices
+        if hasattr(group1_data.X, 'toarray'):
+            group1_expr = group1_data.X.toarray()
+            group2_expr = group2_data.X.toarray()
+        else:
+            group1_expr = group1_data.X
+            group2_expr = group2_data.X
+        
+        n_genes = group1_data.n_vars
+        gene_names = group1_data.var_names
+        
+        # Calculate basic statistics
+        group1_mean = np.mean(group1_expr, axis=0)
+        group2_mean = np.mean(group2_expr, axis=0)
+        
+        # Calculate fold changes (add pseudocount to avoid log(0))
+        log2_fold_change = np.log2((group2_mean + 1) / (group1_mean + 1))
+        
+        # Simple statistical test (t-test) for p-values
+        from scipy import stats
+        
+        p_values = []
+        for i in range(n_genes):
+            if group1_expr.shape[0] > 1 and group2_expr.shape[0] > 1:
+                _, p_val = stats.ttest_ind(group1_expr[:, i], group2_expr[:, i])
+                p_values.append(p_val)
+            else:
+                p_values.append(1.0)  # No test possible with single sample
+        
+        p_values = np.array(p_values)
+        
+        # Multiple testing correction (Benjamini-Hochberg)
+        from statsmodels.stats.multitest import multipletests
+        _, p_adjusted, _, _ = multipletests(p_values, method='fdr_bh')
+        
+        # Create results DataFrame
+        results_df = pd.DataFrame({
+            'baseMean': (group1_mean + group2_mean) / 2,
+            'log2FoldChange': log2_fold_change,
+            'lfcSE': np.ones(n_genes),  # Simplified
+            'stat': log2_fold_change / np.ones(n_genes),  # Simplified
+            'pvalue': p_values,
+            'padj': p_adjusted
+        }, index=gene_names)
+        
+        return results_df.dropna()
+
+    def _run_wilcoxon_test(
+        self, 
+        group1_data: anndata.AnnData, 
+        group2_data: anndata.AnnData, 
+        group1_name: str, 
+        group2_name: str
+    ) -> pd.DataFrame:
+        """Run Wilcoxon rank-sum test for differential expression."""
+        logger.info(f"Running Wilcoxon test: {group1_name} vs {group2_name}")
+        
+        from scipy import stats
+        
+        # Extract expression matrices
+        if hasattr(group1_data.X, 'toarray'):
+            group1_expr = group1_data.X.toarray()
+            group2_expr = group2_data.X.toarray()
+        else:
+            group1_expr = group1_data.X
+            group2_expr = group2_data.X
+        
+        n_genes = group1_data.n_vars
+        gene_names = group1_data.var_names
+        
+        # Calculate statistics
+        group1_mean = np.mean(group1_expr, axis=0)
+        group2_mean = np.mean(group2_expr, axis=0)
+        log2_fold_change = np.log2((group2_mean + 1) / (group1_mean + 1))
+        
+        # Wilcoxon test for each gene
+        p_values = []
+        for i in range(n_genes):
+            if group1_expr.shape[0] > 1 and group2_expr.shape[0] > 1:
+                _, p_val = stats.ranksums(group1_expr[:, i], group2_expr[:, i])
+                p_values.append(p_val)
+            else:
+                p_values.append(1.0)
+        
+        p_values = np.array(p_values)
+        
+        # Multiple testing correction
+        from statsmodels.stats.multitest import multipletests
+        _, p_adjusted, _, _ = multipletests(p_values, method='fdr_bh')
+        
+        results_df = pd.DataFrame({
+            'baseMean': (group1_mean + group2_mean) / 2,
+            'log2FoldChange': log2_fold_change,
+            'lfcSE': np.ones(n_genes),
+            'stat': log2_fold_change / np.ones(n_genes),
+            'pvalue': p_values,
+            'padj': p_adjusted
+        }, index=gene_names)
+        
+        return results_df.dropna()
+
+    def _run_ttest_analysis(
+        self, 
+        group1_data: anndata.AnnData, 
+        group2_data: anndata.AnnData, 
+        group1_name: str, 
+        group2_name: str
+    ) -> pd.DataFrame:
+        """Run t-test for differential expression."""
+        logger.info(f"Running t-test: {group1_name} vs {group2_name}")
+        
+        from scipy import stats
+        
+        # Extract expression matrices
+        if hasattr(group1_data.X, 'toarray'):
+            group1_expr = group1_data.X.toarray()
+            group2_expr = group2_data.X.toarray()
+        else:
+            group1_expr = group1_data.X
+            group2_expr = group2_data.X
+        
+        n_genes = group1_data.n_vars
+        gene_names = group1_data.var_names
+        
+        # Calculate statistics
+        group1_mean = np.mean(group1_expr, axis=0)
+        group2_mean = np.mean(group2_expr, axis=0)
+        log2_fold_change = np.log2((group2_mean + 1) / (group1_mean + 1))
+        
+        # T-test for each gene
+        p_values = []
+        t_stats = []
+        for i in range(n_genes):
+            if group1_expr.shape[0] > 1 and group2_expr.shape[0] > 1:
+                t_stat, p_val = stats.ttest_ind(group1_expr[:, i], group2_expr[:, i])
+                t_stats.append(t_stat)
+                p_values.append(p_val)
+            else:
+                t_stats.append(0.0)
+                p_values.append(1.0)
+        
+        p_values = np.array(p_values)
+        t_stats = np.array(t_stats)
+        
+        # Multiple testing correction
+        from statsmodels.stats.multitest import multipletests
+        _, p_adjusted, _, _ = multipletests(p_values, method='fdr_bh')
+        
+        results_df = pd.DataFrame({
+            'baseMean': (group1_mean + group2_mean) / 2,
+            'log2FoldChange': log2_fold_change,
+            'lfcSE': np.ones(n_genes),
+            'stat': t_stats,
+            'pvalue': p_values,
+            'padj': p_adjusted
+        }, index=gene_names)
+        
+        return results_df.dropna()
+
+    def _run_enrichment_analysis(
+        self, 
+        gene_list: List[str], 
+        analysis_type: str,
+        background_genes: Optional[List[str]] = None
+    ) -> pd.DataFrame:
+        """Run enrichment analysis (mock implementation)."""
+        logger.info(f"Running {analysis_type} enrichment analysis")
+        
+        # For now, use mock results - in production, this would use actual GO/KEGG databases
+        return self._create_mock_enrichment_results(gene_list, analysis_type)
 
     def _parse_fastqc_results(self, qc_dir: Path) -> str:
         """Parse FastQC results and create summary."""

@@ -13,7 +13,15 @@ import json
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
-from lobster.core.data_manager import DataManager
+from langfuse.langchain import CallbackHandler as LangfuseCallback
+##########################################
+##########################################
+##########################################
+## NEEDS Migration to DATAMANGER 2
+##########################################
+##########################################
+##########################################
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.agents.graph import create_bioinformatics_graph
 
 # Configure logging
@@ -23,24 +31,25 @@ logger = logging.getLogger(__name__)
 class AgentClient:
     def __init__(
         self,
-        data_manager: Optional[DataManager] = None,
+        data_manager: Optional[DataManagerV2] = None,
         session_id: str = None,
         enable_reasoning: bool = True,
         enable_langfuse: bool = False,
         workspace_path: Optional[Path] = None,
-        custom_callbacks: Optional[List] = None,  # Changed from List[Callable]
+        custom_callbacks: Optional[List] = None,
         manual_model_params: Optional[Dict[str, Any]] = None
     ):
         """
-        Initialize the agent client.
+        Initialize the agent client with DataManagerV2.
         
         Args:
-            data_manager: Data manager instance (creates new if None)
+            data_manager: DataManagerV2 instance (creates new if None)
             session_id: Unique session identifier
             enable_reasoning: Show agent reasoning/thinking process
             enable_langfuse: Enable Langfuse debugging callback
             workspace_path: Path to workspace for file operations
             custom_callbacks: Additional callback handlers
+            manual_model_params: Manual model parameter overrides
         """
         # Set up session
         self.session_id = session_id or f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -50,13 +59,21 @@ class AgentClient:
         self.workspace_path = workspace_path or Path.cwd()
         self.workspace_path.mkdir(parents=True, exist_ok=True)
         
-        # Initialize data manager
-        self.data_manager = data_manager or DataManager()
+        # Initialize DataManagerV2
+        if data_manager is None:
+            from rich.console import Console
+            console = Console() if custom_callbacks else None
+            self.data_manager = DataManagerV2(
+                workspace_path=self.workspace_path,
+                console=console
+            )
+            logger.info("Initialized with DataManagerV2 (modular multi-omics)")
+        else:
+            self.data_manager = data_manager
         
         # Set up callbacks
         self.callbacks = []
         if enable_langfuse and os.getenv("LANGFUSE_PUBLIC_KEY"):
-            from langfuse.langchain import CallbackHandler as LangfuseCallback
             self.callbacks.append(LangfuseCallback())
         if custom_callbacks:
             self.callbacks.extend(custom_callbacks)
@@ -181,43 +198,23 @@ class AgentClient:
             }
     
     def _extract_response(self, events: List[Dict]) -> str:
-        """Extract the final response from ChatBedrockConverse format events."""
+        """Extract the final response from events."""
         if not events:
             return "No response generated."
         
         # Process events in reverse chronological order to find the last AI response
         for event in reversed(events):
-            # Look for task_result events which contain the actual results
             if event.get("type") == "task_result":
                 payload = event.get("payload", {})
                 result = payload.get("result", [])
                 
-                # Result is a list of tuples like [("messages", [HumanMessage, AIMessage, ...])]
                 for item in result:
                     if isinstance(item, tuple) and len(item) == 2:
                         key, value = item
                         if key == "messages" and isinstance(value, list):
-                            # Find the last AIMessage in this result
                             for msg in reversed(value):
                                 if isinstance(msg, AIMessage) and hasattr(msg, 'content'):
-                                    content = msg.content.strip() if msg.content else ""
-                                    # Return the content, even if it's empty
-                                    if content or msg.content == "":
-                                        return content
-            
-            # Fallback: check checkpoint events with values.messages
-            elif event.get("type") == "checkpoint":
-                payload = event.get("payload", {})
-                values = payload.get("values", {})
-                messages = values.get("messages", [])
-                
-                if messages:
-                    # Find the last AIMessage in checkpoint messages
-                    for msg in reversed(messages):
-                        if isinstance(msg, AIMessage) and hasattr(msg, 'content'):
-                            content = msg.content.strip() if msg.content else ""
-                            if content or msg.content == "":
-                                return content
+                                    return msg.content.strip() if msg.content else ""
         
         return "No response generated."
     
@@ -264,109 +261,33 @@ class AgentClient:
         Returns:
             File content as string, or None if not found
         """
-        logger.info(f"🔍 Attempting to read file: '{filename}'")
-        
-        # Convert to Path object
         file_path = Path(filename)
-        logger.info(f"🔎 Current filepath: {file_path}")
-        logger.info(f"🔎 Is absolut: {file_path.is_absolute()}")
         
         # If it's an absolute path, try to read directly
         if file_path.is_absolute():
-            logger.info(f"📁 Detected absolute path: {file_path}")
             if file_path.exists() and file_path.is_file():
-                logger.info(f"✅ Found absolute file: {file_path}")
                 try:
-                    content = file_path.read_text()
-                    logger.info(f"📖 Successfully read {len(content)} characters from {file_path}")
-                    return content
+                    return file_path.read_text()
                 except Exception as e:
-                    logger.error(f"❌ Error reading absolute file {file_path}: {e}")
                     return f"Error reading file {file_path}: {e}"
             else:
-                logger.warning(f"❌ Absolute file not found: {file_path}")
                 return f"File not found: {file_path}"
         
-        # For relative paths, search in workspace and subdirectories
-        logger.info(f"🔍 Searching for relative file: '{filename}'")
-        logger.info(f"📂 Workspace path: {self.workspace_path}")
-        
-        # First try the root workspace directory
-        file_path = self.workspace_path / filename
-        logger.info(f"🔎 Checking workspace root: {file_path}")
-        if file_path.exists() and file_path.is_file():
-            logger.info(f"✅ Found in workspace root: {file_path}")
-            try:
-                content = file_path.read_text()
-                logger.info(f"📖 Successfully read {len(content)} characters from workspace root")
-                return content
-            except Exception as e:
-                logger.error(f"❌ Error reading from workspace root: {e}")
-                return f"Error reading file: {e}"
-        else:
-            logger.info(f"❌ Not found in workspace root: {file_path}")
-        
-        # If not found in root, search in organized subdirectories
-        search_dirs = [
-            self.data_manager.data_dir,
-            self.data_manager.plots_dir, 
-            self.data_manager.exports_dir
+        # For relative paths, search in workspace and data directories
+        search_paths = [
+            self.workspace_path / filename,
+            self.data_manager.data_dir / filename,
+            self.data_manager.workspace_path / "plots" / filename,
+            self.data_manager.exports_dir / filename,
+            self.data_manager.cache_dir / filename
         ]
         
-        logger.info(f"🔍 Searching in {len(search_dirs)} subdirectories:")
-        for i, search_dir in enumerate(search_dirs):
-            logger.info(f"  {i+1}. {search_dir}")
-        
-        for search_dir in search_dirs:
-            file_path = search_dir / filename
-            logger.info(f"🔎 Checking: {file_path}")
-            if file_path.exists() and file_path.is_file():
-                logger.info(f"✅ Found in subdirectory: {file_path}")
+        for search_path in search_paths:
+            if search_path.exists() and search_path.is_file():
                 try:
-                    content = file_path.read_text()
-                    logger.info(f"📖 Successfully read {len(content)} characters from subdirectory")
-                    return content
+                    return search_path.read_text()
                 except Exception as e:
-                    logger.error(f"❌ Error reading from subdirectory: {e}")
                     return f"Error reading file: {e}"
-            else:
-                logger.debug(f"❌ Not found: {file_path}")
-        
-        # If still not found, try case-insensitive search in all subdirectories
-        logger.info(f"🔍 Starting case-insensitive search for '{filename}'")
-        filename_lower = filename.lower()
-        
-        for search_dir in search_dirs:
-            logger.info(f"🔎 Case-insensitive search in: {search_dir}")
-            if not search_dir.exists():
-                logger.warning(f"⚠️  Directory doesn't exist: {search_dir}")
-                continue
-                
-            try:
-                files_in_dir = list(search_dir.glob("*"))
-                logger.info(f"📁 Found {len(files_in_dir)} items in {search_dir.name}/")
-                
-                for existing_file in files_in_dir:
-                    if existing_file.is_file():
-                        logger.debug(f"  📄 Checking: {existing_file.name}")
-                        if existing_file.name.lower() == filename_lower:
-                            logger.info(f"✅ Case-insensitive match found: {existing_file}")
-                            try:
-                                content = existing_file.read_text()
-                                logger.info(f"📖 Successfully read {len(content)} characters (case-insensitive match)")
-                                return content
-                            except Exception as e:
-                                logger.error(f"❌ Error reading case-insensitive match: {e}")
-                                return f"Error reading file: {e}"
-            except Exception as e:
-                logger.error(f"❌ Error during case-insensitive search in {search_dir}: {e}")
-        
-        # Final logging before giving up
-        logger.warning(f"❌ File '{filename}' not found in any location")
-        logger.info("📋 Search summary:")
-        logger.info(f"  - Workspace root: {self.workspace_path}")
-        for search_dir in search_dirs:
-            logger.info(f"  - {search_dir.name}/: {search_dir}")
         
         return f"File not found in workspace: {filename}"
     
@@ -415,42 +336,25 @@ class AgentClient:
         self.metadata["reset_at"] = datetime.now().isoformat()
     
     def export_session(self, export_path: Optional[Path] = None) -> Path:
-        """Export the current session data using data_manager's comprehensive export."""
-        try:
-            # Try to use data_manager's comprehensive export if data is available
-            if self.data_manager.has_data():
-                export_path = self.data_manager.create_data_package(
-                    output_dir=str(self.data_manager.exports_dir)
-                )
-                return Path(export_path)
-            else:
-                # Fallback to basic session export
-                export_path = export_path or self.workspace_path / f"session_{self.session_id}.json"
-                
-                session_data = {
-                    "session_id": self.session_id,
-                    "metadata": self.metadata,
-                    "conversation": self.get_conversation_history(),
-                    "status": self.get_status(),
-                    "workspace_status": self.data_manager.get_workspace_status(),
-                    "exported_at": datetime.now().isoformat()
-                }
-                
-                with open(export_path, 'w') as f:
-                    json.dump(session_data, f, indent=2, default=str)
-                
-                return export_path
-        except Exception as e:
-            # Final fallback
-            export_path = export_path or self.workspace_path / f"session_{self.session_id}_basic.json"
-            basic_data = {
-                "session_id": self.session_id,
-                "error": str(e),
-                "conversation": self.get_conversation_history(),
-                "exported_at": datetime.now().isoformat()
-            }
-            
-            with open(export_path, 'w') as f:
-                json.dump(basic_data, f, indent=2, default=str)
-            
-            return export_path
+        """Export the current session data."""
+        if self.data_manager.has_data():
+            export_path = self.data_manager.create_data_package(
+                output_dir=str(self.data_manager.exports_dir)
+            )
+            return Path(export_path)
+        
+        export_path = export_path or self.workspace_path / f"session_{self.session_id}.json"
+        
+        session_data = {
+            "session_id": self.session_id,
+            "metadata": self.metadata,
+            "conversation": self.get_conversation_history(),
+            "status": self.get_status(),
+            "workspace_status": self.data_manager.get_workspace_status(),
+            "exported_at": datetime.now().isoformat()
+        }
+        
+        with open(export_path, 'w') as f:
+            json.dump(session_data, f, indent=2, default=str)
+        
+        return export_path

@@ -6,38 +6,39 @@ and generating visualizations of the results.
 """
 
 import time
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Tuple, Any
 
+import anndata
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
 
-from lobster.core.data_manager import DataManager
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+class ClusteringError(Exception):
+    """Base exception for clustering operations."""
+    pass
+
+
 class ClusteringService:
     """
-    Service for clustering single-cell RNA-seq data.
+    Stateless service for clustering single-cell RNA-seq data.
 
     This class provides methods to perform clustering and dimensionality
     reduction on single-cell RNA-seq data and generate visualizations.
     """
 
-    def __init__(self, data_manager: DataManager):
+    def __init__(self):
         """
         Initialize the clustering service.
-
-        Args:
-            data_manager: DataManager instance for accessing data
+        
+        This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing ClusteringService")
-        self.data_manager = data_manager
-        self.progress_callback = None
-        self.current_progress = 0
-        self.total_steps = 7  # Total number of major steps in the clustering pipeline
+        logger.info("Initializing stateless ClusteringService")
         self.default_cluster_resolution = 0.7
         logger.info("ClusteringService initialized successfully")
 
@@ -70,307 +71,174 @@ class ClusteringService:
 
     def cluster_and_visualize(
         self,
+        adata: anndata.AnnData,
         resolution: Optional[float] = None,
         batch_correction: bool = False,
+        batch_key: Optional[str] = None,
         demo_mode: bool = False,
         subsample_size: Optional[int] = None,
         skip_steps: Optional[list] = None,
-    ) -> str:
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
-        Perform clustering and UMAP visualization on the current dataset.
+        Perform clustering and UMAP visualization on single-cell RNA-seq data.
 
         Args:
+            adata: AnnData object to cluster
             resolution: Resolution parameter for Leiden clustering
-            batch_correction: Whether to perform batch correction (using patient ID)
+            batch_correction: Whether to perform batch correction
+            batch_key: Column name for batch information
             demo_mode: Whether to run in demo mode (faster processing with reduced quality)
             subsample_size: Maximum number of cells to include (subsamples if larger)
             skip_steps: List of steps to skip in demo mode (e.g. ['marker_genes'])
 
         Returns:
-            str: Clustering results report
+            Tuple[anndata.AnnData, Dict[str, Any]]: Clustered AnnData and clustering stats
+            
+        Raises:
+            ClusteringError: If clustering fails
         """
-        logger.info("Starting clustering and visualization pipeline")
-        logger.debug(
-            f"Parameters: resolution={resolution}, batch_correction={batch_correction}, "
-            + f"demo_mode={demo_mode}, subsample_size={subsample_size}"
-        )
-
-        # Reset progress tracking
-        self.current_progress = 0
-        self._update_progress("Initializing")
-
-        if not self.data_manager.has_data():
-            logger.error("No data loaded for clustering")
-            return "No data loaded. Please download a dataset first."
-
         try:
-            # Set resolution
+            logger.info("Starting clustering and visualization pipeline")
+            
+            # Set resolution  
             if resolution is None:
                 resolution = self.default_cluster_resolution
-                logger.debug(f"Using default resolution: {resolution}")
-
+            
             logger.info(f"Performing clustering with resolution {resolution}")
+            
+            # Create working copy
+            adata_clustered = adata.copy()
+            original_shape = adata_clustered.shape
+            
+            logger.info(f"Input data dimensions: {original_shape[0]} cells × {original_shape[1]} genes")
 
-            # Get data dimensions
-            data_shape = self.data_manager.current_data.shape
-            logger.info(
-                f"Input data dimensions: {data_shape[0]} cells × {data_shape[1]} genes"
-            )
-
-            # Check if we should subsample for demo mode
+            # Handle demo mode settings
             skip_steps = skip_steps or []
             if demo_mode:
                 logger.info("Running in demo mode (faster processing)")
                 if "marker_genes" not in skip_steps:
                     skip_steps.append("marker_genes")
                 if not subsample_size:
-                    subsample_size = min(
-                        1000, data_shape[0]
-                    )  # Default to 1000 cells in demo mode
-
-            # Get AnnData object (or create if needed)
-            adata = self._prepare_adata()
-            logger.debug(
-                f"AnnData object prepared: {adata.n_obs} obs × {adata.n_vars} vars"
-            )
+                    subsample_size = min(1000, original_shape[0])  # Default to 1000 cells in demo mode
 
             # Subsample if needed
-            if subsample_size and adata.n_obs > subsample_size:
-                logger.info(
-                    f"Subsampling data to {subsample_size} cells (from {adata.n_obs})"
-                )
-                sc.pp.subsample(adata, n_obs=subsample_size, random_state=42)
-                logger.info(f"Data subsampled: {adata.n_obs} cells remaining")
+            if subsample_size and adata_clustered.n_obs > subsample_size:
+                logger.info(f"Subsampling data to {subsample_size} cells (from {adata_clustered.n_obs})")
+                sc.pp.subsample(adata_clustered, n_obs=subsample_size, random_state=42)
+                logger.info(f"Data subsampled: {adata_clustered.n_obs} cells remaining")
 
-            self._update_progress("Data preparation complete")
-
-            # Check if batch information is available (Patient_ID)
-            batch_key = None
-            available_keys = list(adata.obs_keys())
-            logger.debug(f"Available observation keys: {available_keys}")
-
-            # TODO check for more common batch keys
-            for potential_key in ["Patient_ID", "patient", "batch", "sample"]:
-                if potential_key in adata.obs_keys():
-                    batch_key = potential_key
-                    logger.info(f"Found batch information using key: {batch_key}")
-                    break
-
-            if batch_key is None:
-                logger.info("No batch information found in data")
-
-            # Perform batch correction if requested and possible
-            if (
-                batch_correction
-                and batch_key
-                and len(adata.obs[batch_key].unique()) > 1
-            ):
-                unique_batches = adata.obs[batch_key].unique()
-                logger.info(
-                    f"Performing batch correction using {batch_key} with {len(unique_batches)} batches: {list(unique_batches)}"
-                )
-
-                # Split by batch and process separately
-                batches = []
-                batch_sizes = {}
-                for batch in unique_batches:
-                    batch_adata = adata[adata.obs[batch_key] == batch].copy()
-                    batch_sizes[batch] = batch_adata.n_obs
-                    logger.debug(f"Batch {batch}: {batch_adata.n_obs} cells")
-
-                    sc.pp.normalize_total(batch_adata, target_sum=1e4)
-                    sc.pp.log1p(batch_adata)
-                    sc.pp.highly_variable_genes(
-                        batch_adata,
-                        min_mean=0.0125,
-                        max_mean=3,
-                        min_disp=0.5,
-                        flavor="seurat",
-                    )
-                    batches.append(batch_adata)
-
-                logger.info(f"Batch sizes: {batch_sizes}")
-
-                # Find common variable genes across batches
-                var_genes = []
-                for i, batch_adata in enumerate(batches):
-                    hvg_count = sum(batch_adata.var["highly_variable"])
-                    logger.debug(f"Batch {i}: {hvg_count} highly variable genes")
-                    var_genes.append(
-                        set(batch_adata.var_names[batch_adata.var["highly_variable"]])
-                    )
-
-                common_var_genes = list(set.intersection(*var_genes))
-                logger.info(
-                    f"Common variable genes across batches: {len(common_var_genes)}"
-                )
-
-                if len(common_var_genes) < 100:
-                    logger.warning(
-                        f"Only {len(common_var_genes)} common variable genes found. Using all genes for batch correction."
-                    )
-                    common_var_genes = None
-
-                # Perform integration
-                logger.info("Performing batch integration")
-                adata_list = []
-                for batch in unique_batches:
-                    batch_adata = adata[adata.obs[batch_key] == batch].copy()
-                    sc.pp.normalize_total(batch_adata, target_sum=1e4)
-                    sc.pp.log1p(batch_adata)
-                    adata_list.append(batch_adata)
-
-                # Integration (similar to Seurat's CCA approach)
-                logger.debug("Concatenating batch data for integration")
-                adata_integrated = sc.AnnData.concatenate(
-                    *adata_list, batch_key=batch_key
-                )
-                logger.info(
-                    f"Integrated data shape: {adata_integrated.n_obs} × {adata_integrated.n_vars}"
-                )
-
-                # Process integrated data
-                adata = self._perform_clustering(
-                    adata_integrated, resolution, demo_mode, skip_steps
-                )
-                self._update_progress("Batch integration complete")
-            else:
-                if not batch_correction:
-                    logger.info("Batch correction disabled by user")
-                elif not batch_key:
-                    logger.info(
-                        "No batch key found - proceeding with standard processing"
-                    )
+            # Check for batch information if batch correction requested
+            if batch_correction:
+                if batch_key is None:
+                    # Auto-detect batch key
+                    for potential_key in ["Patient_ID", "patient", "batch", "sample"]:
+                        if potential_key in adata_clustered.obs.columns:
+                            batch_key = potential_key
+                            logger.info(f"Auto-detected batch key: {batch_key}")
+                            break
+                
+                if batch_key and batch_key in adata_clustered.obs.columns:
+                    unique_batches = adata_clustered.obs[batch_key].unique()
+                    if len(unique_batches) > 1:
+                        logger.info(f"Found {len(unique_batches)} batches for correction: {list(unique_batches)}")
+                        adata_clustered = self._perform_batch_correction(adata_clustered, batch_key)
+                    else:
+                        logger.info("Only one batch found - proceeding without batch correction")
+                        batch_correction = False
                 else:
-                    logger.info(
-                        "Only one batch found - proceeding with standard processing"
-                    )
+                    logger.warning("Batch correction requested but no valid batch key found")
+                    batch_correction = False
 
-                # Standard processing without batch correction
-                adata = self._perform_clustering(
-                    adata, resolution, demo_mode, skip_steps
-                )
-                self._update_progress("Clustering complete")
-
-            # Create visualizations
-            logger.info("Generating visualizations")
-            self._update_progress("Generating visualizations")
-
-            # Calculate number of clusters for metadata
-            n_clusters = len(adata.obs["leiden"].unique())
-
-            # Prepare dataset and analysis information for plots
-            dataset_info = {
-                "data_shape": adata.shape,
-                "source_dataset": self.data_manager.current_metadata.get(
-                    "source", "Current Dataset"
-                ),
-                "n_cells": adata.n_obs,
-                "n_genes": adata.n_vars,
-                "n_clusters": n_clusters,
-            }
-
-            analysis_params = {
+            # Perform clustering
+            adata_clustered = self._perform_clustering(
+                adata_clustered, resolution, demo_mode, skip_steps
+            )
+            
+            # Compile clustering statistics
+            n_clusters = len(adata_clustered.obs["leiden"].unique())
+            cluster_counts = adata_clustered.obs["leiden"].value_counts().to_dict()
+            
+            clustering_stats = {
+                "analysis_type": "clustering",
                 "resolution": resolution,
+                "n_clusters": n_clusters,
                 "batch_correction": batch_correction,
                 "batch_key": batch_key,
                 "demo_mode": demo_mode,
                 "subsample_size": subsample_size,
-                "analysis_type": "clustering",
+                "original_shape": original_shape,
+                "final_shape": adata_clustered.shape,
+                "cluster_counts": cluster_counts,
+                "cluster_sizes": {
+                    str(cluster): int(count) for cluster, count in cluster_counts.items()
+                },
+                "has_umap": "X_umap" in adata_clustered.obsm,
+                "has_marker_genes": "rank_genes_groups" in adata_clustered.uns,
             }
-
-            # Create UMAP plots
-            logger.debug("Creating main UMAP plot")
-            umap_plot = self._create_umap_plot(adata)
-            self.data_manager.add_plot(
-                umap_plot,
-                title="UMAP Visualization with Leiden Clusters",
-                source="clustering_service",
-                dataset_info=dataset_info,
-                analysis_params=analysis_params,
-            )
-
-            if batch_key:
-                # Also create a batch-colored UMAP if batch information is available
-                logger.debug("Creating batch-colored UMAP plot")
-                batch_umap = self._create_batch_umap(adata, batch_key)
-                batch_analysis_params = {**analysis_params, "colored_by": batch_key}
-                self.data_manager.add_plot(
-                    batch_umap,
-                    title=f"UMAP Visualization by {batch_key}",
-                    source="clustering_service",
-                    dataset_info=dataset_info,
-                    analysis_params=batch_analysis_params,
-                )
-
-            # Create cluster size distribution plot
-            logger.debug("Creating cluster distribution plot")
-            cluster_dist_plot = self._create_cluster_distribution_plot(adata)
-            distribution_analysis_params = {
-                **analysis_params,
-                "plot_type": "cluster_distribution",
-            }
-            self.data_manager.add_plot(
-                cluster_dist_plot,
-                title="Cluster Size Distribution",
-                source="clustering_service",
-                dataset_info=dataset_info,
-                analysis_params=distribution_analysis_params,
-            )
-
-            # Update metadata
-            n_clusters = len(adata.obs["leiden"].unique())
-            logger.info(f"Storing clustering results: {n_clusters} clusters identified")
-
-            self.data_manager.current_metadata["clusters"] = adata.obs[
-                "leiden"
-            ].values.tolist()
-            self.data_manager.current_metadata["umap"] = adata.obsm["X_umap"].tolist()
-            self.data_manager.current_metadata["clustering_resolution"] = resolution
-            self.data_manager.current_metadata["n_clusters"] = n_clusters
-
-            # Store cluster marker genes in metadata
-            if "rank_genes_groups" in adata.uns:
-                logger.debug("Storing marker genes in metadata")
+            
+            # Add batch information if available
+            if batch_correction and batch_key:
+                batch_counts = adata_clustered.obs[batch_key].value_counts().to_dict()
+                clustering_stats["batch_counts"] = batch_counts
+                clustering_stats["n_batches"] = len(batch_counts)
+            
+            # Add marker gene information if available
+            if "rank_genes_groups" in adata_clustered.uns and "marker_genes" not in skip_steps:
                 marker_genes = {}
-                for cluster in adata.obs["leiden"].unique():
-                    genes = adata.uns["rank_genes_groups"]["names"][cluster]
-                    scores = adata.uns["rank_genes_groups"]["scores"][cluster]
-                    marker_genes[cluster] = [
-                        {"gene": gene, "score": float(score)}
+                for cluster in adata_clustered.obs["leiden"].unique():
+                    genes = adata_clustered.uns["rank_genes_groups"]["names"][cluster]
+                    scores = adata_clustered.uns["rank_genes_groups"]["scores"][cluster]
+                    marker_genes[str(cluster)] = [
+                        {"gene": str(gene), "score": float(score)}
                         for gene, score in zip(genes[:10], scores[:10])
                     ]
-                self.data_manager.current_metadata["marker_genes"] = marker_genes
-                logger.info(
-                    f"Stored top 10 marker genes for {len(marker_genes)} clusters"
-                )
+                clustering_stats["top_marker_genes"] = marker_genes
 
-            # Update the AnnData object in the data manager
-            self.data_manager.adata = adata
-            logger.info("AnnData object updated in data manager")
-            self._update_progress("Data stored in manager")
-
-            # Generate and return report
-            original_count = (
-                data_shape[0]
-                if subsample_size and data_shape[0] > subsample_size
-                else None
-            )
-            report = self._format_clustering_report(
-                adata,
-                resolution,
-                batch_correction,
-                batch_key,
-                demo_mode=demo_mode,
-                original_cell_count=original_count,
-            )
-            logger.info("Clustering pipeline completed successfully")
-            self._update_progress("Analysis complete")
-            return report
+            logger.info(f"Clustering completed: {n_clusters} clusters identified")
+            
+            return adata_clustered, clustering_stats
 
         except Exception as e:
             logger.exception(f"Error during clustering: {e}")
-            return f"Error during clustering: {str(e)}"
+            raise ClusteringError(f"Clustering failed: {str(e)}")
+
+    def _perform_batch_correction(self, adata: anndata.AnnData, batch_key: str) -> anndata.AnnData:
+        """
+        Perform simple batch correction on the data.
+        
+        Args:
+            adata: AnnData object with batch information
+            batch_key: Column name containing batch labels
+            
+        Returns:
+            anndata.AnnData: Batch-corrected AnnData object
+        """
+        logger.info(f"Performing batch correction using batch key: {batch_key}")
+        
+        try:
+            # Simple batch correction by normalizing each batch separately
+            unique_batches = adata.obs[batch_key].unique()
+            batch_list = []
+            
+            for batch in unique_batches:
+                batch_mask = adata.obs[batch_key] == batch
+                batch_adata = adata[batch_mask].copy()
+                
+                # Normalize each batch separately
+                sc.pp.normalize_total(batch_adata, target_sum=1e4)
+                sc.pp.log1p(batch_adata)
+                
+                batch_list.append(batch_adata)
+            
+            # Concatenate corrected batches
+            adata_corrected = anndata.concat(batch_list, label=batch_key, keys=unique_batches)
+            
+            logger.info(f"Batch correction completed for {len(unique_batches)} batches")
+            return adata_corrected
+            
+        except Exception as e:
+            logger.warning(f"Batch correction failed, proceeding without correction: {e}")
+            return adata
 
     def _prepare_adata(self) -> sc.AnnData:
         """

@@ -7,6 +7,7 @@ correction, cell filtering, normalization, and batch correction/integration.
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -17,40 +18,41 @@ from plotly.subplots import make_subplots
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from lobster.core.data_manager import DataManager
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class PreprocessingError(Exception):
+    """Base exception for preprocessing operations."""
+    pass
 
 
 class PreprocessingService:
     """
     Advanced preprocessing service for single-cell RNA-seq data.
     
-    This service provides methods for ambient RNA correction, quality control filtering,
+    This stateless service provides methods for ambient RNA correction, quality control filtering,
     normalization, and batch correction/integration following best practices from
     current single-cell analysis pipelines.
     """
 
-    def __init__(self, data_manager: DataManager):
+    def __init__(self):
         """
         Initialize the preprocessing service.
         
-        Args:
-            data_manager: DataManager instance for data access
+        This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing PreprocessingService")
-        self.data_manager = data_manager
-        self.processing_history = []
+        logger.info("Initializing stateless PreprocessingService")
         logger.info("PreprocessingService initialized successfully")
 
     def correct_ambient_rna(
         self,
+        adata: anndata.AnnData,
         contamination_fraction: float = 0.1,
         empty_droplet_threshold: int = 100,
-        method: str = "simple_decontamination",
-        save_corrected: bool = True
-    ) -> str:
+        method: str = "simple_decontamination"
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Correct for ambient RNA contamination using simplified decontamination methods.
         
@@ -58,142 +60,85 @@ class PreprocessingService:
         ambient RNA signal that can contaminate cell-containing droplets.
         
         Args:
+            adata: AnnData object with raw UMI counts
             contamination_fraction: Expected fraction of ambient RNA (0.05-0.2 typical)
             empty_droplet_threshold: Minimum UMI count to consider droplet as cell-containing
             method: Method to use ('simple_decontamination', 'quantile_based')
-            save_corrected: Whether to save corrected data to workspace
             
         Returns:
-            str: Results summary of ambient RNA correction
+            Tuple[anndata.AnnData, Dict[str, Any]]: Corrected AnnData and processing stats
+            
+        Raises:
+            PreprocessingError: If correction fails
         """
         try:
-            if not self.data_manager.has_data():
-                return "No data loaded. Please load single-cell data first."
-
             logger.info(f"Starting ambient RNA correction with method: {method}")
             
-            # Get the current data - should be raw UMI counts
-            adata = self.data_manager.adata
-            if adata is None:
-                return "No AnnData object available. Please ensure data is properly loaded."
-
-            original_shape = adata.shape
+            # Create working copy
+            adata_corrected = adata.copy()
+            original_shape = adata_corrected.shape
             logger.info(f"Input data shape: {original_shape[0]} cells × {original_shape[1]} genes")
 
             # Store original data for comparison
-            if adata.raw is None:
-                adata.raw = adata.copy()
+            if adata_corrected.raw is None:
+                adata_corrected.raw = adata_corrected.copy()
 
             # Implement ambient RNA correction
             if method == "simple_decontamination":
                 corrected_matrix = self._simple_decontamination(
-                    adata.X, contamination_fraction, empty_droplet_threshold
+                    adata_corrected.X, contamination_fraction, empty_droplet_threshold
                 )
             elif method == "quantile_based":
                 corrected_matrix = self._quantile_based_correction(
-                    adata.X, contamination_fraction
+                    adata_corrected.X, contamination_fraction
                 )
             else:
-                return f"Unknown ambient RNA correction method: {method}"
+                raise PreprocessingError(f"Unknown ambient RNA correction method: {method}")
 
             # Update the data
-            adata.X = corrected_matrix
+            adata_corrected.X = corrected_matrix
 
             # Calculate correction statistics
-            original_total = np.sum(adata.raw.X)
-            corrected_total = np.sum(adata.X)
+            original_total = np.sum(adata_corrected.raw.X)
+            corrected_total = np.sum(adata_corrected.X)
             reduction_fraction = (original_total - corrected_total) / original_total
 
-            # Create before/after comparison plots
-            comparison_plot = self._create_ambient_correction_plot(adata)
-            
-            dataset_info = {
-                "data_shape": adata.shape,
-                "source_dataset": self.data_manager.current_metadata.get("source", "Current Dataset"),
-                "n_cells": adata.n_obs,
-                "n_genes": adata.n_vars,
-                "correction_method": method,
-                "contamination_fraction": contamination_fraction,
-                "reduction_fraction": reduction_fraction
-            }
-
-            analysis_params = {
+            # Store processing metadata
+            processing_stats = {
                 "method": method,
                 "contamination_fraction": contamination_fraction,
                 "empty_droplet_threshold": empty_droplet_threshold,
-                "total_umi_reduction": reduction_fraction,
+                "original_total_umis": float(original_total),
+                "corrected_total_umis": float(corrected_total),
+                "umi_reduction_fraction": float(reduction_fraction),
+                "cells_processed": adata_corrected.n_obs,
+                "genes_processed": adata_corrected.n_vars,
                 "analysis_type": "ambient_rna_correction"
             }
 
-            self.data_manager.add_plot(
-                comparison_plot,
-                title="Ambient RNA Correction Results",
-                source="preprocessing_service",
-                dataset_info=dataset_info,
-                analysis_params=analysis_params
-            )
-
-            # Update metadata
-            self.data_manager.current_metadata.update({
-                "ambient_rna_corrected": True,
-                "ambient_correction_method": method,
-                "contamination_fraction_used": contamination_fraction,
-                "umi_reduction_fraction": reduction_fraction
-            })
-
-            # Log processing step
-            processing_step = f"Ambient RNA correction ({method})"
-            self.processing_history.append(processing_step)
-            self.data_manager.processing_log.append(
-                f"{processing_step}: {reduction_fraction:.1%} UMI reduction"
-            )
-
-            # Save corrected data if requested
-            if save_corrected:
-                saved_path = self.data_manager.save_processed_data(
-                    processing_step="ambient_corrected",
-                    processing_params=analysis_params
-                )
-                if saved_path:
-                    logger.info(f"Ambient RNA corrected data saved to: {saved_path}")
-
-            return f"""Ambient RNA Correction Complete!
-
-**Method:** {method}
-**Contamination Fraction:** {contamination_fraction:.1%}
-**Empty Droplet Threshold:** {empty_droplet_threshold} UMIs
-
-**Results:**
-- **Original Total UMIs:** {original_total:,.0f}
-- **Corrected Total UMIs:** {corrected_total:,.0f}
-- **UMI Reduction:** {reduction_fraction:.1%}
-- **Cells Processed:** {adata.n_obs:,}
-- **Genes Processed:** {adata.n_vars:,}
-
-Ambient RNA contamination has been estimated and removed from the expression matrix.
-Before/after comparison plots show the distribution of UMI counts per cell.
-
-**Next Suggested Step:** Quality control filtering and cell selection."""
+            logger.info(f"Ambient RNA correction completed: {reduction_fraction:.1%} UMI reduction")
+            return adata_corrected, processing_stats
 
         except Exception as e:
             logger.exception(f"Error in ambient RNA correction: {e}")
-            return f"Error in ambient RNA correction: {str(e)}"
+            raise PreprocessingError(f"Ambient RNA correction failed: {str(e)}")
 
     def filter_and_normalize_cells(
         self,
+        adata: anndata.AnnData,
         min_genes_per_cell: int = 200,
         max_genes_per_cell: int = 5000,
         min_cells_per_gene: int = 3,
         max_mito_percent: float = 20.0,
         max_ribo_percent: float = 50.0,
         normalization_method: str = "log1p",
-        target_sum: int = 10000,
-        save_filtered: bool = True
-    ) -> str:
+        target_sum: int = 10000
+    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Filter cells and genes based on quality metrics and normalize expression data.
         
         Args:
+            adata: AnnData object to filter and normalize
             min_genes_per_cell: Minimum number of genes expressed per cell
             max_genes_per_cell: Maximum number of genes expressed per cell
             min_cells_per_gene: Minimum number of cells expressing each gene
@@ -201,62 +146,45 @@ Before/after comparison plots show the distribution of UMI counts per cell.
             max_ribo_percent: Maximum ribosomal gene percentage  
             normalization_method: Normalization method ('log1p', 'sctransform_like')
             target_sum: Target sum for normalization (e.g., 10,000)
-            save_filtered: Whether to save filtered data to workspace
             
         Returns:
-            str: Results summary of filtering and normalization
+            Tuple[anndata.AnnData, Dict[str, Any]]: Filtered/normalized AnnData and processing stats
+            
+        Raises:
+            PreprocessingError: If filtering or normalization fails
         """
         try:
-            if not self.data_manager.has_data():
-                return "No data loaded. Please load single-cell data first."
-
             logger.info("Starting cell filtering and normalization")
             
-            adata = self.data_manager.adata
-            if adata is None:
-                return "No AnnData object available. Please ensure data is properly loaded."
-
-            original_shape = adata.shape
+            # Create working copy
+            adata_processed = adata.copy()
+            original_shape = adata_processed.shape
             logger.info(f"Input data shape: {original_shape[0]} cells × {original_shape[1]} genes")
 
             # Calculate QC metrics
-            self._calculate_qc_metrics(adata)
+            self._calculate_qc_metrics(adata_processed)
 
-            # Store pre-filtering data for comparison
+            # Store pre-filtering metrics
             pre_filter_metrics = {
-                "n_cells": adata.n_obs,
-                "n_genes": adata.n_vars,
-                "median_genes_per_cell": np.median(adata.obs["n_genes_by_counts"]),
-                "median_counts_per_cell": np.median(adata.obs["total_counts"])
+                "n_cells": adata_processed.n_obs,
+                "n_genes": adata_processed.n_vars,
+                "median_genes_per_cell": float(np.median(adata_processed.obs["n_genes_by_counts"])),
+                "median_counts_per_cell": float(np.median(adata_processed.obs["total_counts"]))
             }
 
-            # Apply filters
+            # Apply quality filters
             filtering_stats = self._apply_quality_filters(
-                adata, min_genes_per_cell, max_genes_per_cell, 
+                adata_processed, min_genes_per_cell, max_genes_per_cell, 
                 min_cells_per_gene, max_mito_percent, max_ribo_percent
             )
 
             # Normalize the data
             normalization_stats = self._normalize_expression_data(
-                adata, normalization_method, target_sum
+                adata_processed, normalization_method, target_sum
             )
 
-            # Create filtering and normalization plots
-            qc_plot = self._create_filtering_plots(adata, filtering_stats)
-            norm_plot = self._create_normalization_plots(adata, normalization_stats)
-
-            # Combine plots into subplots
-            combined_plot = self._combine_preprocessing_plots(qc_plot, norm_plot)
-
-            dataset_info = {
-                "data_shape": adata.shape,
-                "source_dataset": self.data_manager.current_metadata.get("source", "Current Dataset"),
-                "n_cells_final": adata.n_obs,
-                "n_genes_final": adata.n_vars,
-                "normalization_method": normalization_method
-            }
-
-            analysis_params = {
+            # Combine all processing statistics
+            processing_stats = {
                 "min_genes_per_cell": min_genes_per_cell,
                 "max_genes_per_cell": max_genes_per_cell,
                 "min_cells_per_gene": min_cells_per_gene,
@@ -265,75 +193,21 @@ Before/after comparison plots show the distribution of UMI counts per cell.
                 "normalization_method": normalization_method,
                 "target_sum": target_sum,
                 "analysis_type": "filter_and_normalize",
+                "original_shape": original_shape,
+                "final_shape": adata_processed.shape,
+                **pre_filter_metrics,
                 **filtering_stats,
                 **normalization_stats
             }
 
-            self.data_manager.add_plot(
-                combined_plot,
-                title="Cell Filtering and Normalization Results",
-                source="preprocessing_service",
-                dataset_info=dataset_info,
-                analysis_params=analysis_params
-            )
-
-            # Update metadata
-            self.data_manager.current_metadata.update({
-                "filtered_and_normalized": True,
-                "filtering_params": {
-                    "min_genes_per_cell": min_genes_per_cell,
-                    "max_genes_per_cell": max_genes_per_cell,
-                    "max_mito_percent": max_mito_percent,
-                    "max_ribo_percent": max_ribo_percent
-                },
-                "normalization_method": normalization_method,
-                "target_sum": target_sum,
-                **filtering_stats
-            })
-
-            # Log processing step
-            processing_step = f"Filtering and normalization ({normalization_method})"
-            self.processing_history.append(processing_step)
-            self.data_manager.processing_log.append(
-                f"{processing_step}: {original_shape[0]} → {adata.n_obs} cells, "
-                f"{original_shape[1]} → {adata.n_vars} genes"
-            )
-
-            # Save filtered data if requested
-            if save_filtered:
-                saved_path = self.data_manager.save_processed_data(
-                    processing_step="filtered_normalized",
-                    processing_params=analysis_params
-                )
-                if saved_path:
-                    logger.info(f"Filtered and normalized data saved to: {saved_path}")
-
-            return f"""Cell Filtering and Normalization Complete!
-
-**Quality Control Filters Applied:**
-- **Min genes per cell:** {min_genes_per_cell}
-- **Max genes per cell:** {max_genes_per_cell}
-- **Min cells per gene:** {min_cells_per_gene}
-- **Max mitochondrial %:** {max_mito_percent}%
-- **Max ribosomal %:** {max_ribo_percent}%
-
-**Filtering Results:**
-- **Cells:** {original_shape[0]:,} → {adata.n_obs:,} ({filtering_stats.get('cells_retained_pct', 0):.1f}% retained)
-- **Genes:** {original_shape[1]:,} → {adata.n_vars:,} ({filtering_stats.get('genes_retained_pct', 0):.1f}% retained)
-
-**Normalization:**
-- **Method:** {normalization_method}
-- **Target sum:** {target_sum:,} UMIs per cell
-- **Final median counts per cell:** {normalization_stats.get('final_median_counts', 0):,.0f}
-
-Quality control plots show the distribution of QC metrics and the effect of filtering.
-Expression data has been properly normalized for downstream analysis.
-
-**Next Suggested Step:** Doublet detection or batch correction/integration if multiple samples."""
+            logger.info(f"Filtering and normalization completed: {original_shape[0]} → {adata_processed.n_obs} cells, "
+                       f"{original_shape[1]} → {adata_processed.n_vars} genes")
+            
+            return adata_processed, processing_stats
 
         except Exception as e:
             logger.exception(f"Error in filtering and normalization: {e}")
-            return f"Error in filtering and normalization: {str(e)}"
+            raise PreprocessingError(f"Filtering and normalization failed: {str(e)}")
 
     def integrate_and_batch_correct(
         self,

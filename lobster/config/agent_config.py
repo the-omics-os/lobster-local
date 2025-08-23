@@ -203,7 +203,9 @@ class LobsterAgentConfigurator:
     # Default agents configuration - modify this to add/remove agents dynamically
     DEFAULT_AGENTS = [
         "supervisor",
-        "transcriptomics_expert", 
+        "transcriptomics_expert",  # Legacy support
+        "singlecell_expert", 
+        "bulk_rnaseq_expert",
         "method_agent",
         "general_conversation",
         "data_expert"
@@ -213,7 +215,9 @@ class LobsterAgentConfigurator:
     TESTING_PROFILES = {
         "development": {
             "supervisor": "claude-3-5-haiku",
-            "transcriptomics_expert": "claude-3-5-haiku", 
+            "transcriptomics_expert": "claude-3-5-haiku",  # Legacy
+            "singlecell_expert": "claude-3-5-haiku",
+            "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-5-haiku",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-haiku"
@@ -221,7 +225,9 @@ class LobsterAgentConfigurator:
         
         "production": {
             "supervisor": "claude-3-5-sonnet-v2",
-            "transcriptomics_expert": "claude-4-opus",
+            "transcriptomics_expert": "claude-4-opus",  # Legacy
+            "singlecell_expert": "claude-4-opus",
+            "bulk_rnaseq_expert": "claude-3-5-sonnet-v2",
             "method_agent": "claude-3-5-sonnet",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-sonnet"
@@ -229,7 +235,9 @@ class LobsterAgentConfigurator:
         
         "high-performance": {
             "supervisor": "claude-4-opus",
-            "transcriptomics_expert": "claude-3-7-sonnet",
+            "transcriptomics_expert": "claude-3-7-sonnet",  # Legacy
+            "singlecell_expert": "claude-3-7-sonnet",
+            "bulk_rnaseq_expert": "claude-4-opus",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-haiku"
@@ -237,7 +245,9 @@ class LobsterAgentConfigurator:
         
         "ultra-performance": {
             "supervisor": "claude-4-sonnet",
-            "transcriptomics_expert": "claude-4-sonnet",
+            "transcriptomics_expert": "claude-4-sonnet",  # Legacy
+            "singlecell_expert": "claude-4-sonnet",
+            "bulk_rnaseq_expert": "claude-4-sonnet",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
             "general_conversation": "claude-4-sonnet"
@@ -245,7 +255,9 @@ class LobsterAgentConfigurator:
         
         "cost-optimized": {
             "supervisor": "claude-3-haiku",
-            "transcriptomics_expert": "claude-3-5-sonnet",
+            "transcriptomics_expert": "claude-3-5-sonnet",  # Legacy
+            "singlecell_expert": "claude-3-5-sonnet",
+            "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-haiku",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-haiku"
@@ -253,7 +265,9 @@ class LobsterAgentConfigurator:
         
         "heavyweight": {
             "supervisor": "claude-4-1-opus",
-            "transcriptomics_expert": "claude-4-1-opus",
+            "transcriptomics_expert": "claude-4-1-opus",  # Legacy
+            "singlecell_expert": "claude-4-1-opus",
+            "bulk_rnaseq_expert": "claude-4-1-opus",
             "method_agent": "claude-4-opus",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-4-opus"
@@ -261,7 +275,9 @@ class LobsterAgentConfigurator:
         
         "eu-compliant": {
             "supervisor": "claude-3-5-sonnet-v2-eu",
-            "transcriptomics_expert": "claude-4-1-opus-eu",
+            "transcriptomics_expert": "claude-4-1-opus-eu",  # Legacy
+            "singlecell_expert": "claude-4-1-opus-eu",
+            "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
             "method_agent": "claude-3-5-sonnet-eu",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-sonnet-eu"
@@ -269,7 +285,9 @@ class LobsterAgentConfigurator:
         
         "eu-high-performance": {
             "supervisor": "claude-3-7-sonnet-eu",
-            "transcriptomics_expert": "claude-3-7-sonnet-eu",
+            "transcriptomics_expert": "claude-3-7-sonnet-eu",  # Legacy
+            "singlecell_expert": "claude-3-7-sonnet-eu",
+            "bulk_rnaseq_expert": "claude-4-opus-eu",
             "method_agent": "claude-4-opus-eu",
             "data_expert": "claude-3-5-haiku",
             "general_conversation": "claude-3-5-sonnet-v2-eu"

@@ -3,6 +3,14 @@ Lobster AI - API AgentClient
 Enhanced AgentClient specifically designed for API usage with WebSocket streaming.
 """
 
+##########################################
+##########################################
+##########################################
+## NEEDS Migration to DATAMANGER 2
+##########################################
+##########################################
+##########################################
+
 from typing import Any, Dict, List, Optional, AsyncGenerator
 from datetime import datetime
 from pathlib import Path
