@@ -100,8 +100,8 @@ def create_bioinformatics_graph(
         prompt=system_prompt,
         supervisor_name="supervisor",
         state_schema=OverallState,
-        add_handoff_messages=False,
-        include_agent_nameand='inline',
+        add_handoff_messages=True,
+        include_agent_name='inline',
         # Change from "full_history" to "messages" or "last_message"
         output_mode="full_history",  # This ensures the actual messages are returned
         # output_mode="last_message",  # This ensures the actual messages are returned

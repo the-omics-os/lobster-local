@@ -4,6 +4,7 @@ Provides a simple, extensible interface for both CLI and future UI implementatio
 """
 
 import os
+os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = '900000'
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Generator
@@ -14,13 +15,7 @@ from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
 
 from langfuse.langchain import CallbackHandler as LangfuseCallback
-##########################################
-##########################################
-##########################################
-## NEEDS Migration to DATAMANGER 2
-##########################################
-##########################################
-##########################################
+
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.agents.graph import create_bioinformatics_graph
 
@@ -132,10 +127,10 @@ class AgentClient:
             events = []
             
             # Execute graph
-            for event in self.graph.invoke(
+            for event in self.graph.stream(
                 input=graph_input, 
                 config=config,
-                stream_mode='debug'
+                stream_mode='updates'
                 ):
                 events.append(event)
             
@@ -198,23 +193,34 @@ class AgentClient:
             }
     
     def _extract_response(self, events: List[Dict]) -> str:
-        """Extract the final response from events."""
+        """Extract the final response from events, expecting supervisor responses."""
         if not events:
             return "No response generated."
         
-        # Process events in reverse chronological order to find the last AI response
+        # Process events in reverse chronological order to find the last supervisor response
         for event in reversed(events):
-            if event.get("type") == "task_result":
-                payload = event.get("payload", {})
-                result = payload.get("result", [])
+            # Check for supervisor key first
+            if 'supervisor' not in event:
+                # Log any unexpected keys
+                unexpected_keys = [key for key in event.keys() if key != 'supervisor']
+                if unexpected_keys:
+                    logger.warning(f"Unexpected event keys found (expected 'supervisor'): {unexpected_keys}")
+                continue
+            
+            supervisor_data = event['supervisor']
+            if not isinstance(supervisor_data, dict) or 'messages' not in supervisor_data:
+                continue
                 
-                for item in result:
-                    if isinstance(item, tuple) and len(item) == 2:
-                        key, value = item
-                        if key == "messages" and isinstance(value, list):
-                            for msg in reversed(value):
-                                if isinstance(msg, AIMessage) and hasattr(msg, 'content'):
-                                    return msg.content.strip() if msg.content else ""
+            messages = supervisor_data['messages']
+            if not isinstance(messages, list):
+                continue
+            
+            # Find the last AIMessage in the supervisor's messages
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content:
+                    content = msg.content.strip()
+                    if content:
+                        return content
         
         return "No response generated."
     

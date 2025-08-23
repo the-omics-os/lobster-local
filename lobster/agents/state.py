@@ -20,7 +20,6 @@ class OverallState(AgentState):
 
     # Sub-states for each agent
     data_expert_state: "DataExpertState"
-    transcriptomics_expert_state: "TranscriptomicsExpertState"  # Legacy support
     singlecell_expert_state: "SingleCellExpertState"
     bulk_rnaseq_expert_state: "BulkRNASeqExpertState"
     method_state: "MethodState"
@@ -44,19 +43,19 @@ class OverallState(AgentState):
 #     pending_tasks: List[str]             
 
 
-class TranscriptomicsExpertState(AgentState):
-    """
-    State for the transcriptomics expert agent.
-    """
-    next: str
+# class TranscriptomicsExpertState(AgentState):
+#     """
+#     State for the transcriptomics expert agent.
+#     """
+#     next: str
 
-    # Transcriptomics-specific context
-    analysis_results: Dict[str, Any]     # Gene expression, DEG lists, etc.
-    file_paths: List[str]            # Paths to input/output files
-    methodology_parameters: Dict[str, Any] 
-    data_context: str                    # Type/source of transcriptomics data (RNA-seq, microarray)
-    quality_control_metrics: Dict[str, Any]
-    intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
+#     # Transcriptomics-specific context
+#     analysis_results: Dict[str, Any]     # Gene expression, DEG lists, etc.
+#     file_paths: List[str]            # Paths to input/output files
+#     methodology_parameters: Dict[str, Any] 
+#     data_context: str                    # Type/source of transcriptomics data (RNA-seq, microarray)
+#     quality_control_metrics: Dict[str, Any]
+#     intermediate_outputs: Dict[str, Any] # For partial computations before returning to supervisor
 
 
 class SingleCellExpertState(AgentState):
