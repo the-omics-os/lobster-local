@@ -9,6 +9,8 @@ import os
 import requests
 import re
 import tarfile
+import ftplib
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import Optional, Dict, Tuple, List, Union
 
@@ -414,9 +416,10 @@ class GEODownloadManager:
     def download_file(self, url: str, local_path: Path, description: str = None) -> bool:
         """
         Download file from URL to local path with progress tracking.
+        Supports both HTTP/HTTPS and FTP protocols.
         
         Args:
-            url: URL to download from
+            url: URL to download from (HTTP/HTTPS/FTP)
             local_path: Path to save file to
             description: Optional description for the progress bar
             
@@ -426,9 +429,8 @@ class GEODownloadManager:
         try:
             logger.info(f"Downloading from: {url}")
             
-            # Get file size for progress tracking
-            head_response = self.session.head(url, timeout=30)
-            file_size = int(head_response.headers.get('content-length', 0))
+            # Parse the URL to determine protocol
+            parsed_url = urlparse(url)
             
             # Create a meaningful description for the progress bar
             if not description:
@@ -436,6 +438,35 @@ class GEODownloadManager:
                 if len(filename) > 40:
                     filename = filename[:37] + "..."
                 description = f"Downloading {filename}"
+            
+            # Handle FTP URLs
+            if parsed_url.scheme.lower() == 'ftp':
+                return self._download_ftp(url, local_path, description)
+            
+            # Handle HTTP/HTTPS URLs (existing functionality)
+            else:
+                return self._download_http(url, local_path, description)
+                
+        except Exception as e:
+            logger.warning(f"Failed to download {url}: {e}")
+            return False
+    
+    def _download_http(self, url: str, local_path: Path, description: str) -> bool:
+        """
+        Download file from HTTP/HTTPS URL with progress tracking.
+        
+        Args:
+            url: HTTP/HTTPS URL to download from
+            local_path: Path to save file to
+            description: Description for the progress bar
+            
+        Returns:
+            bool: True if download succeeded, False otherwise
+        """
+        try:
+            # Get file size for progress tracking
+            head_response = self.session.head(url, timeout=30)
+            file_size = int(head_response.headers.get('content-length', 0))
             
             # Start the actual download with progress tracking
             response = self.session.get(url, stream=True, timeout=60)
@@ -470,7 +501,75 @@ class GEODownloadManager:
             return True
             
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to download {url}: {e}")
+            logger.warning(f"Failed to download HTTP {url}: {e}")
+            return False
+    
+    def _download_ftp(self, url: str, local_path: Path, description: str) -> bool:
+        """
+        Download file from FTP URL with progress tracking.
+        
+        Args:
+            url: FTP URL to download from
+            local_path: Path to save file to
+            description: Description for the progress bar
+            
+        Returns:
+            bool: True if download succeeded, False otherwise
+        """
+        try:
+            parsed_url = urlparse(url)
+            hostname = parsed_url.hostname
+            username = parsed_url.username or 'anonymous'
+            password = parsed_url.password or 'anonymous@'
+            filepath = parsed_url.path
+            
+            # Connect to FTP server
+            ftp = ftplib.FTP()
+            ftp.connect(hostname, parsed_url.port or 21, timeout=30)
+            ftp.login(username, password)
+            
+            try:
+                # Get file size for progress tracking
+                file_size = ftp.size(filepath)
+                if file_size is None:
+                    file_size = 0
+                    
+                # Create progress columns for a rich display
+                progress_columns = [
+                    BarColumn(),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    "•",
+                    TimeElapsedColumn(),
+                    "•",
+                    TimeRemainingColumn(),
+                ]
+                
+                # Download with progress tracking
+                with Progress(*progress_columns, console=self.console) as progress:
+                    task_id = progress.add_task(description, total=file_size)
+                    
+                    with open(local_path, 'wb') as f:
+                        downloaded = 0
+                        
+                        def callback(data):
+                            nonlocal downloaded
+                            f.write(data)
+                            downloaded += len(data)
+                            progress.update(task_id, completed=downloaded)
+                        
+                        # Set binary mode and download
+                        ftp.voidcmd('TYPE I')  # Set binary mode
+                        ftp.retrbinary(f'RETR {filepath}', callback, blocksize=32768)
+                
+                logger.info(f"Downloaded FTP file to: {local_path}")
+                return True
+                
+            finally:
+                ftp.quit()
+                
+        except (ftplib.all_errors, OSError) as e:
+            logger.warning(f"Failed to download FTP {url}: {e}")
             return False
     
     def download_geo_data(self, gse_id: str) -> Tuple[Optional[Path], Optional[Union[Path, Dict[str, Path]]]]:

@@ -730,17 +730,17 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     # HELPER INTEGRATION METHODS
     # ========================================
 
-    def _download_and_parse_10x_sample(self, suppl_url: str, gsm_id: str) -> Optional[pd.DataFrame]:
-        """Download and parse 10X format single-cell sample."""
-        try:
-            # Download using helper downloader for better progress tracking
-            local_file = self.cache_dir / f"{gsm_id}_10x_data"
-            if self.geo_downloader.download_file(suppl_url, local_file):
-                return self.geo_parser.parse_supplementary_file(local_file)
-            return None
-        except Exception as e:
-            logger.error(f"Error downloading 10X sample {gsm_id}: {e}")
-            return None
+    # def _download_and_parse_10x_sample(self, suppl_url: str, gsm_id: str) -> Optional[pd.DataFrame]:
+    #     """Download and parse 10X format single-cell sample."""
+    #     try:
+    #         # Download using helper downloader for better progress tracking
+    #         local_file = self.cache_dir / f"{gsm_id}_10x_data"
+    #         if self.geo_downloader.download_file(suppl_url, local_file):
+    #             return self.geo_parser.parse_supplementary_file(local_file)
+    #         return None
+    #     except Exception as e:
+    #         logger.error(f"Error downloading 10X sample {gsm_id}: {e}")
+    #         return None
 
     def _store_single_sample_as_modality(self, gsm_id: str, matrix: pd.DataFrame, gsm) -> str:
         """Store single sample as modality in DataManagerV2."""
@@ -1868,10 +1868,46 @@ The actual expression data download will be much faster now that metadata is pre
             return sample_info
 
         except Exception as e:
-            logger.error(f"Error getting sample info: {e}")
+            logger.error(f"Error getting sample info: {e}"
+            )
             return {}
 
     def _download_sample_matrices(
+        self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
+    ) -> Dict[str, Optional[pd.DataFrame]]:
+        """
+        Download individual sample expression matrices sequentially.
+
+        Args:
+            sample_info: Dictionary of sample information
+            gse_id: GEO series ID
+
+        Returns:
+            dict: Dictionary of sample matrices
+        """
+        sample_matrices = {}
+
+        logger.info(f"Downloading matrices for {len(sample_info)} samples...")
+
+        # Sequential download (no threading)
+        for gsm_id, info in sample_info.items():
+            try:
+                matrix = self._download_single_sample(gsm_id, info, gse_id)
+                sample_matrices[gsm_id] = matrix
+                if matrix is not None:
+                    logger.info(
+                        f"Successfully downloaded matrix for {gsm_id}: {matrix.shape}"
+                    )
+                else:
+                    logger.warning(f"No matrix data found for {gsm_id}")
+            except Exception as e:
+                logger.error(f"Error downloading {gsm_id}: {e}")
+                sample_matrices[gsm_id] = None
+
+        return sample_matrices
+
+
+    def _download_sample_matrices_THREADING(
         self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
     ) -> Dict[str, Optional[pd.DataFrame]]:
         """
@@ -1889,6 +1925,13 @@ The actual expression data download will be much faster now that metadata is pre
         logger.info(f"Downloading matrices for {len(sample_info)} samples...")
 
         # Use threading for parallel downloads
+        #==========================================================================================================
+        #==========================================================================================================
+        #==========================================================================================================
+        #==========================================================================================================
+        #==========================================================================================================
+        #==========================================================================================================
+        #==========================================================================================================
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_sample = {
                 executor.submit(
@@ -1934,20 +1977,13 @@ The actual expression data download will be much faster now that metadata is pre
 
             # Check for 10X format supplementary files
             if hasattr(gsm, "metadata"):
-                suppl_files = self._extract_supplementary_files_from_metadata(gsm.metadata, gsm_id)
+                suppl_files_mapped = self._extract_supplementary_files_from_metadata(gsm.metadata, gsm_id)
                 # suppl_files = gsm.metadata["supplementary_file"]
-                if not isinstance(suppl_files, list):
-                    suppl_files = [suppl_files]
+                df = self._download_and_combine_single_cell_files(suppl_files_mapped, gsm_id)
+                return df
                 
-                # Look for 10X format files
-                for suppl_url in suppl_files:
-                    if any(pattern in suppl_url.lower() for pattern in 
-                            ['matrix', 'barcodes', 'features', '.h5']):
-                        
-                        # Download and parse 10X data
-                        matrix = self._download_and_parse_10x_sample(suppl_url, gsm_id)
-                        if matrix is not None:
-                            return self._store_single_sample_as_modality(gsm_id, matrix, gsm)
+        except Exception as e:
+            print(e)
             
             # Fallback to expression table
             if hasattr(gsm, "table") and gsm.table is not None:
