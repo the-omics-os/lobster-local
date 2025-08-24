@@ -7,6 +7,7 @@ Installable via pip or curl, with rich terminal interface.
 from pathlib import Path
 from typing import Optional
 import os
+os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = '900000'
 import subprocess
 import shutil
  

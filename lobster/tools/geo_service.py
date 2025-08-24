@@ -1,9 +1,11 @@
 """
-Professional GEO data service using GEOparse for DataManagerV2.
+Professional GEO data service using GEOparse with modular fallback architecture.
 
 This service provides a unified interface for downloading and processing
-data from the Gene Expression Omnibus (GEO) database using GEOparse library
-and the modular DataManagerV2 system.
+data from the Gene Expression Omnibus (GEO) database using a layered approach:
+1. Primary: GEOparse library for standard operations
+2. Fallback: Specialized downloader and parser for complex cases
+3. Integration: Full DataManagerV2 compatibility with comprehensive error handling
 """
 
 import json
@@ -11,9 +13,13 @@ import os
 import re
 import tarfile
 import urllib.request
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple, List, Union, Callable
+from enum import Enum
+from dataclasses import dataclass
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -26,7 +32,63 @@ except ImportError:
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
+# Import helper modules for fallback functionality
+from lobster.tools.geo_downloader import GEODownloadManager
+from lobster.tools.geo_parser import GEOParser
+
 logger = get_logger(__name__)
+
+
+# ========================================
+# DATA STRUCTURES AND ENUMS
+# ========================================
+
+class GEODataSource(Enum):
+    """Enumeration of data source types for GEO downloads."""
+    GEOPARSE = "geoparse"
+    SOFT_FILE = "soft_file" 
+    SUPPLEMENTARY = "supplementary"
+    TAR_ARCHIVE = "tar_archive"
+    SAMPLE_MATRICES = "sample_matrices"
+
+
+class GEODataType(Enum):
+    """Enumeration of data types for GEO datasets."""
+    SINGLE_CELL = "single_cell"
+    BULK = "bulk"
+    MIXED = "mixed"
+
+
+@dataclass
+class DownloadStrategy:
+    """Configuration for GEO download preferences and fallback options."""
+    prefer_geoparse: bool = True
+    allow_fallback: bool = True
+    max_retries: int = 3
+    timeout_seconds: int = 300
+    prefer_supplementary: bool = False
+    force_tar_extraction: bool = False
+
+
+@dataclass
+class GEOResult:
+    """Result wrapper containing data, metadata, and processing information."""
+    data: Optional[pd.DataFrame] = None
+    metadata: Dict[str, Any] = None
+    source: GEODataSource = GEODataSource.GEOPARSE
+    processing_info: Dict[str, Any] = None
+    success: bool = False
+    error_message: Optional[str] = None
+
+
+class GEOServiceError(Exception):
+    """Custom exception for GEO service errors."""
+    pass
+
+
+class GEOFallbackError(Exception):
+    """Custom exception for fallback mechanism failures."""
+    pass
 
 
 class GEOService:
@@ -42,7 +104,7 @@ class GEOService:
         self, data_manager: DataManagerV2, cache_dir: Optional[str] = None, console=None
     ):
         """
-        Initialize the GEO service.
+        Initialize the GEO service with modular architecture.
 
         Args:
             data_manager: DataManagerV2 instance for storing processed data as modalities
@@ -59,14 +121,729 @@ class GEOService:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.console = console
 
-        logger.info("GEOService initialized with GEOparse backend and DataManagerV2")
+        # Initialize helper services for fallback functionality
+        self.geo_downloader = GEODownloadManager(
+            cache_dir=str(self.cache_dir), 
+            console=self.console
+        )
+        self.geo_parser = GEOParser()
+        
+        # Default download strategy
+        self.download_strategy = DownloadStrategy()
+        
+        # Processing pipeline registry for different scenarios
+        self.processing_pipelines = self._initialize_processing_pipelines()
+
+        logger.info("GEOService initialized with modular architecture: GEOparse + fallback helpers")
+
+    def _initialize_processing_pipelines(self) -> Dict[str, List[Callable]]:
+        """
+        Initialize processing pipelines for different scenarios.
+        
+        Returns:
+            Dict[str, List[Callable]]: Pipeline functions for each scenario
+        """
+        return {
+            "single_cell": [
+                self._try_geoparse_download,
+                self._try_supplementary_tar,
+                self._try_sample_matrices_fallback,
+                self._try_helper_download_fallback
+            ],
+            "bulk": [
+                self._try_geoparse_download,
+                self._try_series_matrix,
+                self._try_supplementary_files,
+                self._try_helper_download_fallback
+            ],
+            "mixed": [
+                self._try_geoparse_download,
+                self._try_supplementary_tar,
+                self._try_supplementary_files,
+                self._try_sample_matrices_fallback,
+                self._try_helper_download_fallback
+            ]
+        }
+
+    # ========================================
+    # USED BY DATAEXPERT
+    # ========================================
+
+    def download_dataset(self, geo_id: str, modality_type) -> str:
+        """
+        Download and process a dataset using modular strategy with fallbacks (Scenarios 2 & 3).
+
+        Args:
+            geo_id: GEO accession ID
+
+        Returns:
+            str: Status message with detailed information
+        """
+        try:
+            logger.info(f"Processing GEO query with modular strategy: {geo_id}")
+            
+            # Clean the GEO ID
+            clean_geo_id = geo_id.strip().upper()
+            if not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
+
+            # Check if metadata already exists (should be fetched first)
+            if clean_geo_id not in self.data_manager.metadata_store:
+                logger.info(f"Metadata not found, fetching first for {clean_geo_id}")
+                metadata_result = self.fetch_metadata_only(clean_geo_id)
+                if "Error" in metadata_result:
+                    return f"Failed to fetch metadata: {metadata_result}"
+
+            # Check if modality already exists in DataManagerV2
+            modality_name = f"geo_{clean_geo_id.lower()}"
+            existing_modalities = self.data_manager.list_modalities()
+            if modality_name in existing_modalities:
+                return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
+
+            # Use the strategic download approach
+            result = self.download_with_strategy(geo_id = clean_geo_id)
+            
+            if not result.success:
+                return f"Failed to download {clean_geo_id} using all available methods. Last error: {result.error_message}"
+            
+            # Store as modality in DataManagerV2
+            enhanced_metadata = {
+                "dataset_id": clean_geo_id,
+                "dataset_type": "GEO",
+                "source_metadata": result.metadata,
+                "processing_date": pd.Timestamp.now().isoformat(),
+                "download_source": result.source.value,
+                "processing_method": result.processing_info.get("method", "unknown")
+            }
+            enhanced_metadata.update(result.processing_info)
+
+            # Determine appropriate adapter based on data characteristics and metadata
+            cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
+            predicted_type = self._determine_data_type_from_metadata(cached_metadata)
+            
+            n_obs, n_vars = result.data.shape
+            if predicted_type == 'single_cell_rna_seq' or (n_obs > 1000 and n_vars > 5000):
+                adapter_name = "transcriptomics_single_cell"
+            elif predicted_type == 'bulk_rna_seq' or n_obs < 200:
+                adapter_name = "transcriptomics_bulk"
+            else:
+                adapter_name = "transcriptomics_single_cell"  # Default for GEO
+
+            logger.info(f"Using adapter '{adapter_name}' based on predicted type '{predicted_type}' and data shape {result.data.shape}")
+
+            # Load as modality in DataManagerV2
+            adata = self.data_manager.load_modality(
+                name=modality_name,
+                source=result.data,
+                adapter=adapter_name,
+                validate=True,
+                **enhanced_metadata
+            )
+
+            # Save to workspace
+            save_path = f"{clean_geo_id.lower()}_raw.h5ad"
+            saved_file = self.data_manager.save_modality(modality_name, save_path)
+
+            # Log successful download and save
+            self.data_manager.log_tool_usage(
+                tool_name="download_geo_dataset_strategic",
+                parameters={
+                    "geo_id": clean_geo_id, 
+                    "download_source": result.source.value,
+                    "processing_method": result.processing_info.get("method", "unknown")
+                },
+                description=f"Downloaded GEO dataset {clean_geo_id} using strategic approach ({result.source.value}), saved to {saved_file}",
+            )
+
+            # Auto-save current state
+            self.data_manager.auto_save_state()
+
+            return f"""Successfully downloaded and loaded GEO dataset {clean_geo_id}!
+
+📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
+🔬 Adapter: {adapter_name} (predicted: {predicted_type.replace('_', ' ').title()})
+💾 Saved to: {save_path}
+🎯 Source: {result.source.value} ({result.processing_info.get('method', 'unknown')})
+⚡ Ready for quality control and downstream analysis!
+
+The dataset is now available as modality '{modality_name}' for other agents to use."""
+
+        except Exception as e:
+            logger.exception(f"Error downloading dataset: {e}")
+            return f"Error downloading dataset: {str(e)}"
+        
+    # ========================================
+    # MAIN PUBLIC METHODS FOR THE 6 SCENARIOS
+    # ========================================        
+    def download_with_strategy(
+        self, 
+        geo_id: str, 
+        strategy: Optional[DownloadStrategy] = None,
+        data_type: Optional[GEODataType] = None
+    ) -> GEOResult:
+        """
+        Master function implementing layered download approach (Scenarios 1 & 2).
+        
+        Args:
+            geo_id: GEO accession ID
+            strategy: Download strategy configuration
+            data_type: Predicted data type (auto-detected if None)
+            
+        Returns:
+            GEOResult: Comprehensive result with data and metadata
+        """
+        clean_geo_id = geo_id.strip().upper()
+        strategy = strategy or self.download_strategy
+        
+        logger.info(f"Starting strategic download for {clean_geo_id}")
+        
+        try:
+            # Step 1: Ensure metadata exists
+            if clean_geo_id not in self.data_manager.metadata_store:
+                metadata_summary = self.fetch_metadata_only(clean_geo_id)
+                if "Error" in metadata_summary:
+                    return GEOResult(
+                        success=False,
+                        error_message=f"Failed to fetch metadata: {metadata_summary}",
+                        source=GEODataSource.GEOPARSE
+                    )
+            
+            # Step 2: Detect data type if not provided
+            cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
+            if data_type is None:
+                predicted_type = self._determine_data_type_from_metadata(cached_metadata)
+                if predicted_type == 'single_cell_rna_seq':
+                    data_type = GEODataType.SINGLE_CELL
+                elif predicted_type == 'bulk_rna_seq':
+                    data_type = GEODataType.BULK
+                else:
+                    data_type = GEODataType.MIXED
+            
+            # Step 3: Route to appropriate pipeline
+            pipeline_name = data_type.value
+            pipeline = self.processing_pipelines.get(pipeline_name, self.processing_pipelines["mixed"])
+            
+            logger.info(f"Using {pipeline_name} pipeline with {len(pipeline)} steps")
+            
+            # Step 4: Execute pipeline with retries
+            for attempt in range(strategy.max_retries):
+                logger.info(f"Pipeline attempt {attempt + 1}/{strategy.max_retries}")
+                
+                for i, pipeline_func in enumerate(pipeline):
+                    logger.info(f"Executing pipeline step {i + 1}: {pipeline_func.__name__}")
+                    
+                    try:
+                        result = pipeline_func(clean_geo_id, cached_metadata)
+                        if result.success:
+                            logger.info(f"Success via {pipeline_func.__name__}")
+                            return result
+                        else:
+                            logger.warning(f"Step failed: {result.error_message}")
+                    except Exception as e:
+                        logger.warning(f"Pipeline step {pipeline_func.__name__} failed: {e}")
+                        continue
+                
+                if attempt < strategy.max_retries - 1:
+                    logger.info(f"Pipeline failed, retrying in {2 ** attempt} seconds...")
+                    time.sleep(2 ** attempt)
+            
+            return GEOResult(
+                success=False,
+                error_message=f"All pipeline steps failed after {strategy.max_retries} attempts",
+                metadata=cached_metadata,
+                source=GEODataSource.GEOPARSE
+            )
+            
+        except Exception as e:
+            logger.exception(f"Error in strategic download: {e}")
+            return GEOResult(
+                success=False,
+                error_message=str(e),
+                source=GEODataSource.GEOPARSE
+            )
+
+    def download_single_cell_sample(self, gsm_id: str) -> str:
+        """
+        Specialized single-cell sample downloading (Scenario 4).
+        
+        Args:
+            gsm_id: GEO sample ID (e.g., GSM123456)
+            
+        Returns:
+            str: Status message
+        """
+        try:
+            logger.info(f"Downloading single-cell sample: {gsm_id}")
+            
+            # Clean sample ID
+            clean_gsm_id = gsm_id.strip().upper()
+            if not clean_gsm_id.startswith('GSM'):
+                return f"Invalid sample ID format: {gsm_id}. Must be a GSM accession (e.g., GSM123456)."
+            
+            # Try GEOparse first
+            try:
+                gsm = GEOparse.get_GEO(geo=clean_gsm_id, destdir=str(self.cache_dir))
+                
+                # Check for 10X format supplementary files
+                if hasattr(gsm, "metadata") and "supplementary_file" in gsm.metadata:
+                    suppl_files = gsm.metadata["supplementary_file"]
+                    if not isinstance(suppl_files, list):
+                        suppl_files = [suppl_files]
+                    
+                    # Look for 10X format files
+                    for suppl_url in suppl_files:
+                        if any(pattern in suppl_url.lower() for pattern in 
+                               ['matrix.mtx', 'barcodes.tsv', 'features.tsv', '.h5']):
+                            
+                            # Download and parse 10X data
+                            matrix = self._download_and_parse_10x_sample(suppl_url, clean_gsm_id)
+                            if matrix is not None:
+                                return self._store_single_sample_as_modality(clean_gsm_id, matrix, gsm)
+                
+                # Fallback to expression table
+                if hasattr(gsm, "table") and gsm.table is not None:
+                    matrix = gsm.table
+                    return self._store_single_sample_as_modality(clean_gsm_id, matrix, gsm)
+                    
+            except Exception as e:
+                logger.warning(f"GEOparse failed for {clean_gsm_id}: {e}")
+            
+            # Fallback to helper downloader
+            try:
+                return self._download_sample_with_helpers(clean_gsm_id)
+            except Exception as e:
+                logger.error(f"Helper download failed for {clean_gsm_id}: {e}")
+                return f"Failed to download sample {clean_gsm_id}: {str(e)}"
+                
+        except Exception as e:
+            logger.exception(f"Error downloading single-cell sample {gsm_id}: {e}")
+            return f"Error downloading single-cell sample {gsm_id}: {str(e)}"
+
+    def download_bulk_dataset(self, geo_id: str, prefer_series_matrix: bool = True) -> str:
+        """
+        Enhanced bulk data downloading (Scenario 5).
+        
+        Args:
+            geo_id: GEO accession ID
+            prefer_series_matrix: Whether to prefer series matrix over supplementary files
+            
+        Returns:
+            str: Status message
+        """
+        try:
+            logger.info(f"Downloading bulk dataset: {geo_id}")
+            
+            clean_geo_id = geo_id.strip().upper()
+            if not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
+            
+            # Ensure metadata exists
+            if clean_geo_id not in self.data_manager.metadata_store:
+                metadata_summary = self.fetch_metadata_only(clean_geo_id)
+                if "Error" in metadata_summary:
+                    return f"Failed to fetch metadata: {metadata_summary}"
+            
+            # Strategy for bulk data
+            strategy = DownloadStrategy(
+                prefer_geoparse=True,
+                prefer_supplementary=not prefer_series_matrix,
+                max_retries=2
+            )
+            
+            result = self.download_with_strategy(clean_geo_id, strategy, GEODataType.BULK)
+            
+            if result.success:
+                # Store as bulk RNA-seq modality
+                modality_name = f"geo_{clean_geo_id.lower()}_bulk"
+                adata = self.data_manager.load_modality(
+                    name=modality_name,
+                    source=result.data,
+                    adapter="transcriptomics_bulk",
+                    validate=True,
+                    **result.processing_info
+                )
+                
+                # Save to workspace
+                save_path = f"{clean_geo_id.lower()}_bulk_raw.h5ad"
+                saved_file = self.data_manager.save_modality(modality_name, save_path)
+                
+                return f"""Successfully downloaded bulk dataset {clean_geo_id}!
+
+📊 Modality: '{modality_name}' ({adata.n_obs} samples × {adata.n_vars} genes)
+🔬 Adapter: transcriptomics_bulk  
+💾 Saved to: {save_path}
+📈 Ready for bulk RNA-seq analysis!"""
+            else:
+                return f"Failed to download bulk dataset {clean_geo_id}: {result.error_message}"
+                
+        except Exception as e:
+            logger.exception(f"Error downloading bulk dataset {geo_id}: {e}")
+            return f"Error downloading bulk dataset {geo_id}: {str(e)}"
+
+    def process_supplementary_tar_files(self, geo_id: str) -> str:
+        """
+        TAR file processing fallback for single-cell data (Scenario 6).
+        
+        Args:
+            geo_id: GEO accession ID
+            
+        Returns:
+            str: Status message
+        """
+        try:
+            logger.info(f"Processing supplementary TAR files for: {geo_id}")
+            
+            clean_geo_id = geo_id.strip().upper()
+            if not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
+            
+            # Use helper downloader for TAR processing
+            soft_file, data_sources = self.geo_downloader.download_geo_data(clean_geo_id)
+            
+            if not data_sources:
+                return f"No TAR files found for {clean_geo_id}"
+            
+            # Process TAR files using helper parser
+            if isinstance(data_sources, dict):
+                if 'tar' in data_sources:
+                    matrix = self.geo_parser.parse_supplementary_file(data_sources['tar'])
+                elif 'tar_dir' in data_sources:
+                    # Process directory with multiple files
+                    matrix = self._process_tar_directory_with_helpers(data_sources['tar_dir'])
+                else:
+                    return f"No TAR data found in downloaded files for {clean_geo_id}"
+            else:
+                # Single file
+                matrix = self.geo_parser.parse_supplementary_file(data_sources)
+            
+            if matrix is None or matrix.empty:
+                return f"Failed to parse TAR files for {clean_geo_id}"
+            
+            # Store as single-cell modality
+            modality_name = f"geo_{clean_geo_id.lower()}_tar"
+            
+            enhanced_metadata = {
+                "dataset_id": clean_geo_id,
+                "dataset_type": "GEO",
+                "data_source": "tar_supplementary",
+                "processing_date": pd.Timestamp.now().isoformat(),
+                "parser_version": "helper_parser"
+            }
+            
+            adata = self.data_manager.load_modality(
+                name=modality_name,
+                source=matrix,
+                adapter="transcriptomics_single_cell",
+                validate=True,
+                **enhanced_metadata
+            )
+            
+            # Save to workspace
+            save_path = f"{clean_geo_id.lower()}_tar_processed.h5ad"
+            saved_file = self.data_manager.save_modality(modality_name, save_path)
+            
+            self.data_manager.log_tool_usage(
+                tool_name="process_supplementary_tar_files",
+                parameters={"geo_id": clean_geo_id},
+                description=f"Processed TAR supplementary files for {clean_geo_id}"
+            )
+            
+            return f"""Successfully processed TAR supplementary files for {clean_geo_id}!
+
+📊 Modality: '{modality_name}' ({adata.n_obs} cells × {adata.n_vars} genes)
+🔬 Source: TAR supplementary files
+💾 Saved to: {save_path}
+📈 Ready for single-cell analysis!"""
+            
+        except Exception as e:
+            logger.exception(f"Error processing TAR files for {geo_id}: {e}")
+            return f"Error processing TAR files for {geo_id}: {str(e)}"
+
+    # ========================================
+    # PIPELINE STEP FUNCTIONS
+    # ========================================
+
+    def _try_geoparse_download(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Pipeline step: Try standard GEOparse download."""
+        try:
+            logger.info(f"Trying GEOparse download for {geo_id}")
+            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            
+            # Try sample matrices
+            sample_info = self._get_sample_info(gse)
+            if sample_info:
+                sample_matrices = self._download_sample_matrices(sample_info, geo_id)
+                validated_matrices = self._validate_matrices(sample_matrices)
+                if validated_matrices:
+                    combined_matrix = self._concatenate_matrices(validated_matrices, geo_id)
+                    if combined_matrix is not None:
+                        return GEOResult(
+                            data=combined_matrix,
+                            metadata=metadata,
+                            source=GEODataSource.SAMPLE_MATRICES,
+                            processing_info={"method": "geoparse_samples", "n_samples": len(validated_matrices)},
+                            success=True
+                        )
+                    
+            # Try supplementary files alternatevly
+            data = self._process_supplementary_files(gse, geo_id)
+            if data is not None and not data.empty:
+                return GEOResult(
+                    data=data,
+                    metadata=metadata,
+                    source=GEODataSource.GEOPARSE,
+                    processing_info={"method": "geoparse_supplementary", "n_samples": len(gse.gsms) if hasattr(gse, "gsms") else 0},
+                    success=True
+                )
+            
+            
+            return GEOResult(success=False, error_message="GEOparse could not find usable data")
+            
+        except Exception as e:
+            logger.warning(f"GEOparse download failed: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_supplementary_tar(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Pipeline step: Try TAR supplementary files."""
+        try:
+            logger.info(f"Trying TAR supplementary files for {geo_id}")
+            soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
+            
+            if isinstance(data_sources, dict) and 'tar' in data_sources:
+                matrix = self.geo_parser.parse_supplementary_file(data_sources['tar'])
+                if matrix is not None and not matrix.empty:
+                    return GEOResult(
+                        data=matrix,
+                        metadata=metadata,
+                        source=GEODataSource.TAR_ARCHIVE,
+                        processing_info={"method": "helper_tar", "source_file": str(data_sources['tar'])},
+                        success=True
+                    )
+            
+            return GEOResult(success=False, error_message="No TAR files found or parsable")
+            
+        except Exception as e:
+            logger.warning(f"TAR supplementary download failed: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_series_matrix(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Pipeline step: Try series matrix files (for bulk data)."""
+        try:
+            logger.info(f"Trying series matrix for {geo_id}")
+            # Use GEOparse to get series matrix
+            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            
+            # Check if there's a series matrix
+            if hasattr(gse, 'table') and gse.table is not None:
+                return GEOResult(
+                    data=gse.table,
+                    metadata=metadata,
+                    source=GEODataSource.GEOPARSE,
+                    processing_info={"method": "series_matrix"},
+                    success=True
+                )
+            
+            return GEOResult(success=False, error_message="No series matrix available")
+            
+        except Exception as e:
+            logger.warning(f"Series matrix download failed: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_supplementary_files(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Pipeline step: Try supplementary files (non-TAR)."""
+        try:
+            logger.info(f"Trying supplementary files for {geo_id}")
+            soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
+            
+            if isinstance(data_sources, dict) and 'supplementary' in data_sources:
+                matrix = self.geo_parser.parse_supplementary_file(data_sources['supplementary'])
+                if matrix is not None and not matrix.empty:
+                    return GEOResult(
+                        data=matrix,
+                        metadata=metadata,
+                        source=GEODataSource.SUPPLEMENTARY,
+                        processing_info={"method": "helper_supplementary", "source_file": str(data_sources['supplementary'])},
+                        success=True
+                    )
+            
+            return GEOResult(success=False, error_message="No supplementary files found or parsable")
+            
+        except Exception as e:
+            logger.warning(f"Supplementary files download failed: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_sample_matrices_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Pipeline step: Try individual sample matrices as fallback."""
+        try:
+            logger.info(f"Trying sample matrices fallback for {geo_id}")
+            # This is already handled in _try_geoparse_download, so this is a no-op
+            return GEOResult(success=False, error_message="Sample matrices already tried in GEOparse step")
+            
+        except Exception as e:
+            logger.warning(f"Sample matrices fallback failed: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_helper_download_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Pipeline step: Final fallback using helper downloader."""
+        try:
+            logger.info(f"Trying helper download fallback for {geo_id}")
+            soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
+            
+            if not data_sources:
+                return GEOResult(success=False, error_message="No data sources found")
+            
+            # Try all available data sources
+            if isinstance(data_sources, dict):
+                for source_name, source_path in data_sources.items():
+                    try:
+                        matrix = self.geo_parser.parse_supplementary_file(source_path)
+                        if matrix is not None and not matrix.empty:
+                            return GEOResult(
+                                data=matrix,
+                                metadata=metadata,
+                                source=GEODataSource.SOFT_FILE,
+                                processing_info={"method": f"helper_fallback_{source_name}", "source_file": str(source_path)},
+                                success=True
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to parse {source_name}: {e}")
+                        continue
+            else:
+                # Single file
+                matrix = self.geo_parser.parse_supplementary_file(data_sources)
+                if matrix is not None and not matrix.empty:
+                    return GEOResult(
+                        data=matrix,
+                        metadata=metadata,
+                        source=GEODataSource.SOFT_FILE,
+                        processing_info={"method": "helper_fallback_single", "source_file": str(data_sources)},
+                        success=True
+                    )
+            
+            return GEOResult(success=False, error_message="All helper download attempts failed")
+            
+        except Exception as e:
+            logger.warning(f"Helper download fallback failed: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    # ========================================
+    # HELPER INTEGRATION METHODS
+    # ========================================
+
+    def _download_and_parse_10x_sample(self, suppl_url: str, gsm_id: str) -> Optional[pd.DataFrame]:
+        """Download and parse 10X format single-cell sample."""
+        try:
+            # Download using helper downloader for better progress tracking
+            local_file = self.cache_dir / f"{gsm_id}_10x_data"
+            if self.geo_downloader.download_file(suppl_url, local_file):
+                return self.geo_parser.parse_supplementary_file(local_file)
+            return None
+        except Exception as e:
+            logger.error(f"Error downloading 10X sample {gsm_id}: {e}")
+            return None
+
+    def _store_single_sample_as_modality(self, gsm_id: str, matrix: pd.DataFrame, gsm) -> str:
+        """Store single sample as modality in DataManagerV2."""
+        try:
+            modality_name = f"geo_sample_{gsm_id.lower()}"
+            
+            # Extract sample metadata
+            sample_metadata = {}
+            if hasattr(gsm, "metadata"):
+                for key, value in gsm.metadata.items():
+                    if isinstance(value, list) and len(value) == 1:
+                        sample_metadata[key] = value[0]
+                    else:
+                        sample_metadata[key] = value
+            
+            enhanced_metadata = {
+                "sample_id": gsm_id,
+                "dataset_type": "GEO_Sample",
+                "sample_metadata": sample_metadata,
+                "processing_date": pd.Timestamp.now().isoformat(),
+                "data_source": "single_sample"
+            }
+            
+            # Determine adapter based on data characteristics
+            n_obs, n_vars = matrix.shape
+            if n_vars > 5000:  # High gene count suggests single-cell
+                adapter_name = "transcriptomics_single_cell"
+            else:
+                adapter_name = "transcriptomics_bulk"
+            
+            adata = self.data_manager.load_modality(
+                name=modality_name,
+                source=matrix,
+                adapter=adapter_name,
+                validate=True,
+                **enhanced_metadata
+            )
+            
+            # Save to workspace
+            save_path = f"{gsm_id.lower()}_sample.h5ad"
+            saved_file = self.data_manager.save_modality(modality_name, save_path)
+            
+            return f"""Successfully downloaded single-cell sample {gsm_id}!
+
+📊 Modality: '{modality_name}' ({adata.n_obs} cells × {adata.n_vars} genes)
+🔬 Adapter: {adapter_name}
+💾 Saved to: {save_path}
+📈 Ready for single-cell analysis!"""
+            
+        except Exception as e:
+            logger.error(f"Error storing sample {gsm_id}: {e}")
+            return f"Error storing sample {gsm_id}: {str(e)}"
+
+    def _download_sample_with_helpers(self, gsm_id: str) -> str:
+        """Download sample using helper services."""
+        try:
+            # Use helper downloader for sample-level downloads
+            # This would need to be implemented in the helper downloader
+            # For now, return a not implemented message
+            return f"Helper-based sample download for {gsm_id} not yet implemented. Please use GEOparse method."
+            
+        except Exception as e:
+            logger.error(f"Error downloading sample with helpers {gsm_id}: {e}")
+            return f"Error downloading sample with helpers {gsm_id}: {str(e)}"
+
+    def _process_tar_directory_with_helpers(self, tar_dir: Path) -> Optional[pd.DataFrame]:
+        """Process TAR directory using helper parser."""
+        try:
+            # Look for expression files in the directory
+            expression_files = []
+            for file_path in tar_dir.rglob("*"):
+                if file_path.is_file() and any(
+                    ext in file_path.name.lower()
+                    for ext in [".txt", ".csv", ".tsv", ".gz", ".h5", ".mtx"]
+                ):
+                    if file_path.stat().st_size > 10000:  # > 10KB
+                        expression_files.append(file_path)
+            
+            # Sort by size, try largest first
+            expression_files.sort(key=lambda x: x.stat().st_size, reverse=True)
+            
+            for file_path in expression_files[:5]:  # Try top 5 files
+                try:
+                    matrix = self.geo_parser.parse_supplementary_file(file_path)
+                    if matrix is not None and not matrix.empty:
+                        logger.info(f"Successfully parsed TAR file: {file_path.name}")
+                        return matrix
+                except Exception as e:
+                    logger.warning(f"Failed to parse {file_path.name}: {e}")
+                    continue
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error processing TAR directory: {e}")
+            return None
 
     def fetch_metadata_only(self, geo_id: str) -> str:
         """
-        Fetch and validate GEO metadata without downloading expression data.
+        Fetch and validate GEO metadata with fallback mechanisms (Scenario 1).
         
-        This function only downloads the SOFT file metadata and validates it against
-        the transcriptomics schema, storing the metadata in data_manager for user review.
+        This function first tries GEOparse, then falls back to helper services
+        if needed, storing the metadata in data_manager for user review.
         
         Args:
             geo_id: GEO accession ID (e.g., GSE194247)
@@ -82,158 +859,82 @@ class GEOService:
             if not clean_geo_id.startswith('GSE'):
                 return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession (e.g., GSE194247)."
             
-            # Download SOFT data using GEOparse (metadata only)
-            logger.info(f"Downloading SOFT metadata for {clean_geo_id}...")
-            gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
+            # Check if already cached
+            if clean_geo_id in self.data_manager.metadata_store:
+                summary = self._format_metadata_summary(
+                    clean_geo_id,
+                    self.data_manager.metadata_store[clean_geo_id]
+                )
+                return summary
             
-            # Extract comprehensive metadata
-            metadata = self._extract_metadata(gse)
-            logger.info(f"Extracted metadata for {clean_geo_id}")
+            # Primary approach: GEOparse
+            metadata = None
+            validation_result = None
+            data_source = "geoparse"
+            
+            try:
+                logger.info(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
+                gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
+                metadata = self._extract_metadata(gse)
+                logger.info(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
+                
+            except Exception as geoparse_error:
+                import time
+                logger.warning(f"GEOparse metadata fetch failed: {geoparse_error}")
+                time.sleep(5)
+                # Fallback: Use helper downloader to get SOFT file
+                try:
+                    logger.info(f"Falling back to helper services for metadata: {clean_geo_id}")
+                    soft_file, _ = self.geo_downloader.download_geo_data(clean_geo_id)
+                    
+                    if soft_file and soft_file.exists():
+                        # Parse SOFT file using helper parser
+                        _, soft_metadata = self.geo_parser.parse_soft_file(soft_file)
+                        if soft_metadata:
+                            metadata = soft_metadata
+                            data_source = "helper_soft_file"
+                            logger.info(f"Successfully extracted metadata using helper parser for {clean_geo_id}")
+                        else:
+                            raise GEOFallbackError("Helper parser could not extract metadata from SOFT file")
+                    else:
+                        raise GEOFallbackError("Helper downloader could not download SOFT file")
+                        
+                except Exception as helper_error:
+                    logger.error(f"Helper metadata fetch also failed: {helper_error}")
+                    return f"Failed to fetch metadata for {clean_geo_id}. Both GEOparse ({geoparse_error}) and helper services ({helper_error}) failed."
+            
+            if not metadata:
+                return f"No metadata could be extracted for {clean_geo_id}"
             
             # Validate metadata against transcriptomics schema
             validation_result = self._validate_geo_metadata(metadata)
             
             # Store metadata in data_manager for future use
-            # metadata_modality_name = f"geo_{clean_geo_id.lower()}_metadata"
-            # self.data_manager.metadata_store = getattr(self.data_manager, 'metadata_store', {})
-            if clean_geo_id in self.data_manager.metadata_store:
-                return f'{clean_geo_id} already stored in metadata_store.'
-            
             self.data_manager.metadata_store[clean_geo_id] = {
                 'metadata': metadata,
                 'validation': validation_result,
-                'fetch_timestamp': pd.Timestamp.now().isoformat()
+                'fetch_timestamp': pd.Timestamp.now().isoformat(),
+                'data_source': data_source
             }
             
             # Log the metadata fetch operation
             self.data_manager.log_tool_usage(
-                tool_name="fetch_geo_metadata",
-                parameters={"geo_id": clean_geo_id},
-                description=f"Fetched metadata for GEO dataset {clean_geo_id}"
+                tool_name="fetch_geo_metadata_with_fallback",
+                parameters={"geo_id": clean_geo_id, "data_source": data_source},
+                description=f"Fetched metadata for GEO dataset {clean_geo_id} using {data_source}"
             )
             
             # Format comprehensive metadata summary
             summary = self._format_metadata_summary(clean_geo_id, metadata, validation_result)
             
-            logger.info(f"Successfully fetched and validated metadata for {clean_geo_id}")
+            logger.info(f"Successfully fetched and validated metadata for {clean_geo_id} using {data_source}")
             return summary
             
         except Exception as e:
             logger.exception(f"Error fetching metadata for {geo_id}: {e}")
             return f"Error fetching metadata for {geo_id}: {str(e)}"
 
-    def download_dataset(self, clean_geo_id: str) -> str:
-        """
-        Download and process a dataset from GEO using GEOparse.
 
-        Args:
-            clean_geo_id: Cleaned GEO accession ID
-
-        Returns:
-            str: Status message with detailed information
-        """
-        try:
-            logger.info(f"Processing GEO query: {clean_geo_id}")
-
-            # Check if metadata already exists (should be fetched first)
-            if clean_geo_id not in self.data_manager.metadata_store:
-                return f"Please fetch metadata first using fetch_metadata_only('{clean_geo_id}') before downloading the dataset."
-
-            # Check if modality already exists in DataManagerV2
-            modality_name = f"geo_{clean_geo_id.lower()}"
-            existing_modalities = self.data_manager.list_modalities()
-
-            # Step 1: Use existing metadata
-            cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
-            logger.info(f"Using cached metadata for {clean_geo_id}")
-
-            # Step 2: Download SOFT data using GEOparse (re-download for expression data processing)
-            logger.info(f"Downloading SOFT data for {clean_geo_id} using GEOparse...")
-            gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
-
-            # Step 3: Check for supplementary files (TAR, etc.) first
-            supplementary_data = self._process_supplementary_files(gse, clean_geo_id)
-
-            if supplementary_data is not None and not supplementary_data.empty:
-                logger.info(f"Successfully processed supplementary files for {clean_geo_id}")
-                combined_matrix = supplementary_data
-                sample_count = len(gse.gsms) if hasattr(gse, "gsms") else 0
-            else:
-                # Step 4: Fallback to individual sample matrices
-                sample_info = self._get_sample_info(gse)
-                logger.info(f"Found {len(sample_info)} samples in {clean_geo_id}")
-
-                sample_matrices = self._download_sample_matrices(sample_info, clean_geo_id)
-                validated_matrices = self._validate_matrices(sample_matrices)
-
-                if not validated_matrices:
-                    return f"No valid expression matrices found for {clean_geo_id}. The dataset may not contain downloadable expression data matrices."
-
-                combined_matrix = self._concatenate_matrices(validated_matrices, clean_geo_id)
-                sample_count = len(validated_matrices)
-
-            if combined_matrix is None:
-                return f"Failed to process expression data for {clean_geo_id}"
-
-            # Step 5: Store as modality in DataManagerV2
-            enhanced_metadata = {
-                "dataset_id": clean_geo_id,
-                "dataset_type": "GEO",
-                "source_metadata": cached_metadata,
-                "n_samples": sample_count,
-                "data_source": "supplementary_files"
-                if supplementary_data is not None
-                else "individual_samples",
-                "processing_date": pd.Timestamp.now().isoformat(),
-                "geoparse_version": "GEOparse-based"
-            }
-
-            # Determine appropriate adapter based on data characteristics
-            n_obs, n_vars = combined_matrix.shape
-            if n_obs > 1000 and n_vars > 5000:
-                adapter_name = "transcriptomics_single_cell"
-            elif n_obs < 100:
-                adapter_name = "transcriptomics_bulk"
-            else:
-                adapter_name = "transcriptomics_single_cell"  # Default for GEO
-
-            # Load as modality in DataManagerV2
-            modality_name = f"geo_{clean_geo_id.lower()}"
-            adata = self.data_manager.load_modality(
-                name=modality_name,
-                source=combined_matrix,
-                adapter=adapter_name,
-                validate=True,
-                **enhanced_metadata
-            )
-
-            # Save to workspace
-            save_path = f"{clean_geo_id.lower()}_raw.h5ad"
-            saved_file = self.data_manager.save_modality(modality_name, save_path)
-
-            # Log successful download and save
-            self.data_manager.log_tool_usage(
-                tool_name="download_geo_dataset_geoparse",
-                parameters={"geo_id": clean_geo_id},
-                description=f"Downloaded and processed GEO dataset {clean_geo_id} using GEOparse, saved to {saved_file}",
-            )
-
-            # Auto-save current state
-            self.data_manager.auto_save_state()
-
-            return f"""Successfully downloaded and loaded GEO dataset {clean_geo_id}!
-
-📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
-🔬 Adapter: {adapter_name}
-💾 Saved to: {save_path}
-🎯 Source: GEO Database
-⚡ Ready for quality control and downstream analysis!
-
-The dataset is now available as modality '{modality_name}' for other agents to use."""
-
-        except Exception as e:
-            logger.exception(f"Error downloading dataset: {e}")
-            return f"Error downloading dataset: {str(e)}"
 
     def _process_supplementary_files(self, gse, gse_id: str) -> Optional[pd.DataFrame]:
         """
@@ -1030,7 +1731,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         self, 
         geo_id: str, 
         metadata: Dict[str, Any], 
-        validation_result: Dict[str, Any]
+        validation_result: Dict[str, Any] = None
     ) -> str:
         """
         Format comprehensive metadata summary for user review.
@@ -1084,9 +1785,14 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 sample_preview.append(f"  ... and {sample_count - 3} more samples")
             
             # Validation status
-            validation_status = validation_result.get('validation_status', 'UNKNOWN')
-            alignment_pct = validation_result.get('alignment_percentage', 0.0)
-            predicted_type = validation_result.get('predicted_data_type', 'unknown')
+            if not validation_result:
+                validation_status = None
+                alignment_pct = None
+                predicted_type = None
+            else:
+                validation_status = validation_result.get('validation_status', 'UNKNOWN')
+                alignment_pct = validation_result.get('alignment_percentage', 0.0)
+                predicted_type = validation_result.get('predicted_data_type', 'unknown')
             
             # Format the summary
             summary_text = f"""📊 **GEO Dataset Metadata Summary: {geo_id}**
@@ -1209,10 +1915,10 @@ The actual expression data download will be much faster now that metadata is pre
         return sample_matrices
 
     def _download_single_sample(
-        self, gsm_id: str, sample_info: Dict[str, Any], gse_id: str
+        self, gsm_id: str, info: Dict[str, Any], gse_id: str
     ) -> Optional[pd.DataFrame]:
         """
-        Download a single sample matrix.
+        Download a single sample matrix with enhanced single-cell support.
 
         Args:
             gsm_id: GEO sample ID
@@ -1226,35 +1932,27 @@ The actual expression data download will be much faster now that metadata is pre
             # Try to get sample using GEOparse
             gsm = GEOparse.get_GEO(geo=gsm_id, destdir=str(self.cache_dir))
 
-            # Check if the sample has expression data table
-            if hasattr(gsm, "table") and gsm.table is not None:
-                logger.info(f"Found expression table for {gsm_id}")
-                return gsm.table
-
-            # Try supplementary files
-            if hasattr(gsm, "metadata") and "supplementary_file" in gsm.metadata:
-                suppl_files = gsm.metadata["supplementary_file"]
-                if isinstance(suppl_files, list):
-                    suppl_files = suppl_files
-                else:
+            # Check for 10X format supplementary files
+            if hasattr(gsm, "metadata"):
+                suppl_files = self._extract_supplementary_files_from_metadata(gsm.metadata, gsm_id)
+                # suppl_files = gsm.metadata["supplementary_file"]
+                if not isinstance(suppl_files, list):
                     suppl_files = [suppl_files]
-
+                
+                # Look for 10X format files
                 for suppl_url in suppl_files:
-                    if any(
-                        ext in suppl_url.lower()
-                        for ext in [".txt", ".csv", ".tsv", ".gz"]
-                    ):
-                        try:
-                            matrix = self._download_supplementary_file(
-                                suppl_url, gsm_id
-                            )
-                            if matrix is not None:
-                                return matrix
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to download supplementary file {suppl_url}: {e}"
-                            )
-                            continue
+                    if any(pattern in suppl_url.lower() for pattern in 
+                            ['matrix', 'barcodes', 'features', '.h5']):
+                        
+                        # Download and parse 10X data
+                        matrix = self._download_and_parse_10x_sample(suppl_url, gsm_id)
+                        if matrix is not None:
+                            return self._store_single_sample_as_modality(gsm_id, matrix, gsm)
+            
+            # Fallback to expression table
+            if hasattr(gsm, "table") and gsm.table is not None:
+                matrix = gsm.table
+                return self._store_single_sample_as_modality(gsm_id, matrix, gsm)
 
             logger.warning(f"No expression data found for {gsm_id}")
             return None
@@ -1263,47 +1961,365 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error downloading sample {gsm_id}: {e}")
             return None
 
+    def _extract_supplementary_files_from_metadata(self, metadata: Dict[str, Any], gsm_id: str) -> Dict[str, str]:
+        """
+        Extract all supplementary file URLs from sample metadata and classify them.
+        
+        Args:
+            metadata: Sample metadata dictionary
+            gsm_id: GEO sample ID for logging
+            
+        Returns:
+            Dict[str, str]: Dictionary mapping file types ('matrix', 'barcodes', 'features') to URLs
+        """
+        try:
+            supplementary_files = {}
+            
+            # Find all keys that contain 'supplementary'
+            suppl_keys = [key for key in metadata.keys() if 'supplementary' in key.lower()]
+            logger.info(f"Found {len(suppl_keys)} supplementary file keys for {gsm_id}: {suppl_keys}")
+            
+            for key in suppl_keys:
+                file_urls = metadata[key]
+                if isinstance(file_urls, list):
+                    file_urls = file_urls
+                else:
+                    file_urls = [file_urls]
+                
+                for url in file_urls:
+                    if not url or not isinstance(url, str):
+                        continue
+                        
+                    url_lower = url.lower()
+                    filename = url.split('/')[-1].lower()
+                    
+                    # Classify file type based on filename
+                    if any(pattern in filename for pattern in ['matrix.mtx', 'matrix.txt', '_matrix']):
+                        supplementary_files['matrix'] = url
+                        logger.info(f"Classified as matrix: {filename}")
+                    elif any(pattern in filename for pattern in ['barcodes.tsv', 'barcodes.txt', '_barcode', '-barcode']):
+                        supplementary_files['barcodes'] = url
+                        logger.info(f"Classified as barcodes: {filename}")
+                    elif any(pattern in filename for pattern in ['features.tsv', 'features.txt', 'genes.tsv', '_feature', '_gene']):
+                        supplementary_files['features'] = url
+                        logger.info(f"Classified as features: {filename}")
+                    elif any(ext in filename for ext in ['.h5', '.h5ad']):
+                        supplementary_files['h5_data'] = url
+                        logger.info(f"Classified as H5 data: {filename}")
+                    else:
+                        # Generic expression file
+                        if any(ext in filename for ext in ['.txt', '.csv', '.tsv']) and any(keyword in filename for keyword in ['expr', 'count', 'rpkm', 'fpkm', 'tpm']):
+                            supplementary_files['expression'] = url
+                            logger.info(f"Classified as expression file: {filename}")
+            
+            logger.info(f"Classified supplementary files for {gsm_id}: {list(supplementary_files.keys())}")
+            return supplementary_files
+            
+        except Exception as e:
+            logger.error(f"Error extracting supplementary files from metadata for {gsm_id}: {e}")
+            return {}
+
+    def _download_and_combine_single_cell_files(self, supplementary_files_info: Dict[str, str], gsm_id: str) -> Optional[pd.DataFrame]:
+        """
+        Download and combine single-cell format files (matrix, barcodes, features).
+        
+        Args:
+            supplementary_files_info: Dictionary mapping file types to URLs
+            gsm_id: GEO sample ID
+            
+        Returns:
+            DataFrame: Combined single-cell expression matrix or None
+        """
+        try:
+            logger.info(f"Downloading and combining single-cell files for {gsm_id}")
+            
+            # Check if we have the trio of 10X files (matrix, barcodes, features)
+            if all(key in supplementary_files_info for key in ['matrix', 'barcodes', 'features']):
+                logger.info(f"Found complete 10X trio for {gsm_id}")
+                return self._download_10x_trio(supplementary_files_info, gsm_id)
+            
+            # Check for H5 format (contains everything in one file)
+            elif 'h5_data' in supplementary_files_info:
+                logger.info(f"Found H5 data for {gsm_id}")
+                return self._download_h5_file(supplementary_files_info['h5_data'], gsm_id)
+            
+            # Check for single expression matrix file
+            elif 'expression' in supplementary_files_info:
+                logger.info(f"Found expression file for {gsm_id}")
+                return self._download_single_expression_file(supplementary_files_info['expression'], gsm_id)
+            
+            # Try individual files
+            elif 'matrix' in supplementary_files_info:
+                logger.info(f"Found matrix file only for {gsm_id}")
+                return self._download_single_expression_file(supplementary_files_info['matrix'], gsm_id)
+            
+            else:
+                logger.warning(f"No suitable file combination found for {gsm_id}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error downloading and combining files for {gsm_id}: {e}")
+            return None
+
+    def _download_10x_trio(self, files_info: Dict[str, str], gsm_id: str) -> Optional[pd.DataFrame]:
+        """
+        Download and combine 10X format trio (matrix, barcodes, features).
+        
+        Args:
+            files_info: Dictionary with 'matrix', 'barcodes', 'features' URLs
+            gsm_id: GEO sample ID
+            
+        Returns:
+            DataFrame: Combined 10X expression matrix or None
+        """
+        try:
+            logger.info(f"Processing 10X trio for {gsm_id}")
+            
+            # Download all three files
+            local_files = {}
+            for file_type, url in files_info.items():
+                if file_type in ['matrix', 'barcodes', 'features']:
+                    filename = url.split('/')[-1]
+                    local_path = self.cache_dir / f"{gsm_id}_{file_type}_{filename}"
+                    
+                    if not local_path.exists():
+                        logger.info(f"Downloading {file_type} file: {url}")
+                        if self.geo_downloader.download_file(url, local_path):
+                            local_files[file_type] = local_path
+                        else:
+                            logger.error(f"Failed to download {file_type} file")
+                            return None
+                    else:
+                        logger.info(f"Using cached {file_type} file: {local_path}")
+                        local_files[file_type] = local_path
+            
+            if len(local_files) != 3:
+                logger.error(f"Could not download all three 10X files for {gsm_id}")
+                return None
+            
+            # Parse matrix file
+            try:
+                import scipy.io as sio
+            except ImportError:
+                logger.error("scipy is required for parsing 10X matrix files but not available")
+                return None
+            
+            matrix_file = local_files['matrix']
+            logger.info(f"Parsing matrix file: {matrix_file}")
+            
+            # Read the sparse matrix
+            if matrix_file.name.endswith(".gz"):
+                import gzip
+                with gzip.open(matrix_file, "rt") as f:
+                    matrix = sio.mmread(f)
+            else:
+                matrix = sio.mmread(matrix_file)
+            
+            # Convert to dense format and transpose (10X format is genes x cells, we want cells x genes)
+            if hasattr(matrix, "todense"):
+                matrix_dense = matrix.todense()
+            else:
+                matrix_dense = matrix
+            
+            # Transpose so that cells are rows and genes are columns
+            matrix_dense = matrix_dense.T
+            logger.info(f"Matrix shape after transpose: {matrix_dense.shape}")
+            
+            # Read barcodes
+            barcodes_file = local_files['barcodes']
+            logger.info(f"Reading barcodes from: {barcodes_file}")
+            cell_ids = []
+            
+            try:
+                if barcodes_file.name.endswith(".gz"):
+                    with gzip.open(barcodes_file, "rt") as f:
+                        cell_ids = [line.strip() for line in f]
+                else:
+                    with open(barcodes_file, "r") as f:
+                        cell_ids = [line.strip() for line in f]
+                logger.info(f"Read {len(cell_ids)} cell barcodes")
+            except Exception as e:
+                logger.warning(f"Error reading barcodes file: {e}")
+                cell_ids = [f"{gsm_id}_cell_{i}" for i in range(matrix_dense.shape[0])]
+            
+            # Read features
+            features_file = local_files['features']
+            logger.info(f"Reading features from: {features_file}")
+            gene_ids = []
+            gene_names = []
+            
+            try:
+                if features_file.name.endswith(".gz"):
+                    with gzip.open(features_file, "rt") as f:
+                        lines = f.readlines()
+                else:
+                    with open(features_file, "r") as f:
+                        lines = f.readlines()
+                
+                for line in lines:
+                    parts = line.strip().split("\t")
+                    if len(parts) >= 2:
+                        gene_ids.append(parts[0])
+                        gene_names.append(parts[1])
+                    elif len(parts) == 1:
+                        gene_ids.append(parts[0])
+                        gene_names.append(parts[0])
+                
+                logger.info(f"Read {len(gene_ids)} gene features")
+            except Exception as e:
+                logger.warning(f"Error reading features file: {e}")
+                gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
+            
+            # Create DataFrame with proper cell and gene names
+            if not cell_ids or len(cell_ids) != matrix_dense.shape[0]:
+                cell_ids = [f"{gsm_id}_cell_{i}" for i in range(matrix_dense.shape[0])]
+            else:
+                cell_ids = [f"{gsm_id}_{cell_id}" for cell_id in cell_ids]
+            
+            if not gene_names or len(gene_names) != matrix_dense.shape[1]:
+                gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
+            
+            # Create the final DataFrame
+            df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
+            logger.info(f"Successfully created 10X DataFrame for {gsm_id}: {df.shape}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error processing 10X trio for {gsm_id}: {e}")
+            return None
+
+    def _download_h5_file(self, url: str, gsm_id: str) -> Optional[pd.DataFrame]:
+        """
+        Download and parse H5 format single-cell data.
+        
+        Args:
+            url: URL to H5 file
+            gsm_id: GEO sample ID
+            
+        Returns:
+            DataFrame: Expression matrix or None
+        """
+        try:
+            logger.info(f"Processing H5 file for {gsm_id}")
+            
+            filename = url.split('/')[-1]
+            local_path = self.cache_dir / f"{gsm_id}_h5_{filename}"
+            
+            # Download file
+            if not local_path.exists():
+                logger.info(f"Downloading H5 file: {url}")
+                if not self.geo_downloader.download_file(url, local_path):
+                    logger.error(f"Failed to download H5 file")
+                    return None
+            else:
+                logger.info(f"Using cached H5 file: {local_path}")
+            
+            # Parse using geo_parser
+            matrix = self.geo_parser.parse_supplementary_file(local_path)
+            if matrix is not None and not matrix.empty:
+                # Add sample prefix to cell names
+                matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                logger.info(f"Successfully parsed H5 file for {gsm_id}: {matrix.shape}")
+                return matrix
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error processing H5 file for {gsm_id}: {e}")
+            return None
+
+    def _download_single_expression_file(self, url: str, gsm_id: str) -> Optional[pd.DataFrame]:
+        """
+        Download and parse a single expression file with enhanced support.
+        
+        Args:
+            url: URL to expression file
+            gsm_id: GEO sample ID
+            
+        Returns:
+            DataFrame: Expression matrix or None
+        """
+        try:
+            logger.info(f"Processing single expression file for {gsm_id}")
+            
+            filename = url.split('/')[-1]
+            local_path = self.cache_dir / f"{gsm_id}_expr_{filename}"
+            
+            # Download file using helper downloader (supports FTP)
+            if not local_path.exists():
+                logger.info(f"Downloading expression file: {url}")
+                if not self.geo_downloader.download_file(url, local_path):
+                    logger.error(f"Failed to download expression file")
+                    return None
+            else:
+                logger.info(f"Using cached expression file: {local_path}")
+            
+            # Parse using geo_parser for better format support
+            matrix = self.geo_parser.parse_supplementary_file(local_path)
+            if matrix is not None and not matrix.empty:
+                # Add sample prefix to row names if they look like cells
+                if matrix.shape[0] > matrix.shape[1]:  # More rows than columns suggests cells x genes
+                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                else:  # More columns than rows suggests genes x cells, transpose
+                    matrix = matrix.T
+                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                
+                logger.info(f"Successfully parsed expression file for {gsm_id}: {matrix.shape}")
+                return matrix
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error processing expression file for {gsm_id}: {e}")
+            return None
+
     def _download_supplementary_file(
         self, url: str, gsm_id: str
     ) -> Optional[pd.DataFrame]:
         """
-        Download and parse a supplementary file.
+        Professional download and parse of supplementary files with FTP support.
 
         Args:
-            url: URL to supplementary file
+            url: URL to supplementary file (supports HTTP/HTTPS/FTP)
             gsm_id: GEO sample ID
 
         Returns:
             DataFrame: Parsed matrix or None
         """
         try:
-            local_file = self.cache_dir / f"{gsm_id}_suppl.txt"
+            logger.info(f"Downloading supplementary file for {gsm_id}: {url}")
+            
+            # Extract filename and create local path
+            filename = url.split('/')[-1]
+            local_file = self.cache_dir / f"{gsm_id}_suppl_{filename}"
 
-            # Download file
-            urllib.request.urlretrieve(url, local_file)
+            # Use helper downloader for better FTP/HTTP support and progress tracking
+            if not local_file.exists():
+                if not self.geo_downloader.download_file(url, local_file, f"Downloading {filename}"):
+                    logger.error(f"Failed to download supplementary file: {url}")
+                    return None
+            else:
+                logger.info(f"Using cached supplementary file: {local_file}")
 
-            # Try to parse as various formats
-            for sep in ["\t", ","]:
-                try:
-                    if local_file.suffix == ".gz":
-                        df = pd.read_csv(
-                            local_file, sep=sep, compression="gzip", index_col=0
-                        )
-                    else:
-                        df = pd.read_csv(local_file, sep=sep, index_col=0)
-
-                    if df.shape[0] > 0 and df.shape[1] > 0:
-                        logger.info(
-                            f"Successfully parsed supplementary file for {gsm_id}: {df.shape}"
-                        )
-                        return df
-                except:
-                    continue
-
-            return None
+            # Use geo_parser for enhanced format detection and parsing
+            matrix = self.geo_parser.parse_supplementary_file(local_file)
+            
+            if matrix is not None and not matrix.empty:
+                # Add sample prefix to row names for proper identification
+                if matrix.shape[0] > matrix.shape[1]:  # More rows than columns suggests cells x genes
+                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                else:  # More columns than rows suggests genes x cells, transpose
+                    matrix = matrix.T
+                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                
+                logger.info(f"Successfully parsed supplementary file for {gsm_id}: {matrix.shape}")
+                return matrix
+            else:
+                logger.warning(f"Could not parse supplementary file or file is empty: {local_file}")
+                return None
 
         except Exception as e:
-            logger.error(f"Error downloading supplementary file: {e}")
+            logger.error(f"Error downloading supplementary file {url} for {gsm_id}: {e}")
             return None
 
     def _validate_matrices(

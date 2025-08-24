@@ -17,14 +17,14 @@ import scanpy as sc
 
 # Import modules to test - Updated for new structure
 from lobster.core import DataManager
-from lobster.tools import GEOService
+from lobster.tools.geo_service import GEOService
 from lobster.tools import QualityService
 from lobster.tools import ClusteringService
 from lobster.tools import BulkRNASeqService
 from lobster.tools import EnhancedSingleCellService
 # from lobster.tools import FileUploadService
 from lobster.core import AgentClient
-from lobster.tools import PubMedService
+from lobster.tools.pubmed_service import PubMedService
 from lobster.utils import get_logger
 
 

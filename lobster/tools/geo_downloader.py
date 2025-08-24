@@ -21,6 +21,11 @@ from lobster.utils.logger import get_logger
 logger = get_logger(__name__)
 settings = get_settings()
 
+
+class GEODownloadError(Exception):
+    """Custom exception for GEO download errors."""
+    pass
+
 class GEODownloadManager:
     """
     Handles downloading files from GEO database.

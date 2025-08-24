@@ -4,7 +4,6 @@ Provides a simple, extensible interface for both CLI and future UI implementatio
 """
 
 import os
-os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = '900000'
 import logging
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Generator

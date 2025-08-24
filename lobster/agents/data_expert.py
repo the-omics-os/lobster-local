@@ -35,6 +35,14 @@ def data_expert(
     
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])
+
+    
+    @tool
+    def check_tmp_metadata_keys() -> List:
+        """
+        Check which metadata is temporarelly stored
+        """
+        return data_manager.metadata_store.keys()
     
     # Define tools for data operations
     @tool
@@ -58,7 +66,7 @@ def data_expert(
             logger.info(f"Fetching metadata for GEO dataset: {clean_geo_id}")
             
             # Use GEOService to fetch metadata only
-            from lobster.tools import GEOService
+            from lobster.tools.geo_service import GEOService
             
             console = getattr(data_manager, 'console', None)
             geo_service = GEOService(data_manager, console=console)
@@ -73,7 +81,7 @@ def data_expert(
             return f"Error fetching metadata: {str(e)}"
 
     @tool
-    def download_geo_dataset(geo_id: str, modality_type: str = "single_cell") -> str:
+    def download_geo_dataset(geo_id: str, modality_type: str = "single_cell_rna_seq") -> str:
         """
         Download dataset from GEO using accession number and load as a modality.
         IMPORTANT: Use fetch_geo_metadata FIRST to preview dataset before downloading.
@@ -107,25 +115,19 @@ def data_expert(
 
 Use this modality for quality control, filtering, or downstream analysis."""
             
-            # Check if metadata has been fetched first
-            metadata_name = f"{clean_geo_id.lower()}_metadata"
-            if metadata_name not in existing_modalities:
-                return f"""⚠️  Metadata not found for {clean_geo_id}.
-
-🔍 **REQUIRED**: Use fetch_geo_metadata('{geo_id}') first to:
-   • Preview dataset information and size
-   • Validate metadata against schema
-   • Get recommendation for modality_type
-   • Confirm download before processing large files
-
-This ensures you review the dataset details before downloading potentially large expression data."""
+            # # Check if metadata has been fetched first
+            # metadata_name = f"{clean_geo_id.lower()}_metadata"
+            # if metadata_name not in existing_modalities:
+            #     logger.info(f"""Metadata not found for {clean_geo_id}""")
             
-            # Use DataManagerV2 approach with GEOService
-            from lobster.tools import GEOService
+            # Use enhanced GEOService with modular architecture and fallbacks
+            from lobster.tools.geo_service import GEOService
             
             console = getattr(data_manager, 'console', None)
             geo_service = GEOService(data_manager, console=console)
-            result = geo_service.download_dataset(clean_geo_id)
+            
+            # Use the enhanced download_dataset method (handles all scenarios with fallbacks)
+            result = geo_service.download_dataset(clean_geo_id, modality_type)
             
             return result
                 
@@ -148,7 +150,7 @@ This ensures you review the dataset details before downloading potentially large
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
             
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             
             # Use PubMedService with DataManagerV2
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
@@ -173,7 +175,7 @@ This ensures you review the dataset details before downloading potentially large
         """
         try:
             
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             
             # Use PubMedService with DataManagerV2
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
@@ -521,6 +523,7 @@ The MuData object contains all selected modalities and is ready for cross-modal 
             return f"Error getting adapter info: {str(e)}"
 
     base_tools = [
+        check_tmp_metadata_keys,
         fetch_geo_metadata,
         download_geo_dataset,
         find_geo_from_doi,
@@ -530,9 +533,9 @@ The MuData object contains all selected modalities and is ready for cross-modal 
         list_available_modalities,
         load_modality_from_file,
         remove_modality,
-        create_mudata_from_modalities,
         get_adapter_info
     ]
+        # create_mudata_from_modalities, prompt: - create_mudata_from_modalities: Combine modalities into MuData for integrated analysis
     
     # Combine base tools with handoff tools if provided
     tools = base_tools + (handoff_tools or [])
@@ -542,15 +545,16 @@ You are a data management expert specializing in multi-omics bioinformatics data
 
 <Task>
 You handle all data acquisition, storage, and retrieval operations using the new modular architecture:
+0. **Fetching metadata** and give a summary to the supervisor
 1. **Download and load datasets** from various sources (GEO, local files, etc.)
 2. **Process and validate data** using appropriate modality adapters
 3. **Store data as modalities** with proper schema enforcement
 4. **Provide data access** to other agents via modality names
-5. **Create multi-modal datasets** using MuData for integrated analysis
-6. **Maintain workspace** with proper organization and provenance tracking
+5. **Maintain workspace** with proper organization and provenance tracking
 </Task>
 
 <Available Tools>
+- check_tmp_metadata_keys: Check for which identifiers the metadata is currently temporary stored (returns a list of identifiers) 
 - fetch_geo_metadata: Fetch and validate GEO metadata without downloading full dataset (USE FIRST for GEO datasets)
 - download_geo_dataset: Download data from GEO and load as modality (requires metadata fetch first)
 - find_geo_from_doi: Find GEO datasets associated with a DOI
@@ -560,7 +564,7 @@ You handle all data acquisition, storage, and retrieval operations using the new
 - load_modality_from_file: Load specific file as named modality with chosen adapter
 - list_available_modalities: Show all currently loaded modalities with details
 - remove_modality: Remove modality from memory
-- create_mudata_from_modalities: Combine modalities into MuData for integrated analysis
+
 - get_adapter_info: Show available adapters and their capabilities
 
 <Modality System>
@@ -604,7 +608,7 @@ get_data_summary()  # Shows all loaded modalities
 # Step 4: Get approval from supervisor and continue with Step 5:
 
 # Step 5: Download discovered GEO dataset
-download_geo_dataset("GSE123456", modality_type="single_cell")
+download_geo_dataset("GSE123456", modality_type=<single_cell_rna_seq or bulk_rna_seq>)
 
 # Step 6: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
@@ -674,30 +678,6 @@ load_modality_from_file("custom_name", "/path/to/h5ad_file.h5ad", "transcriptomi
 get_data_summary("custom_name")
 ```
 
-## 3. MULTI-MODAL ANALYSIS WORKFLOWS
-
-### Combining Different Data Types
-```bash
-# Step 1: Load transcriptomics data
-download_geo_dataset("GSE123456", modality_type="single_cell")
-
-# Step 2: Load proteomics data
-upload_data_file("/path/to/proteomics.csv", "protein_data", modality_type="proteomics_ms")
-
-# Step 3: Verify both modalities are loaded
-list_available_modalities()
-
-# Step 4: Check individual modality details
-get_data_summary("geo_gse123456")
-get_data_summary("custom_protein_data")
-
-# Step 5: Create integrated MuData object
-create_mudata_from_modalities(["geo_gse123456", "custom_protein_data"], "integrated_analysis")
-
-# Step 6: Verify MuData creation
-get_data_summary()  # Check all modalities including MuData
-```
-
 ## 4. WORKSPACE MANAGEMENT WORKFLOWS
 
 Onlt important if the supervisor instructs you to do so. 
@@ -762,6 +742,8 @@ load_modality_from_file("manual_load", "/path/to/file.csv", "transcriptomics_bul
 - Multi-modal: Use project names (e.g., `integrated_multi_omics`)
 
 When working with DataManagerV2, always think in terms of **modalities** rather than single datasets.
+
+AND MOST IMPORTANT: NEVER MAKE UP INFORMATION. NEVER HALUCINATE
 
 Today's date is {date}.
 """.format(date=date.today())

@@ -54,7 +54,7 @@ def method_expert(
             max_query_length: Maximum query length (default: 300, range: 100-500)
         """
         try:
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
@@ -88,7 +88,7 @@ def method_expert(
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
             
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
@@ -128,7 +128,7 @@ def method_expert(
             doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
         """
         try:
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
@@ -170,7 +170,7 @@ def method_expert(
             doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
         """
         try:
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
@@ -234,7 +234,7 @@ def method_expert(
                 search_query += " small-scale"
             
             # Search for relevant methods using DataManagerV2
-            from lobster.tools import PubMedService
+            from lobster.tools.pubmed_service import PubMedService
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
             
             results = pubmed_service.search_pubmed(

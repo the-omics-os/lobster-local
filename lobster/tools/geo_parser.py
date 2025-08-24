@@ -15,6 +15,16 @@ from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+
+class GEOParserError(Exception):
+    """Custom exception for GEO parser errors."""
+    pass
+
+
+class GEOFormatError(Exception):
+    """Custom exception for unsupported GEO file formats."""
+    pass
+
 class GEOParser:
     """
     Parser for GEO database files.
