@@ -229,7 +229,10 @@ class DataManagerV2:
         adapter_instance = self.adapters[adapter]
         
         # Load data using adapter
-        adata = adapter_instance.from_source(source, **kwargs)
+        if not isinstance(source, anndata.AnnData):
+            adata = adapter_instance.from_source(source, **kwargs)
+        else:
+            adata = source
         
         # Validate data if requested
         if validate:

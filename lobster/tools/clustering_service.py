@@ -40,6 +40,9 @@ class ClusteringService:
         """
         logger.info("Initializing stateless ClusteringService")
         self.default_cluster_resolution = 0.7
+        self.progress_callback = None
+        self.current_progress = 0
+        self.total_steps = 0
         logger.info("ClusteringService initialized successfully")
 
     def set_progress_callback(self, callback: Callable[[int, str], None]) -> None:
@@ -100,6 +103,16 @@ class ClusteringService:
         try:
             logger.info("Starting clustering and visualization pipeline")
             
+            # Initialize progress tracking
+            self.current_progress = 0
+            skip_steps = skip_steps or []
+            # Calculate total steps based on what will be performed
+            self.total_steps = 7  # Base steps: subsample, batch check, normalize, hvg, scale, pca, neighbors, leiden, umap
+            if batch_correction:
+                self.total_steps += 1
+            if "marker_genes" not in skip_steps:
+                self.total_steps += 1
+            
             # Set resolution  
             if resolution is None:
                 resolution = self.default_cluster_resolution
@@ -113,7 +126,6 @@ class ClusteringService:
             logger.info(f"Input data dimensions: {original_shape[0]} cells × {original_shape[1]} genes")
 
             # Handle demo mode settings
-            skip_steps = skip_steps or []
             if demo_mode:
                 logger.info("Running in demo mode (faster processing)")
                 if "marker_genes" not in skip_steps:
@@ -126,6 +138,8 @@ class ClusteringService:
                 logger.info(f"Subsampling data to {subsample_size} cells (from {adata_clustered.n_obs})")
                 sc.pp.subsample(adata_clustered, n_obs=subsample_size, random_state=42)
                 logger.info(f"Data subsampled: {adata_clustered.n_obs} cells remaining")
+            
+            self._update_progress("Data preparation completed")
 
             # Check for batch information if batch correction requested
             if batch_correction:
@@ -148,6 +162,8 @@ class ClusteringService:
                 else:
                     logger.warning("Batch correction requested but no valid batch key found")
                     batch_correction = False
+            
+            self._update_progress("Batch correction completed" if batch_correction else "Batch check completed")
 
             # Perform clustering
             adata_clustered = self._perform_clustering(
@@ -240,32 +256,6 @@ class ClusteringService:
             logger.warning(f"Batch correction failed, proceeding without correction: {e}")
             return adata
 
-    def _prepare_adata(self) -> sc.AnnData:
-        """
-        Prepare AnnData object for clustering.
-
-        This method ensures there's a valid AnnData object available,
-        creating one if needed from the current data.
-
-        Returns:
-            sc.AnnData: AnnData object ready for clustering
-        """
-        logger.info("Preparing AnnData object for clustering")
-
-        if self.data_manager.adata is None:
-            logger.info("Creating new AnnData object from current data")
-            # Get the current data
-            data = self.data_manager.current_data
-
-            # Create AnnData object
-            adata = sc.AnnData(X=data.values)
-            adata.var_names = data.columns
-            adata.obs_names = data.index
-        else:
-            logger.info("Using existing AnnData object")
-            adata = self.data_manager.adata.copy()
-
-        return adata
 
     def _perform_clustering(
         self,
@@ -290,22 +280,18 @@ class ClusteringService:
         skip_steps = skip_steps or []
         start_time = time.time()
 
-        if self.progress_callback:
-            self.progress_callback(
-                int((self.current_progress / self.total_steps) * 100),
-                "Starting preprocessing",
-            )
-
         # Basic preprocessing (follows publication workflow)
         logger.info("Normalizing data")
         sc.pp.normalize_total(adata, target_sum=1e4)
         sc.pp.log1p(adata)
+        self._update_progress("Normalization completed")
 
         # Find highly variable genes (follows the parameters from 02_All_cell_clustering.R)
         logger.info("Finding highly variable genes")
         sc.pp.highly_variable_genes(
             adata, min_mean=0.0125, max_mean=3, min_disp=0.5, flavor="seurat"
         )
+        self._update_progress("Highly variable genes identified")
 
         # Store raw data before scaling
         adata.raw = adata.copy()
@@ -330,27 +316,17 @@ class ClusteringService:
         # Scale data (with max value cap to avoid influence of outliers)
         logger.info("Scaling data")
         sc.pp.scale(adata_hvg, max_value=10)
-
-        if self.progress_callback:
-            self.progress_callback(
-                int(((self.current_progress + 0.33) / self.total_steps) * 100),
-                "Running PCA",
-            )
+        self._update_progress("Data scaling completed")
 
         # PCA (using 'arpack' SVD solver for better performance with sparse matrices)
         logger.info("Running PCA")
         sc.tl.pca(adata_hvg, svd_solver="arpack")
+        self._update_progress("PCA completed")
 
         # Determine optimal number of PCs (following publication's approach using 20 PCs)
         # In demo mode, use fewer PCs for faster processing
         n_pcs = 10 if demo_mode else 20
         logger.info(f"Using {n_pcs} principal components for neighborhood graph")
-
-        if self.progress_callback:
-            self.progress_callback(
-                int(((self.current_progress + 0.66) / self.total_steps) * 100),
-                "Computing neighborhood graph",
-            )
 
         # Compute neighborhood graph
         logger.info("Computing neighborhood graph")
@@ -358,10 +334,12 @@ class ClusteringService:
             10 if demo_mode else 15
         )  # Use fewer neighbors in demo mode for speed
         sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
+        self._update_progress("Neighborhood graph computed")
 
         # Run Leiden clustering at specified resolution (similar to publication's approach)
         logger.info(f"Running Leiden clustering with resolution {resolution}")
         sc.tl.leiden(adata_hvg, resolution=resolution, key_added="leiden")
+        self._update_progress("Leiden clustering completed")
 
         # UMAP for visualization
         logger.info("Computing UMAP coordinates")
@@ -370,6 +348,7 @@ class ClusteringService:
             sc.tl.umap(adata_hvg, min_dist=0.5, spread=1.5)
         else:
             sc.tl.umap(adata_hvg)
+        self._update_progress("UMAP coordinates computed")
 
         # Transfer clustering results and UMAP coordinates back to the original object
         adata.obs["leiden"] = adata_hvg.obs["leiden"]
@@ -382,6 +361,7 @@ class ClusteringService:
                 "t-test" if demo_mode else "wilcoxon"
             )  # t-test is faster than wilcoxon
             sc.tl.rank_genes_groups(adata, "leiden", method=method)
+            self._update_progress("Marker genes identified")
         else:
             logger.info("Skipping marker gene identification (demo mode)")
 

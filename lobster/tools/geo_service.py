@@ -203,60 +203,64 @@ class GEOService:
             #==================================================
             #==================================================
             # Use the strategic download approach
-            result = self.download_with_strategy(geo_id = clean_geo_id)
+            geo_result = self.download_with_strategy(geo_id = clean_geo_id)
             #==================================================
             #==================================================
             
-            if not result.success:
-                return f"Failed to download {clean_geo_id} using all available methods. Last error: {result.error_message}"
+            if not geo_result.success:
+                return f"Failed to download {clean_geo_id} using all available methods. Last error: {geo_result.error_message}"
             
-            # Store as modality in DataManagerV2
+            
+            # # Store as modality in DataManagerV2
             enhanced_metadata = {
                 "dataset_id": clean_geo_id,
                 "dataset_type": "GEO",
-                "source_metadata": result.metadata,
+                "source_metadata": geo_result.metadata,
                 "processing_date": pd.Timestamp.now().isoformat(),
-                "download_source": result.source.value,
-                "processing_method": result.processing_info.get("method", "unknown")
+                "download_source": geo_result.source.value,
+                "processing_method": geo_result.processing_info.get("method", "unknown"),
+                "data_type": geo_result.processing_info.get("data_type", "unknown")
             }
-            enhanced_metadata.update(result.processing_info)
+            # enhanced_metadata.update(result.processing_info)
 
-            # Determine appropriate adapter based on data characteristics and metadata
-            cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
-            predicted_type = self._determine_data_type_from_metadata(cached_metadata)
-            
-            n_obs, n_vars = result.data.shape
-            if predicted_type == 'single_cell_rna_seq' or (n_obs > 1000 and n_vars > 5000):
+            # # Determine appropriate adapter based on data characteristics and metadata
+            if not enhanced_metadata.get('data_type', None):
+                cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
+                predicted_type = self._determine_data_type_from_metadata(cached_metadata)
+                
+            n_obs, n_vars = geo_result.data.shape
+            if enhanced_metadata.get('data_type') == 'single_cell_rna_seq':
                 adapter_name = "transcriptomics_single_cell"
-            elif predicted_type == 'bulk_rna_seq' or n_obs < 200:
+            elif enhanced_metadata.get('data_type') == 'bulk_rna_seq':
                 adapter_name = "transcriptomics_bulk"
             else:
-                adapter_name = "transcriptomics_single_cell"  # Default for GEO
+                # Default to single-cell for GEO datasets (more common)
+                adapter_name = 'single_cell_rna_seq'
 
-            logger.info(f"Using adapter '{adapter_name}' based on predicted type '{predicted_type}' and data shape {result.data.shape}")
+            logger.debug(f"Using adapter '{adapter_name}' based on predicted type '{enhanced_metadata.get('data_type', None)}' and data shape {geo_result.data.shape}")
 
-            # Load as modality in DataManagerV2
+            # # Load as modality in DataManagerV2
             adata = self.data_manager.load_modality(
                 name=modality_name,
-                source=result.data,
+                source=geo_result.data,
                 adapter=adapter_name,
                 validate=True,
                 **enhanced_metadata
             )
 
-            # Save to workspace
+            # # Save to workspace
             save_path = f"{clean_geo_id.lower()}_raw.h5ad"
             saved_file = self.data_manager.save_modality(modality_name, save_path)
 
-            # Log successful download and save
+            # # Log successful download and save
             self.data_manager.log_tool_usage(
                 tool_name="download_geo_dataset_strategic",
                 parameters={
                     "geo_id": clean_geo_id, 
-                    "download_source": result.source.value,
-                    "processing_method": result.processing_info.get("method", "unknown")
+                    "download_source": geo_result.source.value,
+                    "processing_method": geo_result.processing_info.get("method", "unknown")
                 },
-                description=f"Downloaded GEO dataset {clean_geo_id} using strategic approach ({result.source.value}), saved to {saved_file}",
+                description=f"Downloaded GEO dataset {clean_geo_id} using strategic approach ({geo_result.source.value}), saved to {saved_file}",
             )
 
             # Auto-save current state
@@ -265,9 +269,9 @@ class GEOService:
             return f"""Successfully downloaded and loaded GEO dataset {clean_geo_id}!
 
 📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
-🔬 Adapter: {adapter_name} (predicted: {predicted_type.replace('_', ' ').title()})
+🔬 Adapter: {adapter_name} (predicted: {enhanced_metadata.get('data_type', None)})
 💾 Saved to: {save_path}
-🎯 Source: {result.source.value} ({result.processing_info.get('method', 'unknown')})
+🎯 Source: {geo_result.source.value} ({geo_result.processing_info.get('method', 'unknown')})
 ⚡ Ready for quality control and downstream analysis!
 
 The dataset is now available as modality '{modality_name}' for other agents to use."""
@@ -334,7 +338,9 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 logger.debug(f"Executing pipeline step {i + 1}: {pipeline_func.__name__}")
                 
                 try:
+                    #========================================================================
                     result = pipeline_func(clean_geo_id, cached_metadata)
+                    #========================================================================
                     if result.success:
                         logger.debug(f"Success via {pipeline_func.__name__}")
                         return result
@@ -591,17 +597,18 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                         
                         if stored_samples:
                             # Immediately concatenate for a complete dataset
-                            concatenated_result = self._concatenate_stored_samples(
+                            concatinated_dataset_annDataObject = self._concatenate_stored_samples(
                                 geo_id, stored_samples, use_intersecting_genes_only
                             )
                             
-                            if concatenated_result is not None:
+                            if concatinated_dataset_annDataObject is not None:
                                 return GEOResult(
-                                    data=concatenated_result,
+                                    data=concatinated_dataset_annDataObject,
                                     metadata=metadata,
-                                    source=GEODataSource.SAMPLE_MATRICES,
+                                    source=GEODataSource.GEOPARSE,
                                     processing_info={
                                         "method": "geoparse_samples_concatenated", 
+                                        "data_type" : data_type,
                                         "n_samples": len(validated_matrices),
                                         "stored_sample_ids": stored_samples,
                                         "use_intersecting_genes_only": use_intersecting_genes_only,
@@ -914,6 +921,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             
             # Check if already cached
             if clean_geo_id in self.data_manager.metadata_store:
+                logger.debug(f"Metadata already stored for: {geo_id}. returning summary")
                 summary = self._format_metadata_summary(
                     clean_geo_id,
                     self.data_manager.metadata_store[clean_geo_id]
@@ -2792,34 +2800,33 @@ The actual expression data download will be much faster now that metadata is pre
             logger.info(f"Concatenation successful: {combined_adata.shape}")
             
             # Convert to DataFrame for compatibility with the rest of the pipeline
-            # The expression matrix is stored in X
-            if hasattr(combined_adata.X, 'todense'):
-                # Handle sparse matrix
-                expression_matrix = pd.DataFrame(
-                    combined_adata.X.todense(),
-                    index=combined_adata.obs_names,
-                    columns=combined_adata.var_names
-                )
-            else:
-                # Handle dense matrix
-                expression_matrix = pd.DataFrame(
-                    combined_adata.X,
-                    index=combined_adata.obs_names,
-                    columns=combined_adata.var_names
-                )
+            # # The expression matrix is stored in X
+            # if hasattr(combined_adata.X, 'todense'):
+            #     # Handle sparse matrix
+            #     expression_matrix = pd.DataFrame(
+            #         combined_adata.X.todense(),
+            #         index=combined_adata.obs_names,
+            #         columns=combined_adata.var_names
+            #     )
+            # else:
+            #     # Handle dense matrix
+            #     expression_matrix = pd.DataFrame(
+            #         combined_adata.X,
+            #         index=combined_adata.obs_names,
+            #         columns=combined_adata.var_names
+            #     )
             
             # Add batch information as a column (for compatibility)
-            if 'batch' in combined_adata.obs.columns:
-                expression_matrix['batch'] = combined_adata.obs['batch'].values
+            # if 'batch' in combined_adata.obs.columns:
+            #     expression_matrix['batch'] = combined_adata.obs['batch'].values
             
-            logger.info(f"Converted to DataFrame: {expression_matrix.shape}")
+            # logger.info(f"Converted to DataFrame: {expression_matrix.shape}")
             
             # Log statistics
-            n_genes = len(expression_matrix.columns) - (1 if 'batch' in expression_matrix.columns else 0)
-            logger.info(f"Final matrix: {len(expression_matrix)} cells × {n_genes} genes")
-            logger.info(f"Samples included: {', '.join(sample_ids)}")
+            # n_genes = combined_adata.X.shape[1]
+
             
-            return expression_matrix
+            return combined_adata
             
         except ImportError:
             logger.error("anndata package is required but not installed. Install with: pip install anndata")

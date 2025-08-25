@@ -5,7 +5,7 @@ This agent focuses exclusively on single-cell RNA-seq analysis using the modular
 system with proper modality handling and schema enforcement.
 """
 
-from typing import List
+from typing import List, Optional
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrockConverse
@@ -21,6 +21,7 @@ from lobster.tools.preprocessing_service import PreprocessingService, Preprocess
 from lobster.tools.quality_service import QualityService, QualityError
 from lobster.tools.clustering_service import ClusteringService, ClusteringError
 from lobster.tools.enhanced_singlecell_service import EnhancedSingleCellService, SingleCellError as ServiceSingleCellError
+from lobster.tools.visualization_service import SingleCellVisualizationService, VisualizationError
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -56,6 +57,7 @@ def singlecell_expert(
     quality_service = QualityService()
     clustering_service = ClusteringService()
     singlecell_service = EnhancedSingleCellService()
+    visualization_service = SingleCellVisualizationService()
     
     analysis_results = {"summary": "", "details": {}}
     
@@ -401,7 +403,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
     def cluster_modality(
         modality_name: str,
         resolution: float = 0.5,
-        batch_correction: bool = False,
+        batch_correction: bool = True,
         batch_key: str = None,
         demo_mode: bool = False,
         save_result: bool = True
@@ -688,6 +690,723 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             logger.error(f"Unexpected error in single-cell cell type annotation: {e}")
             return f"Unexpected error: {str(e)}"
 
+    # -------------------------
+    # VISUALIZATION TOOLS
+    # -------------------------
+    @tool
+    def create_umap_plot(
+        modality_name: str,
+        color_by: str = "leiden",
+        point_size: Optional[int] = None,
+        title: Optional[str] = None,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create an interactive UMAP plot for single-cell data.
+        
+        Args:
+            modality_name: Name of the modality with UMAP coordinates
+            color_by: Column to color by (e.g., 'leiden', 'cell_type', or gene name)
+            point_size: Size of points (auto-scaled if None)
+            title: Plot title
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Create UMAP plot
+            fig = visualization_service.create_umap_plot(
+                adata=adata,
+                color_by=color_by,
+                point_size=point_size,
+                title=title
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title=f"UMAP - {color_by}",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "n_cells": adata.n_obs,
+                    "color_by": color_by
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_umap_plot",
+                parameters={
+                    "modality_name": modality_name,
+                    "color_by": color_by
+                },
+                description=f"Created UMAP plot colored by {color_by}"
+            )
+            
+            response = f"""Successfully created UMAP plot for '{modality_name}'!
+
+📊 **Plot Details:**
+- Colored by: {color_by}
+- Number of cells: {adata.n_obs:,}
+- Plot ID: {plot_id}
+- Interactive plot added to workspace
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            response += f"\n\nThe UMAP plot shows the distribution of cells in 2D space, colored by {color_by}."
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating UMAP plot: {e}")
+            return f"Error creating UMAP plot: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in UMAP plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_qc_plots(
+        modality_name: str,
+        title: Optional[str] = None,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create comprehensive QC plots for single-cell data.
+        
+        Args:
+            modality_name: Name of the modality to visualize
+            title: Overall title for the QC plots
+            save_plot: Whether to save the plots
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Create QC plots
+            fig = visualization_service.create_qc_plots(
+                adata=adata,
+                title=title
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title="QC Plots",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "n_cells": adata.n_obs,
+                    "plot_type": "qc_multi_panel"
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_qc_plots",
+                parameters={
+                    "modality_name": modality_name
+                },
+                description="Created comprehensive QC plots"
+            )
+            
+            response = f"""Successfully created QC plots for '{modality_name}'!
+
+📊 **QC Plots Created:**
+- nGenes vs nUMIs scatter plot
+- Mitochondrial % vs nUMIs
+- nGenes distribution histogram
+- nUMIs distribution histogram
+- Mitochondrial % distribution
+- Cells per sample (if batch info available)
+
+📈 **Data Overview:**
+- Total cells: {adata.n_obs:,}
+- Total genes: {adata.n_vars:,}
+- Plot ID: {plot_id}
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            response += "\n\nUse these plots to identify QC thresholds for filtering."
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating QC plots: {e}")
+            return f"Error creating QC plots: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in QC plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_violin_plot(
+        modality_name: str,
+        genes: Union[str, List[str]],
+        groupby: str = "leiden",
+        use_raw: bool = True,
+        log_scale: bool = False,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create violin plots for gene expression across groups.
+        
+        Args:
+            modality_name: Name of the modality
+            genes: Gene or list of genes to plot
+            groupby: Column to group by (e.g., 'leiden', 'cell_type')
+            use_raw: Whether to use raw data
+            log_scale: Whether to use log scale
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Ensure genes is a list
+            if isinstance(genes, str):
+                genes = [genes]
+            
+            # Create violin plot
+            fig = visualization_service.create_violin_plot(
+                adata=adata,
+                genes=genes,
+                groupby=groupby,
+                use_raw=use_raw,
+                log_scale=log_scale
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title=f"Violin Plot - {', '.join(genes)}",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "genes": genes,
+                    "groupby": groupby
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_violin_plot",
+                parameters={
+                    "modality_name": modality_name,
+                    "genes": genes,
+                    "groupby": groupby,
+                    "use_raw": use_raw,
+                    "log_scale": log_scale
+                },
+                description=f"Created violin plot for {len(genes)} genes"
+            )
+            
+            response = f"""Successfully created violin plot for '{modality_name}'!
+
+📊 **Plot Details:**
+- Genes plotted: {', '.join(genes)}
+- Grouped by: {groupby}
+- Using {'raw' if use_raw else 'normalized'} data
+- Log scale: {'Yes' if log_scale else 'No'}
+- Plot ID: {plot_id}
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            response += f"\n\nViolin plots show the distribution of gene expression across {groupby} groups."
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating violin plot: {e}")
+            return f"Error creating violin plot: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in violin plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_feature_plot(
+        modality_name: str,
+        genes: Union[str, List[str]],
+        use_raw: bool = True,
+        ncols: int = 2,
+        point_size: Optional[int] = None,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create feature plots showing gene expression on UMAP.
+        
+        Args:
+            modality_name: Name of the modality with UMAP coordinates
+            genes: Gene or list of genes to plot
+            use_raw: Whether to use raw data
+            ncols: Number of columns in subplot grid
+            point_size: Size of points
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Ensure genes is a list
+            if isinstance(genes, str):
+                genes = [genes]
+            
+            # Create feature plot
+            fig = visualization_service.create_feature_plot(
+                adata=adata,
+                genes=genes,
+                use_raw=use_raw,
+                ncols=ncols,
+                point_size=point_size
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title=f"Feature Plot - {', '.join(genes[:3])}{'...' if len(genes) > 3 else ''}",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "genes": genes,
+                    "n_genes": len(genes)
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_feature_plot",
+                parameters={
+                    "modality_name": modality_name,
+                    "genes": genes,
+                    "use_raw": use_raw,
+                    "ncols": ncols
+                },
+                description=f"Created feature plot for {len(genes)} genes"
+            )
+            
+            response = f"""Successfully created feature plot for '{modality_name}'!
+
+📊 **Plot Details:**
+- Genes plotted: {', '.join(genes[:5])}{'...' if len(genes) > 5 else ''}
+- Total genes: {len(genes)}
+- Using {'raw' if use_raw else 'normalized'} data
+- Grid layout: {ncols} columns
+- Plot ID: {plot_id}
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            response += "\n\nFeature plots show gene expression levels projected onto UMAP coordinates."
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating feature plot: {e}")
+            return f"Error creating feature plot: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in feature plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_dot_plot(
+        modality_name: str,
+        genes: List[str],
+        groupby: str = "leiden",
+        use_raw: bool = True,
+        standard_scale: str = "var",
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create a dot plot for marker gene expression.
+        
+        Args:
+            modality_name: Name of the modality
+            genes: List of genes to plot
+            groupby: Column to group by
+            use_raw: Whether to use raw data
+            standard_scale: How to scale ('var', 'group', or None)
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Create dot plot
+            fig = visualization_service.create_dot_plot(
+                adata=adata,
+                genes=genes,
+                groupby=groupby,
+                use_raw=use_raw,
+                standard_scale=standard_scale
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title=f"Dot Plot - {groupby}",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "n_genes": len(genes),
+                    "groupby": groupby
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_dot_plot",
+                parameters={
+                    "modality_name": modality_name,
+                    "n_genes": len(genes),
+                    "groupby": groupby,
+                    "standard_scale": standard_scale
+                },
+                description=f"Created dot plot for {len(genes)} genes"
+            )
+            
+            response = f"""Successfully created dot plot for '{modality_name}'!
+
+📊 **Plot Details:**
+- Genes plotted: {len(genes)}
+- Grouped by: {groupby}
+- Using {'raw' if use_raw else 'normalized'} data
+- Scaling: {standard_scale if standard_scale else 'None'}
+- Plot ID: {plot_id}
+
+📈 **Dot Plot Legend:**
+- Dot size: Percentage of cells expressing the gene
+- Dot color: Mean expression level
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating dot plot: {e}")
+            return f"Error creating dot plot: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in dot plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_heatmap(
+        modality_name: str,
+        genes: Optional[List[str]] = None,
+        groupby: str = "leiden",
+        use_raw: bool = True,
+        n_top_genes: int = 5,
+        standard_scale: bool = True,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create a heatmap of gene expression.
+        
+        Args:
+            modality_name: Name of the modality
+            genes: List of genes (if None, use top marker genes)
+            groupby: Column to group by
+            use_raw: Whether to use raw data
+            n_top_genes: Number of top genes per group if genes not specified
+            standard_scale: Whether to z-score normalize
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Create heatmap
+            fig = visualization_service.create_heatmap(
+                adata=adata,
+                genes=genes,
+                groupby=groupby,
+                use_raw=use_raw,
+                n_top_genes=n_top_genes,
+                standard_scale=standard_scale
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title=f"Heatmap - {groupby}",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "groupby": groupby,
+                    "n_genes": len(genes) if genes else "auto"
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_heatmap",
+                parameters={
+                    "modality_name": modality_name,
+                    "groupby": groupby,
+                    "n_genes": len(genes) if genes else f"top {n_top_genes} per group",
+                    "standard_scale": standard_scale
+                },
+                description="Created gene expression heatmap"
+            )
+            
+            response = f"""Successfully created heatmap for '{modality_name}'!
+
+📊 **Plot Details:**
+- Grouped by: {groupby}
+- Genes: {len(genes) if genes else f'Top {n_top_genes} marker genes per group'}
+- Using {'raw' if use_raw else 'normalized'} data
+- Z-score normalized: {'Yes' if standard_scale else 'No'}
+- Plot ID: {plot_id}
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            response += "\n\nHeatmap shows mean expression levels across groups."
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating heatmap: {e}")
+            return f"Error creating heatmap: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in heatmap creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_elbow_plot(
+        modality_name: str,
+        n_pcs: int = 50,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create an elbow plot for PCA variance explained.
+        
+        Args:
+            modality_name: Name of the modality with PCA results
+            n_pcs: Number of PCs to show
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Create elbow plot
+            fig = visualization_service.create_elbow_plot(
+                adata=adata,
+                n_pcs=n_pcs
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title="PCA Elbow Plot",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "n_pcs": n_pcs
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_elbow_plot",
+                parameters={
+                    "modality_name": modality_name,
+                    "n_pcs": n_pcs
+                },
+                description="Created PCA elbow plot"
+            )
+            
+            response = f"""Successfully created elbow plot for '{modality_name}'!
+
+📊 **Plot Details:**
+- PCs shown: {n_pcs}
+- Shows individual and cumulative variance explained
+- Plot ID: {plot_id}
+
+💡 **How to interpret:**
+- Look for the "elbow" where variance explained plateaus
+- This indicates the optimal number of PCs to use for clustering
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating elbow plot: {e}")
+            return f"Error creating elbow plot: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in elbow plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def create_cluster_composition_plot(
+        modality_name: str,
+        cluster_col: str = "leiden",
+        sample_col: Optional[str] = None,
+        normalize: bool = True,
+        save_plot: bool = True
+    ) -> str:
+        """
+        Create a stacked bar plot showing cluster composition.
+        
+        Args:
+            modality_name: Name of the modality
+            cluster_col: Column with cluster assignments
+            sample_col: Column with sample/batch info (auto-detect if None)
+            normalize: Whether to normalize to percentages
+            save_plot: Whether to save the plot
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            
+            # Create composition plot
+            fig = visualization_service.create_cluster_composition_plot(
+                adata=adata,
+                cluster_col=cluster_col,
+                sample_col=sample_col,
+                normalize=normalize
+            )
+            
+            # Add to data manager plots
+            plot_id = data_manager.add_plot(
+                plot=fig,
+                title=f"Cluster Composition - {cluster_col}",
+                source="singlecell_expert",
+                dataset_info={
+                    "modality_name": modality_name,
+                    "cluster_col": cluster_col,
+                    "sample_col": sample_col
+                }
+            )
+            
+            # Save plot if requested
+            saved_files = []
+            if save_plot:
+                saved_files = data_manager.save_plots_to_workspace()
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_cluster_composition_plot",
+                parameters={
+                    "modality_name": modality_name,
+                    "cluster_col": cluster_col,
+                    "sample_col": sample_col,
+                    "normalize": normalize
+                },
+                description="Created cluster composition plot"
+            )
+            
+            response = f"""Successfully created cluster composition plot for '{modality_name}'!
+
+📊 **Plot Details:**
+- Cluster column: {cluster_col}
+- Sample column: {sample_col if sample_col else 'Auto-detected or none'}
+- Normalized: {'Yes (percentages)' if normalize else 'No (counts)'}
+- Plot ID: {plot_id}
+
+💾 **Saved files:** {len(saved_files)} files"""
+            
+            if saved_files:
+                response += f"\n- Files: {', '.join([f.split('/')[-1] for f in saved_files[:3]])}"
+            
+            response += "\n\nComposition plot shows cluster distribution across samples/batches."
+            
+            return response
+            
+        except (VisualizationError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating composition plot: {e}")
+            return f"Error creating cluster composition plot: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in composition plot creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
     @tool
     def create_analysis_summary() -> str:
         """Create a comprehensive summary of all single-cell analysis steps performed."""
@@ -745,6 +1464,15 @@ Proceed with filtering and normalization, then doublet detection before clusteri
         cluster_modality,
         find_marker_genes_for_clusters,
         annotate_cell_types,
+        # Visualization tools
+        create_umap_plot,
+        create_qc_plots,
+        create_violin_plot,
+        create_feature_plot,
+        create_dot_plot,
+        create_heatmap,
+        create_elbow_plot,
+        create_cluster_composition_plot,
         create_analysis_summary
     ]
     
@@ -774,14 +1502,26 @@ You perform single-cell RNA-seq analysis following current best practices:
 </Task>
 
 <Available Single-cell Tools>
+
+## Analysis Tools:
 - `check_data_status`: Check loaded single-cell modalities and comprehensive status information
 - `assess_data_quality`: Professional QC assessment with single-cell specific statistical summaries
 - `filter_and_normalize_modality`: Advanced filtering with single-cell QC standards and UMI normalization
 - `detect_doublets_in_modality`: Scrublet-based doublet detection with statistical scoring
-- `cluster_modality`: Leiden clustering with PCA, neighborhood graphs, and UMAP for single-cell data
+- `cluster_modality`: Leiden clustering with PCA, Batch correction, neighborhood graphs, and UMAP for single-cell data
 - `find_marker_genes_for_clusters`: Professional differential expression analysis for single-cell clusters
 - `annotate_cell_types`: Automated cell type annotation using marker databases
 - `create_analysis_summary`: Comprehensive single-cell analysis report with modality tracking
+
+## Visualization Tools:
+- `create_umap_plot`: Interactive UMAP plot colored by clusters, cell types, or gene expression
+- `create_qc_plots`: Comprehensive multi-panel QC plots (nGenes, nUMIs, mitochondrial %)
+- `create_violin_plot`: Violin plots for gene expression distribution across groups
+- `create_feature_plot`: Feature plots showing gene expression on UMAP coordinates
+- `create_dot_plot`: Dot plots for marker gene expression (size=%, color=mean expression)
+- `create_heatmap`: Expression heatmaps with hierarchical clustering
+- `create_elbow_plot`: PCA elbow plot for determining optimal number of components
+- `create_cluster_composition_plot`: Stacked bar plots showing cluster/sample composition
 
 <Professional Single-cell Workflows & Tool Usage Order>
 
@@ -831,7 +1571,8 @@ detect_doublets_in_modality("geo_gse12345_filtered_normalized", expected_doublet
 check_data_status("geo_gse12345_filtered_normalized")
 
 # Step 2: Perform clustering with appropriate resolution
-cluster_modality("geo_gse12345_filtered_normalized", resolution=0.5, batch_correction=False)
+# information about batch correction: Use batch correction for cell type discovery / clustering / visualization.
+cluster_modality("geo_gse12345_filtered_normalized", resolution=0.5, batch_correction=True)
 
 # Step 3: Report clustering results to supervisor
 # WAIT for further instructions (marker genes, cell type annotation, etc.)
@@ -860,7 +1601,47 @@ annotate_cell_types("geo_gse12345_markers", reference_markers=None)
 # Step 3: Report cell type annotations to supervisor
 ```
 
-## 3. COMPREHENSIVE ANALYSIS WORKFLOWS
+## 3. VISUALIZATION WORKFLOWS
+
+### Quality Control Visualization (Supervisor Request: "Create QC plots")
+```bash
+# Step 1: Check data status
+check_data_status("geo_gse12345")
+
+# Step 2: Create comprehensive QC plots
+create_qc_plots("geo_gse12345", title="Single-cell QC Analysis")
+
+# Step 3: Report QC visualization results to supervisor
+```
+
+### Clustering Visualization (Supervisor Request: "Visualize clustering results")
+```bash
+# Step 1: Create UMAP plot colored by clusters
+create_umap_plot("geo_gse12345_clustered", color_by="leiden", title="Leiden Clustering")
+
+# Step 2: Create cluster composition plot if batch info available
+create_cluster_composition_plot("geo_gse12345_clustered", cluster_col="leiden", normalize=True)
+
+# Step 3: Create PCA elbow plot for parameter tuning
+create_elbow_plot("geo_gse12345_clustered", n_pcs=50)
+```
+
+### Gene Expression Visualization (Supervisor Request: "Visualize marker gene expression")
+```bash
+# Step 1: Create violin plots for top marker genes
+create_violin_plot("geo_gse12345_clustered", genes=["CD3D", "CD8A", "CD4"], groupby="leiden")
+
+# Step 2: Create feature plots on UMAP
+create_feature_plot("geo_gse12345_clustered", genes=["CD3D", "CD8A", "CD4", "FOXP3"], ncols=2)
+
+# Step 3: Create dot plot for marker panel
+create_dot_plot("geo_gse12345_clustered", genes=marker_gene_list, groupby="leiden")
+
+# Step 4: Create heatmap of top markers
+create_heatmap("geo_gse12345_clustered", groupby="leiden", n_top_genes=5)
+```
+
+## 4. COMPREHENSIVE ANALYSIS WORKFLOWS
 
 ### Complete Single-cell Pipeline (Supervisor Request: "Run full single-cell analysis")
 ```bash

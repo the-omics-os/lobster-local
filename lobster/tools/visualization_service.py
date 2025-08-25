@@ -1,0 +1,1140 @@
+"""
+Visualization service for single-cell RNA-seq data.
+
+This service provides comprehensive visualization methods for single-cell data analysis,
+generating interactive and publication-quality plots using Plotly.
+"""
+
+import time
+from typing import Dict, List, Optional, Tuple, Any, Union
+import warnings
+
+import anndata
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import plotly.io as pio
+import scanpy as sc
+from scipy import stats
+from scipy.sparse import issparse
+
+from lobster.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+class VisualizationError(Exception):
+    """Base exception for visualization operations."""
+    pass
+
+
+class SingleCellVisualizationService:
+    """
+    Professional visualization service for single-cell RNA-seq data.
+    
+    This class provides comprehensive visualization methods including
+    UMAP, PCA, violin plots, feature plots, dot plots, heatmaps, and QC plots.
+    All plots are interactive using Plotly for publication-quality figures.
+    """
+
+    def __init__(self):
+        """Initialize the visualization service."""
+        logger.info("Initializing SingleCellVisualizationService")
+        
+        # Color palettes for consistency
+        self.cluster_colors = px.colors.qualitative.Set1
+        self.continuous_colors = px.colors.sequential.Viridis
+        self.diverging_colors = px.colors.diverging.RdBu_r
+        
+        # Default plot settings
+        self.default_width = 800
+        self.default_height = 600
+        self.default_marker_size = 3
+        self.default_opacity = 0.8
+        
+        # Scientific color scales for gene expression
+        self.expression_colorscale = [
+            [0, 'lightgray'],
+            [0.01, 'lightblue'],
+            [0.1, 'blue'],
+            [0.5, 'red'],
+            [0.8, 'darkred'],
+            [1.0, 'black']
+        ]
+        
+        logger.info("SingleCellVisualizationService initialized successfully")
+
+    def create_umap_plot(
+        self,
+        adata: anndata.AnnData,
+        color_by: str = "leiden",
+        point_size: Optional[int] = None,
+        title: Optional[str] = None,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        show_legend: bool = True,
+        alpha: float = 0.8
+    ) -> go.Figure:
+        """
+        Create an interactive UMAP plot.
+        
+        Args:
+            adata: AnnData object with UMAP coordinates
+            color_by: Column in adata.obs to color by (default: 'leiden')
+            point_size: Size of points (default: auto-scaled)
+            title: Plot title
+            width: Plot width
+            height: Plot height
+            show_legend: Whether to show legend
+            alpha: Point transparency (0-1)
+            
+        Returns:
+            go.Figure: Interactive UMAP plot
+            
+        Raises:
+            VisualizationError: If UMAP coordinates not found
+        """
+        try:
+            if "X_umap" not in adata.obsm:
+                raise VisualizationError("UMAP coordinates not found. Run clustering first.")
+            
+            umap_coords = adata.obsm["X_umap"]
+            
+            # Auto-scale point size based on number of cells
+            if point_size is None:
+                n_cells = adata.n_obs
+                if n_cells < 1000:
+                    point_size = 8
+                elif n_cells < 10000:
+                    point_size = 5
+                elif n_cells < 50000:
+                    point_size = 3
+                else:
+                    point_size = 2
+            
+            # Prepare color data
+            if color_by in adata.obs.columns:
+                color_data = adata.obs[color_by]
+                # Check if categorical or continuous
+                is_categorical = pd.api.types.is_categorical_dtype(color_data) or \
+                                pd.api.types.is_object_dtype(color_data) or \
+                                color_data.nunique() < 50
+            elif color_by in adata.var_names:
+                # Color by gene expression
+                gene_idx = adata.var_names.get_loc(color_by)
+                if issparse(adata.X):
+                    color_data = adata.X[:, gene_idx].toarray().flatten()
+                else:
+                    color_data = adata.X[:, gene_idx]
+                is_categorical = False
+                title = title or f"UMAP - {color_by} Expression"
+            else:
+                raise VisualizationError(f"'{color_by}' not found in obs columns or gene names")
+            
+            # Create the plot
+            if is_categorical:
+                # Categorical coloring
+                fig = px.scatter(
+                    x=umap_coords[:, 0],
+                    y=umap_coords[:, 1],
+                    color=color_data.astype(str),
+                    title=title or f"UMAP colored by {color_by}",
+                    labels={"x": "UMAP 1", "y": "UMAP 2", "color": color_by},
+                    width=width or self.default_width,
+                    height=height or self.default_height,
+                    color_discrete_sequence=self.cluster_colors
+                )
+            else:
+                # Continuous coloring
+                fig = px.scatter(
+                    x=umap_coords[:, 0],
+                    y=umap_coords[:, 1],
+                    color=color_data,
+                    title=title or f"UMAP colored by {color_by}",
+                    labels={"x": "UMAP 1", "y": "UMAP 2", "color": color_by},
+                    width=width or self.default_width,
+                    height=height or self.default_height,
+                    color_continuous_scale=self.continuous_colors
+                )
+            
+            # Update traces
+            fig.update_traces(
+                marker=dict(size=point_size, opacity=alpha),
+                hovertemplate="UMAP1: %{x:.2f}<br>UMAP2: %{y:.2f}<br>%{customdata}<extra></extra>"
+            )
+            
+            # Add cell IDs as hover data
+            hover_data = []
+            for idx in range(adata.n_obs):
+                hover_text = f"Cell: {adata.obs_names[idx]}<br>{color_by}: {color_data.iloc[idx] if hasattr(color_data, 'iloc') else color_data[idx]}"
+                hover_data.append(hover_text)
+            
+            fig.update_traces(customdata=hover_data)
+            
+            # Update layout
+            fig.update_layout(
+                showlegend=show_legend,
+                legend=dict(
+                    orientation="v",
+                    yanchor="top",
+                    y=0.99,
+                    xanchor="left",
+                    x=1.01
+                ) if show_legend else None,
+                hovermode='closest',
+                plot_bgcolor='white',
+                xaxis=dict(showgrid=True, gridcolor='lightgray', zeroline=True),
+                yaxis=dict(showgrid=True, gridcolor='lightgray', zeroline=True)
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating UMAP plot: {e}")
+            raise VisualizationError(f"Failed to create UMAP plot: {str(e)}")
+
+    def create_pca_plot(
+        self,
+        adata: anndata.AnnData,
+        color_by: str = "leiden",
+        components: Tuple[int, int] = (0, 1),
+        point_size: Optional[int] = None,
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create an interactive PCA plot.
+        
+        Args:
+            adata: AnnData object with PCA results
+            color_by: Column in adata.obs to color by
+            components: Which PC components to plot (0-indexed)
+            point_size: Size of points
+            title: Plot title
+            
+        Returns:
+            go.Figure: Interactive PCA plot
+        """
+        try:
+            if "X_pca" not in adata.obsm:
+                raise VisualizationError("PCA coordinates not found. Run PCA first.")
+            
+            pca_coords = adata.obsm["X_pca"]
+            pc1, pc2 = components
+            
+            # Get variance explained if available
+            var_explained = ""
+            if "pca" in adata.uns and "variance_ratio" in adata.uns["pca"]:
+                var_ratio = adata.uns["pca"]["variance_ratio"]
+                var_explained = f" ({var_ratio[pc1]*100:.1f}% / {var_ratio[pc2]*100:.1f}% var)"
+            
+            # Prepare color data
+            if color_by in adata.obs.columns:
+                color_data = adata.obs[color_by].astype(str)
+            else:
+                color_data = pd.Series(["All"] * adata.n_obs, index=adata.obs_names)
+            
+            # Create plot
+            fig = px.scatter(
+                x=pca_coords[:, pc1],
+                y=pca_coords[:, pc2],
+                color=color_data,
+                title=title or f"PCA Plot - PC{pc1+1} vs PC{pc2+1}{var_explained}",
+                labels={
+                    "x": f"PC{pc1+1}{var_explained.split('/')[0] if var_explained else ''}",
+                    "y": f"PC{pc2+1}{var_explained.split('/')[1] if var_explained else ''}",
+                    "color": color_by
+                },
+                width=self.default_width,
+                height=self.default_height,
+                color_discrete_sequence=self.cluster_colors
+            )
+            
+            # Update marker size
+            if point_size is None:
+                point_size = 5 if adata.n_obs < 5000 else 3
+            
+            fig.update_traces(marker=dict(size=point_size, opacity=0.8))
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating PCA plot: {e}")
+            raise VisualizationError(f"Failed to create PCA plot: {str(e)}")
+
+    def create_elbow_plot(
+        self,
+        adata: anndata.AnnData,
+        n_pcs: int = 50,
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create an elbow plot for PCA variance explained.
+        
+        Args:
+            adata: AnnData object with PCA results
+            n_pcs: Number of PCs to show
+            title: Plot title
+            
+        Returns:
+            go.Figure: Elbow plot
+        """
+        try:
+            if "pca" not in adata.uns or "variance_ratio" not in adata.uns["pca"]:
+                raise VisualizationError("PCA variance information not found")
+            
+            var_ratio = adata.uns["pca"]["variance_ratio"][:n_pcs]
+            cumsum_var = np.cumsum(var_ratio)
+            
+            # Create figure with secondary y-axis
+            fig = make_subplots(specs=[[{"secondary_y": True}]])
+            
+            # Add variance explained per PC
+            fig.add_trace(
+                go.Scatter(
+                    x=list(range(1, len(var_ratio) + 1)),
+                    y=var_ratio * 100,
+                    mode='lines+markers',
+                    name='Individual variance',
+                    marker=dict(size=6),
+                    line=dict(width=2)
+                ),
+                secondary_y=False
+            )
+            
+            # Add cumulative variance
+            fig.add_trace(
+                go.Scatter(
+                    x=list(range(1, len(cumsum_var) + 1)),
+                    y=cumsum_var * 100,
+                    mode='lines+markers',
+                    name='Cumulative variance',
+                    marker=dict(size=6),
+                    line=dict(width=2, dash='dash')
+                ),
+                secondary_y=True
+            )
+            
+            # Update layout
+            fig.update_xaxes(title_text="Principal Component")
+            fig.update_yaxes(title_text="Variance Explained (%)", secondary_y=False)
+            fig.update_yaxes(title_text="Cumulative Variance (%)", secondary_y=True)
+            
+            fig.update_layout(
+                title=title or "PCA Elbow Plot - Variance Explained",
+                width=self.default_width,
+                height=self.default_height,
+                hovermode='x unified',
+                plot_bgcolor='white',
+                xaxis=dict(showgrid=True, gridcolor='lightgray'),
+                yaxis=dict(showgrid=True, gridcolor='lightgray')
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating elbow plot: {e}")
+            raise VisualizationError(f"Failed to create elbow plot: {str(e)}")
+
+    def create_violin_plot(
+        self,
+        adata: anndata.AnnData,
+        genes: Union[str, List[str]],
+        groupby: str = "leiden",
+        use_raw: bool = True,
+        log_scale: bool = False,
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create violin plots for gene expression across groups.
+        
+        Args:
+            adata: AnnData object
+            genes: Gene or list of genes to plot
+            groupby: Column in adata.obs to group by
+            use_raw: Whether to use raw data
+            log_scale: Whether to use log scale
+            title: Plot title
+            
+        Returns:
+            go.Figure: Violin plot
+        """
+        try:
+            # Ensure genes is a list
+            if isinstance(genes, str):
+                genes = [genes]
+            
+            # Validate genes exist
+            data_source = adata.raw if use_raw and adata.raw else adata
+            missing_genes = [g for g in genes if g not in data_source.var_names]
+            if missing_genes:
+                raise VisualizationError(f"Genes not found: {missing_genes}")
+            
+            # Validate groupby
+            if groupby not in adata.obs.columns:
+                raise VisualizationError(f"'{groupby}' not found in obs columns")
+            
+            # Create subplots for multiple genes
+            n_genes = len(genes)
+            fig = make_subplots(
+                rows=1, cols=n_genes,
+                subplot_titles=genes,
+                horizontal_spacing=0.1
+            )
+            
+            # Get groups
+            groups = adata.obs[groupby].astype(str).unique()
+            groups = sorted(groups, key=lambda x: int(x) if x.isdigit() else x)
+            
+            # Process each gene
+            for gene_idx, gene in enumerate(genes):
+                # Extract expression data
+                gene_loc = data_source.var_names.get_loc(gene)
+                if issparse(data_source.X):
+                    expr_data = data_source.X[:, gene_loc].toarray().flatten()
+                else:
+                    expr_data = data_source.X[:, gene_loc]
+                
+                # Create violin for each group
+                for group in groups:
+                    mask = adata.obs[groupby].astype(str) == group
+                    group_expr = expr_data[mask]
+                    
+                    # Apply log transformation if requested
+                    if log_scale:
+                        group_expr = np.log1p(group_expr)
+                    
+                    fig.add_trace(
+                        go.Violin(
+                            y=group_expr,
+                            name=f"{groupby} {group}",
+                            x=[group] * len(group_expr),
+                            box_visible=True,
+                            meanline_visible=True,
+                            showlegend=(gene_idx == 0),
+                            scalemode='width',
+                            width=0.7
+                        ),
+                        row=1, col=gene_idx + 1
+                    )
+            
+            # Update layout
+            y_title = "Expression (log)" if log_scale else "Expression"
+            fig.update_yaxes(title_text=y_title, row=1, col=1)
+            fig.update_xaxes(title_text=groupby)
+            
+            fig.update_layout(
+                title=title or f"Violin Plot - {', '.join(genes)}",
+                width=max(800, 400 * n_genes),
+                height=600,
+                violinmode='group',
+                plot_bgcolor='white'
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating violin plot: {e}")
+            raise VisualizationError(f"Failed to create violin plot: {str(e)}")
+
+    def create_feature_plot(
+        self,
+        adata: anndata.AnnData,
+        genes: Union[str, List[str]],
+        use_raw: bool = True,
+        ncols: int = 2,
+        point_size: Optional[int] = None,
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None
+    ) -> go.Figure:
+        """
+        Create feature plots showing gene expression on UMAP.
+        
+        Args:
+            adata: AnnData object with UMAP coordinates
+            genes: Gene or list of genes to plot
+            use_raw: Whether to use raw data
+            ncols: Number of columns in subplot grid
+            point_size: Size of points
+            vmin: Minimum value for color scale
+            vmax: Maximum value for color scale
+            
+        Returns:
+            go.Figure: Feature plot
+        """
+        try:
+            if "X_umap" not in adata.obsm:
+                raise VisualizationError("UMAP coordinates not found")
+            
+            # Ensure genes is a list
+            if isinstance(genes, str):
+                genes = [genes]
+            
+            # Validate genes
+            data_source = adata.raw if use_raw and adata.raw else adata
+            missing_genes = [g for g in genes if g not in data_source.var_names]
+            if missing_genes:
+                raise VisualizationError(f"Genes not found: {missing_genes}")
+            
+            # Calculate subplot layout
+            n_genes = len(genes)
+            nrows = (n_genes + ncols - 1) // ncols
+            
+            # Create subplots
+            fig = make_subplots(
+                rows=nrows, cols=ncols,
+                subplot_titles=genes,
+                horizontal_spacing=0.08,
+                vertical_spacing=0.12
+            )
+            
+            # Auto-scale point size
+            if point_size is None:
+                point_size = 3 if adata.n_obs < 10000 else 2
+            
+            umap_coords = adata.obsm["X_umap"]
+            
+            # Process each gene
+            for idx, gene in enumerate(genes):
+                row = idx // ncols + 1
+                col = idx % ncols + 1
+                
+                # Extract expression data
+                gene_loc = data_source.var_names.get_loc(gene)
+                if issparse(data_source.X):
+                    expr_data = data_source.X[:, gene_loc].toarray().flatten()
+                else:
+                    expr_data = data_source.X[:, gene_loc]
+                
+                # Apply vmin/vmax if specified
+                if vmin is not None:
+                    expr_data = np.maximum(expr_data, vmin)
+                if vmax is not None:
+                    expr_data = np.minimum(expr_data, vmax)
+                
+                # Create scatter plot
+                scatter = go.Scatter(
+                    x=umap_coords[:, 0],
+                    y=umap_coords[:, 1],
+                    mode='markers',
+                    marker=dict(
+                        size=point_size,
+                        color=expr_data,
+                        colorscale=self.expression_colorscale,
+                        showscale=(idx == 0),  # Show colorbar only for first plot
+                        colorbar=dict(
+                            title="Expression",
+                            x=1.15 if ncols == 1 else 1.05
+                        ),
+                        cmin=vmin if vmin is not None else expr_data.min(),
+                        cmax=vmax if vmax is not None else expr_data.max()
+                    ),
+                    text=[f"Cell: {cell}<br>Expression: {expr:.2f}" 
+                          for cell, expr in zip(adata.obs_names, expr_data)],
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False
+                )
+                
+                fig.add_trace(scatter, row=row, col=col)
+            
+            # Update axes
+            for i in range(1, n_genes + 1):
+                row = (i - 1) // ncols + 1
+                col = (i - 1) % ncols + 1
+                fig.update_xaxes(title_text="UMAP 1", row=row, col=col)
+                fig.update_yaxes(title_text="UMAP 2", row=row, col=col)
+            
+            # Update layout
+            fig.update_layout(
+                title=f"Feature Plot - Gene Expression",
+                width=400 * min(ncols, n_genes),
+                height=400 * nrows,
+                plot_bgcolor='white',
+                showlegend=False
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating feature plot: {e}")
+            raise VisualizationError(f"Failed to create feature plot: {str(e)}")
+
+    def create_dot_plot(
+        self,
+        adata: anndata.AnnData,
+        genes: List[str],
+        groupby: str = "leiden",
+        use_raw: bool = True,
+        standard_scale: str = "var",
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create a dot plot for marker gene expression.
+        
+        Args:
+            adata: AnnData object
+            genes: List of genes to plot
+            groupby: Column in adata.obs to group by
+            use_raw: Whether to use raw data
+            standard_scale: How to scale ('var', 'group', or None)
+            title: Plot title
+            
+        Returns:
+            go.Figure: Dot plot
+        """
+        try:
+            # Validate inputs
+            data_source = adata.raw if use_raw and adata.raw else adata
+            missing_genes = [g for g in genes if g not in data_source.var_names]
+            if missing_genes:
+                raise VisualizationError(f"Genes not found: {missing_genes}")
+            
+            if groupby not in adata.obs.columns:
+                raise VisualizationError(f"'{groupby}' not found in obs columns")
+            
+            # Get groups
+            groups = adata.obs[groupby].astype(str).unique()
+            groups = sorted(groups, key=lambda x: int(x) if x.isdigit() else x)
+            
+            # Calculate statistics for each gene-group combination
+            mean_expr = []
+            pct_expr = []
+            
+            for gene in genes:
+                gene_means = []
+                gene_pcts = []
+                
+                # Get gene expression
+                gene_loc = data_source.var_names.get_loc(gene)
+                if issparse(data_source.X):
+                    expr_data = data_source.X[:, gene_loc].toarray().flatten()
+                else:
+                    expr_data = data_source.X[:, gene_loc]
+                
+                for group in groups:
+                    mask = adata.obs[groupby].astype(str) == group
+                    group_expr = expr_data[mask]
+                    
+                    # Calculate mean expression
+                    gene_means.append(np.mean(group_expr))
+                    
+                    # Calculate percentage of cells expressing
+                    gene_pcts.append(np.sum(group_expr > 0) / len(group_expr) * 100)
+                
+                mean_expr.append(gene_means)
+                pct_expr.append(gene_pcts)
+            
+            mean_expr = np.array(mean_expr)
+            pct_expr = np.array(pct_expr)
+            
+            # Standard scaling if requested
+            if standard_scale == "var":
+                # Scale across all groups for each gene
+                for i in range(len(genes)):
+                    mean_expr[i] = (mean_expr[i] - mean_expr[i].mean()) / (mean_expr[i].std() + 1e-8)
+            elif standard_scale == "group":
+                # Scale across all genes for each group
+                for j in range(len(groups)):
+                    mean_expr[:, j] = (mean_expr[:, j] - mean_expr[:, j].mean()) / (mean_expr[:, j].std() + 1e-8)
+            
+            # Create dot plot
+            fig = go.Figure()
+            
+            # Add dots for each gene-group combination
+            for i, gene in enumerate(genes):
+                for j, group in enumerate(groups):
+                    # Size based on percentage expressing
+                    size = pct_expr[i, j] / 100 * 30  # Scale to max size of 30
+                    
+                    # Color based on mean expression
+                    color = mean_expr[i, j]
+                    
+                    fig.add_trace(go.Scatter(
+                        x=[j],
+                        y=[i],
+                        mode='markers',
+                        marker=dict(
+                            size=size,
+                            color=color,
+                            colorscale=self.expression_colorscale,
+                            showscale=(i == 0 and j == 0),  # Show colorbar once
+                            colorbar=dict(
+                                title="Mean<br>Expression",
+                                x=1.15
+                            ),
+                            line=dict(width=0.5, color='black')
+                        ),
+                        text=f"Gene: {gene}<br>Group: {group}<br>"
+                             f"Mean Expr: {mean_expr[i, j]:.2f}<br>"
+                             f"% Expressing: {pct_expr[i, j]:.1f}%",
+                        hovertemplate="%{text}<extra></extra>",
+                        showlegend=False
+                    ))
+            
+            # Add size legend
+            for size_pct in [25, 50, 75, 100]:
+                fig.add_trace(go.Scatter(
+                    x=[len(groups) + 0.5],
+                    y=[len(genes) - 4 + size_pct/25],
+                    mode='markers',
+                    marker=dict(
+                        size=size_pct/100 * 30,
+                        color='gray',
+                        line=dict(width=0.5, color='black')
+                    ),
+                    text=f"{size_pct}%",
+                    showlegend=False
+                ))
+            
+            # Update layout
+            fig.update_layout(
+                title=title or f"Dot Plot - {groupby}",
+                xaxis=dict(
+                    tickmode='array',
+                    tickvals=list(range(len(groups))),
+                    ticktext=groups,
+                    title=groupby
+                ),
+                yaxis=dict(
+                    tickmode='array',
+                    tickvals=list(range(len(genes))),
+                    ticktext=genes,
+                    title="Genes"
+                ),
+                width=max(600, 50 * len(groups)),
+                height=max(400, 30 * len(genes)),
+                plot_bgcolor='white',
+                hovermode='closest'
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating dot plot: {e}")
+            raise VisualizationError(f"Failed to create dot plot: {str(e)}")
+
+    def create_heatmap(
+        self,
+        adata: anndata.AnnData,
+        genes: Optional[List[str]] = None,
+        groupby: str = "leiden",
+        use_raw: bool = True,
+        n_top_genes: int = 5,
+        standard_scale: bool = True,
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create a heatmap of gene expression.
+        
+        Args:
+            adata: AnnData object
+            genes: List of genes (if None, use top marker genes)
+            groupby: Column to group by
+            use_raw: Whether to use raw data
+            n_top_genes: Number of top genes per group if genes not specified
+            standard_scale: Whether to z-score normalize
+            title: Plot title
+            
+        Returns:
+            go.Figure: Heatmap
+        """
+        try:
+            # Get genes if not specified
+            if genes is None:
+                if "rank_genes_groups" not in adata.uns:
+                    raise VisualizationError("No marker genes found. Run rank_genes_groups first or specify genes.")
+                
+                # Get top genes from each group
+                genes = []
+                for group in adata.obs[groupby].unique():
+                    group_genes = adata.uns["rank_genes_groups"]["names"][str(group)][:n_top_genes]
+                    genes.extend(group_genes)
+                genes = list(dict.fromkeys(genes))  # Remove duplicates while preserving order
+            
+            # Validate genes
+            data_source = adata.raw if use_raw and adata.raw else adata
+            missing_genes = [g for g in genes if g not in data_source.var_names]
+            if missing_genes:
+                logger.warning(f"Genes not found: {missing_genes}")
+                genes = [g for g in genes if g in data_source.var_names]
+            
+            if not genes:
+                raise VisualizationError("No valid genes to plot")
+            
+            # Extract expression matrix
+            gene_indices = [data_source.var_names.get_loc(g) for g in genes]
+            if issparse(data_source.X):
+                expr_matrix = data_source.X[:, gene_indices].toarray()
+            else:
+                expr_matrix = data_source.X[:, gene_indices]
+            
+            # Group by clusters
+            groups = adata.obs[groupby].astype(str).unique()
+            groups = sorted(groups, key=lambda x: int(x) if x.isdigit() else x)
+            
+            # Calculate mean expression per group
+            group_means = []
+            for group in groups:
+                mask = adata.obs[groupby].astype(str) == group
+                group_expr = expr_matrix[mask, :].mean(axis=0)
+                group_means.append(group_expr)
+            
+            group_means = np.array(group_means).T  # Genes x Groups
+            
+            # Standard scale if requested
+            if standard_scale:
+                # Z-score normalize each gene across groups
+                for i in range(group_means.shape[0]):
+                    mean_val = group_means[i].mean()
+                    std_val = group_means[i].std()
+                    if std_val > 0:
+                        group_means[i] = (group_means[i] - mean_val) / std_val
+            
+            # Create heatmap
+            fig = go.Figure(data=go.Heatmap(
+                z=group_means,
+                x=groups,
+                y=genes,
+                colorscale=self.diverging_colors if standard_scale else self.continuous_colors,
+                colorbar=dict(title="Expression<br>(z-score)" if standard_scale else "Expression"),
+                hovertemplate="Gene: %{y}<br>Group: %{x}<br>Expression: %{z:.2f}<extra></extra>"
+            ))
+            
+            # Update layout
+            fig.update_layout(
+                title=title or f"Gene Expression Heatmap - {groupby}",
+                xaxis=dict(title=groupby, tickmode='linear'),
+                yaxis=dict(title="Genes", tickmode='linear'),
+                width=max(600, 40 * len(groups)),
+                height=max(400, 20 * len(genes)),
+                plot_bgcolor='white'
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating heatmap: {e}")
+            raise VisualizationError(f"Failed to create heatmap: {str(e)}")
+
+    def create_qc_plots(
+        self,
+        adata: anndata.AnnData,
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create comprehensive QC plots for single-cell data.
+        
+        Args:
+            adata: AnnData object
+            title: Overall title for the QC plots
+            
+        Returns:
+            go.Figure: Multi-panel QC plot
+        """
+        try:
+            # Create subplots
+            fig = make_subplots(
+                rows=2, cols=3,
+                subplot_titles=[
+                    "nGenes vs nUMIs",
+                    "Mitochondrial %",
+                    "nGenes Distribution",
+                    "nUMIs Distribution",
+                    "% Mitochondrial Distribution",
+                    "Cells per Sample"
+                ],
+                specs=[
+                    [{"type": "scatter"}, {"type": "scatter"}, {"type": "histogram"}],
+                    [{"type": "histogram"}, {"type": "histogram"}, {"type": "bar"}]
+                ]
+            )
+            
+            # Calculate QC metrics if not present
+            if "n_genes" not in adata.obs.columns:
+                adata.obs["n_genes"] = (adata.X > 0).sum(axis=1)
+            if "n_counts" not in adata.obs.columns:
+                if issparse(adata.X):
+                    adata.obs["n_counts"] = adata.X.sum(axis=1).A1
+                else:
+                    adata.obs["n_counts"] = adata.X.sum(axis=1)
+            
+            # Calculate mitochondrial percentage if not present
+            if "percent_mito" not in adata.obs.columns:
+                mito_genes = adata.var_names.str.startswith("MT-") | adata.var_names.str.startswith("mt-")
+                if mito_genes.sum() > 0:
+                    if issparse(adata.X):
+                        adata.obs["percent_mito"] = np.sum(
+                            adata[:, mito_genes].X, axis=1
+                        ).A1 / adata.obs["n_counts"] * 100
+                    else:
+                        adata.obs["percent_mito"] = np.sum(
+                            adata[:, mito_genes].X, axis=1
+                        ) / adata.obs["n_counts"] * 100
+                else:
+                    adata.obs["percent_mito"] = 0
+            
+            # 1. nGenes vs nUMIs scatter plot
+            fig.add_trace(
+                go.Scatter(
+                    x=adata.obs["n_counts"],
+                    y=adata.obs["n_genes"],
+                    mode='markers',
+                    marker=dict(
+                        size=2,
+                        color=adata.obs["percent_mito"],
+                        colorscale=self.continuous_colors,
+                        showscale=True,
+                        colorbar=dict(title="% Mito", x=0.35, y=0.85, len=0.3)
+                    ),
+                    text=[f"Cell: {cell}<br>UMIs: {umi}<br>Genes: {gene}<br>% Mito: {mito:.1f}"
+                          for cell, umi, gene, mito in zip(
+                              adata.obs_names,
+                              adata.obs["n_counts"],
+                              adata.obs["n_genes"],
+                              adata.obs["percent_mito"]
+                          )],
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False
+                ),
+                row=1, col=1
+            )
+            
+            # 2. Mitochondrial % vs nUMIs
+            fig.add_trace(
+                go.Scatter(
+                    x=adata.obs["n_counts"],
+                    y=adata.obs["percent_mito"],
+                    mode='markers',
+                    marker=dict(size=2, opacity=0.5),
+                    showlegend=False
+                ),
+                row=1, col=2
+            )
+            
+            # 3. nGenes histogram
+            fig.add_trace(
+                go.Histogram(
+                    x=adata.obs["n_genes"],
+                    nbinsx=50,
+                    marker_color='steelblue',
+                    showlegend=False
+                ),
+                row=1, col=3
+            )
+            
+            # 4. nUMIs histogram
+            fig.add_trace(
+                go.Histogram(
+                    x=adata.obs["n_counts"],
+                    nbinsx=50,
+                    marker_color='indianred',
+                    showlegend=False
+                ),
+                row=2, col=1
+            )
+            
+            # 5. Mitochondrial % histogram
+            fig.add_trace(
+                go.Histogram(
+                    x=adata.obs["percent_mito"],
+                    nbinsx=50,
+                    marker_color='seagreen',
+                    showlegend=False
+                ),
+                row=2, col=2
+            )
+            
+            # 6. Cells per sample (if batch info available)
+            batch_cols = ["batch", "sample", "patient", "Patient_ID"]
+            batch_col = None
+            for col in batch_cols:
+                if col in adata.obs.columns:
+                    batch_col = col
+                    break
+            
+            if batch_col:
+                sample_counts = adata.obs[batch_col].value_counts()
+                fig.add_trace(
+                    go.Bar(
+                        x=sample_counts.index,
+                        y=sample_counts.values,
+                        marker_color='purple',
+                        showlegend=False
+                    ),
+                    row=2, col=3
+                )
+            
+            # Update axes labels
+            fig.update_xaxes(title_text="nUMIs", row=1, col=1)
+            fig.update_yaxes(title_text="nGenes", row=1, col=1)
+            
+            fig.update_xaxes(title_text="nUMIs", row=1, col=2)
+            fig.update_yaxes(title_text="% Mitochondrial", row=1, col=2)
+            
+            fig.update_xaxes(title_text="nGenes", row=1, col=3)
+            fig.update_yaxes(title_text="Count", row=1, col=3)
+            
+            fig.update_xaxes(title_text="nUMIs", row=2, col=1)
+            fig.update_yaxes(title_text="Count", row=2, col=1)
+            
+            fig.update_xaxes(title_text="% Mitochondrial", row=2, col=2)
+            fig.update_yaxes(title_text="Count", row=2, col=2)
+            
+            if batch_col:
+                fig.update_xaxes(title_text=batch_col, row=2, col=3)
+                fig.update_yaxes(title_text="Number of Cells", row=2, col=3)
+            
+            # Update layout
+            fig.update_layout(
+                title=title or "Single-cell QC Plots",
+                width=1200,
+                height=800,
+                showlegend=False,
+                plot_bgcolor='white'
+            )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating QC plots: {e}")
+            raise VisualizationError(f"Failed to create QC plots: {str(e)}")
+
+    def create_cluster_composition_plot(
+        self,
+        adata: anndata.AnnData,
+        cluster_col: str = "leiden",
+        sample_col: Optional[str] = None,
+        normalize: bool = True,
+        title: Optional[str] = None
+    ) -> go.Figure:
+        """
+        Create a stacked bar plot showing cluster composition.
+        
+        Args:
+            adata: AnnData object
+            cluster_col: Column with cluster assignments
+            sample_col: Column with sample/batch info (auto-detect if None)
+            normalize: Whether to normalize to percentages
+            title: Plot title
+            
+        Returns:
+            go.Figure: Stacked bar plot
+        """
+        try:
+            # Validate cluster column
+            if cluster_col not in adata.obs.columns:
+                raise VisualizationError(f"'{cluster_col}' not found in obs columns")
+            
+            # Auto-detect sample column if not specified
+            if sample_col is None:
+                for col in ["batch", "sample", "patient", "Patient_ID"]:
+                    if col in adata.obs.columns:
+                        sample_col = col
+                        break
+            
+            if sample_col is None:
+                # If no sample column, just show cluster sizes
+                cluster_counts = adata.obs[cluster_col].value_counts()
+                
+                fig = go.Figure(data=[
+                    go.Bar(
+                        x=cluster_counts.index.astype(str),
+                        y=cluster_counts.values,
+                        marker_color='steelblue'
+                    )
+                ])
+                
+                fig.update_layout(
+                    title=title or f"Cluster Sizes - {cluster_col}",
+                    xaxis_title=cluster_col,
+                    yaxis_title="Number of Cells",
+                    width=800,
+                    height=500
+                )
+                
+            else:
+                # Create composition matrix
+                composition = pd.crosstab(
+                    adata.obs[sample_col],
+                    adata.obs[cluster_col],
+                    normalize='index' if normalize else False
+                )
+                
+                if normalize:
+                    composition = composition * 100
+                
+                # Create stacked bar plot
+                fig = go.Figure()
+                
+                for cluster in composition.columns:
+                    fig.add_trace(go.Bar(
+                        name=f"Cluster {cluster}",
+                        x=composition.index,
+                        y=composition[cluster]
+                    ))
+                
+                fig.update_layout(
+                    title=title or f"Cluster Composition by {sample_col}",
+                    xaxis_title=sample_col,
+                    yaxis_title="Percentage" if normalize else "Number of Cells",
+                    barmode='stack',
+                    width=max(800, 50 * len(composition.index)),
+                    height=600,
+                    legend=dict(
+                        orientation="v",
+                        yanchor="top",
+                        y=0.99,
+                        xanchor="left",
+                        x=1.01
+                    )
+                )
+            
+            return fig
+            
+        except Exception as e:
+            logger.error(f"Error creating cluster composition plot: {e}")
+            raise VisualizationError(f"Failed to create cluster composition plot: {str(e)}")
+
+    def save_all_plots(
+        self,
+        plots: Dict[str, go.Figure],
+        output_dir: str,
+        format: str = "both"
+    ) -> List[str]:
+        """
+        Save multiple plots to files.
+        
+        Args:
+            plots: Dictionary of plot_name: figure pairs
+            output_dir: Directory to save plots
+            format: 'html', 'png', or 'both'
+            
+        Returns:
+            List[str]: Paths to saved files
+        """
+        import os
+        from pathlib import Path
+        
+        saved_files = []
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        for name, fig in plots.items():
+            try:
+                if format in ["html", "both"]:
+                    html_path = output_path / f"{name}.html"
+                    pio.write_html(fig, html_path)
+                    saved_files.append(str(html_path))
+                    logger.info(f"Saved HTML: {html_path}")
+                
+                if format in ["png", "both"]:
+                    png_path = output_path / f"{name}.png"
+                    pio.write_image(fig, png_path, width=1200, height=800)
+                    saved_files.append(str(png_path))
+                    logger.info(f"Saved PNG: {png_path}")
+                    
+            except Exception as e:
+                logger.error(f"Failed to save plot '{name}': {e}")
+        
+        return saved_files

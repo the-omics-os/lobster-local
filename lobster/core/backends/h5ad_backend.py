@@ -176,10 +176,10 @@ class H5ADBackend(BaseBackend):
         self._ensure_directory(resolved_path)
         
         # Create backup if file exists
-        if resolved_path.exists():
-            backup_path = self.create_backup(resolved_path)
-            if backup_path:
-                self.logger.info(f"Created backup: {backup_path}")
+        # if resolved_path.exists():
+        #     backup_path = self.create_backup(resolved_path)
+        #     if backup_path:
+        #         self.logger.info(f"Created backup: {backup_path}")
         
         try:
             # Extract saving parameters
