@@ -159,19 +159,24 @@ class TranscriptomicsAdapter(BaseAdapter):
             raise FileNotFoundError(f"File not found: {path}")
         
         format_type = self.detect_format(path)
-        
-        if format_type == 'h5ad':
-            return self._load_h5ad_data(path)
-        elif format_type in ['csv', 'tsv', 'txt']:
-            return self._load_csv_transcriptomics_data(path, **kwargs)
-        elif format_type in ['xlsx', 'xls']:
-            return self._load_excel_transcriptomics_data(path, **kwargs)
-        elif format_type == 'h5':
-            return self._load_h5_transcriptomics_data(path, **kwargs)
-        elif format_type == 'mtx':
-            return self._load_mtx_data(path, **kwargs)
-        else:
-            raise ValueError(f"Unsupported file format: {format_type}")
+
+        try:
+            if format_type == 'h5ad':
+                return self._load_h5ad_data(path)
+            elif format_type in ['csv', 'tsv', 'txt']:
+                return self._load_csv_transcriptomics_data(path, **kwargs)
+            elif format_type in ['xlsx', 'xls']:
+                return self._load_excel_transcriptomics_data(path, **kwargs)
+            elif format_type == 'h5':
+                return self._load_h5_transcriptomics_data(path, **kwargs)
+            elif format_type == 'mtx':
+                return self._load_mtx_data(path, **kwargs)
+            else:
+                raise ValueError(f"Unsupported file format: {format_type}")
+        except Exception as e: 
+            print(e)
+            logger.debug(f'Transcriptomics adapter failed to load from file with path: {path}')
+            return 'failed to load from source'
 
     def _load_csv_transcriptomics_data(
         self, 

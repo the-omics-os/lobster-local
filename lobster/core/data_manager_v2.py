@@ -447,6 +447,83 @@ class DataManagerV2:
         logger.info(f"Saved MuData to {path}")
         return str(path)
 
+    def _match_modality_to_adapter(self, modality_name: str) -> Optional[str]:
+        """
+        Smart matching of modality names to adapter names.
+        
+        This method uses a hierarchical matching strategy to identify the correct
+        adapter for a given modality name, handling various naming patterns.
+        
+        Args:
+            modality_name: Name of the modality to match
+            
+        Returns:
+            Optional[str]: Matching adapter name, or None if no match found
+        """
+        modality_lower = modality_name.lower()
+        
+        # Define keyword mappings for each adapter type
+        adapter_keywords = {
+            'transcriptomics_single_cell': {
+                'primary': ['single_cell', 'single-cell', 'sc_', 'scrna', '10x'],
+                'secondary': ['transcriptom', 'rna', 'gene_expression'],
+                'exclude': ['bulk']
+            },
+            'transcriptomics_bulk': {
+                'primary': ['bulk'],
+                'secondary': ['transcriptom', 'rna', 'gene_expression'],
+                'exclude': ['single_cell', 'single-cell', 'sc_', 'scrna']
+            },
+            'proteomics_ms': {
+                'primary': ['ms', 'mass_spec', 'mass-spec', 'mass_spectrometry'],
+                'secondary': ['proteomic', 'protein'],
+                'exclude': ['affinity', 'antibody']
+            },
+            'proteomics_affinity': {
+                'primary': ['affinity', 'antibody', 'immunoassay', 'elisa', 'western'],
+                'secondary': ['proteomic', 'protein'],
+                'exclude': ['ms', 'mass_spec']
+            }
+        }
+        
+        # Score each adapter based on keyword matches
+        adapter_scores = {}
+        
+        for adapter_name, keywords in adapter_keywords.items():
+            score = 0
+            
+            # Check exclusion keywords first - if any match, skip this adapter
+            if any(exclude in modality_lower for exclude in keywords.get('exclude', [])):
+                continue
+            
+            # Primary keywords have higher weight
+            for primary in keywords.get('primary', []):
+                if primary in modality_lower:
+                    score += 10
+            
+            # Secondary keywords have lower weight
+            for secondary in keywords.get('secondary', []):
+                if secondary in modality_lower:
+                    score += 5
+            
+            # Store score if > 0
+            if score > 0:
+                adapter_scores[adapter_name] = score
+        
+        # Return adapter with highest score, or None if no matches
+        if adapter_scores:
+            return max(adapter_scores.items(), key=lambda x: x[1])[0]
+        
+        # Fallback: try to infer from modality name patterns
+        if 'geo' in modality_lower or 'gse' in modality_lower:
+            # GEO datasets are usually transcriptomics
+            if any(keyword in modality_lower for keyword in ['single', 'sc', '10x']):
+                return 'transcriptomics_single_cell'
+            else:
+                return 'transcriptomics_bulk'
+        
+        return None
+
     def get_quality_metrics(self, modality: Optional[str] = None) -> Dict[str, Any]:
         """
         Get quality metrics for modalities.
@@ -461,17 +538,16 @@ class DataManagerV2:
             if modality not in self.modalities:
                 raise ValueError(f"Modality '{modality}' not found")
             
-            # Get adapter for this modality (find by checking registered adapters)
-            adapter_instance = None
-            for adapter_name, adapter in self.adapters.items():
-                if modality in adapter_name or adapter.get_modality_name() in modality.lower():
-                    adapter_instance = adapter
-                    break
+            # Use smart matching to find appropriate adapter
+            matched_adapter_name = self._match_modality_to_adapter(modality)
             
-            if adapter_instance:
+            if matched_adapter_name and matched_adapter_name in self.adapters:
+                adapter_instance = self.adapters[matched_adapter_name]
+                logger.debug(f"Matched modality '{modality}' to adapter '{matched_adapter_name}'")
                 return adapter_instance.get_quality_metrics(self.modalities[modality])
             else:
                 # Use basic metrics if no specific adapter found
+                logger.warning(f"No specific adapter found for modality '{modality}', using basic metrics")
                 from lobster.core.adapters.base import BaseAdapter
                 base_adapter = BaseAdapter()
                 return base_adapter.get_quality_metrics(self.modalities[modality])
@@ -541,17 +617,16 @@ class DataManagerV2:
         results = {}
         
         for name, adata in self.modalities.items():
-            # Find appropriate adapter for validation
-            adapter_instance = None
-            for adapter_name, adapter in self.adapters.items():
-                if name in adapter_name or adapter.get_modality_name() in name.lower():
-                    adapter_instance = adapter
-                    break
+            # Use smart matching to find appropriate adapter
+            matched_adapter_name = self._match_modality_to_adapter(name)
             
-            if adapter_instance:
+            if matched_adapter_name and matched_adapter_name in self.adapters:
+                adapter_instance = self.adapters[matched_adapter_name]
+                logger.debug(f"Validating modality '{name}' with adapter '{matched_adapter_name}'")
                 results[name] = adapter_instance.validate(adata, strict=strict)
             else:
                 # Use basic validation if no specific adapter found
+                logger.warning(f"No specific adapter found for modality '{name}', using basic validation")
                 from lobster.core.adapters.base import BaseAdapter
                 base_adapter = BaseAdapter()
                 results[name] = base_adapter._validate_basic_structure(adata)

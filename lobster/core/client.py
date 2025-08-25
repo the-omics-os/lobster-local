@@ -124,6 +124,7 @@ class AgentClient:
             # Track execution
             start_time = datetime.now()
             events = []
+            last_agent = None
             
             # Execute graph
             for event in self.graph.stream(
@@ -132,6 +133,12 @@ class AgentClient:
                 stream_mode='updates'
                 ):
                 events.append(event)
+                
+                # Track which agent is responding
+                if event:
+                    for node_name in event.keys():
+                        if node_name and node_name != '__end__':
+                            last_agent = node_name
             
             # Extract final response from the last event
             final_response = self._extract_response(events)
@@ -147,7 +154,8 @@ class AgentClient:
                 "events_count": len(events),
                 "session_id": self.session_id,
                 "has_data": self.data_manager.has_data(),
-                "plots": self.data_manager.get_latest_plots(5) if self.data_manager.has_data() else []
+                "plots": self.data_manager.get_latest_plots(5) if self.data_manager.has_data() else [],
+                "last_agent": last_agent  # Include which agent provided the response
             }
             
         except Exception as e:

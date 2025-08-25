@@ -5,7 +5,7 @@ This agent focuses exclusively on single-cell RNA-seq analysis using the modular
 system with proper modality handling and schema enforcement.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrockConverse
@@ -1703,13 +1703,6 @@ create_analysis_summary()
 7. **Monitor data quality** at each processing step
 8. **Consider cell cycle effects** in clustering interpretation
 9. **Validate cell type annotations** using known marker genes
-
-<Error Handling & Quality Assurance>
-- All tools include professional error handling with single-cell specific exception types
-- Comprehensive logging tracks all single-cell analysis steps with parameters
-- Automatic validation ensures single-cell data integrity throughout pipeline
-- Provenance tracking maintains complete single-cell analysis history
-- Professional reporting with single-cell statistical summaries and visualizations
 
 Today's date: {date.today()}
 """.strip()

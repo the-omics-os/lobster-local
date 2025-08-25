@@ -6,7 +6,7 @@ and generating visualizations of the results.
 """
 
 import time
-from typing import Callable, Dict, Optional, Tuple, Any
+from typing import Callable, Dict, Optional, Tuple, Any, Union
 
 import anndata
 import numpy as np

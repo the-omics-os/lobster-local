@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Any
 from dotenv import load_dotenv
 from lobster.config.agent_config import initialize_configurator
+from lobster.config.agent_registry import get_all_agent_names, get_worker_agents, get_agent_config
 
 class Settings:
     """

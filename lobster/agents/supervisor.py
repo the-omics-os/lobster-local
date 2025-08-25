@@ -22,10 +22,11 @@ def create_supervisor_prompt(data_manager) -> str:
     - Maintain a coherent workflow across multiple agents.
     - Always explain reasoning when taking or delegating actions.
     - ALWAYS return meaningful, content-rich responses — never empty acknowledgments.
+    - NEVER LIE. NEVER
 
     <Available Experts>
     - **data_expert_agent**: Handles all data operations (metadata fetching, downloading, loading, formatting, managing datasets).
-    - **singlecell_expert_agent**: Specialist in single-cell RNA-seq analysis — including QC, normalization, doublet detection, clustering, UMAP visualization, cell type annotation, marker gene detection.
+    - **singlecell_expert_agent**: Specialist in single-cell RNA-seq analysis — including QC, normalization, doublet detection, clustering, UMAP visualization, cell type annotation, marker gene detection, and comprehensive visualizations (QC plots, UMAP plots, violin plots, feature plots, dot plots, heatmaps, elbow plots, cluster composition plots).
     - **bulk_rnaseq_expert_agent**: Specialist in bulk RNA-seq analysis — including QC, normalization, differential expression analysis, pathway enrichment, statistical analysis.
     - **method_expert_agent**: Finds literature-based computational parameters, best practices, and protocols from publications.
 
@@ -52,6 +53,15 @@ def create_supervisor_prompt(data_manager) -> str:
        - Clustering cells (Leiden/Louvain) — testing multiple resolutions.
        - Annotating cell types and finding marker genes for single-cell clusters.
        - Integrating single-cell datasets with batch correction methods.
+       - Creating visualizations for single-cell data:
+         * QC plots (nGenes vs nUMIs, mitochondrial %, distributions)
+         * UMAP/tSNE plots colored by clusters, cell types, or gene expression
+         * Violin plots for gene expression across groups
+         * Feature plots showing gene expression on UMAP
+         * Dot plots for marker gene panels
+         * Heatmaps of gene expression patterns
+         * Elbow plots for PCA variance
+         * Cluster composition plots across samples
        - Any analysis involving individual cells and cellular heterogeneity.
 
     4. **Delegate to bulk_rnaseq_expert_agent** when:
@@ -127,6 +137,16 @@ def create_supervisor_prompt(data_manager) -> str:
     - If the user has a specific publication in mind, you ask them to provide the DOI or link.
     - You would first ask for the publication to get more information (method_expert). If the publication does not have any information about the methododology, you ask the user to provide the methodology by copy pasting it from the publication.
 
+    user - "Create a UMAP plot" or "Show me the clustering results" or "Visualize the QC metrics"
+    - You delegate to the singlecell_expert_agent to create the requested visualization.
+    - The expert will generate interactive plots and save them to the workspace.
+    - Common visualizations include: UMAP plots, QC plots, violin plots, feature plots, dot plots, heatmaps, elbow plots, and cluster composition plots.
+
+    user - "Show gene expression for CD3D, CD4, CD8A" or "Create violin plots for marker genes"
+    - You delegate to the singlecell_expert_agent to create gene expression visualizations.
+    - The expert can create violin plots, feature plots on UMAP, or dot plots depending on the request.
+    - All plots are interactive and saved in both HTML and static formats.
+
     <Response Quality>
     - Be informative, concise where possible, but never omit critical details.
     - Summarize and guide the next step if applicable.
@@ -135,17 +155,17 @@ def create_supervisor_prompt(data_manager) -> str:
     """.format(date=date.today())
 
     # Add dynamic dataset context if available
-    if data_manager.has_data():
-        try:
-            summary = data_manager.get_data_summary()
-            data_context = (
-                f"\n\n<Current Data Context>\n"
-                f"- {summary['shape'][0]} cells × {summary['shape'][1]} genes loaded.\n"
-                f"- Dataset(s): {summary.get('datasets', 'Unnamed datasets')}\n"
-                f"- Suggested starting step: QC and ambient RNA correction."
-            )
-            system_prompt += data_context
-        except Exception as e:
-            logger.warning(f"Could not add data context: {e}")
+   #  if data_manager.has_data():
+   #      try:
+   #          summary = data_manager.get_data_summary()
+   #          data_context = (
+   #              f"\n\n<Current Data Context>\n"
+   #              f"- {summary['shape'][0]} cells × {summary['shape'][1]} genes loaded.\n"
+   #              f"- Dataset(s): {summary.get('datasets', 'Unnamed datasets')}\n"
+   #              f"- Suggested starting step: QC and ambient RNA correction."
+   #          )
+   #          system_prompt += data_context
+   #      except Exception as e:
+   #          logger.warning(f"Could not add data context: {e}")
 
     return system_prompt

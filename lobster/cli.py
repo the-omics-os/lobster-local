@@ -370,6 +370,8 @@ def display_welcome():
     [red]/metadata[/red]     - Show detailed metadata information
     [red]/workspace[/red]    - Show workspace status and configuration
     [red]/plots[/red]        - List all generated visualizations
+    [red]/plot[/red]         - Open plots directory in file manager
+    [red]/plot[/red] <ID>    - Open a specific plot by ID or name
     [red]/read[/red] <file>  - Read file from workspace (supports subdirectories)
     [red]/modes[/red]        - List available operation modes
     
@@ -470,10 +472,17 @@ def chat(
             
             # Display response
             if result["success"]:
-                # Response header always shows Lobster
+                # Show which agent provided the response if available
+                agent_name = result.get("last_agent", "supervisor")
+                if agent_name and agent_name != '__end__':
+                    agent_display = agent_name.replace('_', ' ').title()
+                    title = f"[bold white on red] 🦞 {agent_display} Response [/bold white on red]"
+                else:
+                    title = "[bold white on red] 🦞 Lobster Response [/bold white on red]"
+                
                 response_panel = Panel(
                     Markdown(result["response"]),
-                    title="[bold white on red] 🦞 Lobster Response [/bold white on red]",
+                    title=title,
                     border_style="red",
                     padding=(1, 2),
                     box=box.DOUBLE
@@ -510,7 +519,9 @@ def handle_command(command: str, client: AgentClient):
         [red]/metadata[/red]     [grey50]-[/grey50] Show detailed metadata information
         [red]/workspace[/red]    [grey50]-[/grey50] Show workspace status and information
         [red]/modalities[/red]   [grey50]-[/grey50] Show detailed modality information
-        [red]/plots[/red]        [grey50]-[/grey50] List generated plots
+        [red]/plots[/red]        [grey50]-[/grey50] List all generated plots
+        [red]/plot[/red]         [grey50]-[/grey50] Open plots directory in file manager
+        [red]/plot[/red] <ID>    [grey50]-[/grey50] Open specific plot by ID or name
         [red]/save[/red]         [grey50]-[/grey50] Save current state to workspace
         [red]/read[/red] <file>  [grey50]-[/grey50] Read a file from workspace
         [red]/export[/red]       [grey50]-[/grey50] Export session data
@@ -928,6 +939,129 @@ def handle_command(command: str, client: AgentClient):
             console.print(table)
         else:
             console.print("[grey50]No plots generated yet[/grey50]")
+    
+    elif cmd.startswith("/plot"):
+        # Handle /plot command with optional plot ID/name
+        parts = cmd.split(maxsplit=1)
+        
+        if len(parts) == 1:
+            # /plot with no arguments - open plots directory
+            plots_dir = client.data_manager.workspace_path / "plots"
+            
+            # Ensure plots directory exists
+            if not plots_dir.exists():
+                plots_dir.mkdir(parents=True, exist_ok=True)
+                # Save any existing plots to the directory
+                if client.data_manager.latest_plots:
+                    saved_files = client.data_manager.save_plots_to_workspace()
+                    if saved_files:
+                        console.print(f"[bold red]✓[/bold red] [white]Saved {len(saved_files)} plot files to workspace[/white]")
+            
+            # Open the directory in file manager
+            import platform
+            import subprocess
+            
+            try:
+                system = platform.system()
+                if system == "Darwin":  # macOS
+                    subprocess.run(["open", str(plots_dir)], check=True)
+                    console.print(f"[bold red]✓[/bold red] [white]Opened plots directory in Finder:[/white] [grey74]{plots_dir}[/grey74]")
+                elif system == "Linux":
+                    # Try common file managers
+                    file_managers = ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm"]
+                    opened = False
+                    for fm in file_managers:
+                        try:
+                            subprocess.run([fm, str(plots_dir)], check=True, stderr=subprocess.DEVNULL)
+                            console.print(f"[bold red]✓[/bold red] [white]Opened plots directory:[/white] [grey74]{plots_dir}[/grey74]")
+                            opened = True
+                            break
+                        except (subprocess.CalledProcessError, FileNotFoundError):
+                            continue
+                    if not opened:
+                        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not open file manager. Directory: {plots_dir}[/red]")
+                elif system == "Windows":
+                    subprocess.run(["explorer", str(plots_dir)], check=True)
+                    console.print(f"[bold red]✓[/bold red] [white]Opened plots directory in Explorer:[/white] [grey74]{plots_dir}[/grey74]")
+                else:
+                    console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Unsupported operating system: {system}[/red]")
+                    console.print(f"[white]Plots directory:[/white] [grey74]{plots_dir}[/grey74]")
+            except Exception as e:
+                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Failed to open plots directory: {e}[/red]")
+                console.print(f"[white]Plots directory:[/white] [grey74]{plots_dir}[/grey74]")
+        
+        else:
+            # /plot <ID or name> - open specific plot
+            plot_identifier = parts[1].strip()
+            
+            # First, ensure plots are saved to workspace
+            plots_dir = client.data_manager.workspace_path / "plots"
+            if not plots_dir.exists():
+                plots_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save plots if needed
+            if client.data_manager.latest_plots:
+                saved_files = client.data_manager.save_plots_to_workspace()
+            
+            # Find the plot by ID or partial title match
+            found_plot = None
+            plot_info = None
+            
+            for plot_entry in client.data_manager.latest_plots:
+                # Check ID match
+                if plot_entry["id"] == plot_identifier:
+                    found_plot = plot_entry
+                    plot_info = plot_entry
+                    break
+                # Check title match (case-insensitive partial match)
+                elif plot_identifier.lower() in plot_entry["title"].lower() or plot_identifier.lower() in plot_entry["original_title"].lower():
+                    found_plot = plot_entry
+                    plot_info = plot_entry
+                    break
+            
+            if found_plot:
+                # Construct the filename
+                plot_id = plot_info["id"]
+                plot_title = plot_info["title"]
+                
+                # Create sanitized filename (same logic as save_plots_to_workspace)
+                safe_title = "".join(
+                    c for c in plot_title if c.isalnum() or c in [" ", "_", "-"]
+                ).rstrip()
+                safe_title = safe_title.replace(" ", "_")
+                filename_base = f"{plot_id}_{safe_title}" if safe_title else plot_id
+                
+                # Try to open HTML file first, then PNG
+                html_path = plots_dir / f"{filename_base}.html"
+                png_path = plots_dir / f"{filename_base}.png"
+                
+                file_to_open = html_path if html_path.exists() else png_path
+                
+                if file_to_open.exists():
+                    import platform
+                    import subprocess
+                    
+                    try:
+                        system = platform.system()
+                        if system == "Darwin":  # macOS
+                            subprocess.run(["open", str(file_to_open)], check=True)
+                            console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
+                        elif system == "Linux":
+                            subprocess.run(["xdg-open", str(file_to_open)], check=True)
+                            console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
+                        elif system == "Windows":
+                            subprocess.run(["start", "", str(file_to_open)], shell=True, check=True)
+                            console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
+                        else:
+                            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Unsupported operating system: {system}[/red]")
+                    except Exception as e:
+                        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Failed to open plot: {e}[/red]")
+                        console.print(f"[white]Plot file:[/white] [grey74]{file_to_open}[/grey74]")
+                else:
+                    console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot file not found. Try running /save first.[/red]")
+            else:
+                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot not found: {plot_identifier}[/red]")
+                console.print("[grey50]Use /plots to see available plot IDs and titles[/grey50]")
     
     elif cmd == "/save":
         # Auto-save current state

@@ -11,6 +11,7 @@ Lobster AI is a powerful bioinformatics platform that uses specialized AI agents
 
 ### Core Capabilities
 - **🤖 Multi-Agent System**: Specialized agents for data management, transcriptomics, proteomics, and literature research
+- **🔧 Centralized Agent Registry**: Single-source configuration for adding and managing agents system-wide
 - **🧬 Multi-Omics Support**: Integrated analysis of transcriptomics and proteomics data
 - **🏗️ Modular Architecture**: DataManagerV2 with extensible adapters and backends
 - **📊 MuData Integration**: Professional multi-modal data analysis and visualization

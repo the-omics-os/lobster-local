@@ -5,17 +5,15 @@ Implementation using langgraph_supervisor package for hierarchical multi-agent c
 """
 
 from langgraph.checkpoint.memory import InMemorySaver
-
+ 
 from langgraph_supervisor import create_supervisor
 from langgraph_supervisor.handoff import create_forward_message_tool
 from langchain_aws import ChatBedrockConverse
 
 from lobster.agents.supervisor import create_supervisor_prompt
-from lobster.agents.data_expert import data_expert
-from lobster.agents.singlecell_expert import singlecell_expert
-from lobster.agents.bulk_rnaseq_expert import bulk_rnaseq_expert
 from lobster.agents.state import OverallState
 from lobster.config.settings import get_settings
+from lobster.config.agent_registry import get_worker_agents, import_agent_factory
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 from lobster.tools.handoff_tool import create_custom_handoff_tool
@@ -28,8 +26,6 @@ def create_bioinformatics_graph(
     callback_handler=None,
     manual_model_params: dict = None
 ):
-    from lobster.agents.method_expert import method_expert
-    
     """Create the bioinformatics multi-agent graph using langgraph_supervisor."""
     logger.info("Creating bioinformatics multi-agent graph")
     
@@ -48,44 +44,36 @@ def create_bioinformatics_graph(
     if callback_handler and hasattr(supervisor_model, 'with_config'):
         supervisor_model = supervisor_model.with_config(callbacks=[callback_handler])
     
-    # Create worker agents
+    # Create worker agents dynamically from registry
     agents = []
+    handoff_tools = []
     
-    # Create data expert agent
-    data_agent = data_expert(
-        data_manager=data_manager,
-        callback_handler=callback_handler,
-        agent_name='data_expert_agent',
-        handoff_tools=None
-    )
-    agents.append(data_agent)
+    # Get all worker agents from the registry
+    worker_agents = get_worker_agents()
     
-    # Create single-cell expert agent
-    singlecell_agent = singlecell_expert(
-        data_manager=data_manager,
-        callback_handler=callback_handler,
-        agent_name='singlecell_expert_agent',
-        handoff_tools=None
-    )
-    agents.append(singlecell_agent)
-    
-    # Create bulk RNA-seq expert agent
-    bulk_rnaseq_agent = bulk_rnaseq_expert(
-        data_manager=data_manager,
-        callback_handler=callback_handler,
-        agent_name='bulk_rnaseq_expert_agent',
-        handoff_tools=None
-    )
-    agents.append(bulk_rnaseq_agent)
-    
-    # Create method expert agent
-    method_agent = method_expert(
-        data_manager=data_manager,
-        callback_handler=callback_handler,
-        agent_name='method_expert_agent',
-        handoff_tools=None
-    )
-    agents.append(method_agent)
+    for agent_name, agent_config in worker_agents.items():
+        # Import the factory function dynamically
+        factory_function = import_agent_factory(agent_config.factory_function)
+        
+        # Create the agent
+        agent = factory_function(
+            data_manager=data_manager,
+            callback_handler=callback_handler,
+            agent_name=agent_config.name,
+            handoff_tools=None
+        )
+        agents.append(agent)
+        
+        # Create handoff tool if configured
+        if agent_config.handoff_tool_name and agent_config.handoff_tool_description:
+            handoff_tool = create_custom_handoff_tool(
+                agent_name=agent_config.name,
+                name=agent_config.handoff_tool_name,
+                description=agent_config.handoff_tool_description
+            )
+            handoff_tools.append(handoff_tool)
+        
+        logger.info(f"Created agent: {agent_config.display_name} ({agent_config.name})")
     
     # UPDATED SUPERVISOR PROMPT - More explicit about response handling
     system_prompt = create_supervisor_prompt(data_manager)
@@ -105,27 +93,14 @@ def create_bioinformatics_graph(
         # Change from "full_history" to "messages" or "last_message"
         output_mode="full_history",  # This ensures the actual messages are returned
         # output_mode="last_message",  # This ensures the actual messages are returned
-        tools=[
-            create_custom_handoff_tool(agent_name='data_expert_agent',
-                                       name="handoff_to_data_expert",
-                                       description="Assign data fetching/download tasks to the data expert"),
-            create_custom_handoff_tool(agent_name='singlecell_expert_agent',
-                                       name="handoff_to_singlecell_expert",
-                                       description="Assign single-cell RNA-seq analysis tasks to the single-cell expert"),
-            create_custom_handoff_tool(agent_name='bulk_rnaseq_expert_agent',
-                                       name="handoff_to_bulk_rnaseq_expert",
-                                       description="Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert"),
-            create_custom_handoff_tool(agent_name='method_expert_agent',
-                                       name="handoff_to_method_expert",
-                                       description="Assign literature/method tasks to the method expert")
-            # forwarding_tool
-            ]
+        tools=handoff_tools  # Use dynamically created handoff tools
     )
     
     # Compile the graph with the provided checkpointer
     graph = workflow.compile(
-        checkpointer=checkpointer
-        )
+        checkpointer=checkpointer,
+        # debug=True  # Enable debug mode for better visibility
+    )
     
     logger.info("Bioinformatics multi-agent graph created successfully")
     return graph

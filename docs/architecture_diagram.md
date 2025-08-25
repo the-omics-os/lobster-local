@@ -13,8 +13,15 @@ graph TB
         MTX[10X MTX<br/>Single-cell Data]
     end
 
+    %% NEW: Agent Registry System
+    subgraph "Agent Registry System"
+        AREG[Agent Registry<br/>🏛️ Single Source of Truth]
+        ACONF[Agent Configurations<br/>📋 Factory Functions & Metadata]
+        HDTOOLS[Handoff Tools<br/>🔄 Dynamic Tool Generation]
+    end
+
     %% Agents Layer
-    subgraph "AI Agents - Modality Orchestrators"
+    subgraph "AI Agents - Dynamically Loaded"
         DE[Data Expert<br/>🔄 Data Loading & Management]
         TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]
         PE[Proteomics Expert<br/>🧪 Protein Analysis]
@@ -254,6 +261,272 @@ graph LR
     class TRA,PRA adapter
     class H5BE,MUBE backend
     class TSCH,PSCH,FVAL schema
+
+## 🏛️ Centralized Agent Registry System
+
+### Overview
+
+The Lobster AI system now features a **centralized agent registry** that serves as the single source of truth for all agent configurations. This eliminates redundancy and reduces errors when adding new agents to the system.
+
+### Agent Registry Architecture
+
+```mermaid
+graph TB
+    subgraph "Agent Registry System"
+        AREG[Agent Registry<br/>lobster/config/agent_registry.py]
+        ACONF[AgentConfig Objects<br/>🔧 Metadata & Factory Functions]
+        HELPERS[Helper Functions<br/>🛠️ get_worker_agents()<br/>get_all_agent_names()]
+    end
+
+    subgraph "System Integration"
+        GRAPH[Graph Creation<br/>lobster/agents/graph.py]
+        CALLBACKS[Callback System<br/>lobster/utils/callbacks.py]
+        SETTINGS[Settings Integration<br/>lobster/config/settings.py]
+    end
+
+    subgraph "Dynamic Loading"
+        IMPORT[Dynamic Import<br/>import_agent_factory()]
+        TOOLS[Tool Generation<br/>create_custom_handoff_tool()]
+        DETECT[Agent Detection<br/>get_all_agent_names()]
+    end
+
+    AREG --> ACONF
+    AREG --> HELPERS
+    
+    HELPERS --> GRAPH
+    HELPERS --> CALLBACKS
+    HELPERS --> SETTINGS
+    
+    ACONF --> IMPORT
+    ACONF --> TOOLS
+    HELPERS --> DETECT
+
+    classDef registry fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
+    classDef integration fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef dynamic fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+
+    class AREG,ACONF,HELPERS registry
+    class GRAPH,CALLBACKS,SETTINGS integration
+    class IMPORT,TOOLS,DETECT dynamic
+```
+
+### Agent Configuration Schema
+
+Each agent in the registry is defined using an `AgentConfig` dataclass:
+
+```python
+@dataclass
+class AgentConfig:
+    """Configuration for an agent in the system."""
+    name: str                              # Unique agent identifier
+    display_name: str                     # Human-readable name
+    description: str                      # Agent's purpose/capability
+    factory_function: str                 # Module path to factory function
+    handoff_tool_name: Optional[str]     # Name of handoff tool
+    handoff_tool_description: Optional[str]  # Tool description
+```
+
+### Current Agent Registry
+
+```python
+AGENT_REGISTRY: Dict[str, AgentConfig] = {
+    'data_expert_agent': AgentConfig(
+        name='data_expert_agent',
+        display_name='Data Expert',
+        description='Handles data fetching and download tasks',
+        factory_function='lobster.agents.data_expert.data_expert',
+        handoff_tool_name='handoff_to_data_expert',
+        handoff_tool_description='Assign data fetching/download tasks to the data expert'
+    ),
+    'singlecell_expert_agent': AgentConfig(
+        name='singlecell_expert_agent',
+        display_name='Single-Cell Expert',
+        description='Handles single-cell RNA-seq analysis tasks',
+        factory_function='lobster.agents.singlecell_expert.singlecell_expert',
+        handoff_tool_name='handoff_to_singlecell_expert',
+        handoff_tool_description='Assign single-cell RNA-seq analysis tasks to the single-cell expert'
+    ),
+    'bulk_rnaseq_expert_agent': AgentConfig(
+        name='bulk_rnaseq_expert_agent',
+        display_name='Bulk RNA-seq Expert',
+        description='Handles bulk RNA-seq analysis tasks',
+        factory_function='lobster.agents.bulk_rnaseq_expert.bulk_rnaseq_expert',
+        handoff_tool_name='handoff_to_bulk_rnaseq_expert',
+        handoff_tool_description='Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert'
+    ),
+    'method_expert_agent': AgentConfig(
+        name='method_expert_agent',
+        display_name='Method Expert',
+        description='Handles literature and method-related tasks',
+        factory_function='lobster.agents.method_expert.method_expert',
+        handoff_tool_name='handoff_to_method_expert',
+        handoff_tool_description='Assign literature/method tasks to the method expert'
+    ),
+}
+```
+
+### System Integration Flow
+
+```mermaid
+sequenceDiagram
+    participant AREG as Agent Registry
+    participant GRAPH as Graph Creation
+    participant CB as Callbacks
+    participant AGENT as Created Agent
+
+    Note over AREG: System Startup
+    GRAPH->>AREG: get_worker_agents()
+    AREG-->>GRAPH: Dict[agent_name, AgentConfig]
+    
+    loop For each agent config
+        GRAPH->>AREG: import_agent_factory(config.factory_function)
+        AREG-->>GRAPH: Agent factory function
+        GRAPH->>GRAPH: Create agent instance
+        GRAPH->>GRAPH: Create handoff tool
+    end
+    
+    Note over GRAPH: All agents loaded dynamically
+    
+    Note over CB: Runtime Execution
+    CB->>AREG: get_all_agent_names()
+    AREG-->>CB: List of all agent names
+    CB->>CB: Monitor for agent transitions
+    CB->>AGENT: Detect agent handoffs
+```
+
+### Benefits of Centralized Registry
+
+#### **Before (Legacy System)**
+```
+Adding new agents required updating:
+├── lobster/agents/graph.py          # Import statements
+├── lobster/agents/graph.py          # Agent creation code
+├── lobster/agents/graph.py          # Handoff tool definitions
+├── lobster/utils/callbacks.py       # Agent name hardcoded list
+└── Multiple imports throughout codebase
+```
+
+#### **After (Registry System)**
+```
+Adding new agents only requires:
+└── lobster/config/agent_registry.py  # Single registry entry
+
+Everything else is handled automatically:
+├── ✅ Dynamic agent loading
+├── ✅ Automatic handoff tool creation
+├── ✅ Callback system integration
+├── ✅ Type-safe configuration
+└── ✅ Professional error handling
+```
+
+### How to Add New Agents
+
+#### **Step 1: Create Agent Implementation**
+```python
+# lobster/agents/new_agent.py
+def new_agent(data_manager, callback_handler=None, agent_name='new_agent', handoff_tools=None):
+    """Create a new specialized agent."""
+    # Agent implementation
+    return agent_instance
+```
+
+#### **Step 2: Register in Agent Registry**
+```python
+# lobster/config/agent_registry.py
+AGENT_REGISTRY = {
+    # ... existing agents ...
+    'new_agent': AgentConfig(
+        name='new_agent',
+        display_name='New Agent',
+        description='Handles specialized new functionality',
+        factory_function='lobster.agents.new_agent.new_agent',
+        handoff_tool_name='handoff_to_new_agent',
+        handoff_tool_description='Assign specialized tasks to the new agent'
+    ),
+}
+```
+
+#### **Step 3: Done!**
+The system automatically handles:
+- ✅ Agent loading in graph creation
+- ✅ Handoff tool generation
+- ✅ Callback system detection
+- ✅ Error handling and logging
+- ✅ Integration with existing workflows
+
+### Registry Helper Functions
+
+The registry provides several utility functions:
+
+```python
+# Get all worker agents with configurations
+worker_agents = get_worker_agents()
+# Returns: Dict[str, AgentConfig]
+
+# Get all agent names (including system agents)
+all_agents = get_all_agent_names()
+# Returns: List[str]
+
+# Get specific agent configuration
+config = get_agent_config('data_expert_agent')
+# Returns: AgentConfig or None
+
+# Dynamically import agent factory
+factory = import_agent_factory('lobster.agents.data_expert.data_expert')
+# Returns: Callable
+```
+
+### Error Prevention
+
+The registry system prevents common errors:
+
+#### **Runtime Validation**
+- ✅ Factory function existence validation
+- ✅ Import path verification
+- ✅ Configuration completeness checks
+- ✅ Duplicate agent name detection
+
+#### **Development Safety**
+- ✅ Type hints for all configurations
+- ✅ Consistent naming conventions
+- ✅ Comprehensive error messages
+- ✅ Centralized documentation
+
+#### **Maintenance Benefits**
+- ✅ Single source of truth
+- ✅ Easy to audit and review
+- ✅ Reduced cognitive load
+- ✅ Professional code organization
+
+### Testing the Registry
+
+The system includes comprehensive testing:
+
+```python
+# tests/test_agent_registry.py
+def test_agent_registry():
+    """Test the agent registry functionality."""
+    # Test 1: Verify all agents are registered
+    worker_agents = get_worker_agents()
+    assert len(worker_agents) > 0
+    
+    # Test 2: Validate factory function imports
+    for agent_name, config in worker_agents.items():
+        factory = import_agent_factory(config.factory_function)
+        assert callable(factory)
+    
+    # Test 3: Check agent name consistency
+    all_agents = get_all_agent_names()
+    assert 'supervisor' in all_agents
+    assert 'data_expert_agent' in all_agents
+```
+
+Run the test with:
+```bash
+python tests/test_agent_registry.py
+```
+
+This centralized approach ensures professional, maintainable, and error-free agent management across the entire Lobster AI system.
 
 ## Architecture Migration Summary
 

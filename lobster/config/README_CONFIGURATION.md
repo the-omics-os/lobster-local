@@ -1,15 +1,69 @@
-# Genie AI Professional Configuration System
+# Lobster AI Professional Configuration System
 
-This document describes the new professional configuration system for Genie AI that allows per-agent model configuration for easy testing and deployment.
+This document describes the professional configuration system for Lobster AI that provides centralized agent management and per-agent model configuration for easy testing and deployment.
 
 ## Overview
 
 The new configuration system provides:
+- **Centralized Agent Registry** - Single-source configuration for all system agents
 - **Per-agent model configuration** - Different models for different agents
 - **Testing profiles** - Pre-configured setups for different scenarios
 - **Environment overrides** - Quick changes via environment variables
 - **Type-safe configuration** - Prevents configuration errors
 - **CLI management tools** - Easy configuration management
+
+## 🔧 Centralized Agent Registry
+
+The system now uses a centralized agent registry (`lobster/config/agent_registry.py`) that defines all agents in one place, eliminating the need to update multiple files when adding new agents.
+
+### Benefits
+- **Single Source of Truth**: All agent definitions in one location
+- **Reduced Redundancy**: No more forgetting to update callbacks or graph configuration
+- **Professional Error Prevention**: Eliminates common mistakes when adding agents
+- **Dynamic Loading**: Agents are loaded dynamically from the registry
+- **Easy Maintenance**: Add new agents by updating only the registry
+
+### Current Registered Agents
+
+| Agent Name | Display Name | Factory Function | Handoff Tool |
+|------------|--------------|------------------|--------------|
+| `data_expert_agent` | Data Expert | `lobster.agents.data_expert.data_expert` | `handoff_to_data_expert` |
+| `singlecell_expert_agent` | Single-Cell Expert | `lobster.agents.singlecell_expert.singlecell_expert` | `handoff_to_singlecell_expert` |
+| `bulk_rnaseq_expert_agent` | Bulk RNA-seq Expert | `lobster.agents.bulk_rnaseq_expert.bulk_rnaseq_expert` | `handoff_to_bulk_rnaseq_expert` |
+| `method_expert_agent` | Method Expert | `lobster.agents.method_expert.method_expert` | `handoff_to_method_expert` |
+
+### System Agents
+These agents are tracked by the callback system but don't require factory functions:
+- `supervisor` - Main coordination agent
+- `transcriptomics_expert` - Legacy transcriptomics agent (if used)
+- `method_agent` - Alternative method agent name
+- `clarify_with_user` - User interaction agent
+
+### Adding New Agents
+
+To add a new agent to the system, simply update the `AGENT_REGISTRY` in `lobster/config/agent_registry.py`:
+
+```python
+AGENT_REGISTRY = {
+    # ... existing agents ...
+    'new_agent_name': AgentConfig(
+        name='new_agent_name',
+        display_name='New Agent',
+        description='Handles new functionality',
+        factory_function='lobster.agents.new_agent.new_agent',
+        handoff_tool_name='handoff_to_new_agent',
+        handoff_tool_description='Assign tasks to the new agent'
+    ),
+}
+```
+
+The system will automatically:
+- ✅ Create the agent in the graph
+- ✅ Generate handoff tools
+- ✅ Update callback detection
+- ✅ Include in agent lists
+
+**No other files need to be modified!**
 
 ## Quick Start
 

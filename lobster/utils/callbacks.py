@@ -21,6 +21,8 @@ from rich.live import Live
 from rich.layout import Layout
 from rich import box
 
+from lobster.config.agent_registry import get_all_agent_names
+
 
 class EventType(Enum):
     """Types of events in the agent system."""
@@ -329,8 +331,8 @@ class TerminalCallbackHandler(BaseCallbackHandler):
             
         chain_name = serialized.get("name", "")
         
-        # Detect agent transitions
-        agent_names = ["supervisor", "transcriptomics_expert", "method_agent", "clarify_with_user"]
+        # Detect agent transitions using the agent registry
+        agent_names = get_all_agent_names()
         for agent_name in agent_names:
             if agent_name in chain_name.lower():
                 if agent_name != self.current_agent:

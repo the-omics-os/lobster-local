@@ -116,7 +116,8 @@ class BaseAdapter(IModalityAdapter):
             anndata.AnnData: Loaded AnnData object
         """
         try:
-            adata = sc.read_h5ad(path)
+            adata = anndata.read_h5ad(path)
+            # adata = sc.read_h5ad(path)
             self.logger.info(f"Loaded H5AD data from {path}: {adata.n_obs} obs × {adata.n_vars} vars")
             return adata
         except Exception as e:

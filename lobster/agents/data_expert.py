@@ -81,7 +81,7 @@ def data_expert(
             return f"Error fetching metadata: {str(e)}"
 
     @tool
-    def download_geo_dataset(geo_id: str, modality_type: str = "single_cell_rna_seq") -> str:
+    def download_geo_dataset(geo_id: str, modality_type: str = "single_cell") -> str:
         """
         Download dataset from GEO using accession number and load as a modality.
         IMPORTANT: Use fetch_geo_metadata FIRST to preview dataset before downloading.
@@ -343,7 +343,7 @@ The dataset is now available as modality '{modality_name}' for analysis."""
         Load a specific file as a modality using the modular system.
         
         Args:
-            modality_name: Name for the new modality
+            modality_name: Name for the new modality ('transcriptomics_single_cell', 'transcriptomics_bulk', 'proteomics_ms', 'proteomics_affinity')
             file_path: Path to the data file
             adapter: Adapter to use (transcriptomics_single_cell, transcriptomics_bulk, proteomics_ms, etc.)
             **kwargs: Additional adapter parameters
@@ -353,7 +353,7 @@ The dataset is now available as modality '{modality_name}' for analysis."""
         """
         try:
             from pathlib import Path
-            file_path = Path(file_path)
+            file_path = data_manager.data_dir / file_path
             
             if not file_path.exists():
                 return f"File not found: {file_path}"
@@ -608,7 +608,7 @@ get_data_summary()  # Shows all loaded modalities
 # Step 4: Get approval from supervisor and continue with Step 5:
 
 # Step 5: Download discovered GEO dataset
-download_geo_dataset("GSE123456", modality_type=<single_cell_rna_seq or bulk_rna_seq>)
+download_geo_dataset("GSE123456", modality_type=<available adapter names>)
 
 # Step 6: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality

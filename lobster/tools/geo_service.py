@@ -195,7 +195,7 @@ class GEOService:
                     return f"Failed to fetch metadata: {metadata_result}"
 
             # Check if modality already exists in DataManagerV2
-            modality_name = f"geo_{clean_geo_id.lower()}"
+            modality_name = f"geo_{clean_geo_id.lower()}_{modality_type}"
             existing_modalities = self.data_manager.list_modalities()
             if modality_name in existing_modalities:
                 return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
@@ -249,7 +249,7 @@ class GEOService:
             )
 
             # # Save to workspace
-            save_path = f"{clean_geo_id.lower()}_raw.h5ad"
+            save_path = f"{modality_name}_raw.h5ad"
             saved_file = self.data_manager.save_modality(modality_name, save_path)
 
             # # Log successful download and save
@@ -1986,10 +1986,6 @@ The actual expression data download will be much faster now that metadata is pre
         logger.info(f"Downloading matrices for {len(sample_info)} samples...")
 
         # Use threading for parallel downloads
-        #==========================================================================================================
-        #==========================================================================================================
-        #==========================================================================================================
-        #==========================================================================================================
         #==========================================================================================================
         #==========================================================================================================
         #==========================================================================================================
