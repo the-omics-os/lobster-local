@@ -7,6 +7,7 @@ S3 integration without API changes.
 """
 
 import logging
+import collections
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
@@ -105,6 +106,45 @@ class H5ADBackend(BaseBackend):
         except Exception as e:
             raise ValueError(f"Failed to load H5AD file {resolved_path}: {e}")
 
+    @staticmethod
+    def sanitize_anndata(adata, slash_replacement="__"):
+        """
+        Sanitize AnnData object so it can be safely written to H5AD.
+        - Converts OrderedDict → dict
+        - Converts tuple → list
+        - Converts numpy scalars → Python scalars
+        - Replaces '/' in keys with '__' (HDF5 safe)
+        - Recursively applies to .uns, .obsm, .varm, .layers
+        """
+        def sanitize_key(key):
+            if isinstance(key, str) and "/" in key:
+                return key.replace("/", slash_replacement)
+            return key
+
+        def convert(obj):
+            if isinstance(obj, collections.OrderedDict):
+                return {sanitize_key(k): convert(v) for k, v in obj.items()}
+            if isinstance(obj, tuple):
+                return [convert(v) for v in obj]
+            if isinstance(obj, (np.generic,)):
+                return obj.item()
+            if isinstance(obj, dict):
+                return {sanitize_key(k): convert(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [convert(v) for v in obj]
+            return obj
+
+        # Sanitize uns
+        adata.uns = {sanitize_key(k): convert(v) for k, v in adata.uns.items()}
+
+        # Sanitize obsm, varm, layers (keys must be safe)
+        adata.obsm = {sanitize_key(k): v for k, v in adata.obsm.items()}
+        adata.varm = {sanitize_key(k): v for k, v in adata.varm.items()}
+        adata.layers = {sanitize_key(k): v for k, v in adata.layers.items()}
+
+        return adata
+    
+
     def save(
         self, 
         adata: anndata.AnnData, 
@@ -146,9 +186,15 @@ class H5ADBackend(BaseBackend):
             compression = kwargs.get('compression', self.compression)
             compression_opts = kwargs.get('compression_opts', self.compression_opts)
             as_dense = kwargs.get('as_dense', False)
+
+            #saniztize Anndata before storing
+            adata_sanitized = self.sanitize_anndata(adata)
+
+            #make variables unique
+            adata_sanitized.var_names_make_unique(join='__')
             
             # Prepare AnnData for saving
-            adata_to_save = adata.copy() if as_dense else adata
+            adata_to_save = adata_sanitized.copy()
             
             if as_dense and hasattr(adata_to_save.X, 'toarray'):
                 # Convert sparse to dense if requested

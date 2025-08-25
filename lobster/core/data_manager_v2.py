@@ -75,7 +75,7 @@ class DataManagerV2:
             console: Optional Rich console instance for progress tracking
         """
         self.default_backend = default_backend
-        self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd() / ".lobster_workspace_v2"
+        self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd() / ".lobster_workspace"
         self.enable_provenance = enable_provenance
         self.console = console  # Store console for progress tracking in tools
         
@@ -250,7 +250,6 @@ class DataManagerV2:
         if self.provenance:
             entity_id = self.provenance.create_entity(
                 entity_type="modality_data",
-                uri=str(source),
                 metadata={
                     "modality_name": name,
                     "adapter": adapter,
@@ -258,12 +257,12 @@ class DataManagerV2:
                 }
             )
             
-            self.provenance.log_data_loading(
-                source_path=source,
-                output_entity_id=entity_id,
-                adapter_name=adapter,
-                parameters=kwargs
-            )
+            # self.provenance.log_data_loading(
+            #     source_path=source,
+            #     output_entity_id=entity_id,
+            #     adapter_name=adapter,
+            #     parameters=kwargs
+            # )
             
             # Add provenance to AnnData
             adata = self.provenance.add_to_anndata(adata)
@@ -314,18 +313,11 @@ class DataManagerV2:
         if self.provenance:
             entity_id = self.provenance.create_entity(
                 entity_type="modality_data",
-                uri=str(adata),  # Use in-memory representation as source
+                uri=path,  # Use in-memory representation as source
                 metadata={
                     "modality_name": name,
                     "shape": adata.shape
                 }
-            )
-            
-            self.provenance.log_data_saving(
-                input_entity_id=entity_id,
-                output_path=path,
-                backend_name=backend_name,
-                parameters=kwargs
             )
         
         logger.info(f"Saved modality '{name}' to {path} using backend '{backend_name}'")

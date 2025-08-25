@@ -200,8 +200,12 @@ class GEOService:
             if modality_name in existing_modalities:
                 return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
 
+            #==================================================
+            #==================================================
             # Use the strategic download approach
             result = self.download_with_strategy(geo_id = clean_geo_id)
+            #==================================================
+            #==================================================
             
             if not result.success:
                 return f"Failed to download {clean_geo_id} using all available methods. Last error: {result.error_message}"
@@ -295,7 +299,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         clean_geo_id = geo_id.strip().upper()
         strategy = strategy or self.download_strategy
         
-        logger.info(f"Starting strategic download for {clean_geo_id}")
+        logger.debug(f"Starting strategic download for {clean_geo_id}")
         
         try:
             # Step 1: Ensure metadata exists
@@ -323,29 +327,23 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             pipeline_name = data_type.value
             pipeline = self.processing_pipelines.get(pipeline_name, self.processing_pipelines["mixed"])
             
-            logger.info(f"Using {pipeline_name} pipeline with {len(pipeline)} steps")
+            logger.debug(f"Using {pipeline_name} pipeline with {len(pipeline)} steps")
             
             # Step 4: Execute pipeline with retries
-            for attempt in range(strategy.max_retries):
-                logger.info(f"Pipeline attempt {attempt + 1}/{strategy.max_retries}")
+            for i, pipeline_func in enumerate(pipeline):
+                logger.debug(f"Executing pipeline step {i + 1}: {pipeline_func.__name__}")
                 
-                for i, pipeline_func in enumerate(pipeline):
-                    logger.info(f"Executing pipeline step {i + 1}: {pipeline_func.__name__}")
-                    
-                    try:
-                        result = pipeline_func(clean_geo_id, cached_metadata)
-                        if result.success:
-                            logger.info(f"Success via {pipeline_func.__name__}")
-                            return result
-                        else:
-                            logger.warning(f"Step failed: {result.error_message}")
-                    except Exception as e:
-                        logger.warning(f"Pipeline step {pipeline_func.__name__} failed: {e}")
-                        continue
-                
-                if attempt < strategy.max_retries - 1:
-                    logger.info(f"Pipeline failed, retrying in {2 ** attempt} seconds...")
-                    time.sleep(2 ** attempt)
+                try:
+                    result = pipeline_func(clean_geo_id, cached_metadata)
+                    if result.success:
+                        logger.debug(f"Success via {pipeline_func.__name__}")
+                        return result
+                    else:
+                        logger.warning(f"Step failed: {result.error_message}")
+                except Exception as e:
+                    logger.warning(f"Pipeline step {pipeline_func.__name__} failed: {e}")
+                    continue
+
             
             return GEOResult(
                 success=False,
@@ -373,7 +371,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             str: Status message
         """
         try:
-            logger.info(f"Downloading single-cell sample: {gsm_id}")
+            logger.debug(f"Downloading single-cell sample: {gsm_id}")
             
             # Clean sample ID
             clean_gsm_id = gsm_id.strip().upper()
@@ -431,7 +429,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             str: Status message
         """
         try:
-            logger.info(f"Downloading bulk dataset: {geo_id}")
+            logger.debug(f"Downloading bulk dataset: {geo_id}")
             
             clean_geo_id = geo_id.strip().upper()
             if not clean_geo_id.startswith('GSE'):
@@ -491,7 +489,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             str: Status message
         """
         try:
-            logger.info(f"Processing supplementary TAR files for: {geo_id}")
+            logger.debug(f"Processing supplementary TAR files for: {geo_id}")
             
             clean_geo_id = geo_id.strip().upper()
             if not clean_geo_id.startswith('GSE'):
@@ -559,33 +557,89 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             logger.exception(f"Error processing TAR files for {geo_id}: {e}")
             return f"Error processing TAR files for {geo_id}: {str(e)}"
 
-    # ========================================
+    # ========================================================================================================================
+    # ========================================================================================================================
+    # ========================================================================================================================
+    # ========================================================================================================================
     # PIPELINE STEP FUNCTIONS
-    # ========================================
+    # ========================================================================================================================
+    # ========================================================================================================================
+    # ========================================================================================================================
+    # ========================================================================================================================
 
-    def _try_geoparse_download(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
-        """Pipeline step: Try standard GEOparse download."""
+
+    def _try_geoparse_download(self, geo_id: str, metadata: Dict[str, Any], use_intersecting_genes_only: bool = True) -> GEOResult:
+        """Pipeline step: Try standard GEOparse download with proper single-cell/bulk handling."""
         try:
             logger.info(f"Trying GEOparse download for {geo_id}")
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            
+            # Determine data type from metadata
+            data_type = self._determine_data_type_from_metadata(metadata)
+            is_single_cell = data_type == 'single_cell_rna_seq'
             
             # Try sample matrices
             sample_info = self._get_sample_info(gse)
             if sample_info:
                 sample_matrices = self._download_sample_matrices(sample_info, geo_id)
                 validated_matrices = self._validate_matrices(sample_matrices)
+                
                 if validated_matrices:
-                    combined_matrix = self._concatenate_matrices(validated_matrices, geo_id)
-                    if combined_matrix is not None:
-                        return GEOResult(
-                            data=combined_matrix,
-                            metadata=metadata,
-                            source=GEODataSource.SAMPLE_MATRICES,
-                            processing_info={"method": "geoparse_samples", "n_samples": len(validated_matrices)},
-                            success=True
+                    if is_single_cell and len(validated_matrices) > 1:
+                        # For single-cell with multiple samples: store individually first
+                        stored_samples = self._store_samples_as_anndata(validated_matrices, geo_id, metadata)
+                        
+                        if stored_samples:
+                            # Immediately concatenate for a complete dataset
+                            concatenated_result = self._concatenate_stored_samples(
+                                geo_id, stored_samples, use_intersecting_genes_only
+                            )
+                            
+                            if concatenated_result is not None:
+                                return GEOResult(
+                                    data=concatenated_result,
+                                    metadata=metadata,
+                                    source=GEODataSource.SAMPLE_MATRICES,
+                                    processing_info={
+                                        "method": "geoparse_samples_concatenated", 
+                                        "n_samples": len(validated_matrices),
+                                        "stored_sample_ids": stored_samples,
+                                        "use_intersecting_genes_only": use_intersecting_genes_only,
+                                        "batch_info": {gsm_id: gsm_id for gsm_id in validated_matrices.keys()},
+                                        "note": "Single-cell samples concatenated with batch tracking"
+                                    },
+                                    success=True
+                                )
+                    else:
+                        # For bulk RNA-seq or single sample: concatenate directly
+                        combined_matrix = self._concatenate_matrices(
+                            validated_matrices, geo_id, use_intersecting_genes_only
                         )
+                        
+                        if combined_matrix is not None:
+                            # Add batch information to the matrix
+                            if 'batch' not in combined_matrix.columns:
+                                batch_info = []
+                                for gsm_id in validated_matrices.keys():
+                                    n_cells = len([idx for idx in combined_matrix.index if idx.startswith(gsm_id)])
+                                    batch_info.extend([gsm_id] * n_cells)
+                                combined_matrix['batch'] = batch_info
+                            
+                            return GEOResult(
+                                data=combined_matrix,
+                                metadata=metadata,
+                                source=GEODataSource.SAMPLE_MATRICES,
+                                processing_info={
+                                    "method": "geoparse_samples_direct", 
+                                    "n_samples": len(validated_matrices),
+                                    "use_intersecting_genes_only": use_intersecting_genes_only,
+                                    "data_type": "bulk" if not is_single_cell else "single_cell_single_sample",
+                                    "batch_info": {gsm_id: gsm_id for gsm_id in validated_matrices.keys()}
+                                },
+                                success=True
+                            )
                     
-            # Try supplementary files alternatevly
+            # Try supplementary files as fallback
             data = self._process_supplementary_files(gse, geo_id)
             if data is not None and not data.empty:
                 return GEOResult(
@@ -596,7 +650,6 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     success=True
                 )
             
-            
             return GEOResult(success=False, error_message="GEOparse could not find usable data")
             
         except Exception as e:
@@ -606,7 +659,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_supplementary_tar(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Pipeline step: Try TAR supplementary files."""
         try:
-            logger.info(f"Trying TAR supplementary files for {geo_id}")
+            logger.debug(f"Trying TAR supplementary files for {geo_id}")
             soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
             
             if isinstance(data_sources, dict) and 'tar' in data_sources:
@@ -629,7 +682,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_series_matrix(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Pipeline step: Try series matrix files (for bulk data)."""
         try:
-            logger.info(f"Trying series matrix for {geo_id}")
+            logger.debug(f"Trying series matrix for {geo_id}")
             # Use GEOparse to get series matrix
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
             
@@ -652,7 +705,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_supplementary_files(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Pipeline step: Try supplementary files (non-TAR)."""
         try:
-            logger.info(f"Trying supplementary files for {geo_id}")
+            logger.debug(f"Trying supplementary files for {geo_id}")
             soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
             
             if isinstance(data_sources, dict) and 'supplementary' in data_sources:
@@ -675,7 +728,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_sample_matrices_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Pipeline step: Try individual sample matrices as fallback."""
         try:
-            logger.info(f"Trying sample matrices fallback for {geo_id}")
+            logger.debug(f"Trying sample matrices fallback for {geo_id}")
             # This is already handled in _try_geoparse_download, so this is a no-op
             return GEOResult(success=False, error_message="Sample matrices already tried in GEOparse step")
             
@@ -686,7 +739,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_helper_download_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Pipeline step: Final fallback using helper downloader."""
         try:
-            logger.info(f"Trying helper download fallback for {geo_id}")
+            logger.debug(f"Trying helper download fallback for {geo_id}")
             soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
             
             if not data_sources:
@@ -826,7 +879,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 try:
                     matrix = self.geo_parser.parse_supplementary_file(file_path)
                     if matrix is not None and not matrix.empty:
-                        logger.info(f"Successfully parsed TAR file: {file_path.name}")
+                        logger.debug(f"Successfully parsed TAR file: {file_path.name}")
                         return matrix
                 except Exception as e:
                     logger.warning(f"Failed to parse {file_path.name}: {e}")
@@ -873,10 +926,10 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             data_source = "geoparse"
             
             try:
-                logger.info(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
+                logger.debug(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
                 gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
                 metadata = self._extract_metadata(gse)
-                logger.info(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
+                logger.debug(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
                 
             except Exception as geoparse_error:
                 import time
@@ -884,7 +937,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 time.sleep(5)
                 # Fallback: Use helper downloader to get SOFT file
                 try:
-                    logger.info(f"Falling back to helper services for metadata: {clean_geo_id}")
+                    logger.debug(f"Falling back to helper services for metadata: {clean_geo_id}")
                     soft_file, _ = self.geo_downloader.download_geo_data(clean_geo_id)
                     
                     if soft_file and soft_file.exists():
@@ -893,7 +946,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                         if soft_metadata:
                             metadata = soft_metadata
                             data_source = "helper_soft_file"
-                            logger.info(f"Successfully extracted metadata using helper parser for {clean_geo_id}")
+                            logger.debug(f"Successfully extracted metadata using helper parser for {clean_geo_id}")
                         else:
                             raise GEOFallbackError("Helper parser could not extract metadata from SOFT file")
                     else:
@@ -927,7 +980,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             # Format comprehensive metadata summary
             summary = self._format_metadata_summary(clean_geo_id, metadata, validation_result)
             
-            logger.info(f"Successfully fetched and validated metadata for {clean_geo_id} using {data_source}")
+            logger.debug(f"Successfully fetched and validated metadata for {clean_geo_id} using {data_source}")
             return summary
             
         except Exception as e:
@@ -949,20 +1002,20 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         """
         try:
             if not hasattr(gse, "metadata") or "supplementary_file" not in gse.metadata:
-                logger.info(f"No supplementary files found for {gse_id}")
+                logger.debug(f"No supplementary files found for {gse_id}")
                 return None
 
             suppl_files = gse.metadata["supplementary_file"]
             if not isinstance(suppl_files, list):
                 suppl_files = [suppl_files]
 
-            logger.info(f"Found {len(suppl_files)} supplementary files for {gse_id}")
+            logger.debug(f"Found {len(suppl_files)} supplementary files for {gse_id}")
 
             # Look for TAR files first (most common for expression data)
             tar_files = [f for f in suppl_files if f.lower().endswith(".tar")]
 
             if tar_files:
-                logger.info(f"Processing TAR file: {tar_files[0]}")
+                logger.debug(f"Processing TAR file: {tar_files[0]}")
                 return self._process_tar_file(tar_files[0], gse_id)
 
             # Look for other expression data files
@@ -976,7 +1029,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             ]
 
             if expression_files:
-                logger.info(f"Processing expression file: {expression_files[0]}")
+                logger.debug(f"Processing expression file: {expression_files[0]}")
                 return self._download_and_parse_file(expression_files[0], gse_id)
 
             logger.warning(
@@ -1004,11 +1057,11 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             tar_file_path = self.cache_dir / f"{gse_id}_RAW.tar"
 
             if not tar_file_path.exists():
-                logger.info(f"Downloading TAR file from: {tar_url}")
+                logger.debug(f"Downloading TAR file from: {tar_url}")
                 urllib.request.urlretrieve(tar_url, tar_file_path)
-                logger.info(f"Downloaded TAR file: {tar_file_path}")
+                logger.debug(f"Downloaded TAR file: {tar_file_path}")
             else:
-                logger.info(f"Using cached TAR file: {tar_file_path}")
+                logger.debug(f"Using cached TAR file: {tar_file_path}")
 
             # Extract TAR file
             extract_dir = self.cache_dir / f"{gse_id}_extracted"
@@ -1872,42 +1925,42 @@ The actual expression data download will be much faster now that metadata is pre
             )
             return {}
 
+    # def _download_sample_matrices(
+    #     self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
+    # ) -> Dict[str, Optional[pd.DataFrame]]:
+    #     """
+    #     Download individual sample expression matrices sequentially.
+
+    #     Args:
+    #         sample_info: Dictionary of sample information
+    #         gse_id: GEO series ID
+
+    #     Returns:
+    #         dict: Dictionary of sample matrices
+    #     """
+    #     sample_matrices = {}
+
+    #     logger.info(f"Downloading matrices for {len(sample_info)} samples...")
+
+    #     # Sequential download (no threading)
+    #     for gsm_id, info in sample_info.items():
+    #         try:
+    #             matrix = self._download_single_sample(gsm_id, info, gse_id)
+    #             sample_matrices[gsm_id] = matrix
+    #             if matrix is not None:
+    #                 logger.info(
+    #                     f"Successfully downloaded matrix for {gsm_id}: {matrix.shape}"
+    #                 )
+    #             else:
+    #                 logger.warning(f"No matrix data found for {gsm_id}")
+    #         except Exception as e:
+    #             logger.error(f"Error downloading {gsm_id}: {e}")
+    #             sample_matrices[gsm_id] = None
+
+    #     return sample_matrices
+
+
     def _download_sample_matrices(
-        self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
-    ) -> Dict[str, Optional[pd.DataFrame]]:
-        """
-        Download individual sample expression matrices sequentially.
-
-        Args:
-            sample_info: Dictionary of sample information
-            gse_id: GEO series ID
-
-        Returns:
-            dict: Dictionary of sample matrices
-        """
-        sample_matrices = {}
-
-        logger.info(f"Downloading matrices for {len(sample_info)} samples...")
-
-        # Sequential download (no threading)
-        for gsm_id, info in sample_info.items():
-            try:
-                matrix = self._download_single_sample(gsm_id, info, gse_id)
-                sample_matrices[gsm_id] = matrix
-                if matrix is not None:
-                    logger.info(
-                        f"Successfully downloaded matrix for {gsm_id}: {matrix.shape}"
-                    )
-                else:
-                    logger.warning(f"No matrix data found for {gsm_id}")
-            except Exception as e:
-                logger.error(f"Error downloading {gsm_id}: {e}")
-                sample_matrices[gsm_id] = None
-
-        return sample_matrices
-
-
-    def _download_sample_matrices_THREADING(
         self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
     ) -> Dict[str, Optional[pd.DataFrame]]:
         """
@@ -2159,11 +2212,11 @@ The actual expression data download will be much faster now that metadata is pre
             
             # Transpose so that cells are rows and genes are columns
             matrix_dense = matrix_dense.T
-            logger.info(f"Matrix shape after transpose: {matrix_dense.shape}")
+            logger.debug(f"Matrix shape after transpose: {matrix_dense.shape}")
             
             # Read barcodes
             barcodes_file = local_files['barcodes']
-            logger.info(f"Reading barcodes from: {barcodes_file}")
+            logger.debug(f"Reading barcodes from: {barcodes_file}")
             cell_ids = []
             
             try:
@@ -2362,7 +2415,7 @@ The actual expression data download will be much faster now that metadata is pre
         self, sample_matrices: Dict[str, Optional[pd.DataFrame]]
     ) -> Dict[str, pd.DataFrame]:
         """
-        Validate downloaded matrices and filter out invalid ones.
+        Validate downloaded matrices and filter out invalid ones using multithreading.
 
         Args:
             sample_matrices: Dictionary of sample matrices
@@ -2371,31 +2424,67 @@ The actual expression data download will be much faster now that metadata is pre
             dict: Dictionary of validated matrices
         """
         validated = {}
+        
+        # Filter out None matrices first
+        valid_matrices = {gsm_id: matrix for gsm_id, matrix in sample_matrices.items() if matrix is not None}
+        
+        if not valid_matrices:
+            logger.warning("No matrices to validate")
+            return validated
 
-        for gsm_id, matrix in sample_matrices.items():
-            if matrix is None:
-                logger.warning(f"Skipping {gsm_id}: No matrix data")
-                continue
+        logger.info(f"Validating {len(valid_matrices)} matrices using multithreading...")
 
-            # Validate matrix format
-            if not self._is_valid_expression_matrix(matrix):
-                logger.warning(f"Skipping {gsm_id}: Invalid matrix format")
-                continue
+        # Use multithreading for validation - this is the main performance improvement
+        with ThreadPoolExecutor(max_workers=min(8, len(valid_matrices))) as executor:
+            future_to_sample = {
+                executor.submit(self._validate_single_matrix, gsm_id, matrix): gsm_id
+                for gsm_id, matrix in valid_matrices.items()
+            }
 
-            # Check matrix dimensions
-            if matrix.shape[0] < 10 or matrix.shape[1] < 10:
-                logger.warning(f"Skipping {gsm_id}: Matrix too small ({matrix.shape})")
-                continue
-
-            validated[gsm_id] = matrix
-            logger.info(f"Validated {gsm_id}: {matrix.shape}")
+            for future in as_completed(future_to_sample):
+                gsm_id = future_to_sample[future]
+                try:
+                    is_valid, validation_info = future.result()
+                    if is_valid:
+                        validated[gsm_id] = valid_matrices[gsm_id]
+                        logger.info(f"Validated {gsm_id}: {validation_info}")
+                    else:
+                        logger.warning(f"Skipping {gsm_id}: {validation_info}")
+                except Exception as e:
+                    logger.error(f"Error validating {gsm_id}: {e}")
 
         logger.info(f"Validated {len(validated)}/{len(sample_matrices)} matrices")
         return validated
 
+    def _validate_single_matrix(self, gsm_id: str, matrix: pd.DataFrame) -> Tuple[bool, str]:
+        """
+        Validate a single matrix with optimized checks.
+        
+        Args:
+            gsm_id: Sample ID for logging
+            matrix: DataFrame to validate
+            
+        Returns:
+            Tuple[bool, str]: (is_valid, info_message)
+        """
+        try:
+            # Check matrix dimensions first (fastest check)
+            if matrix.shape[0] < 10 or matrix.shape[1] < 10:
+                return False, f"Matrix too small ({matrix.shape})"
+
+            # Use optimized validation
+            if not self._is_valid_expression_matrix(matrix):
+                return False, "Invalid matrix format"
+
+            return True, f"Valid matrix {matrix.shape}"
+            
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
     def _is_valid_expression_matrix(self, matrix: pd.DataFrame) -> bool:
         """
-        Check if a matrix is a valid expression matrix.
+        Optimized check if a matrix is a valid expression matrix.
+        Uses sampling and vectorized operations for better performance on large DataFrames.
 
         Args:
             matrix: DataFrame to validate
@@ -2408,19 +2497,51 @@ The actual expression data download will be much faster now that metadata is pre
             if not isinstance(matrix, pd.DataFrame):
                 return False
 
-            # Check for numeric data
-            numeric_cols = matrix.select_dtypes(include=[np.number]).columns
-            if len(numeric_cols) == 0:
+            # Fast check: ensure we have numeric data by checking dtypes
+            # This is much faster than select_dtypes() for large DataFrames
+            numeric_dtypes = set(['int16', 'int32', 'int64', 'float16', 'float32', 'float64'])
+            has_numeric = any(str(dtype) in numeric_dtypes for dtype in matrix.dtypes)
+            
+            if not has_numeric:
                 return False
 
-            # Check for non-negative values (typical for expression data)
-            if (matrix[numeric_cols] < 0).any().any():
-                logger.warning("Matrix contains negative values")
+            # For large matrices, use sampling to speed up validation  
+            if matrix.size > 1_000_000:  # > 1M cells
+                # Sample 10% of the data or max 100k cells for validation
+                sample_size = min(100_000, int(matrix.size * 0.1))
+                
+                # Get a random sample of the flattened matrix
+                flat_sample = matrix.select_dtypes(include=[np.number]).values.flatten()
+                if len(flat_sample) > sample_size:
+                    indices = np.random.choice(len(flat_sample), sample_size, replace=False)
+                    sample_data = flat_sample[indices]
+                else:
+                    sample_data = flat_sample
+                
+                # Check for non-negative values in sample
+                if np.any(sample_data < 0):
+                    logger.warning("Matrix contains negative values (detected in sample)")
+                
+                # Check for reasonable value ranges in sample
+                max_val = np.max(sample_data)
+                if max_val > 1e6:
+                    logger.info("Matrix contains very large values (possibly raw counts)")
+                    
+            else:
+                # For smaller matrices, do full validation but with optimized operations
+                numeric_data = matrix.select_dtypes(include=[np.number])
+                
+                # Use numpy operations which are faster than pandas
+                values = numeric_data.values
+                
+                # Check for non-negative values using numpy
+                if np.any(values < 0):
+                    logger.warning("Matrix contains negative values")
 
-            # Check for reasonable value ranges
-            max_val = matrix[numeric_cols].max().max()
-            if max_val > 1e6:
-                logger.info("Matrix contains very large values (possibly raw counts)")
+                # Check for reasonable value ranges using numpy
+                max_val = np.max(values)
+                if max_val > 1e6:
+                    logger.info("Matrix contains very large values (possibly raw counts)")
 
             return True
 
@@ -2428,61 +2549,284 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error validating matrix: {e}")
             return False
 
-    def _concatenate_matrices(
-        self, validated_matrices: Dict[str, pd.DataFrame], gse_id: str
-    ) -> Optional[pd.DataFrame]:
+    def _store_samples_as_anndata(
+        self, validated_matrices: Dict[str, pd.DataFrame], gse_id: str, metadata: Dict[str, Any]
+    ) -> List[str]:
         """
-        Concatenate validated matrices into a single expression matrix.
-
+        Store each sample as an individual AnnData object in DataManagerV2.
+        
         Args:
-            validated_matrices: Dictionary of validated matrices
+            validated_matrices: Dictionary of validated sample matrices
             gse_id: GEO series ID
-
+            metadata: Metadata from GEO
+            
         Returns:
-            DataFrame: Combined expression matrix or None
+            List[str]: List of modality names that were successfully stored
+        """
+        stored_samples = []
+        
+        try:
+            logger.info(f"Storing {len(validated_matrices)} samples as individual AnnData objects")
+            
+            for gsm_id, matrix in validated_matrices.items():
+                try:
+                    # Create unique modality name for this sample
+                    modality_name = f"geo_{gse_id.lower()}_sample_{gsm_id.lower()}"
+                    
+                    # Extract sample-specific metadata
+                    sample_metadata = {}
+                    if 'samples' in metadata and gsm_id in metadata['samples']:
+                        sample_metadata = metadata['samples'][gsm_id]
+                    
+                    # Create enhanced metadata for this sample
+                    enhanced_metadata = {
+                        "dataset_id": gse_id,
+                        "sample_id": gsm_id,
+                        "dataset_type": "GEO_Sample",
+                        "parent_dataset": gse_id,
+                        "sample_metadata": sample_metadata,
+                        "processing_date": pd.Timestamp.now().isoformat(),
+                        "data_source": "individual_sample_matrix",
+                        "is_preprocessed": False,
+                        "needs_concatenation": True
+                    }
+                    
+                    # Determine adapter based on data characteristics
+                    n_obs, n_vars = matrix.shape
+                    if n_vars > 5000:  # High gene count suggests single-cell
+                        adapter_name = "transcriptomics_single_cell"
+                    else:
+                        adapter_name = "transcriptomics_bulk"
+                    
+                    # Load as modality in DataManagerV2
+                    adata = self.data_manager.load_modality(
+                        name=modality_name,
+                        source=matrix,
+                        adapter=adapter_name,
+                        validate=False,  # Skip validation for individual samples
+                        **enhanced_metadata
+                    )
+                    
+                    # Save to workspace
+                    save_path = f"{gse_id.lower()}_{gsm_id.lower()}_raw.h5ad"
+                    # Create directory if needed
+                    (self.data_manager.data_dir / gse_id.lower()).mkdir(exist_ok=True)
+                    self.data_manager.save_modality(
+                        name=modality_name, 
+                        path=save_path)
+                    
+                    stored_samples.append(modality_name)
+                    logger.info(f"Stored sample {gsm_id} as modality '{modality_name}' ({adata.shape})")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to store sample {gsm_id}: {e}")
+                    continue
+            
+            logger.info(f"Successfully stored {len(stored_samples)} samples as individual AnnData objects")
+            return stored_samples
+            
+        except Exception as e:
+            logger.error(f"Error storing samples as AnnData: {e}")
+            return stored_samples
+
+    def _create_placeholder_matrix(
+        self, stored_samples: List[str], gse_id: str
+    ) -> pd.DataFrame:
+        """
+        Create a placeholder matrix for immediate compatibility.
+        This will contain summary information about the stored samples.
+        
+        Args:
+            stored_samples: List of modality names that were stored
+            gse_id: GEO series ID
+            
+        Returns:
+            DataFrame: Placeholder matrix with sample information
         """
         try:
-            if not validated_matrices:
-                logger.error("No validated matrices to concatenate")
-                return None
-
-            logger.info(
-                f"Concatenating {len(validated_matrices)} matrices for {gse_id}"
-            )
-
-            # Check if all matrices have the same genes (columns)
+            # Collect information about stored samples
+            sample_info_list = []
+            total_cells = 0
             all_genes = set()
-            for matrix in validated_matrices.values():
-                all_genes.update(matrix.columns)
-
-            common_genes = set(next(iter(validated_matrices.values())).columns)
-            for matrix in validated_matrices.values():
-                common_genes = common_genes.intersection(set(matrix.columns))
-
-            logger.info(f"Found {len(common_genes)} common genes across all matrices")
-
-            if len(common_genes) == 0:
-                logger.error("No common genes found across matrices")
-                return None
-
-            # Align matrices to common genes
-            aligned_matrices = []
-            for gsm_id, matrix in validated_matrices.items():
-                # Select common genes and add sample prefix to cell/row names
-                aligned_matrix = matrix[list(common_genes)]
-                aligned_matrix.index = [
-                    f"{gsm_id}_{idx}" for idx in aligned_matrix.index
+            
+            for modality_name in stored_samples:
+                adata = self.data_manager.get_modality(modality_name)
+                sample_id = modality_name.split('_')[-1].upper()
+                
+                sample_info_list.append({
+                    'sample_id': sample_id,
+                    'modality_name': modality_name,
+                    'n_cells': adata.n_obs,
+                    'n_genes': adata.n_vars,
+                    'stored': True
+                })
+                
+                total_cells += adata.n_obs
+                all_genes.update(adata.var_names)
+            
+            # Create a summary DataFrame
+            summary_df = pd.DataFrame(sample_info_list)
+            
+            # Create a minimal placeholder matrix with metadata
+            # This matrix will have one row per sample with summary statistics
+            placeholder_matrix = pd.DataFrame(
+                index=summary_df['sample_id'],
+                columns=['n_cells', 'n_genes', 'modality_name', 'status']
+            )
+            
+            for _, row in summary_df.iterrows():
+                placeholder_matrix.loc[row['sample_id']] = [
+                    row['n_cells'],
+                    row['n_genes'],
+                    row['modality_name'],
+                    'stored_for_preprocessing'
                 ]
-                aligned_matrices.append(aligned_matrix)
-
-            # Concatenate matrices
-            combined_matrix = pd.concat(aligned_matrices, axis=0, sort=False)
-
-            logger.info(f"Successfully concatenated matrices: {combined_matrix.shape}")
-            return combined_matrix
-
+            
+            # Add metadata as attributes
+            placeholder_matrix.attrs = {
+                'dataset_id': gse_id,
+                'total_samples': len(stored_samples),
+                'total_cells': total_cells,
+                'total_unique_genes': len(all_genes),
+                'stored_modalities': stored_samples,
+                'note': 'Individual samples stored as AnnData objects for preprocessing',
+                'concatenation_pending': True
+            }
+            
+            logger.info(f"Created placeholder matrix with {len(stored_samples)} samples")
+            return placeholder_matrix
+            
         except Exception as e:
-            logger.error(f"Error concatenating matrices: {e}")
+            logger.error(f"Error creating placeholder matrix: {e}")
+            # Return a minimal placeholder
+            return pd.DataFrame({'status': ['error']}, index=[gse_id])
+
+    def _concatenate_stored_samples(
+        self, geo_id: str, stored_samples: List[str], use_intersecting_genes_only: bool = True
+    ) -> Optional[pd.DataFrame]:
+        """
+        Concatenate stored AnnData samples using anndata's concat function.
+        
+        This function loads individual AnnData objects that were previously stored,
+        concatenates them using anndata.concat(), and returns the result as a DataFrame
+        for compatibility with the rest of the pipeline.
+        
+        Args:
+            geo_id: GEO series ID
+            stored_samples: List of modality names that were stored
+            use_intersecting_genes_only: If True, use only common genes across all samples.
+                                       If False, use all genes (filling missing with zeros).
+            
+        Returns:
+            DataFrame: Concatenated expression matrix or None if concatenation fails
+        """
+        try:
+            import anndata as ad
+            
+            logger.info(f"Concatenating {len(stored_samples)} stored samples for {geo_id}")
+            
+            # Validate input
+            if not stored_samples:
+                logger.error("No stored samples provided for concatenation")
+                return None
+            
+            # Load all AnnData objects
+            adata_list = []
+            sample_ids = []
+            
+            for modality_name in stored_samples:
+                try:
+                    # Load the AnnData object from data manager
+                    adata = self.data_manager.get_modality(modality_name)
+                    if adata is None:
+                        logger.warning(f"Could not load modality: {modality_name}")
+                        continue
+                    
+                    # Extract sample ID from modality name
+                    sample_id = modality_name.split('_')[-1].upper()
+                    sample_ids.append(sample_id)
+                    
+                    # Add batch information to obs
+                    adata.obs['batch'] = sample_id
+                    adata.obs['sample_id'] = sample_id
+                    
+                    adata_list.append(adata)
+                    logger.debug(f"Loaded {modality_name}: {adata.shape}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to load modality {modality_name}: {e}")
+                    continue
+            
+            # Check if we have any valid data
+            if not adata_list:
+                logger.error("No valid AnnData objects could be loaded")
+                return None
+            
+            logger.info(f"Successfully loaded {len(adata_list)} AnnData objects")
+            
+            # Concatenate using anndata
+            if use_intersecting_genes_only:
+                # Use intersection (inner join) - only common genes
+                logger.info("Concatenating with gene intersection (inner join)")
+                combined_adata = ad.concat(
+                    adata_list, 
+                    axis=0,         # Concatenate along observations (cells)
+                    join='inner',   # Use only common genes
+                    merge='unique', # Merge unique keys in uns
+                    label='batch',
+                    keys=sample_ids
+                )
+            else:
+                # Use union (outer join) - all genes
+                logger.info("Concatenating with gene union (outer join)")
+                combined_adata = ad.concat(
+                    adata_list,
+                    axis=0,         # Concatenate along observations (cells)
+                    join='outer',   # Use all genes
+                    merge='unique', # Merge unique keys in uns
+                    fill_value=0,   # Fill missing values with 0
+                    label='batch',
+                    keys=sample_ids
+                )
+            
+            logger.info(f"Concatenation successful: {combined_adata.shape}")
+            
+            # Convert to DataFrame for compatibility with the rest of the pipeline
+            # The expression matrix is stored in X
+            if hasattr(combined_adata.X, 'todense'):
+                # Handle sparse matrix
+                expression_matrix = pd.DataFrame(
+                    combined_adata.X.todense(),
+                    index=combined_adata.obs_names,
+                    columns=combined_adata.var_names
+                )
+            else:
+                # Handle dense matrix
+                expression_matrix = pd.DataFrame(
+                    combined_adata.X,
+                    index=combined_adata.obs_names,
+                    columns=combined_adata.var_names
+                )
+            
+            # Add batch information as a column (for compatibility)
+            if 'batch' in combined_adata.obs.columns:
+                expression_matrix['batch'] = combined_adata.obs['batch'].values
+            
+            logger.info(f"Converted to DataFrame: {expression_matrix.shape}")
+            
+            # Log statistics
+            n_genes = len(expression_matrix.columns) - (1 if 'batch' in expression_matrix.columns else 0)
+            logger.info(f"Final matrix: {len(expression_matrix)} cells × {n_genes} genes")
+            logger.info(f"Samples included: {', '.join(sample_ids)}")
+            
+            return expression_matrix
+            
+        except ImportError:
+            logger.error("anndata package is required but not installed. Install with: pip install anndata")
+            return None
+        except Exception as e:
+            logger.error(f"Error concatenating stored samples: {e}")
+            logger.exception("Full traceback:")
             return None
 
     def _check_workspace_for_processed_data(

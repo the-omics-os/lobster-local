@@ -84,7 +84,7 @@ class ProvenanceTracker:
     def create_entity(
         self,
         entity_type: str,
-        uri: Union[str, Path],
+        uri: Union[str, Path] = None,
         checksum: Optional[str] = None,
         format: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
@@ -111,7 +111,7 @@ class ProvenanceTracker:
         entity = {
             "id": entity_id,
             "type": entity_type,
-            "uri": str(uri),
+            "uri": str(uri) if uri else None,
             "checksum": checksum,
             "format": format,
             "metadata": metadata or {},

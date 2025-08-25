@@ -76,6 +76,7 @@ class TranscriptomicsAdapter(BaseAdapter):
                 - gene_metadata: Additional gene metadata DataFrame
                 - var_names: Column to use as variable names
                 - first_column_names: Use first column as obs names
+                - Additional metadata fields will be stored in uns
 
         Returns:
             anndata.AnnData: Loaded and validated data
@@ -87,32 +88,57 @@ class TranscriptomicsAdapter(BaseAdapter):
         self._log_operation("loading", source=str(source), data_type=self.data_type)
         
         try:
+            # Extract metadata fields that should be stored in uns
+            metadata_fields = {}
+            dataframe_params = {}
+            
+            # Known parameters for _create_anndata_from_dataframe
+            valid_dataframe_params = {'transpose', 'obs_metadata', 'var_metadata'}
+            
+            # Known parameters for file loading
+            file_params = {'transpose', 'gene_symbols_col', 'sample_metadata', 
+                          'gene_metadata', 'var_names', 'first_column_names'}
+            
+            # Separate metadata from processing parameters
+            for key, value in kwargs.items():
+                if key in valid_dataframe_params:
+                    dataframe_params[key] = value
+                elif key not in file_params:
+                    # Store as metadata
+                    metadata_fields[key] = value
+            
             # Handle different source types
             if isinstance(source, anndata.AnnData):
                 adata = source.copy()
             elif isinstance(source, pd.DataFrame):
-                adata = self._create_anndata_from_dataframe(source, **kwargs)
+                adata = self._create_anndata_from_dataframe(
+                    df = source, 
+                    obs_metadata=dataframe_params.get('obs_metadata'),
+                    var_metadata=dataframe_params.get('var_metadata')
+                    )
             elif isinstance(source, (str, Path)):
                 adata = self._load_from_file(source, **kwargs)
             else:
                 raise TypeError(f"Unsupported source type: {type(source)}")
-
-            # Add basic metadata
-            adata = self._add_basic_metadata(adata, source)
+            
+            # Store metadata fields in uns
+            if metadata_fields:
+                for key, value in metadata_fields.items():
+                    adata.uns[key] = value
             
             # Apply transcriptomics-specific preprocessing
             adata = self.preprocess_data(adata, **kwargs)
             
-            # Add provenance information
-            adata = self.add_provenance(
-                adata,
-                source_info={
-                    "source": str(source),
-                    "data_type": self.data_type,
-                    "source_type": type(source).__name__
-                },
-                processing_params=kwargs
-            )
+            # # Add provenance information
+            # adata = self.add_provenance(
+            #     adata,
+            #     source_info={
+            #         # "source": str(source),
+            #         "data_type": self.data_type,
+            #         "source_type": type(source).__name__
+            #     },
+            #     processing_params=kwargs
+            # )
             
             self.logger.info(f"Loaded transcriptomics data: {adata.n_obs} obs × {adata.n_vars} vars")
             return adata
@@ -158,11 +184,17 @@ class TranscriptomicsAdapter(BaseAdapter):
         first_column_names = kwargs.get('first_column_names', True)
         gene_symbols_col = kwargs.get('gene_symbols_col', None)
         
+        # Filter kwargs for _load_csv_data to avoid passing metadata fields
+        csv_params = {k: v for k, v in kwargs.items() 
+                     if k not in ['transpose', 'first_column_names', 'gene_symbols_col', 
+                                  'dataset_id', 'dataset_type', 'source_metadata', 
+                                  'processing_date', 'download_source', 'processing_method']}
+        
         # Load the data
         df = self._load_csv_data(
             path, 
             index_col=0 if first_column_names else None,
-            **{k: v for k, v in kwargs.items() if k not in ['transpose', 'first_column_names', 'gene_symbols_col']}
+            **csv_params
         )
         
         # Handle gene symbols if specified
@@ -190,7 +222,11 @@ class TranscriptomicsAdapter(BaseAdapter):
         transpose = kwargs.get('transpose', True)
         sheet_name = kwargs.get('sheet_name', 0)
         
-        df = self._load_excel_data(path, sheet_name=sheet_name, index_col=0)
+        # Filter kwargs to avoid passing unexpected parameters
+        excel_params = {k: v for k, v in kwargs.items() 
+                       if k in ['sheet_name'] and k not in ['transpose']}
+        
+        df = self._load_excel_data(path, sheet_name=sheet_name, index_col=0, **excel_params)
         
         return self._create_anndata_from_dataframe(df, transpose=transpose)
 
