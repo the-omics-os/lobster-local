@@ -54,14 +54,14 @@ AGENT_REGISTRY: Dict[str, AgentConfig] = {
         handoff_tool_name='handoff_to_method_expert',
         handoff_tool_description='Assign literature/method tasks to the method expert'
     ),
-    'machine_learning_expert_agent': AgentConfig(
-        name='machine_learning_expert_agent',
-        display_name='ML Expert',
-        description='Handles Machine Learning related tasks like transforming the data in the desired format for downstream tasks',
-        factory_function='lobster.agents.machine_learning_expert.machine_learning_expert',
-        handoff_tool_name='handoff_to_machine_learning_expert',
-        handoff_tool_description='Assign literature/method tasks to the machine learning expert'
-    ),
+    # 'machine_learning_expert_agent': AgentConfig(
+    #     name='machine_learning_expert_agent',
+    #     display_name='ML Expert',
+    #     description='Handles Machine Learning related tasks like transforming the data in the desired format for downstream tasks',
+    #     factory_function='lobster.agents.machine_learning_expert.machine_learning_expert',
+    #     handoff_tool_name='handoff_to_machine_learning_expert',
+    #     handoff_tool_description='Assign literature/method tasks to the machine learning expert'
+    # ),
 }
 
 

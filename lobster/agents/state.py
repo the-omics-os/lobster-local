@@ -23,6 +23,7 @@ class OverallState(AgentState):
     singlecell_expert_state: "SingleCellExpertState"
     bulk_rnaseq_expert_state: "BulkRNASeqExpertState"
     method_state: "MethodState"
+    machine_learning_expert_state: "MachineLearningExpertState"
     
 
 
@@ -122,3 +123,22 @@ class MethodState(AgentState):
     evaluation_metrics: Dict[str, Any]   # Accuracy, runtime, reproducibility metrics
     recommendations: List[str]           # Suggested methods or pipelines
     references: List[str]
+
+
+class MachineLearningExpertState(AgentState):
+    """
+    State for the machine learning expert agent.
+    """
+    next: str
+
+    # Machine learning specific context
+    ml_ready_modalities: Dict[str, Any]  # Assessment of modalities ready for ML
+    feature_engineering_results: Dict[str, Any]  # Feature preparation outcomes
+    data_splits: Dict[str, Any]         # Train/test/validation split information
+    exported_datasets: Dict[str, Any]   # Framework export results and paths
+    ml_metadata: Dict[str, Any]         # ML-specific metadata and preprocessing info
+    framework_exports: List[str]        # List of export formats and paths
+    file_paths: List[str]               # Paths to ML-ready files
+    methodology_parameters: Dict[str, Any] # ML method parameters used
+    data_context: str                   # ML data context and characteristics
+    intermediate_outputs: Dict[str, Any] # For partial ML computations before returning to supervisor

@@ -1119,71 +1119,6 @@ class DataManagerV2:
     # CURRENT DATASET MANAGEMENT (Legacy Support)
     # ========================================
 
-    def set_current_dataset(self, modality_name: str) -> None:
-        """
-        Set the current active modality for legacy compatibility.
-        
-        Args:
-            modality_name: Name of modality to set as current
-            
-        Raises:
-            ValueError: If modality not found
-        """
-        if modality_name not in self.modalities:
-            raise ValueError(f"Modality '{modality_name}' not found")
-        
-        self.current_dataset = modality_name
-        adata = self.modalities[modality_name]
-        
-        # Update legacy compatibility attributes
-        try:
-            # Convert AnnData to DataFrame for legacy compatibility
-            if hasattr(adata, 'to_df'):
-                self.current_data = adata.to_df().T  # Transpose to match expected format
-            else:
-                # Manual conversion
-                self.current_data = pd.DataFrame(
-                    adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
-                    index=adata.obs_names,
-                    columns=adata.var_names
-                ).T  # Transpose for legacy format
-            
-            self.adata = adata
-            
-            # Update current metadata with modality info
-            self.current_metadata = {
-                "modality_name": modality_name,
-                "shape": adata.shape,
-                "obs_columns": list(adata.obs.columns),
-                "var_columns": list(adata.var.columns),
-                "data_type": self._detect_modality_type(modality_name),
-            }
-            
-            # Add any existing uns metadata
-            if hasattr(adata, 'uns') and adata.uns:
-                self.current_metadata.update({
-                    f"uns_{k}": v for k, v in adata.uns.items() 
-                    if isinstance(v, (str, int, float, bool))
-                })
-                
-        except Exception as e:
-            logger.error(f"Failed to set current dataset: {e}")
-            # Fallback - at least set the references
-            self.current_data = None
-            self.adata = adata
-            self.current_metadata = {"modality_name": modality_name, "error": str(e)}
-        
-        logger.info(f"Set current dataset to modality: {modality_name}")
-
-    def get_current_data(self) -> Optional[pd.DataFrame]:
-        """Get current dataset as DataFrame (legacy compatibility)."""
-        if self.current_dataset and self.current_dataset in self.modalities:
-            # Ensure current_data is up-to-date
-            if self.current_data is None:
-                self.set_current_dataset(self.current_dataset)
-        
-        return self.current_data
-
     def get_data_summary(self) -> Dict[str, Any]:
         """
         Get summary of current dataset or all modalities.
@@ -1338,6 +1273,653 @@ class DataManagerV2:
             List[str]: List of dataset IDs with metadata
         """
         return list(self.metadata_store.keys())
+
+    # ========================================
+    # MACHINE LEARNING INTEGRATION METHODS
+    # ========================================
+
+    def check_ml_readiness(self, modality: str = None) -> Dict[str, Any]:
+        """
+        Check if modalities are ready for machine learning workflows.
+        
+        Args:
+            modality: Specific modality to check (default: all modalities)
+            
+        Returns:
+            Dict[str, Any]: ML readiness assessment
+        """
+        if modality:
+            if modality not in self.modalities:
+                raise ValueError(f"Modality '{modality}' not found")
+            modalities_to_check = [modality]
+        else:
+            modalities_to_check = list(self.modalities.keys())
+        
+        if not modalities_to_check:
+            return {"status": "error", "message": "No modalities loaded"}
+        
+        readiness_results = {}
+        
+        for mod_name in modalities_to_check:
+            adata = self.modalities[mod_name]
+            
+            # Basic data structure checks
+            checks = {
+                "has_expression_data": adata.X is not None,
+                "sufficient_samples": adata.n_obs >= 10,
+                "sufficient_features": adata.n_vars >= 50,
+                "no_missing_values": not np.any(pd.isna(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X)),
+                "has_metadata": len(adata.obs.columns) > 0,
+                "numeric_data": True,  # Assume true for now, could add numeric check
+            }
+            
+            # Advanced checks based on modality type
+            modality_type = self._detect_modality_type(mod_name)
+            
+            if modality_type in ['single_cell_rna_seq', 'bulk_rna_seq']:
+                # Transcriptomics-specific checks
+                checks.update({
+                    "gene_symbols_available": 'gene_symbols' in adata.var.columns or adata.var.index.dtype == 'object',
+                    "count_data": np.all(adata.X >= 0) if hasattr(adata.X, '__iter__') else True,
+                    "reasonable_gene_count": 500 <= adata.n_vars <= 50000,
+                })
+            elif 'proteomics' in modality_type:
+                # Proteomics-specific checks
+                checks.update({
+                    "protein_identifiers": len(adata.var.index) > 0,
+                    "reasonable_protein_count": 10 <= adata.n_vars <= 10000,
+                    "positive_values": np.all(adata.X >= 0) if hasattr(adata.X, '__iter__') else True,
+                })
+            
+            # Calculate overall readiness score
+            passed_checks = sum(checks.values())
+            total_checks = len(checks)
+            readiness_score = passed_checks / total_checks
+            
+            # Determine readiness level
+            if readiness_score >= 0.9:
+                readiness_level = "excellent"
+            elif readiness_score >= 0.75:
+                readiness_level = "good"
+            elif readiness_score >= 0.5:
+                readiness_level = "fair"
+            else:
+                readiness_level = "poor"
+            
+            # Compile results
+            readiness_results[mod_name] = {
+                "modality_type": modality_type,
+                "shape": adata.shape,
+                "readiness_score": readiness_score,
+                "readiness_level": readiness_level,
+                "checks": checks,
+                "recommendations": self._generate_ml_recommendations(checks, modality_type)
+            }
+        
+        # Overall assessment
+        if len(readiness_results) == 1:
+            return readiness_results[list(readiness_results.keys())[0]]
+        else:
+            return {
+                "status": "success",
+                "modalities": readiness_results,
+                "overall_readiness": np.mean([r["readiness_score"] for r in readiness_results.values()])
+            }
+
+    def _generate_ml_recommendations(self, checks: Dict[str, bool], modality_type: str) -> List[str]:
+        """Generate ML-specific recommendations based on failed checks."""
+        recommendations = []
+        
+        if not checks.get("sufficient_samples", True):
+            recommendations.append("Consider data augmentation or collecting more samples (minimum 10 recommended)")
+        
+        if not checks.get("sufficient_features", True):
+            recommendations.append("Feature count is low - consider feature selection strategies")
+        
+        if not checks.get("no_missing_values", True):
+            recommendations.append("Handle missing values through imputation or removal")
+        
+        if not checks.get("has_metadata", True):
+            recommendations.append("Add sample metadata for supervised learning tasks")
+        
+        if modality_type in ['single_cell_rna_seq', 'bulk_rna_seq']:
+            if not checks.get("reasonable_gene_count", True):
+                recommendations.append("Gene count outside typical range - verify data quality")
+            if not checks.get("count_data", True):
+                recommendations.append("Negative values detected - ensure proper preprocessing for count data")
+        
+        if len(recommendations) == 0:
+            recommendations.append("Data appears ML-ready!")
+        
+        return recommendations
+
+    def prepare_ml_features(
+        self,
+        modality: str,
+        feature_selection: str = "variance",
+        n_features: int = 2000,
+        normalization: str = "log1p",
+        scaling: str = "standard"
+    ) -> Dict[str, Any]:
+        """
+        Prepare ML-ready feature matrices from biological data.
+        
+        Args:
+            modality: Name of modality to process
+            feature_selection: Method for feature selection ('variance', 'correlation', 'chi2', 'mutual_info')
+            n_features: Number of features to select
+            normalization: Normalization method ('log1p', 'cpm', 'none')
+            scaling: Scaling method ('standard', 'minmax', 'robust', 'none')
+            
+        Returns:
+            Dict[str, Any]: Processed feature information and metadata
+        """
+        if modality not in self.modalities:
+            raise ValueError(f"Modality '{modality}' not found")
+        
+        adata = self.modalities[modality].copy()
+        processing_steps = []
+        
+        try:
+            import scanpy as sc
+            from sklearn.feature_selection import VarianceThreshold, SelectKBest, chi2, mutual_info_classif
+            from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler
+            scanpy_available = True
+        except ImportError:
+            scanpy_available = False
+            logger.warning("Scanpy not available - using basic processing")
+        
+        # Step 1: Normalization
+        if normalization == "log1p":
+            if scanpy_available:
+                sc.pp.normalize_total(adata, target_sum=1e4)
+                sc.pp.log1p(adata)
+            else:
+                # Basic log1p normalization
+                X = adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X
+                X = np.log1p(X / np.sum(X, axis=1, keepdims=True) * 1e4)
+                adata.X = X
+            processing_steps.append(f"Applied {normalization} normalization")
+        elif normalization == "cpm":
+            if scanpy_available:
+                sc.pp.normalize_total(adata, target_sum=1e6)
+            else:
+                X = adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X
+                X = X / np.sum(X, axis=1, keepdims=True) * 1e6
+                adata.X = X
+            processing_steps.append(f"Applied CPM normalization")
+        
+        # Step 2: Feature Selection
+        X = adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X
+        
+        if feature_selection == "variance" and scanpy_available:
+            # Use scanpy's highly variable genes
+            sc.pp.highly_variable_genes(adata, n_top_genes=min(n_features, adata.n_vars))
+            selected_features = adata.var['highly_variable']
+            selected_indices = np.where(selected_features)[0]
+        elif feature_selection == "variance":
+            # Basic variance-based selection
+            variances = np.var(X, axis=0)
+            selected_indices = np.argsort(variances)[-n_features:]
+        else:
+            # Fallback to top variance features
+            variances = np.var(X, axis=0)
+            selected_indices = np.argsort(variances)[-n_features:]
+        
+        # Apply feature selection
+        X_selected = X[:, selected_indices]
+        selected_feature_names = adata.var_names[selected_indices]
+        processing_steps.append(f"Selected {len(selected_indices)} features using {feature_selection}")
+        
+        # Step 3: Scaling
+        if scaling == "standard":
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X_selected)
+            processing_steps.append("Applied standard scaling")
+        elif scaling == "minmax":
+            scaler = MinMaxScaler()
+            X_scaled = scaler.fit_transform(X_selected)
+            processing_steps.append("Applied min-max scaling")
+        elif scaling == "robust":
+            scaler = RobustScaler()
+            X_scaled = scaler.fit_transform(X_selected)
+            processing_steps.append("Applied robust scaling")
+        else:
+            X_scaled = X_selected
+            scaler = None
+        
+        # Create feature matrix DataFrame
+        feature_matrix = pd.DataFrame(
+            X_scaled,
+            index=adata.obs_names,
+            columns=selected_feature_names
+        )
+        
+        # Store processed data in a new modality
+        processed_modality_name = f"{modality}_ml_features"
+        
+        # Create new AnnData with processed features
+        adata_processed = anndata.AnnData(
+            X=X_scaled,
+            obs=adata.obs.copy(),
+            var=pd.DataFrame(index=selected_feature_names)
+        )
+        
+        # Add processing metadata
+        adata_processed.uns['ml_processing'] = {
+            'source_modality': modality,
+            'feature_selection': feature_selection,
+            'n_features_selected': len(selected_indices),
+            'normalization': normalization,
+            'scaling': scaling,
+            'processing_steps': processing_steps,
+            'selected_indices': selected_indices.tolist(),
+            'original_feature_names': list(adata.var_names),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Store processed modality
+        self.modalities[processed_modality_name] = adata_processed
+        
+        # Log processing
+        self.processing_log.append(
+            f"ML feature preparation: {modality} -> {processed_modality_name} "
+            f"({adata.shape[0]} samples × {len(selected_indices)} features)"
+        )
+        
+        return {
+            "processed_modality": processed_modality_name,
+            "feature_matrix": feature_matrix,
+            "original_shape": adata.shape,
+            "processed_shape": adata_processed.shape,
+            "selected_features": list(selected_feature_names),
+            "processing_steps": processing_steps,
+            "scaler": scaler,
+            "processing_metadata": adata_processed.uns['ml_processing']
+        }
+
+    def create_ml_splits(
+        self,
+        modality: str,
+        target_column: str = None,
+        test_size: float = 0.2,
+        validation_size: float = 0.1,
+        stratify: bool = True,
+        random_state: int = 42
+    ) -> Dict[str, Any]:
+        """
+        Create stratified train/validation/test splits for ML workflows.
+        
+        Args:
+            modality: Name of modality to split
+            target_column: Column name in obs for stratification (if None, uses random splits)
+            test_size: Proportion of data for test set
+            validation_size: Proportion of remaining data for validation set
+            stratify: Whether to stratify splits based on target_column
+            random_state: Random seed for reproducibility
+            
+        Returns:
+            Dict[str, Any]: Split information and indices
+        """
+        if modality not in self.modalities:
+            raise ValueError(f"Modality '{modality}' not found")
+        
+        adata = self.modalities[modality]
+        n_samples = adata.n_obs
+        
+        try:
+            from sklearn.model_selection import train_test_split
+        except ImportError:
+            raise ImportError("scikit-learn required for ML splits. Install with: pip install scikit-learn")
+        
+        # Prepare indices and target
+        sample_indices = np.arange(n_samples)
+        
+        if target_column and target_column in adata.obs.columns:
+            target = adata.obs[target_column].values
+            if stratify:
+                # Check if stratification is possible
+                unique_classes, counts = np.unique(target, return_counts=True)
+                min_class_count = np.min(counts)
+                min_required = max(2, int(1 / min(test_size, validation_size)))
+                
+                if min_class_count < min_required:
+                    logger.warning(f"Insufficient samples in some classes for stratification. "
+                                 f"Minimum class has {min_class_count} samples, need {min_required}")
+                    stratify = False
+                    target = None
+        else:
+            target = None
+            stratify = False
+        
+        # Create train/temp split
+        if stratify and target is not None:
+            train_idx, temp_idx = train_test_split(
+                sample_indices, 
+                test_size=test_size + validation_size,
+                stratify=target,
+                random_state=random_state
+            )
+            temp_target = target[temp_idx]
+        else:
+            train_idx, temp_idx = train_test_split(
+                sample_indices,
+                test_size=test_size + validation_size,
+                random_state=random_state
+            )
+            temp_target = None
+        
+        # Create validation/test split from temp
+        if len(temp_idx) > 1 and validation_size > 0:
+            val_test_ratio = test_size / (test_size + validation_size)
+            
+            if stratify and temp_target is not None:
+                val_idx, test_idx = train_test_split(
+                    temp_idx,
+                    test_size=val_test_ratio,
+                    stratify=temp_target,
+                    random_state=random_state
+                )
+            else:
+                val_idx, test_idx = train_test_split(
+                    temp_idx,
+                    test_size=val_test_ratio,
+                    random_state=random_state
+                )
+        else:
+            test_idx = temp_idx
+            val_idx = np.array([])
+        
+        # Create split metadata
+        splits = {
+            'train': {
+                'indices': train_idx.tolist(),
+                'size': len(train_idx),
+                'proportion': len(train_idx) / n_samples
+            },
+            'validation': {
+                'indices': val_idx.tolist(),
+                'size': len(val_idx),
+                'proportion': len(val_idx) / n_samples
+            } if len(val_idx) > 0 else None,
+            'test': {
+                'indices': test_idx.tolist(),
+                'size': len(test_idx),
+                'proportion': len(test_idx) / n_samples
+            }
+        }
+        
+        # Add target distribution information
+        if target is not None:
+            for split_name, split_info in splits.items():
+                if split_info is not None:
+                    split_indices = split_info['indices']
+                    split_target = target[split_indices]
+                    unique, counts = np.unique(split_target, return_counts=True)
+                    split_info['target_distribution'] = dict(zip(unique, counts))
+        
+        # Store splits in modality metadata
+        split_metadata = {
+            'modality': modality,
+            'target_column': target_column,
+            'stratified': stratify,
+            'test_size': test_size,
+            'validation_size': validation_size,
+            'random_state': random_state,
+            'n_samples': n_samples,
+            'splits': splits,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Add to AnnData uns
+        adata.uns['ml_splits'] = split_metadata
+        
+        # Log split creation
+        self.processing_log.append(
+            f"ML splits created for {modality}: "
+            f"train({len(train_idx)}) / val({len(val_idx)}) / test({len(test_idx)})"
+        )
+        
+        return split_metadata
+
+    def export_for_ml_framework(
+        self,
+        modality: str,
+        framework: str = "sklearn",
+        split: str = None,
+        target_column: str = None,
+        output_dir: str = None
+    ) -> Dict[str, Any]:
+        """
+        Export data in formats suitable for ML frameworks.
+        
+        Args:
+            modality: Name of modality to export
+            framework: Target framework ('sklearn', 'pytorch', 'tensorflow', 'xgboost')
+            split: Specific split to export ('train', 'validation', 'test', or None for all)
+            target_column: Target column for supervised learning
+            output_dir: Directory to save exports (defaults to exports_dir)
+            
+        Returns:
+            Dict[str, Any]: Export information and file paths
+        """
+        if modality not in self.modalities:
+            raise ValueError(f"Modality '{modality}' not found")
+        
+        adata = self.modalities[modality]
+        
+        # Set up output directory
+        if output_dir is None:
+            output_dir = self.exports_dir / "ml_exports"
+        else:
+            output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Get data matrix
+        X = adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X
+        
+        # Get target data if specified
+        y = None
+        if target_column and target_column in adata.obs.columns:
+            y = adata.obs[target_column].values
+        
+        # Get splits if available
+        splits_info = adata.uns.get('ml_splits', {})
+        splits = splits_info.get('splits', {})
+        
+        # Prepare data for export
+        export_info = {
+            'modality': modality,
+            'framework': framework,
+            'shape': X.shape,
+            'has_target': y is not None,
+            'target_column': target_column,
+            'export_timestamp': datetime.now().isoformat(),
+            'files': {}
+        }
+        
+        # Framework-specific export logic
+        if framework == "sklearn":
+            # Export as NumPy arrays and pickle files
+            if split is None:
+                # Export full dataset
+                np.save(output_dir / f"{modality}_X.npy", X)
+                export_info['files']['features'] = str(output_dir / f"{modality}_X.npy")
+                
+                if y is not None:
+                    np.save(output_dir / f"{modality}_y.npy", y)
+                    export_info['files']['target'] = str(output_dir / f"{modality}_y.npy")
+            else:
+                # Export specific split
+                if split in splits:
+                    indices = splits[split]['indices']
+                    X_split = X[indices]
+                    np.save(output_dir / f"{modality}_{split}_X.npy", X_split)
+                    export_info['files'][f'{split}_features'] = str(output_dir / f"{modality}_{split}_X.npy")
+                    
+                    if y is not None:
+                        y_split = y[indices]
+                        np.save(output_dir / f"{modality}_{split}_y.npy", y_split)
+                        export_info['files'][f'{split}_target'] = str(output_dir / f"{modality}_{split}_y.npy")
+        
+        elif framework == "pytorch":
+            # Export as PyTorch tensors
+            try:
+                import torch
+                
+                if split is None:
+                    X_tensor = torch.FloatTensor(X)
+                    torch.save(X_tensor, output_dir / f"{modality}_X.pt")
+                    export_info['files']['features'] = str(output_dir / f"{modality}_X.pt")
+                    
+                    if y is not None:
+                        y_tensor = torch.LongTensor(y) if y.dtype.kind in ['i', 'u'] else torch.FloatTensor(y)
+                        torch.save(y_tensor, output_dir / f"{modality}_y.pt")
+                        export_info['files']['target'] = str(output_dir / f"{modality}_y.pt")
+                else:
+                    if split in splits:
+                        indices = splits[split]['indices']
+                        X_split = X[indices]
+                        X_tensor = torch.FloatTensor(X_split)
+                        torch.save(X_tensor, output_dir / f"{modality}_{split}_X.pt")
+                        export_info['files'][f'{split}_features'] = str(output_dir / f"{modality}_{split}_X.pt")
+                        
+                        if y is not None:
+                            y_split = y[indices]
+                            y_tensor = torch.LongTensor(y_split) if y_split.dtype.kind in ['i', 'u'] else torch.FloatTensor(y_split)
+                            torch.save(y_tensor, output_dir / f"{modality}_{split}_y.pt")
+                            export_info['files'][f'{split}_target'] = str(output_dir / f"{modality}_{split}_y.pt")
+            
+            except ImportError:
+                logger.warning("PyTorch not available, falling back to NumPy export")
+                framework = "sklearn"  # Fallback to sklearn format
+        
+        elif framework == "tensorflow":
+            # Export as TensorFlow SavedModel or .npy for now
+            logger.warning("TensorFlow export not fully implemented, using NumPy format")
+            framework = "sklearn"  # Fallback
+        
+        # Also export metadata and feature names
+        metadata = {
+            'feature_names': list(adata.var_names),
+            'sample_names': list(adata.obs_names),
+            'shape': X.shape,
+            'modality_metadata': dict(adata.obs.dtypes.astype(str)),
+            'processing_info': adata.uns.get('ml_processing', {}),
+            'splits_info': splits_info
+        }
+        
+        metadata_path = output_dir / f"{modality}_metadata.json"
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2, default=str)
+        export_info['files']['metadata'] = str(metadata_path)
+        
+        # Log export
+        self.processing_log.append(
+            f"ML export completed: {modality} -> {framework} format "
+            f"({len(export_info['files'])} files created)"
+        )
+        
+        return export_info
+
+    def get_ml_summary(self, modality: str = None) -> Dict[str, Any]:
+        """
+        Get comprehensive ML workflow summary for modalities.
+        
+        Args:
+            modality: Specific modality to summarize (default: all modalities)
+            
+        Returns:
+            Dict[str, Any]: ML workflow summary
+        """
+        if modality:
+            if modality not in self.modalities:
+                raise ValueError(f"Modality '{modality}' not found")
+            modalities_to_summarize = [modality]
+        else:
+            modalities_to_summarize = list(self.modalities.keys())
+        
+        if not modalities_to_summarize:
+            return {"status": "error", "message": "No modalities loaded"}
+        
+        ml_summaries = {}
+        
+        for mod_name in modalities_to_summarize:
+            adata = self.modalities[mod_name]
+            
+            # Basic information
+            summary = {
+                "modality_name": mod_name,
+                "modality_type": self._detect_modality_type(mod_name),
+                "shape": adata.shape,
+                "data_type": str(adata.X.dtype) if hasattr(adata.X, 'dtype') else 'unknown'
+            }
+            
+            # ML readiness check
+            readiness = self.check_ml_readiness(mod_name)
+            summary["ml_readiness"] = {
+                "score": readiness.get("readiness_score", 0),
+                "level": readiness.get("readiness_level", "unknown"),
+                "recommendations": readiness.get("recommendations", [])
+            }
+            
+            # Feature processing information
+            if 'ml_processing' in adata.uns:
+                processing_info = adata.uns['ml_processing']
+                summary["feature_processing"] = {
+                    "processed": True,
+                    "source_modality": processing_info.get('source_modality'),
+                    "n_features_selected": processing_info.get('n_features_selected'),
+                    "processing_steps": processing_info.get('processing_steps', [])
+                }
+            else:
+                summary["feature_processing"] = {"processed": False}
+            
+            # Splits information
+            if 'ml_splits' in adata.uns:
+                splits_info = adata.uns['ml_splits']
+                splits = splits_info.get('splits', {})
+                summary["splits"] = {
+                    "created": True,
+                    "stratified": splits_info.get('stratified', False),
+                    "target_column": splits_info.get('target_column'),
+                    "train_size": splits.get('train', {}).get('size', 0),
+                    "validation_size": splits.get('validation', {}).get('size', 0) if splits.get('validation') else 0,
+                    "test_size": splits.get('test', {}).get('size', 0)
+                }
+            else:
+                summary["splits"] = {"created": False}
+            
+            # Available metadata for supervised learning
+            categorical_columns = []
+            numerical_columns = []
+            
+            for col in adata.obs.columns:
+                if adata.obs[col].dtype.kind in ['O', 'S']:  # Object or string
+                    categorical_columns.append(col)
+                elif adata.obs[col].dtype.kind in ['i', 'u', 'f']:  # Integer or float
+                    numerical_columns.append(col)
+            
+            summary["metadata"] = {
+                "categorical_columns": categorical_columns,
+                "numerical_columns": numerical_columns,
+                "total_metadata_columns": len(adata.obs.columns)
+            }
+            
+            ml_summaries[mod_name] = summary
+        
+        # Overall summary if multiple modalities
+        if len(ml_summaries) == 1:
+            return ml_summaries[list(ml_summaries.keys())[0]]
+        else:
+            return {
+                "status": "success",
+                "n_modalities": len(ml_summaries),
+                "modalities": ml_summaries,
+                "overall_ml_readiness": np.mean([
+                    s["ml_readiness"]["score"] for s in ml_summaries.values()
+                ])
+            }
 
     def get_technical_summary(self) -> str:
         """
@@ -1560,26 +2142,3 @@ class DataManagerV2:
                 return 'affinity_proteomics'
         
         return 'unknown'
-
-    # ========================================
-    # LEGACY COMPATIBILITY METHODS
-    # ========================================
-
-    def list_processed_geo_datasets(self) -> List[Dict[str, Any]]:
-        """List GEO datasets with stored metadata."""
-        geo_datasets = []
-        
-        for dataset_id, info in self.metadata_store.items():
-            if dataset_id.startswith('GSE'):
-                metadata = info.get('metadata', {})
-                geo_datasets.append({
-                    "gse_id": dataset_id,
-                    "title": metadata.get('title', 'Unknown'),
-                    "n_samples": len(metadata.get('samples', {})),
-                    "processing_date": info.get('fetch_timestamp', 'Unknown'),
-                    "modality_loaded": dataset_id.lower() in [m.lower() for m in self.modalities.keys()]
-                })
-        
-        # Sort by processing date (most recent first)
-        geo_datasets.sort(key=lambda x: x['processing_date'], reverse=True)
-        return geo_datasets
