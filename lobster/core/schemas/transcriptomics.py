@@ -8,7 +8,7 @@ validation rules.
 
 from typing import Any, Dict, List, Optional
 
-from .validation import FlexibleValidator
+from lobster.core.schemas.validation import FlexibleValidator
 from lobster.core.interfaces.validator import ValidationResult
 
 

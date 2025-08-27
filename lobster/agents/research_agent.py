@@ -479,7 +479,7 @@ search_datasets_directly(
     query="single-cell RNA-seq tumor microenvironment",
     data_type="geo",
     max_results=8,
-    filters='{"organism": "human", "year": "2023"}'
+    filters='{{"organism": "human", "year": "2023"}}'
 )
 
 # Find publications associated with interesting datasets  
@@ -498,7 +498,7 @@ find_marker_genes(
 search_literature(
     query="CD8 T cell markers cancer immunotherapy",
     max_results=5,
-    filters='{"date_range": {"start": "2022", "end": "2024"}}'
+    filters='{{"date_range": {{"start": "2022", "end": "2024"}}}}'
 )
 ```
 

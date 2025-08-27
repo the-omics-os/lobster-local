@@ -37,7 +37,7 @@ class ModelConfig:
     model_id: str
     tier: ModelTier
     temperature: float = 1.0
-    region: str = "us-east-1"
+    region: str = "us-east-2"
     description: str = ""
     
     def __post_init__(self):
@@ -180,7 +180,7 @@ class LobsterAgentConfigurator:
         "singlecell_expert", 
         "bulk_rnaseq_expert",
         "method_agent",
-        "research_expert",
+        "research_agent",
         "data_expert"
     ]
     
@@ -192,16 +192,16 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-5-haiku",
             "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-3-5-haiku"
+            "research_agent": "claude-3-5-haiku"
         },
         
         "production": {
-            "supervisor": "claude-3-5-sonnet-v2",
-            "singlecell_expert": "claude-4-opus",
-            "bulk_rnaseq_expert": "claude-3-5-sonnet-v2",
-            "method_agent": "claude-3-5-sonnet",
-            "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-3-5-sonnet"
+            "supervisor": "claude-3-7-sonnet",
+            "singlecell_expert": "claude-4-sonnet",
+            "bulk_rnaseq_expert": "claude-4-sonnet",
+            "method_agent": "claude-3-7-sonnet",
+            "data_expert": "claude-3-7-sonnet",
+            "research_agent": "claude-3-7-sonnet"
         },
         
         "high-performance": {
@@ -210,7 +210,7 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-opus",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-3-5-haiku"
+            "research_agent": "claude-3-5-haiku"
         },
         
         "ultra-performance": {
@@ -219,7 +219,7 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-sonnet",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
-            "research_expert": "claude-4-sonnet"
+            "research_agent": "claude-4-sonnet"
         },
         
         "cost-optimized": {
@@ -228,7 +228,7 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-haiku",
             "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-3-haiku"
+            "research_agent": "claude-3-haiku"
         },
         
         "heavyweight": {
@@ -237,7 +237,7 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-1-opus",
             "method_agent": "claude-4-opus",
             "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-4-opus"
+            "research_agent": "claude-4-opus"
         },
         
         "eu-compliant": {
@@ -246,7 +246,7 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
             "method_agent": "claude-3-5-sonnet-eu",
             "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-3-5-sonnet-eu"
+            "research_agent": "claude-3-5-sonnet-eu"
         },
         
         "eu-high-performance": {
@@ -255,7 +255,7 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-opus-eu",
             "method_agent": "claude-4-opus-eu",
             "data_expert": "claude-3-5-haiku",
-            "research_expert": "claude-3-5-sonnet-v2-eu"
+            "research_agent": "claude-3-5-sonnet-v2-eu"
         }
     }
     

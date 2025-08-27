@@ -18,7 +18,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 ##########################################
 ##########################################
 # Import required components
-from lobster.core.data_manager import DataManager
+from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.agents.graph import create_bioinformatics_graph
 
 
@@ -34,7 +34,7 @@ def generate_graph_image(output_path=None, display_image=False):
         Path to the generated image file
     """
     print("Initializing data manager...")
-    data_manager = DataManager()
+    data_manager = DataManagerV2()
     
     print("Creating bioinformatics graph...")
     # Create graph with minimal dependencies
@@ -64,17 +64,6 @@ def generate_graph_image(output_path=None, display_image=False):
         f.write(png_data)
     
     print(f"Graph diagram saved to: {output_path}")
-    
-    # Display the image if requested and running in IPython
-    if display_image:
-        try:
-            from IPython.display import display, Image
-            print("Displaying image...")
-            display(Image(png_data))
-        except ImportError:
-            print("IPython not available. Image saved but cannot be displayed.")
-        except Exception as e:
-            print(f"Error displaying image: {e}")
     
     return output_path
 
