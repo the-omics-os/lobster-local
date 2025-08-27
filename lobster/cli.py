@@ -84,7 +84,7 @@ current_directory = Path.cwd()
 
 def init_client(
     workspace: Optional[Path] = None,
-    reasoning: bool = True,
+    reasoning: bool = False,
     debug: bool = False
 ) -> AgentClient:
     """Initialize the agent client."""
@@ -420,7 +420,7 @@ def display_status(client: AgentClient):
 @app.command()
 def chat(
     workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
-    reasoning: bool = typer.Option(True, "--reasoning/--no-reasoning", help="Show agent reasoning"),
+    reasoning: bool = typer.Option(False, "--reasoning", is_flag=True, help="Show agent reasoning"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with Langfuse")
 ):
     """
@@ -1292,7 +1292,7 @@ def test(
         if agent:
             # Test specific agent
             try:
-                config = configurator.get_agent_config(agent)
+                config = configurator.get_agent_model_config(agent)
                 params = configurator.get_llm_params(agent)
                 
                 console.print(f"\n[green]✅ Agent '{agent}' configuration is valid[/green]")
@@ -1313,7 +1313,7 @@ def test(
             
             for agent_name in available_agents:
                 try:
-                    config = configurator.get_agent_config(agent_name)
+                    config = configurator.get_agent_model_config(agent_name)
                     params = configurator.get_llm_params(agent_name)
                     console.print(f"   [green]✅ {agent_name}: {config.model_config.model_id}[/green]")
                 except Exception as e:

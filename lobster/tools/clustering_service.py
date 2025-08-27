@@ -375,7 +375,7 @@ class ClusteringService:
 
     def _create_umap_plot(self, adata: sc.AnnData) -> go.Figure:
         """
-        Create UMAP plot from clustering results.
+        Create high-quality UMAP plot from clustering results.
 
         Args:
             adata: AnnData object with clustering results
@@ -383,10 +383,11 @@ class ClusteringService:
         Returns:
             go.Figure: Plotly figure with UMAP plot
         """
-        logger.info("Creating UMAP visualization")
+        logger.info("Creating high-quality UMAP visualization")
 
         umap_coords = adata.obsm["X_umap"]
         clusters = adata.obs["leiden"].astype(str)
+        n_cells = len(clusters)
 
         # Create a colormap similar to those in the publication
         n_clusters = len(adata.obs["leiden"].unique())
@@ -397,37 +398,79 @@ class ClusteringService:
         else:
             color_map = px.colors.qualitative.Alphabet
 
+        # Dynamic marker sizing based on number of cells for optimal visibility
+        if n_cells < 1000:
+            marker_size = 8
+        elif n_cells < 5000:
+            marker_size = 6
+        elif n_cells < 10000:
+            marker_size = 5
+        else:
+            marker_size = 4
+
         fig = px.scatter(
             x=umap_coords[:, 0],
             y=umap_coords[:, 1],
             color=clusters,
             title="UMAP Visualization with Leiden Clusters",
             labels={"x": "UMAP_1", "y": "UMAP_2", "color": "Cluster"},
-            width=800,
-            height=700,
+            width=1200,  # Increased from 800
+            height=1000,  # Increased from 700
             color_discrete_sequence=color_map,
         )
 
-        fig.update_traces(marker=dict(size=4, opacity=0.8))
+        fig.update_traces(
+            marker=dict(
+                size=marker_size,
+                opacity=0.7,
+                line=dict(width=0.5, color='rgba(50,50,50,0.4)')  # Add subtle borders
+            )
+        )
+        
         fig.update_layout(
-            legend_title="Cluster",
-            font=dict(size=12),
-            margin=dict(l=40, r=40, t=50, b=40),
+            title=dict(
+                text="UMAP Visualization with Leiden Clusters",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,  # Center the title
+                xanchor='center'
+            ),
+            legend_title=dict(
+                text="Cluster",
+                font=dict(size=16, family="Arial, sans-serif")
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            margin=dict(l=80, r=150, t=80, b=80),  # Increased margins
             legend=dict(
                 orientation="v",
                 yanchor="top",
-                y=0.99,
-                xanchor="right",
-                x=1.15,
+                y=0.98,
+                xanchor="left",
+                x=1.02,
                 itemsizing="constant",
+                font=dict(size=14),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="rgba(0,0,0,0.2)",
+                borderwidth=1
             ),
+            xaxis=dict(
+                title=dict(text="UMAP_1", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            yaxis=dict(
+                title=dict(text="UMAP_2", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white"
         )
 
         return fig
 
     def _create_batch_umap(self, adata: sc.AnnData, batch_key: str) -> go.Figure:
         """
-        Create UMAP plot colored by batch.
+        Create high-quality UMAP plot colored by batch.
 
         Args:
             adata: AnnData object with clustering results
@@ -436,10 +479,11 @@ class ClusteringService:
         Returns:
             go.Figure: Plotly figure with batch-colored UMAP plot
         """
-        logger.info(f"Creating batch-colored UMAP visualization using {batch_key}")
+        logger.info(f"Creating high-quality batch-colored UMAP visualization using {batch_key}")
 
         umap_coords = adata.obsm["X_umap"]
         batches = adata.obs[batch_key].astype(str)
+        n_cells = len(batches)
 
         # Create color map
         n_batches = len(adata.obs[batch_key].unique())
@@ -448,37 +492,79 @@ class ClusteringService:
         else:
             color_map = px.colors.qualitative.Alphabet
 
+        # Dynamic marker sizing based on number of cells for optimal visibility
+        if n_cells < 1000:
+            marker_size = 8
+        elif n_cells < 5000:
+            marker_size = 6
+        elif n_cells < 10000:
+            marker_size = 5
+        else:
+            marker_size = 4
+
         fig = px.scatter(
             x=umap_coords[:, 0],
             y=umap_coords[:, 1],
             color=batches,
             title=f"UMAP Visualization by {batch_key}",
             labels={"x": "UMAP_1", "y": "UMAP_2", "color": batch_key},
-            width=800,
-            height=700,
+            width=1200,  # Increased from 800
+            height=1000,  # Increased from 700
             color_discrete_sequence=color_map,
         )
 
-        fig.update_traces(marker=dict(size=4, opacity=0.8))
+        fig.update_traces(
+            marker=dict(
+                size=marker_size,
+                opacity=0.7,
+                line=dict(width=0.5, color='rgba(50,50,50,0.4)')  # Add subtle borders
+            )
+        )
+        
         fig.update_layout(
-            legend_title=batch_key,
-            font=dict(size=12),
-            margin=dict(l=40, r=40, t=50, b=40),
+            title=dict(
+                text=f"UMAP Visualization by {batch_key}",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,  # Center the title
+                xanchor='center'
+            ),
+            legend_title=dict(
+                text=batch_key,
+                font=dict(size=16, family="Arial, sans-serif")
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            margin=dict(l=80, r=150, t=80, b=80),  # Increased margins
             legend=dict(
                 orientation="v",
                 yanchor="top",
-                y=0.99,
-                xanchor="right",
-                x=1.15,
+                y=0.98,
+                xanchor="left",
+                x=1.02,
                 itemsizing="constant",
+                font=dict(size=14),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="rgba(0,0,0,0.2)",
+                borderwidth=1
             ),
+            xaxis=dict(
+                title=dict(text="UMAP_1", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            yaxis=dict(
+                title=dict(text="UMAP_2", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            plot_bgcolor="white",
+            paper_bgcolor="white"
         )
 
         return fig
 
     def _create_cluster_distribution_plot(self, adata: sc.AnnData) -> go.Figure:
         """
-        Create a cluster size distribution plot.
+        Create a high-quality cluster size distribution plot.
 
         Args:
             adata: AnnData object with clustering results
@@ -486,10 +572,17 @@ class ClusteringService:
         Returns:
             go.Figure: Plotly figure with cluster distribution plot
         """
-        logger.info("Creating cluster size distribution plot")
+        logger.info("Creating high-quality cluster size distribution plot")
 
         # Get cluster counts
         cluster_counts = adata.obs["leiden"].value_counts().sort_index()
+        
+        # Create gradient colors for better visual appeal
+        n_clusters = len(cluster_counts)
+        colors = px.colors.sample_colorscale(
+            "viridis", 
+            [i/(n_clusters-1) for i in range(n_clusters)] if n_clusters > 1 else [0]
+        )
 
         # Create bar plot
         fig = go.Figure()
@@ -497,21 +590,44 @@ class ClusteringService:
             go.Bar(
                 x=cluster_counts.index.astype(str),
                 y=cluster_counts.values,
-                marker_color="steelblue",
+                marker=dict(
+                    color=colors,
+                    line=dict(color='rgba(50,50,50,0.8)', width=1)
+                ),
+                text=cluster_counts.values,
+                textposition="outside",
+                textfont=dict(size=12, color="black"),
+                hovertemplate="<b>Cluster %{x}</b><br>" +
+                            "Cells: %{y}<br>" +
+                            "Percentage: %{customdata:.1f}%<extra></extra>",
+                customdata=[(count/cluster_counts.sum()*100) for count in cluster_counts.values]
             )
         )
 
         fig.update_layout(
-            title="Cluster Size Distribution",
-            xaxis_title="Cluster",
-            yaxis_title="Number of Cells",
-            width=800,
-            height=500,
-            yaxis=dict(
-                type="log"
-                if max(cluster_counts) / min(cluster_counts) > 100
-                else "linear"
+            title=dict(
+                text="Cluster Size Distribution",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
             ),
+            xaxis=dict(
+                title=dict(text="Cluster", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            yaxis=dict(
+                title=dict(text="Number of Cells", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)",
+                type="log" if max(cluster_counts) / min(cluster_counts) > 100 else "linear"
+            ),
+            width=1000,  # Increased from 800
+            height=700,   # Increased from 500
+            font=dict(size=14, family="Arial, sans-serif"),
+            margin=dict(l=80, r=80, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
             showlegend=False,
         )
 

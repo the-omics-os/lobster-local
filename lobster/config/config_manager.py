@@ -80,7 +80,7 @@ def test_configuration(profile: str, agent: str = None):
         if agent:
             # Test specific agent
             try:
-                config = configurator.get_agent_config(agent)
+                config = configurator.get_agent_model_config(agent)
                 params = configurator.get_llm_params(agent)
                 
                 print_colored(f"\n✅ Agent '{agent}' configuration is valid", "green")
@@ -101,7 +101,7 @@ def test_configuration(profile: str, agent: str = None):
             
             for agent_name in available_agents:
                 try:
-                    config = configurator.get_agent_config(agent_name)
+                    config = configurator.get_agent_model_config(agent_name)
                     params = configurator.get_llm_params(agent_name)
                     print_colored(f"   ✅ {agent_name}: {config.model_config.model_id}", "green")
                 except Exception as e:

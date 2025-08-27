@@ -47,8 +47,8 @@ class ModelConfig:
             self.tier = ModelTier(self.tier)
 
 @dataclass
-class AgentConfig:
-    """Configuration for a specific agent."""
+class AgentModelConfig:
+    """Model configuration for a specific agent."""
     name: str
     model_config: ModelConfig
     fallback_model: Optional[str] = None
@@ -86,14 +86,6 @@ class LobsterAgentConfigurator:
             description="Fast, cost-effective Claude 3.5 Haiku for simple tasks"
         ),
         
-        "claude-3-5-sonnet": ModelConfig(
-            provider=ModelProvider.BEDROCK_ANTHROPIC,
-            model_id="us.anthropic.claude-3-5-sonnet-20240620-v1:0",
-            tier=ModelTier.STANDARD,
-            temperature=1.0,
-            description="Enhanced Claude 3.5 Sonnet with improved performance"
-        ),
-        
         "claude-3-5-sonnet-v2": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -108,15 +100,6 @@ class LobsterAgentConfigurator:
             tier=ModelTier.STANDARD,
             temperature=1.0,
             description="Next-generation Claude 4 Sonnet model"
-        ),
-        
-        # Anthropic Claude Models - Heavy (Opus family)
-        "claude-3-opus": ModelConfig(
-            provider=ModelProvider.BEDROCK_ANTHROPIC,
-            model_id="us.anthropic.claude-3-opus-20240229-v1:0",
-            tier=ModelTier.HEAVY,
-            temperature=1.0,
-            description="Most capable Claude 3 Opus for complex analysis"
         ),
         
         "claude-4-opus": ModelConfig(
@@ -152,15 +135,6 @@ class LobsterAgentConfigurator:
             temperature=1.0,
             region="eu-central-1",
             description="EU region Claude 3.5 Haiku model"
-        ),
-        
-        "claude-3-5-sonnet-eu": ModelConfig(
-            provider=ModelProvider.BEDROCK_ANTHROPIC,
-            model_id="eu.anthropic.claude-3-5-sonnet-20240620-v1:0",
-            tier=ModelTier.STANDARD,
-            temperature=1.0,
-            region="eu-central-1",
-            description="EU region Claude 3.5 Sonnet model"
         ),
         
         "claude-3-5-sonnet-v2-eu": ModelConfig(
@@ -203,11 +177,10 @@ class LobsterAgentConfigurator:
     # Default agents configuration - modify this to add/remove agents dynamically
     DEFAULT_AGENTS = [
         "supervisor",
-        "transcriptomics_expert",  # Legacy support
         "singlecell_expert", 
         "bulk_rnaseq_expert",
         "method_agent",
-        "general_conversation",
+        "research_expert",
         "data_expert"
     ]
     
@@ -215,86 +188,78 @@ class LobsterAgentConfigurator:
     TESTING_PROFILES = {
         "development": {
             "supervisor": "claude-3-5-haiku",
-            "transcriptomics_expert": "claude-3-5-haiku",  # Legacy
             "singlecell_expert": "claude-3-5-haiku",
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-5-haiku",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-3-5-haiku"
+            "research_expert": "claude-3-5-haiku"
         },
         
         "production": {
             "supervisor": "claude-3-5-sonnet-v2",
-            "transcriptomics_expert": "claude-4-opus",  # Legacy
             "singlecell_expert": "claude-4-opus",
             "bulk_rnaseq_expert": "claude-3-5-sonnet-v2",
             "method_agent": "claude-3-5-sonnet",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-3-5-sonnet"
+            "research_expert": "claude-3-5-sonnet"
         },
         
         "high-performance": {
             "supervisor": "claude-4-opus",
-            "transcriptomics_expert": "claude-3-7-sonnet",  # Legacy
             "singlecell_expert": "claude-3-7-sonnet",
             "bulk_rnaseq_expert": "claude-4-opus",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-3-5-haiku"
+            "research_expert": "claude-3-5-haiku"
         },
         
         "ultra-performance": {
             "supervisor": "claude-4-sonnet",
-            "transcriptomics_expert": "claude-4-sonnet",  # Legacy
             "singlecell_expert": "claude-4-sonnet",
             "bulk_rnaseq_expert": "claude-4-sonnet",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
-            "general_conversation": "claude-4-sonnet"
+            "research_expert": "claude-4-sonnet"
         },
         
         "cost-optimized": {
             "supervisor": "claude-3-haiku",
-            "transcriptomics_expert": "claude-3-5-sonnet",  # Legacy
             "singlecell_expert": "claude-3-5-sonnet",
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-haiku",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-3-haiku"
+            "research_expert": "claude-3-haiku"
         },
         
         "heavyweight": {
             "supervisor": "claude-4-1-opus",
-            "transcriptomics_expert": "claude-4-1-opus",  # Legacy
             "singlecell_expert": "claude-4-1-opus",
             "bulk_rnaseq_expert": "claude-4-1-opus",
             "method_agent": "claude-4-opus",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-4-opus"
+            "research_expert": "claude-4-opus"
         },
         
         "eu-compliant": {
             "supervisor": "claude-3-5-sonnet-v2-eu",
-            "transcriptomics_expert": "claude-4-1-opus-eu",  # Legacy
             "singlecell_expert": "claude-4-1-opus-eu",
             "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
             "method_agent": "claude-3-5-sonnet-eu",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-3-5-sonnet-eu"
+            "research_expert": "claude-3-5-sonnet-eu"
         },
         
         "eu-high-performance": {
             "supervisor": "claude-3-7-sonnet-eu",
-            "transcriptomics_expert": "claude-3-7-sonnet-eu",  # Legacy
             "singlecell_expert": "claude-3-7-sonnet-eu",
             "bulk_rnaseq_expert": "claude-4-opus-eu",
             "method_agent": "claude-4-opus-eu",
             "data_expert": "claude-3-5-haiku",
-            "general_conversation": "claude-3-5-sonnet-v2-eu"
+            "research_expert": "claude-3-5-sonnet-v2-eu"
         }
     }
     
-    def __init__(self, profile: str = None, config_file: str = None):
+    def __init__(self, profile: str = None):
         """
         Initialize the configurator.
         
@@ -303,16 +268,8 @@ class LobsterAgentConfigurator:
             config_file: Path to custom configuration file
         """
         self.profile = profile or os.environ.get('GENIE_PROFILE', 'production')
-        self.config_file = config_file
         self._agent_configs = {}
-        self._load_configuration()
-    
-    def _load_configuration(self):
-        """Load configuration from profile or custom file."""
-        if self.config_file and Path(self.config_file).exists():
-            self._load_from_file()
-        else:
-            self._load_from_profile()
+        self._load_from_profile()
         
         # Apply environment overrides
         self._apply_env_overrides()
@@ -328,34 +285,9 @@ class LobsterAgentConfigurator:
             if model_preset not in self.MODEL_PRESETS:
                 raise ValueError(f"Unknown model preset: {model_preset}")
             
-            self._agent_configs[agent_name] = AgentConfig(
+            self._agent_configs[agent_name] = AgentModelConfig(
                 name=agent_name,
                 model_config=self.MODEL_PRESETS[model_preset]
-            )
-    
-    def _load_from_file(self):
-        """Load configuration from JSON file."""
-        with open(self.config_file, 'r') as f:
-            config_data = json.load(f)
-        
-        for agent_name, agent_data in config_data.get('agents', {}).items():
-            model_data = agent_data['model_config']
-            
-            model_config = ModelConfig(
-                provider=model_data['provider'],
-                model_id=model_data['model_id'],
-                tier=model_data['tier'],
-                temperature=model_data.get('temperature', 1.0),
-                region=model_data.get('region', 'us-east-1'),
-                description=model_data.get('description', '')
-            )
-            
-            self._agent_configs[agent_name] = AgentConfig(
-                name=agent_name,
-                model_config=model_config,
-                fallback_model=agent_data.get('fallback_model'),
-                enabled=agent_data.get('enabled', True),
-                custom_params=agent_data.get('custom_params', {})
             )
     
     def _apply_env_overrides(self):
@@ -385,15 +317,15 @@ class LobsterAgentConfigurator:
                 except ValueError:
                     pass
     
-    def get_agent_config(self, agent_name: str) -> AgentConfig:
+    def get_agent_model_config(self, agent_name: str) -> AgentModelConfig:
         """
-        Get configuration for a specific agent.
+        Get model configuration for a specific agent.
         
         Args:
             agent_name: Name of the agent
             
         Returns:
-            AgentConfig for the specified agent
+            AgentModelConfig for the specified agent
             
         Raises:
             KeyError: If agent configuration not found
@@ -413,7 +345,7 @@ class LobsterAgentConfigurator:
         Returns:
             ModelConfig for the specified agent
         """
-        return self.get_agent_config(agent_name).model_config
+        return self.get_agent_model_config(agent_name).model_config
     
     def get_llm_params(self, agent_name: str) -> Dict:
         """
@@ -520,7 +452,7 @@ def get_agent_configurator() -> LobsterAgentConfigurator:
         _configurator = LobsterAgentConfigurator()
     return _configurator
 
-def initialize_configurator(profile: str = None, config_file: str = None) -> LobsterAgentConfigurator:
+def initialize_configurator(profile: str = None) -> LobsterAgentConfigurator:
     """
     Initialize or reinitialize the global configurator.
     
@@ -532,5 +464,5 @@ def initialize_configurator(profile: str = None, config_file: str = None) -> Lob
         GenieAgentConfigurator instance
     """
     global _configurator
-    _configurator = LobsterAgentConfigurator(profile=profile, config_file=config_file)
+    _configurator = LobsterAgentConfigurator(profile=profile)
     return _configurator

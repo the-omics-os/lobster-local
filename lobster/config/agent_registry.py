@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 
 @dataclass
-class AgentConfig:
+class AgentRegistryConfig:
     """Configuration for an agent in the system."""
     name: str
     display_name: str
@@ -21,8 +21,8 @@ class AgentConfig:
 
 
 # Central registry of all agents in the system
-AGENT_REGISTRY: Dict[str, AgentConfig] = {
-    'data_expert_agent': AgentConfig(
+AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
+    'data_expert_agent': AgentRegistryConfig(
         name='data_expert_agent',
         display_name='Data Expert',
         description='Handles data fetching and download tasks',
@@ -30,7 +30,7 @@ AGENT_REGISTRY: Dict[str, AgentConfig] = {
         handoff_tool_name='handoff_to_data_expert',
         handoff_tool_description='Assign data fetching/download tasks to the data expert'
     ),
-    'singlecell_expert_agent': AgentConfig(
+    'singlecell_expert_agent': AgentRegistryConfig(
         name='singlecell_expert_agent',
         display_name='Single-Cell Expert',
         description='Handles single-cell RNA-seq analysis tasks',
@@ -38,7 +38,7 @@ AGENT_REGISTRY: Dict[str, AgentConfig] = {
         handoff_tool_name='handoff_to_singlecell_expert',
         handoff_tool_description='Assign single-cell RNA-seq analysis tasks to the single-cell expert'
     ),
-    'bulk_rnaseq_expert_agent': AgentConfig(
+    'bulk_rnaseq_expert_agent': AgentRegistryConfig(
         name='bulk_rnaseq_expert_agent',
         display_name='Bulk RNA-seq Expert',
         description='Handles bulk RNA-seq analysis tasks',
@@ -46,13 +46,21 @@ AGENT_REGISTRY: Dict[str, AgentConfig] = {
         handoff_tool_name='handoff_to_bulk_rnaseq_expert',
         handoff_tool_description='Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert'
     ),
-    'method_expert_agent': AgentConfig(
+    'research_agent': AgentRegistryConfig(
+        name='research_agent',
+        display_name='Research Agent',
+        description='Handles literature discovery and dataset identification tasks',
+        factory_function='lobster.agents.research_agent.research_agent',
+        handoff_tool_name='handoff_to_research_agent',
+        handoff_tool_description='Assign literature search and dataset discovery tasks to the research agent'
+    ),
+    'method_expert_agent': AgentRegistryConfig(
         name='method_expert_agent',
         display_name='Method Expert',
-        description='Handles literature and method-related tasks',
+        description='Handles computational method extraction and parameter analysis from publications',
         factory_function='lobster.agents.method_expert.method_expert',
         handoff_tool_name='handoff_to_method_expert',
-        handoff_tool_description='Assign literature/method tasks to the method expert'
+        handoff_tool_description='Assign computational parameter extraction tasks to the method expert'
     ),
     # 'machine_learning_expert_agent': AgentConfig(
     #     name='machine_learning_expert_agent',
@@ -74,13 +82,13 @@ def get_all_agent_names() -> list[str]:
     return list(AGENT_REGISTRY.keys())
 
 
-def get_worker_agents() -> Dict[str, AgentConfig]:
+def get_worker_agents() -> Dict[str, AgentRegistryConfig]:
     """Get only the worker agents (excluding system agents)."""
     return AGENT_REGISTRY.copy()
 
 
-def get_agent_config(agent_name: str) -> Optional[AgentConfig]:
-    """Get configuration for a specific agent."""
+def get_agent_registry_config(agent_name: str) -> Optional[AgentRegistryConfig]:
+    """Get registry configuration for a specific agent."""
     return AGENT_REGISTRY.get(agent_name)
 
 

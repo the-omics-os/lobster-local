@@ -1,185 +1,239 @@
 # Implementation Plan
 
-## Overview
-Refactor the GEO service to create a modular, robust system that integrates GEOparse with fallback mechanisms using helper files for comprehensive GEO data downloading and processing.
+## [Overview]
+Split the current method_expert agent into two specialized agents: a research_agent focused on literature discovery and dataset identification, and a refined method_expert focused purely on computational parameter extraction and methodology analysis.
 
-## Scope
-The implementation creates a layered architecture where GEOparse is the primary method, with sophisticated fallback mechanisms using geo_downloader.py and geo_parser.py helper files. The system handles both single-cell and bulk RNA-seq data with comprehensive error recovery and systematic naming conventions.
+This refactoring addresses the current architectural issue where method_expert handles two distinct responsibilities: literature search/dataset discovery and computational method extraction. The new architecture will create cleaner separation of concerns, improve modularity, and prepare the system for future expansion with additional literature sources (bioRxiv, medRxiv) and advanced tools like knowledge graphs.
 
-## Types
-Data structure and interface definitions for the modular GEO service system.
+The implementation involves creating a new research_agent, refactoring the method_expert to focus on parameter extraction, developing a modular publication service architecture to replace the current pubmed_service, and updating the supervisor's delegation logic to coordinate between the two agents effectively.
 
-**Core Data Types:**
-- `GEODataSource`: Enum defining data source types (GEOparse, SOFT, Supplementary, TAR)
-- `GEODataType`: Enum for data types (SingleCell, Bulk, Mixed)
-- `DownloadStrategy`: Configuration class for download preferences and fallback options
-- `GEOResult`: Result wrapper containing data, metadata, and processing information
-- `ProcessingPipeline`: Pipeline configuration for different data scenarios
+## [Types]
+New data structures and interfaces for the modular publication service and agent coordination.
 
-**Interface Definitions:**
+**Publication Provider Interface:**
 ```python
-class GEODataSource(Enum):
-    GEOPARSE = "geoparse"
-    SOFT_FILE = "soft_file" 
-    SUPPLEMENTARY = "supplementary"
-    TAR_ARCHIVE = "tar_archive"
-    SAMPLE_MATRICES = "sample_matrices"
-
-class GEODataType(Enum):
-    SINGLE_CELL = "single_cell"
-    BULK = "bulk"
-    MIXED = "mixed"
-
-class DownloadStrategy:
-    prefer_geoparse: bool = True
-    allow_fallback: bool = True
-    max_retries: int = 3
-    timeout_seconds: int = 300
+class BasePublicationProvider(ABC):
+    """Abstract base class for publication providers."""
+    @abstractmethod
+    def search_publications(self, query: str, **kwargs) -> str
+    @abstractmethod
+    def find_datasets_from_publication(self, identifier: str) -> str  
+    @abstractmethod
+    def extract_publication_metadata(self, identifier: str) -> str
 ```
 
-## Files
-Detailed file modifications and new file creation requirements.
+**Provider Registry:**
+```python
+class ProviderRegistry:
+    """Registry for managing publication providers."""
+    providers: Dict[str, BasePublicationProvider]
+    default_provider: str
+```
 
-**Modified Files:**
-- `lobster/tools/geo_service.py`: Complete refactoring with modular architecture
-  - Integrate geo_downloader.GEODownloadManager for fallback downloading
-  - Integrate geo_parser.GEOParser for fallback parsing
-  - Implement layered download strategy with proper error handling
-  - Add specialized methods for each of the 6 scenarios
-  - Maintain backward compatibility with existing DataManagerV2 integration
+**Agent State Enums:**
+```python
+class AgentType(Enum):
+    RESEARCH = "research_agent"
+    METHOD = "method_expert"
+    DATA = "data_expert"
+```
 
-**Helper Files Integration:**
-- `lobster/tools/geo_downloader.py`: Enhanced with better error reporting
-  - Add integration points for geo_service callback
-  - Improve download progress reporting
-  - Add validation for downloaded files
+**Publication Source Types:**
+```python
+class PublicationSource(Enum):
+    PUBMED = "pubmed"
+    BIORXIV = "biorxiv" 
+    MEDRXIV = "medrxiv"
+    ARXIV = "arxiv"
+```
 
-- `lobster/tools/geo_parser.py`: Enhanced parsing capabilities  
-  - Add better format detection
-  - Improve error handling and validation
-  - Add support for additional single-cell formats
+## [Files]
+File system changes including new files, modifications, and renames.
+
+**New Files to Create:**
+- `lobster/agents/research_agent.py` - New research agent for literature and dataset discovery
+- `lobster/tools/publication_service.py` - Modular publication service replacing pubmed_service
+- `lobster/tools/providers/base_provider.py` - Abstract base class for publication providers
+- `lobster/tools/providers/pubmed_provider.py` - PubMed-specific implementation
+- `lobster/tools/providers/biorxiv_provider.py` - bioRxiv stub implementation
+- `lobster/tools/providers/medrxiv_provider.py` - medRxiv stub implementation
+- `lobster/tools/providers/__init__.py` - Provider package initialization
+
+**Files to Modify:**
+- `lobster/agents/method_expert.py` - Remove literature search tools, focus on parameter extraction
+- `lobster/agents/data_expert.py` - Remove GEO discovery functions, keep download/management
+- `lobster/config/agent_registry.py` - Add research_agent configuration
+- `lobster/agents/supervisor.py` - Update delegation logic for two-agent workflow
+- `lobster/agents/graph.py` - Include research_agent in graph construction
+
+**Files to Rename:**
+- `lobster/tools/pubmed_service.py` → Archive for reference, replaced by new modular system
 
 **Configuration Updates:**
-- Update import statements to include helper classes
-- Add logging configuration for comprehensive tracking
-- Add settings for download timeouts and retry logic
+- Agent registry entries for research_agent
+- Supervisor prompt updates for new delegation patterns
+- Import path updates where pubmed_service was used
 
-## Functions
-Function-level modifications and new function implementations.
+## [Functions]
+Function-level changes across the affected components.
 
-**New Core Functions in GEOService:**
-- `download_with_strategy()`: Master function implementing layered download approach
-- `download_single_cell_sample()`: Specialized single-cell sample downloading (Scenario 4)
-- `download_bulk_dataset()`: Enhanced bulk data downloading (Scenario 5)  
-- `process_supplementary_tar_files()`: TAR file processing fallback (Scenario 6)
-- `_detect_and_route_data_type()`: Smart routing based on metadata analysis
-- `_create_fallback_pipeline()`: Dynamic fallback pipeline creation
-- `_integrate_helper_services()`: Helper service integration and coordination
+**New Functions in research_agent.py:**
+- `research_agent()` - Main agent factory function
+- `search_literature()` - Multi-source literature search tool
+- `find_datasets_from_publication()` - Dataset discovery from DOI/PMID
+- `find_marker_genes()` - Biological marker gene search (moved from method_expert)
+- `extract_publication_metadata()` - Publication metadata extraction
+- `discover_related_studies()` - Find related publications
 
-**Enhanced Existing Functions:**
-- `fetch_metadata_only()`: Enhanced with helper file fallback (Scenario 1)
-- `download_dataset()`: Complete refactoring with scenario routing (Scenario 2)
-- `_process_supplementary_files()`: Integration with geo_parser
-- `_validate_geo_metadata()`: Enhanced validation with data type detection
+**Modified Functions in method_expert.py:**
+- `method_expert()` - Remove literature search tools, keep parameter extraction tools
+- Remove: `search_pubmed()`, `find_geo_from_doi()`, `find_marker_genes()`
+- Keep: `find_method_parameters_from_doi()`, `find_protocol_information()`, `find_method_parameters_for_modality()`
+- Add: `extract_computational_parameters()` - Enhanced parameter extraction
+- Add: `analyze_methodology()` - Deep method analysis from pre-retrieved publications
 
-**Helper Integration Functions:**
-- `_download_with_geo_downloader()`: Wrapper for GEODownloadManager integration
-- `_parse_with_geo_parser()`: Wrapper for GEOParser integration
-- `_coordinate_fallback_strategy()`: Orchestrate fallback mechanisms
+**Modified Functions in data_expert.py:**
+- Remove: `find_geo_from_doi()`, `find_geo_from_pmid()` - These move to research_agent
+- Keep: All download and data management functions
+- Enhance: Better integration with research_agent discovered datasets
 
-## Classes
-Class structure modifications and new class definitions.
+**New Functions in publication_service.py:**
+- `PublicationService.__init__()` - Service initialization with provider registry
+- `search_across_sources()` - Multi-provider search orchestration
+- `find_datasets()` - Unified dataset discovery
+- `get_publication_metadata()` - Standardized metadata extraction
+- `register_provider()` - Dynamic provider registration
 
-**Enhanced GEOService Class:**
-- Add `geo_downloader: GEODownloadManager` attribute for fallback downloading
-- Add `geo_parser: GEOParser` attribute for fallback parsing
-- Add `download_strategy: DownloadStrategy` for configuration
-- Add `processing_pipeline: Dict[str, List[Callable]]` for scenario routing
-- Maintain existing `data_manager: DataManagerV2` integration
-- Add comprehensive error tracking and recovery mechanisms
+**Provider Functions:**
+- `PubMedProvider.search_publications()` - Enhanced PubMed search
+- `PubMedProvider.find_datasets_from_publication()` - GEO/SRA discovery
+- `BioRxivProvider.*` - Stub implementations for future development
+- `MedRxivProvider.*` - Stub implementations for future development
 
-**New Helper Integration Classes:**
-- `GEOServiceCoordinator`: Coordinates between main service and helper files
-- `ScenarioRouter`: Routes download requests to appropriate processing pipeline
-- `FallbackManager`: Manages fallback strategies and error recovery
+## [Classes]
+Class structure changes and new class definitions.
 
-**Enhanced Error Handling:**
-- Custom exception classes for different failure modes
-- Comprehensive logging at each processing stage
-- Graceful degradation when components fail
+**New Classes:**
 
-## Dependencies
-Package and library requirements for the enhanced system.
+`BasePublicationProvider` (Abstract):
+- Location: `lobster/tools/providers/base_provider.py`
+- Purpose: Abstract interface for all publication providers
+- Key Methods: `search_publications()`, `find_datasets_from_publication()`, `extract_publication_metadata()`
+- Inheritance: ABC base class
 
-**Required Imports:**
-```python
-# Existing imports (maintained)
-import json, os, re, tarfile, urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List, Union, Callable
-import numpy as np
-import pandas as pd
-try:
-    import GEOparse
-except ImportError:
-    GEOparse = None
+`PubMedProvider`:
+- Location: `lobster/tools/providers/pubmed_provider.py`  
+- Purpose: PubMed-specific implementation with enhanced features
+- Inherits: `BasePublicationProvider`
+- Key Methods: All abstract methods + PubMed-specific utilities
+- Integration: Uses existing PubMed functionality from current pubmed_service
 
-# New imports for helper integration
-from lobster.tools.geo_downloader import GEODownloadManager
-from lobster.tools.geo_parser import GEOParser
-from enum import Enum
-from dataclasses import dataclass
-import time
-from contextlib import contextmanager
-```
+`PublicationService`:
+- Location: `lobster/tools/publication_service.py`
+- Purpose: Main orchestrator for all publication operations
+- Key Methods: `search_across_sources()`, `register_provider()`, `get_available_sources()`
+- Composition: Contains provider registry and routing logic
 
-**External Dependencies (no changes):**
-- GEOparse: Primary GEO data access library
-- pandas, numpy: Data manipulation
-- requests: HTTP downloading
-- scipy: Sparse matrix handling for single-cell data
+`BioRxivProvider` & `MedRxivProvider`:
+- Location: `lobster/tools/providers/biorxiv_provider.py` and `medrxiv_provider.py`
+- Purpose: Stub implementations for future expansion
+- Inherits: `BasePublicationProvider`
+- Implementation: Minimal stubs that return "not implemented" messages
 
-## Testing
-Testing approach and validation strategies for the modular system.
+**Modified Classes:**
+
+`AgentConfig` updates in `agent_registry.py`:
+- Add research_agent configuration entry
+- Update method_expert description to reflect new focus
+
+**Removed Classes:**
+- None (current PubMedService class will be refactored into PubMedProvider)
+
+## [Dependencies]
+Package and import dependency modifications.
+
+**New Dependencies:**
+- No new external packages required
+- Enhanced internal module structure with providers package
+
+**Import Changes:**
+- `from lobster.tools.pubmed_service import PubMedService` → `from lobster.tools.publication_service import PublicationService`
+- Add provider imports: `from lobster.tools.providers import PubMedProvider, BioRxivProvider, MedRxivProvider`
+- Update agent imports to include research_agent
+
+**Internal Dependencies:**
+- research_agent depends on publication_service
+- method_expert no longer depends on pubmed_service
+- data_expert no longer imports publication-related functions
+- supervisor imports both research_agent and updated method_expert
+
+**Backward Compatibility:**
+- Maintain compatibility by keeping old pubmed_service functions accessible through publication_service
+- Gradual migration path for any external code using pubmed_service directly
+
+## [Testing]
+Comprehensive testing strategy for the refactored architecture.
+
+**Test File Requirements:**
+- `tests/test_research_agent.py` - Test new research agent functionality
+- `tests/test_publication_service.py` - Test modular publication service
+- `tests/test_providers/` - Directory for provider-specific tests
+- `tests/test_method_expert_refactored.py` - Test updated method expert
+- `tests/test_agent_coordination.py` - Test supervisor delegation between agents
 
 **Integration Testing:**
-- Test each of the 6 scenarios independently
-- Test fallback mechanisms under simulated failures
-- Test data consistency across different download methods
-- Verify DataManagerV2 integration maintains functionality
+- Test research_agent → method_expert workflow through supervisor
+- Test publication service with different providers
+- Test backward compatibility with existing workflows
+- Validate dataset discovery and parameter extraction pipeline
 
-**Validation Testing:**
-- Single-cell data format validation (10X, h5ad, etc.)
-- Bulk data format validation
-- Metadata consistency checks
-- Processing pipeline integrity
+**Test Data Requirements:**
+- Sample DOIs and PMIDs for testing publication retrieval
+- Mock responses for bioRxiv/medRxiv stub testing
+- Sample publication content for parameter extraction testing
 
-**Error Recovery Testing:**
-- Network failure simulation
-- Partial download recovery
-- Corrupted file handling
-- GEOparse library unavailability
+**Validation Strategies:**
+- Unit tests for each provider implementation
+- Integration tests for cross-agent workflows
+- Performance tests to ensure no regression in literature search speed
+- Functional tests for supervisor delegation logic
 
-## Implementation Order
-Sequential steps for implementing the modular GEO service.
+## [Implementation Order]
+Logical sequence to minimize conflicts and ensure successful integration.
 
-**Phase 1: Core Integration (Steps 1-3)**
-1. **Import Integration**: Add helper file imports and initialize integration points
-2. **Basic Fallback**: Implement basic fallback from GEOparse to helper files
-3. **Error Handling**: Add comprehensive error handling and logging framework
+**Phase 1: Foundation (Steps 1-3)**
+1. Create provider architecture and base classes
+2. Implement PubMedProvider by refactoring existing PubMedService functionality
+3. Create publication_service as orchestrator with provider registry
 
-**Phase 2: Scenario Implementation (Steps 4-6)**  
-4. **Scenario Routing**: Implement smart routing for different data types and scenarios
-5. **Single-Cell Enhancement**: Implement specialized single-cell download methods (Scenarios 4, 6)
-6. **Bulk Data Enhancement**: Refine bulk data downloading with helper integration (Scenario 5)
+**Phase 2: Agent Refactoring (Steps 4-6)**
+4. Create research_agent with literature search and dataset discovery tools
+5. Refactor method_expert to remove literature functions and focus on parameter extraction
+6. Update data_expert to remove publication-related functions
 
-**Phase 3: Advanced Features (Steps 7-9)**
-7. **TAR Processing**: Implement robust TAR supplementary file processing
-8. **Pipeline Coordination**: Add pipeline coordination and strategy management
-9. **DataManagerV2 Sync**: Ensure full compatibility with DataManagerV2 features
+**Phase 3: Integration (Steps 7-9)**
+7. Update agent_registry.py to include research_agent configuration
+8. Update supervisor.py with new delegation logic for research/method agent coordination
+9. Update graph.py to include research_agent in the multi-agent system
 
-**Phase 4: Validation & Testing (Steps 10-12)**
-10. **Integration Testing**: Test all scenarios with real GEO datasets
-11. **Performance Optimization**: Optimize download speeds and memory usage
-12. **Documentation**: Update docstrings and add usage examples
+**Phase 4: Testing and Validation (Steps 10-12)**
+10. Create comprehensive test suite for all components
+11. Validate agent coordination workflows through supervisor
+12. Test backward compatibility and migration path
+
+**Phase 5: Documentation and Cleanup (Steps 13-15)**
+13. Update all import statements and remove old pubmed_service references
+14. Create migration guide and update documentation
+15. Archive old pubmed_service.py and clean up unused code
+
+**Dependencies Between Steps:**
+- Steps 1-3 must complete before agent refactoring (Steps 4-6)
+- Agent refactoring must complete before integration (Steps 7-9)
+- All implementation phases must complete before testing (Steps 10-12)
+- Testing must complete before final cleanup (Steps 13-15)
+
+**Risk Mitigation:**
+- Each phase includes validation checkpoints
+- Maintain old code alongside new code until testing completes
+- Implement feature flags for gradual rollout if needed
+- Keep detailed rollback procedures for each phase

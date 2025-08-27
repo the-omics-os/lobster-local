@@ -354,13 +354,21 @@ AGENT_REGISTRY: Dict[str, AgentConfig] = {
         handoff_tool_name='handoff_to_bulk_rnaseq_expert',
         handoff_tool_description='Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert'
     ),
+    'research_agent': AgentConfig(
+        name='research_agent',
+        display_name='Research Agent',
+        description='Handles literature discovery and dataset identification tasks',
+        factory_function='lobster.agents.research_agent.research_agent',
+        handoff_tool_name='handoff_to_research_agent',
+        handoff_tool_description='Assign literature search and dataset discovery tasks to the research agent'
+    ),
     'method_expert_agent': AgentConfig(
         name='method_expert_agent',
         display_name='Method Expert',
-        description='Handles literature and method-related tasks',
+        description='Handles computational method extraction and parameter analysis from publications',
         factory_function='lobster.agents.method_expert.method_expert',
         handoff_tool_name='handoff_to_method_expert',
-        handoff_tool_description='Assign literature/method tasks to the method expert'
+        handoff_tool_description='Assign computational parameter extraction tasks to the method expert'
     ),
 }
 ```

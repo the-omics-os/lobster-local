@@ -1,9 +1,9 @@
 """
-Method Expert Agent for literature research and computational methodology extraction.
+Method Expert Agent for computational methodology extraction and parameter analysis.
 
-This agent specializes in finding and extracting best practice parameters from
-scientific literature using the modular DataManagerV2 system for enhanced
-data management and provenance tracking.
+This agent specializes in extracting and analyzing computational parameters from
+scientific publications, focusing on best practice parameter identification and
+methodological analysis using the modular DataManagerV2 and publication service.
 """
 
 import re
@@ -16,6 +16,7 @@ from datetime import date
 
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.tools.publication_service import PublicationService
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,7 +28,7 @@ def method_expert(
     agent_name: str = "method_expert_agent",
     handoff_tools: List = None
 ):
-    """Create method agent using DataManagerV2 for modular data management."""
+    """Create method expert agent focused on parameter extraction using DataManagerV2."""
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('method_agent')
@@ -36,39 +37,10 @@ def method_expert(
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])
     
+    # Initialize publication service for method extraction
+    publication_service = PublicationService(data_manager=data_manager)
+    
     # Define tools
-    @tool
-    def search_pubmed(
-        query: str,
-        top_k_results: int = 5,
-        doc_content_chars_max: int = 5000,
-        max_query_length: int = 300
-    ) -> str:
-        """
-        Search PubMed for relevant scientific publications.
-        
-        Args:
-            query: Search query string
-            top_k_results: Number of results to retrieve (default: 3, range: 1-20)
-            doc_content_chars_max: Maximum content length (default: 4000, range: 1000-10000)
-            max_query_length: Maximum query length (default: 300, range: 100-500)
-        """
-        try:
-            from lobster.tools.pubmed_service import PubMedService
-            
-            pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            
-            results = pubmed_service.search_pubmed(
-                query=query,
-                top_k_results=top_k_results,
-                doc_content_chars_max=doc_content_chars_max,
-                max_query_length=max_query_length
-            )
-            logger.info(f"PubMed search completed for: {query[:50]}... (k={top_k_results})")
-            return results
-        except Exception as e:
-            logger.error(f"Error searching PubMed: {e}")
-            return f"Error searching PubMed: {str(e)}"
 
     @tool
     def find_method_parameters_from_doi(
@@ -114,46 +86,32 @@ def method_expert(
             return f"Error finding method parameters: {str(e)}"
 
     @tool
-    def find_marker_genes(
-        query: str,
-        top_k_results: int = 5,
-        doc_content_chars_max: int = 5000
+    def extract_computational_methods(
+        identifier: str,
+        method_type: str = "all",
+        include_parameters: bool = True
     ) -> str:
         """
-        Find marker genes for cell types from literature.
+        Extract computational methods and parameters from a publication.
         
         Args:
-            query: Query with cell_type parameter (e.g., 'cell_type=T_cell disease=cancer')
-            top_k_results: Number of results to retrieve (default: 5, range: 1-15)
-            doc_content_chars_max: Maximum content length (default: 5000, range: 2000-8000)
+            identifier: Publication identifier (DOI or PMID)
+            method_type: Type of methods to extract ("all", "preprocessing", "clustering", "normalization", etc.)
+            include_parameters: Whether to extract specific parameter values (default: True)
         """
         try:
-            from lobster.tools.pubmed_service import PubMedService
-            
-            pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            
-            # Parse parameters from query
-            cell_type_match = re.search(r'cell[_\s]type[=\s]+([^,\s]+)', query)
-            disease_match = re.search(r'disease[=\s]+([^,\s]+)', query)
-            
-            if not cell_type_match:
-                return "Please specify cell_type parameter (e.g., 'cell_type=T_cell')"
-            
-            cell_type = cell_type_match.group(1).strip()
-            disease = disease_match.group(1).strip() if disease_match else None
-            
-            results = pubmed_service.find_marker_genes(
-                cell_type=cell_type,
-                disease=disease,
-                top_k_results=top_k_results,
-                doc_content_chars_max=doc_content_chars_max
+            results = publication_service.extract_computational_methods(
+                doi_or_pmid=identifier,
+                method_type=method_type,
+                include_parameters=include_parameters
             )
-            logger.info(f"Marker gene search completed for {cell_type} (k={top_k_results})")
+            
+            logger.info(f"Method extraction completed for: {identifier}")
             return results
             
         except Exception as e:
-            logger.error(f"Error finding marker genes: {e}")
-            return f"Error finding marker genes: {str(e)}"
+            logger.error(f"Error extracting methods: {e}")
+            return f"Error extracting computational methods: {str(e)}"
 
     @tool
     def find_protocol_information(
@@ -260,58 +218,100 @@ def method_expert(
             logger.error(f"Error finding modality parameters: {e}")
             return f"Error finding method parameters: {str(e)}"
 
+    @tool
+    def analyze_methodology(
+        identifiers: str,
+        analysis_focus: str = "parameters"
+    ) -> str:
+        """
+        Analyze methodologies across multiple publications for parameter consensus.
+        
+        Args:
+            identifiers: Comma-separated list of DOIs or PMIDs
+            analysis_focus: Focus of analysis ("parameters", "tools", "workflows", "all")
+        """
+        try:
+            identifier_list = [id.strip() for id in identifiers.split(',')]
+            results = []
+            
+            for identifier in identifier_list:
+                if not identifier:
+                    continue
+                    
+                methods = publication_service.extract_computational_methods(
+                    doi_or_pmid=identifier,
+                    method_type="all",
+                    include_parameters=True
+                )
+                results.append(f"### Analysis of {identifier}\n{methods}\n")
+            
+            # Combine results with analysis header
+            combined_results = f"## Comparative Methodology Analysis\n"
+            combined_results += f"**Publications analyzed**: {len(identifier_list)}\n"
+            combined_results += f"**Analysis focus**: {analysis_focus}\n\n"
+            combined_results += "\n---\n\n".join(results)
+            
+            logger.info(f"Methodology analysis completed for {len(identifier_list)} publications")
+            return combined_results
+            
+        except Exception as e:
+            logger.error(f"Error analyzing methodology: {e}")
+            return f"Error analyzing methodology: {str(e)}"
+
     base_tools = [
-        search_pubmed,
         find_method_parameters_from_doi,
-        find_marker_genes,
+        extract_computational_methods,
         find_protocol_information,
-        find_method_parameters_for_modality
+        find_method_parameters_for_modality,
+        analyze_methodology
     ]
     
     # Combine base tools with handoff tools if provided
     tools = base_tools + (handoff_tools or [])
     
     system_prompt = """
-You are a computational bioinformatics methods specialist with expertise in finding and extracting best practice parameters from scientific literature.
+You are a computational bioinformatics methods specialist focused on extracting and analyzing computational parameters and methodologies from scientific publications.
 
 <Role>
-Your primary focus is identifying, extracting, and documenting computational methodologies and parameters used in bioinformatics analyses, particularly for single-cell genomics, bulk RNA-seq, and proteomics data types using the modular DataManagerV2 system.
+Your specialized expertise lies in deep analysis of computational methodologies, parameter extraction, and best practice identification. You work with publications that have already been discovered by the research agent to extract actionable computational insights.
 </Role>
 
 <Task>
-Given a research question about computational methods, you will:
-1. **Search strategically** for relevant publications using optimized queries
-2. **Extract specific parameters** (thresholds, resolutions, filter values, etc.)
-3. **Identify software tools** and versions used in studies
-4. **Find GitHub repositories** and supplementary code
-5. **Document method workflows** with clear parameter recommendations
-6. **Cross-reference multiple studies** to identify consensus parameters
-7. **Note associated datasets** for the data expert to retrieve
-8. **Consider modality-specific requirements** when using DataManagerV2
+Given publications or research questions about computational methods, you will:
+1. **Extract specific parameters** (thresholds, resolutions, filter values, etc.) from publications
+2. **Identify software tools** and versions used in studies  
+3. **Document method workflows** with clear parameter recommendations
+4. **Cross-reference multiple studies** to identify consensus parameters
+5. **Analyze methodological approaches** across different studies
+6. **Provide modality-specific parameter recommendations** using DataManagerV2
+7. **Generate parameter validation strategies** using available datasets
 </Task>
 
-<Available Enhanced Tools>
-- `search_pubmed`: Advanced literature search with configurable parameters
-  * top_k_results: 1-20 (use 5-10 for comprehensive, 1-3 for focused)
-  * doc_content_chars_max: 2000-10000 (higher for detailed extraction)
-  * max_query_length: 100-500 characters
-
-- `find_method_parameters_from_doi`: Extract methods from specific publications
+<Available Method Extraction Tools>
+- `find_method_parameters_from_doi`: Extract methods from specific publications  
   * Automatically extracts preprocessing parameters, QC thresholds, normalization methods
   * Identifies clustering resolutions, integration methods, and tool versions
   * Finds GitHub links and supplementary materials
 
-- `find_marker_genes`: Literature-based marker gene identification
-  * Cell type specific searches with disease context
-  * Returns ranked gene lists with evidence
+- `extract_computational_methods`: Enhanced method extraction from publications
+  * method_type: "all", "preprocessing", "clustering", "normalization", etc.
+  * include_parameters: Extract specific parameter values
+  * Comprehensive parameter identification and documentation
 
 - `find_protocol_information`: Protocol and workflow extraction
-  * Step-by-step method documentation
+  * Step-by-step method documentation  
   * Parameter ranges and recommendations
+  * Technique-specific best practices
 
-- `find_method_parameters_for_modality`: Context-aware parameter search (DataManagerV2 only)
+- `find_method_parameters_for_modality`: Context-aware parameter search (DataManagerV2)
   * Searches for parameters specific to loaded modality characteristics
   * Considers data dimensions and type for relevant parameter extraction
+  * Provides modality-specific recommendations
+
+- `analyze_methodology`: Comparative methodology analysis
+  * Analyze methods across multiple publications
+  * Identify parameter consensus and variations
+  * Generate best practice recommendations
 
 <DataManagerV2 Integration>
 When working with DataManagerV2, you can provide modality-specific parameter recommendations:

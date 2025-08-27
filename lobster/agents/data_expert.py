@@ -135,57 +135,6 @@ Use this modality for quality control, filtering, or downstream analysis."""
             logger.error(f"Error processing GEO dataset {geo_id}: {e}")
             return f"Error processing dataset: {str(e)}"
 
-    @tool
-    def find_geo_from_doi(doi: str) -> str:
-        """
-        Find GEO accession numbers associated with a DOI.
-        
-        Args:  
-            doi: Digital Object Identifier (e.g., 10.1234/example)
-            
-        Returns:
-            str: List of GEO accessions found for the DOI
-        """
-        try:
-            if not doi.startswith("10."):
-                return "Invalid DOI format. DOI should start with '10.'"
-            
-            from lobster.tools.pubmed_service import PubMedService
-            
-            # Use PubMedService with DataManagerV2
-            pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            results = pubmed_service.find_geo_from_doi(doi)
-            
-            logger.info(f"GEO search completed for DOI: {doi}")
-            return results
-        except Exception as e:
-            logger.error(f"Error finding GEO from DOI: {e}")
-            return f"Error finding GEO datasets: {str(e)}"
-
-    @tool
-    def find_geo_from_pmid(pmid: str) -> str:
-        """
-        Find GEO accession numbers associated with a PMID.
-        
-        Args:  
-            PMID: Digital Object Identifier (e.g., 38297291)
-            
-        Returns:
-            str: List of GEO accessions found for the PMID
-        """
-        try:
-            
-            from lobster.tools.pubmed_service import PubMedService
-            
-            # Use PubMedService with DataManagerV2
-            pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            results = pubmed_service.find_geo_from_pmid(pmid)
-            
-            logger.info(f"GEO search completed for PMID: {pmid}")
-            return results
-        except Exception as e:
-            logger.error(f"Error finding GEO from pmid: {e}")
-            return f"Error finding GEO datasets: {str(e)}"
 
     @tool
     def get_data_summary(modality_name: str = "") -> str:
@@ -526,8 +475,6 @@ The MuData object contains all selected modalities and is ready for cross-modal 
         check_tmp_metadata_keys,
         fetch_geo_metadata,
         download_geo_dataset,
-        find_geo_from_doi,
-        find_geo_from_pmid,
         get_data_summary,
         upload_data_file,
         list_available_modalities,
@@ -593,24 +540,21 @@ The new DataManagerV2 uses a modular approach where each dataset is loaded as a 
 
 ## 1. DISCOVERY & EXPLORATION WORKFLOWS
 
-### Starting from a DOI OR ncbi link with a PMID (Literature-Based Discovery)
+### Starting with Dataset Accessions (Research Agent Discovery)
 ```bash
-# Step 1: Find datasets from a publication DOI or PMID
-find_geo_from_doi("10.1038/s41586-023-12345-6")
-or (if link is given; https://pubmed.ncbi.nlm.nih.gov/38297291/)
-find_geo_from_pmid("38297291")
+# Step 1: Receive dataset accessions from research_agent
+# (Dataset discovery is now handled by research_agent)
 
-# Step 2: Check current workspace status
+# Step 2: Check current workspace status  
 get_data_summary()  # Shows all loaded modalities
 
-# Step 3: Return back to the supervisor to confirm if you can download the data
+# Step 3: Fetch metadata for the dataset first
+fetch_geo_metadata("GSE123456")
 
-# Step 4: Get approval from supervisor and continue with Step 5:
+# Step 4: Download the dataset with appropriate modality type
+download_geo_dataset("GSE123456", modality_type="single_cell")
 
-# Step 5: Download discovered GEO dataset
-download_geo_dataset("GSE123456", modality_type=<available adapter names>)
-
-# Step 6: Verify and explore the loaded data
+# Step 5: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
 ```
 
@@ -723,7 +667,6 @@ load_modality_from_file("manual_load", "/path/to/file.csv", "transcriptomics_bul
 **get_data_summary()** - Use to check specific modality details or overview
 **get_adapter_info()** - Use when unsure about data types/formats
 **download_geo_dataset()** - Primary tool for GEO data acquisition
-**find_geo_from_doi()** - Use for literature-based dataset discovery
 **upload_data_file()** - Use for local files with auto-detection
 **load_modality_from_file()** - Use for expert/manual loading with specific adapters
 **create_mudata_from_modalities()** - Use for multi-modal integration

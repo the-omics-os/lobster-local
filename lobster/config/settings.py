@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Dict, Any
 from dotenv import load_dotenv
 from lobster.config.agent_config import initialize_configurator
-from lobster.config.agent_registry import get_all_agent_names, get_worker_agents, get_agent_config
 
 class Settings:
     """
@@ -44,8 +43,7 @@ class Settings:
         self.CPU = 8192
         # Initialize agent configurator based on environment
         profile = os.environ.get('GENIE_PROFILE', 'production')
-        config_file = os.environ.get('GENIE_CONFIG_FILE')
-        self.agent_configurator = initialize_configurator(profile=profile, config_file=config_file)
+        self.agent_configurator = initialize_configurator(profile=profile)
 
         # Base directories
         self.BASE_DIR = Path(__file__).resolve().parent.parent
@@ -115,15 +113,9 @@ class Settings:
         """
         try:
             return self.agent_configurator.get_llm_params(agent_name)
-        except KeyError:
+        except KeyError as k:
             # Fallback to legacy settings if agent not configured
-            return {
-                "model_id": self.LLM_MODEL,
-                "temperature": self.LLM_TEMPERATURE,
-                "region_name": self.REGION,
-                "aws_access_key_id": self.AWS_BEDROCK_ACCESS_KEY,
-                "aws_secret_access_key": self.AWS_BEDROCK_SECRET_ACCESS_KEY,
-            }
+            raise KeyError(f'{k}')
     
     def get_agent_model_config(self, agent_name: str):
         """

@@ -668,7 +668,113 @@ class PubMedService(BaseModel):
         
         return response
 
-    # Keep the original methods for backward compatibility but enhance them
+    def _load_with_params(self, query: str, top_k_results: int) -> Iterator[dict]:
+        """Load PubMed results with specific parameters."""
+        url = (
+            self.base_url_esearch +
+            f"db=pubmed&term={urllib.parse.quote(query)}" +
+            f"&retmode=json&retmax={top_k_results}&usehistory=y"
+        )
+        
+        if self.config.api_key:
+            url += f"&api_key={self.config.api_key}"
+        
+        result = urllib.request.urlopen(url)
+        text = result.read().decode("utf-8")
+        json_text = json.loads(text)
+        
+        if int(json_text["esearchresult"].get("count", "0")) == 0:
+            return
+        
+        webenv = json_text["esearchresult"]["webenv"]
+        for uid in json_text["esearchresult"]["idlist"]:
+            yield self.retrieve_article(uid, webenv)
+
+    def retrieve_article(self, uid: str, webenv: str) -> dict:
+        """Retrieve article metadata."""
+        url = (
+            self.base_url_efetch +
+            f"db=pubmed&retmode=xml&id={uid}&webenv={webenv}"
+        )
+        
+        if self.config.api_key:
+            url += f"&api_key={self.config.api_key}"
+        
+        retry = 0
+        while True:
+            try:
+                result = urllib.request.urlopen(url)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and retry < self.config.max_retry:
+                    time.sleep(self.config.sleep_time)
+                    self.config.sleep_time *= 2
+                    retry += 1
+                else:
+                    raise e
+        
+        xml_text = result.read().decode("utf-8")
+        text_dict = self.parse(xml_text)
+        return self._parse_article(uid, text_dict)            
+    
+    def _parse_article(self, uid: str, text_dict: dict) -> dict:
+        """Parse article metadata from XML."""
+        try:
+            ar = text_dict["PubmedArticleSet"]["PubmedArticle"]["MedlineCitation"]["Article"]
+        except KeyError:
+            try:
+                ar = text_dict["PubmedArticleSet"]["PubmedBookArticle"]["BookDocument"]
+            except KeyError:
+                return {
+                    "uid": uid,
+                    "Title": "Could not parse article",
+                    "Published": "",
+                    "Summary": "Article data could not be parsed."
+                }
+        
+        # Extract abstract
+        abstract_text = ar.get("Abstract", {}).get("AbstractText", [])
+        summaries = []
+        
+        if isinstance(abstract_text, list):
+            for txt in abstract_text:
+                if isinstance(txt, dict) and "#text" in txt:
+                    label = txt.get("@Label", "")
+                    text_content = txt["#text"]
+                    summaries.append(f"{label}: {text_content}" if label else text_content)
+                elif isinstance(txt, str):
+                    summaries.append(txt)
+        elif isinstance(abstract_text, dict) and "#text" in abstract_text:
+            summaries.append(abstract_text["#text"])
+        elif isinstance(abstract_text, str):
+            summaries.append(abstract_text)
+        
+        summary = "\n".join(summaries) if summaries else "No abstract available"
+        
+        # Get dates
+        pub_date = ""
+        if "ArticleDate" in ar:
+            a_d = ar["ArticleDate"]
+            if isinstance(a_d, list):
+                a_d = a_d[0]
+            pub_date = f"{a_d.get('Year', '')}-{a_d.get('Month', '')}-{a_d.get('Day', '')}"
+        elif "Journal" in ar and "JournalIssue" in ar["Journal"]:
+            p_d = ar["Journal"]["JournalIssue"].get("PubDate", {})
+            pub_date = f"{p_d.get('Year', '')}-{p_d.get('Month', '')}-{p_d.get('Day', '')}"
+        
+        # Get journal
+        journal = ar.get("Journal", {}).get("Title", "")
+        
+        return {
+            "uid": uid,
+            "Title": ar.get("ArticleTitle", ""),
+            "Published": pub_date,
+            "Journal": journal,
+            "Copyright Information": ar.get("Abstract", {}).get("CopyrightInformation", ""),
+            "Summary": summary
+        }
+
+    # OLD METHODS
     def search_pubmed(
         self,
         query: str,
@@ -764,113 +870,4 @@ class PubMedService(BaseModel):
         """Enhanced version that uses the new comprehensive method."""
         return self.find_geo_from_publication(pmid=pmid, include_related=True)
 
-    # Keep other original methods with minimal changes for compatibility
-    def _load_with_params(self, query: str, top_k_results: int) -> List[dict]:
-        """Load PubMed results with specific parameters."""
-        return list(self._lazy_load_with_params(query, top_k_results))
 
-    def _lazy_load_with_params(self, query: str, top_k_results: int) -> Iterator[dict]:
-        """Lazy load PubMed results."""
-        url = (
-            self.base_url_esearch +
-            f"db=pubmed&term={urllib.parse.quote(query)}" +
-            f"&retmode=json&retmax={top_k_results}&usehistory=y"
-        )
-        
-        if self.config.api_key:
-            url += f"&api_key={self.config.api_key}"
-        
-        result = urllib.request.urlopen(url)
-        text = result.read().decode("utf-8")
-        json_text = json.loads(text)
-        
-        if int(json_text["esearchresult"].get("count", "0")) == 0:
-            return
-        
-        webenv = json_text["esearchresult"]["webenv"]
-        for uid in json_text["esearchresult"]["idlist"]:
-            yield self.retrieve_article(uid, webenv)
-
-    def retrieve_article(self, uid: str, webenv: str) -> dict:
-        """Retrieve article metadata."""
-        url = (
-            self.base_url_efetch +
-            f"db=pubmed&retmode=xml&id={uid}&webenv={webenv}"
-        )
-        
-        if self.config.api_key:
-            url += f"&api_key={self.config.api_key}"
-        
-        retry = 0
-        while True:
-            try:
-                result = urllib.request.urlopen(url)
-                break
-            except urllib.error.HTTPError as e:
-                if e.code == 429 and retry < self.config.max_retry:
-                    time.sleep(self.config.sleep_time)
-                    self.config.sleep_time *= 2
-                    retry += 1
-                else:
-                    raise e
-        
-        xml_text = result.read().decode("utf-8")
-        text_dict = self.parse(xml_text)
-        return self._parse_article(uid, text_dict)
-
-    def _parse_article(self, uid: str, text_dict: dict) -> dict:
-        """Parse article metadata from XML."""
-        try:
-            ar = text_dict["PubmedArticleSet"]["PubmedArticle"]["MedlineCitation"]["Article"]
-        except KeyError:
-            try:
-                ar = text_dict["PubmedArticleSet"]["PubmedBookArticle"]["BookDocument"]
-            except KeyError:
-                return {
-                    "uid": uid,
-                    "Title": "Could not parse article",
-                    "Published": "",
-                    "Summary": "Article data could not be parsed."
-                }
-        
-        # Extract abstract
-        abstract_text = ar.get("Abstract", {}).get("AbstractText", [])
-        summaries = []
-        
-        if isinstance(abstract_text, list):
-            for txt in abstract_text:
-                if isinstance(txt, dict) and "#text" in txt:
-                    label = txt.get("@Label", "")
-                    text_content = txt["#text"]
-                    summaries.append(f"{label}: {text_content}" if label else text_content)
-                elif isinstance(txt, str):
-                    summaries.append(txt)
-        elif isinstance(abstract_text, dict) and "#text" in abstract_text:
-            summaries.append(abstract_text["#text"])
-        elif isinstance(abstract_text, str):
-            summaries.append(abstract_text)
-        
-        summary = "\n".join(summaries) if summaries else "No abstract available"
-        
-        # Get dates
-        pub_date = ""
-        if "ArticleDate" in ar:
-            a_d = ar["ArticleDate"]
-            if isinstance(a_d, list):
-                a_d = a_d[0]
-            pub_date = f"{a_d.get('Year', '')}-{a_d.get('Month', '')}-{a_d.get('Day', '')}"
-        elif "Journal" in ar and "JournalIssue" in ar["Journal"]:
-            p_d = ar["Journal"]["JournalIssue"].get("PubDate", {})
-            pub_date = f"{p_d.get('Year', '')}-{p_d.get('Month', '')}-{p_d.get('Day', '')}"
-        
-        # Get journal
-        journal = ar.get("Journal", {}).get("Title", "")
-        
-        return {
-            "uid": uid,
-            "Title": ar.get("ArticleTitle", ""),
-            "Published": pub_date,
-            "Journal": journal,
-            "Copyright Information": ar.get("Abstract", {}).get("CopyrightInformation", ""),
-            "Summary": summary
-        }

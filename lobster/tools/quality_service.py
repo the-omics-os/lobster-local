@@ -303,7 +303,7 @@ class QualityService:
 
     def _create_quality_plots(self, qc_metrics: pd.DataFrame) -> List[go.Figure]:
         """
-        Create quality assessment plots.
+        Create high-quality assessment plots.
 
         Args:
             qc_metrics: DataFrame with QC metrics
@@ -311,10 +311,10 @@ class QualityService:
         Returns:
             list: List of Plotly figures
         """
-        logger.info("Generating quality plots")
+        logger.info("Generating high-quality assessment plots")
         plots = []
 
-        # 1. Violin plot of mitochondrial percentages
+        # 1. Enhanced violin plot of mitochondrial percentages
         fig1 = go.Figure()
         fig1.add_trace(
             go.Violin(
@@ -322,16 +322,41 @@ class QualityService:
                 name="Mitochondrial %",
                 box_visible=True,
                 meanline_visible=True,
+                fillcolor="rgba(56, 108, 176, 0.7)",
+                line_color="rgba(56, 108, 176, 1.0)",
+                points="outliers",
+                pointpos=0,
+                jitter=0.05,
+                side="positive"
             )
         )
         fig1.update_layout(
-            title="Distribution of Mitochondrial Gene Percentages",
-            yaxis_title="Mitochondrial Gene %",
-            height=400,
+            title=dict(
+                text="Distribution of Mitochondrial Gene Percentages",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
+            ),
+            yaxis=dict(
+                title=dict(text="Mitochondrial Gene %", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            xaxis=dict(
+                tickfont=dict(size=14),
+                showgrid=False
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            height=600,  # Increased from 400
+            width=1000,  # Added width
+            margin=dict(l=80, r=80, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            showlegend=False
         )
         plots.append(fig1)
 
-        # 2. Violin plot of ribosomal percentages
+        # 2. Enhanced violin plot of ribosomal percentages
         fig1b = go.Figure()
         fig1b.add_trace(
             go.Violin(
@@ -339,16 +364,41 @@ class QualityService:
                 name="Ribosomal %",
                 box_visible=True,
                 meanline_visible=True,
+                fillcolor="rgba(127, 201, 127, 0.7)",
+                line_color="rgba(127, 201, 127, 1.0)",
+                points="outliers",
+                pointpos=0,
+                jitter=0.05,
+                side="positive"
             )
         )
         fig1b.update_layout(
-            title="Distribution of Ribosomal Gene Percentages",
-            yaxis_title="Ribosomal Gene %",
-            height=400,
+            title=dict(
+                text="Distribution of Ribosomal Gene Percentages",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
+            ),
+            yaxis=dict(
+                title=dict(text="Ribosomal Gene %", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            xaxis=dict(
+                tickfont=dict(size=14),
+                showgrid=False
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            height=600,  # Increased from 400
+            width=1000,  # Added width
+            margin=dict(l=80, r=80, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            showlegend=False
         )
         plots.append(fig1b)
 
-        # 3. Violin plot of housekeeping scores
+        # 3. Enhanced violin plot of housekeeping scores
         fig1c = go.Figure()
         fig1c.add_trace(
             go.Violin(
@@ -356,52 +406,147 @@ class QualityService:
                 name="Housekeeping Score",
                 box_visible=True,
                 meanline_visible=True,
+                fillcolor="rgba(190, 174, 212, 0.7)",
+                line_color="rgba(190, 174, 212, 1.0)",
+                points="outliers",
+                pointpos=0,
+                jitter=0.05,
+                side="positive"
             )
         )
         fig1c.update_layout(
-            title="Distribution of Housekeeping Gene Scores",
-            yaxis_title="Housekeeping Score",
-            height=400,
+            title=dict(
+                text="Distribution of Housekeeping Gene Scores",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
+            ),
+            yaxis=dict(
+                title=dict(text="Housekeeping Score", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            xaxis=dict(
+                tickfont=dict(size=14),
+                showgrid=False
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            height=600,  # Increased from 400
+            width=1000,  # Added width
+            margin=dict(l=80, r=80, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            showlegend=False
         )
         plots.append(fig1c)
 
-        # 4. Scatter plot of quality metrics
+        # 4. Enhanced scatter plot of quality metrics
         fig2 = px.scatter(
             qc_metrics,
             x="total_counts",
             y="n_genes",
             color="mt_pct",
-            title="Cell Quality Metrics",
+            title="Cell Quality Metrics - Mitochondrial Content",
             labels={
                 "total_counts": "Total RNA Count",
                 "n_genes": "Number of Detected Features",
                 "mt_pct": "Mitochondrial %",
             },
-            color_continuous_scale="viridis",
-            height=450,
-            width=600,
+            color_continuous_scale="plasma",
+            height=700,  # Increased from 450
+            width=1200,  # Increased from 600
+        )
+        
+        fig2.update_traces(
+            marker=dict(
+                size=6,
+                opacity=0.7,
+                line=dict(width=0.5, color='rgba(50,50,50,0.4)')
+            )
+        )
+        
+        fig2.update_layout(
+            title=dict(
+                text="Cell Quality Metrics - Mitochondrial Content",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis=dict(
+                title=dict(text="Total RNA Count", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            yaxis=dict(
+                title=dict(text="Number of Detected Features", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            margin=dict(l=80, r=150, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            coloraxis_colorbar=dict(
+                title=dict(text="Mitochondrial %", font=dict(size=14)),
+                tickfont=dict(size=12)
+            )
         )
         plots.append(fig2)
 
-        # 5. Scatter plot showing ribosomal percentage
+        # 5. Enhanced scatter plot showing ribosomal percentage
         fig2b = px.scatter(
             qc_metrics,
             x="total_counts",
             y="n_genes",
             color="ribo_pct",
-            title="Cell Quality Metrics - Ribosomal",
+            title="Cell Quality Metrics - Ribosomal Content",
             labels={
                 "total_counts": "Total RNA Count",
                 "n_genes": "Number of Detected Features",
                 "ribo_pct": "Ribosomal %",
             },
             color_continuous_scale="viridis",
-            height=450,
-            width=600,
+            height=700,  # Increased from 450
+            width=1200,  # Increased from 600
+        )
+        
+        fig2b.update_traces(
+            marker=dict(
+                size=6,
+                opacity=0.7,
+                line=dict(width=0.5, color='rgba(50,50,50,0.4)')
+            )
+        )
+        
+        fig2b.update_layout(
+            title=dict(
+                text="Cell Quality Metrics - Ribosomal Content",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis=dict(
+                title=dict(text="Total RNA Count", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            yaxis=dict(
+                title=dict(text="Number of Detected Features", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            margin=dict(l=80, r=150, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white",
+            coloraxis_colorbar=dict(
+                title=dict(text="Ribosomal %", font=dict(size=14)),
+                tickfont=dict(size=12)
+            )
         )
         plots.append(fig2b)
 
-        # 6. Correlation plot
+        # 6. Enhanced correlation plot
         fig3 = px.scatter(
             qc_metrics,
             x="total_counts",
@@ -412,12 +557,44 @@ class QualityService:
                 "total_counts": "Total RNA Count",
                 "n_genes": "Number of Detected Features",
             },
-            height=400,
-            width=550,
+            height=700,  # Increased from 400
+            width=1100,  # Increased from 550
+        )
+        
+        fig3.update_traces(
+            marker=dict(
+                size=6,
+                opacity=0.6,
+                color='rgba(31, 119, 180, 0.7)',
+                line=dict(width=0.5, color='rgba(50,50,50,0.4)')
+            )
+        )
+        
+        fig3.update_layout(
+            title=dict(
+                text="Correlation between Features and RNA Count",
+                font=dict(size=20, family="Arial, sans-serif"),
+                x=0.5,
+                xanchor='center'
+            ),
+            xaxis=dict(
+                title=dict(text="Total RNA Count", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            yaxis=dict(
+                title=dict(text="Number of Detected Features", font=dict(size=16)),
+                tickfont=dict(size=14),
+                gridcolor="rgba(200,200,200,0.3)"
+            ),
+            font=dict(size=14, family="Arial, sans-serif"),
+            margin=dict(l=80, r=80, t=80, b=80),
+            plot_bgcolor="white",
+            paper_bgcolor="white"
         )
         plots.append(fig3)
 
-        logger.info(f"Created {len(plots)} quality plots")
+        logger.info(f"Created {len(plots)} high-quality assessment plots")
         return plots
 
     def _generate_qc_summary(self, qc_metrics: pd.DataFrame) -> str:

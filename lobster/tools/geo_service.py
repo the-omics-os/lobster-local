@@ -140,28 +140,21 @@ class GEOService:
         """
         Initialize processing pipelines for different scenarios.
         
+        Since fallback functions have been moved to GEOFallbackService,
+        the pipeline now only uses the primary GEOparse download method.
+        
         Returns:
             Dict[str, List[Callable]]: Pipeline functions for each scenario
         """
         return {
             "single_cell": [
-                self._try_geoparse_download,
-                self._try_supplementary_tar,
-                self._try_sample_matrices_fallback,
-                self._try_helper_download_fallback
+                self._try_geoparse_download
             ],
             "bulk": [
-                self._try_geoparse_download,
-                self._try_series_matrix,
-                self._try_supplementary_files,
-                self._try_helper_download_fallback
+                self._try_geoparse_download
             ],
             "mixed": [
-                self._try_geoparse_download,
-                self._try_supplementary_tar,
-                self._try_supplementary_files,
-                self._try_sample_matrices_fallback,
-                self._try_helper_download_fallback
+                self._try_geoparse_download
             ]
         }
 
@@ -281,7 +274,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             return f"Error downloading dataset: {str(e)}"
         
     # ========================================
-    # MAIN PUBLIC METHODS FOR THE 6 SCENARIOS
+    # MAIN PUBLIC METHODS FOR THE 3 SCENARIOS
     # ========================================        
     def download_with_strategy(
         self, 
@@ -366,202 +359,6 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 source=GEODataSource.GEOPARSE
             )
 
-    def download_single_cell_sample(self, gsm_id: str) -> str:
-        """
-        Specialized single-cell sample downloading (Scenario 4).
-        
-        Args:
-            gsm_id: GEO sample ID (e.g., GSM123456)
-            
-        Returns:
-            str: Status message
-        """
-        try:
-            logger.debug(f"Downloading single-cell sample: {gsm_id}")
-            
-            # Clean sample ID
-            clean_gsm_id = gsm_id.strip().upper()
-            if not clean_gsm_id.startswith('GSM'):
-                return f"Invalid sample ID format: {gsm_id}. Must be a GSM accession (e.g., GSM123456)."
-            
-            # Try GEOparse first
-            try:
-                gsm = GEOparse.get_GEO(geo=clean_gsm_id, destdir=str(self.cache_dir))
-                
-                # Check for 10X format supplementary files
-                if hasattr(gsm, "metadata") and "supplementary_file" in gsm.metadata:
-                    suppl_files = gsm.metadata["supplementary_file"]
-                    if not isinstance(suppl_files, list):
-                        suppl_files = [suppl_files]
-                    
-                    # Look for 10X format files
-                    for suppl_url in suppl_files:
-                        if any(pattern in suppl_url.lower() for pattern in 
-                               ['matrix.mtx', 'barcodes.tsv', 'features.tsv', '.h5']):
-                            
-                            # Download and parse 10X data
-                            matrix = self._download_and_parse_10x_sample(suppl_url, clean_gsm_id)
-                            if matrix is not None:
-                                return self._store_single_sample_as_modality(clean_gsm_id, matrix, gsm)
-                
-                # Fallback to expression table
-                if hasattr(gsm, "table") and gsm.table is not None:
-                    matrix = gsm.table
-                    return self._store_single_sample_as_modality(clean_gsm_id, matrix, gsm)
-                    
-            except Exception as e:
-                logger.warning(f"GEOparse failed for {clean_gsm_id}: {e}")
-            
-            # Fallback to helper downloader
-            try:
-                return self._download_sample_with_helpers(clean_gsm_id)
-            except Exception as e:
-                logger.error(f"Helper download failed for {clean_gsm_id}: {e}")
-                return f"Failed to download sample {clean_gsm_id}: {str(e)}"
-                
-        except Exception as e:
-            logger.exception(f"Error downloading single-cell sample {gsm_id}: {e}")
-            return f"Error downloading single-cell sample {gsm_id}: {str(e)}"
-
-    def download_bulk_dataset(self, geo_id: str, prefer_series_matrix: bool = True) -> str:
-        """
-        Enhanced bulk data downloading (Scenario 5).
-        
-        Args:
-            geo_id: GEO accession ID
-            prefer_series_matrix: Whether to prefer series matrix over supplementary files
-            
-        Returns:
-            str: Status message
-        """
-        try:
-            logger.debug(f"Downloading bulk dataset: {geo_id}")
-            
-            clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
-                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
-            
-            # Ensure metadata exists
-            if clean_geo_id not in self.data_manager.metadata_store:
-                metadata_summary = self.fetch_metadata_only(clean_geo_id)
-                if "Error" in metadata_summary:
-                    return f"Failed to fetch metadata: {metadata_summary}"
-            
-            # Strategy for bulk data
-            strategy = DownloadStrategy(
-                prefer_geoparse=True,
-                prefer_supplementary=not prefer_series_matrix,
-                max_retries=2
-            )
-            
-            result = self.download_with_strategy(clean_geo_id, strategy, GEODataType.BULK)
-            
-            if result.success:
-                # Store as bulk RNA-seq modality
-                modality_name = f"geo_{clean_geo_id.lower()}_bulk"
-                adata = self.data_manager.load_modality(
-                    name=modality_name,
-                    source=result.data,
-                    adapter="transcriptomics_bulk",
-                    validate=True,
-                    **result.processing_info
-                )
-                
-                # Save to workspace
-                save_path = f"{clean_geo_id.lower()}_bulk_raw.h5ad"
-                saved_file = self.data_manager.save_modality(modality_name, save_path)
-                
-                return f"""Successfully downloaded bulk dataset {clean_geo_id}!
-
-📊 Modality: '{modality_name}' ({adata.n_obs} samples × {adata.n_vars} genes)
-🔬 Adapter: transcriptomics_bulk  
-💾 Saved to: {save_path}
-📈 Ready for bulk RNA-seq analysis!"""
-            else:
-                return f"Failed to download bulk dataset {clean_geo_id}: {result.error_message}"
-                
-        except Exception as e:
-            logger.exception(f"Error downloading bulk dataset {geo_id}: {e}")
-            return f"Error downloading bulk dataset {geo_id}: {str(e)}"
-
-    def process_supplementary_tar_files(self, geo_id: str) -> str:
-        """
-        TAR file processing fallback for single-cell data (Scenario 6).
-        
-        Args:
-            geo_id: GEO accession ID
-            
-        Returns:
-            str: Status message
-        """
-        try:
-            logger.debug(f"Processing supplementary TAR files for: {geo_id}")
-            
-            clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
-                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
-            
-            # Use helper downloader for TAR processing
-            soft_file, data_sources = self.geo_downloader.download_geo_data(clean_geo_id)
-            
-            if not data_sources:
-                return f"No TAR files found for {clean_geo_id}"
-            
-            # Process TAR files using helper parser
-            if isinstance(data_sources, dict):
-                if 'tar' in data_sources:
-                    matrix = self.geo_parser.parse_supplementary_file(data_sources['tar'])
-                elif 'tar_dir' in data_sources:
-                    # Process directory with multiple files
-                    matrix = self._process_tar_directory_with_helpers(data_sources['tar_dir'])
-                else:
-                    return f"No TAR data found in downloaded files for {clean_geo_id}"
-            else:
-                # Single file
-                matrix = self.geo_parser.parse_supplementary_file(data_sources)
-            
-            if matrix is None or matrix.empty:
-                return f"Failed to parse TAR files for {clean_geo_id}"
-            
-            # Store as single-cell modality
-            modality_name = f"geo_{clean_geo_id.lower()}_tar"
-            
-            enhanced_metadata = {
-                "dataset_id": clean_geo_id,
-                "dataset_type": "GEO",
-                "data_source": "tar_supplementary",
-                "processing_date": pd.Timestamp.now().isoformat(),
-                "parser_version": "helper_parser"
-            }
-            
-            adata = self.data_manager.load_modality(
-                name=modality_name,
-                source=matrix,
-                adapter="transcriptomics_single_cell",
-                validate=True,
-                **enhanced_metadata
-            )
-            
-            # Save to workspace
-            save_path = f"{clean_geo_id.lower()}_tar_processed.h5ad"
-            saved_file = self.data_manager.save_modality(modality_name, save_path)
-            
-            self.data_manager.log_tool_usage(
-                tool_name="process_supplementary_tar_files",
-                parameters={"geo_id": clean_geo_id},
-                description=f"Processed TAR supplementary files for {clean_geo_id}"
-            )
-            
-            return f"""Successfully processed TAR supplementary files for {clean_geo_id}!
-
-📊 Modality: '{modality_name}' ({adata.n_obs} cells × {adata.n_vars} genes)
-🔬 Source: TAR supplementary files
-💾 Saved to: {save_path}
-📈 Ready for single-cell analysis!"""
-            
-        except Exception as e:
-            logger.exception(f"Error processing TAR files for {geo_id}: {e}")
-            return f"Error processing TAR files for {geo_id}: {str(e)}"
 
     # ========================================================================================================================
     # ========================================================================================================================
@@ -663,128 +460,6 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             logger.warning(f"GEOparse download failed: {e}")
             return GEOResult(success=False, error_message=str(e))
 
-    def _try_supplementary_tar(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
-        """Pipeline step: Try TAR supplementary files."""
-        try:
-            logger.debug(f"Trying TAR supplementary files for {geo_id}")
-            soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
-            
-            if isinstance(data_sources, dict) and 'tar' in data_sources:
-                matrix = self.geo_parser.parse_supplementary_file(data_sources['tar'])
-                if matrix is not None and not matrix.empty:
-                    return GEOResult(
-                        data=matrix,
-                        metadata=metadata,
-                        source=GEODataSource.TAR_ARCHIVE,
-                        processing_info={"method": "helper_tar", "source_file": str(data_sources['tar'])},
-                        success=True
-                    )
-            
-            return GEOResult(success=False, error_message="No TAR files found or parsable")
-            
-        except Exception as e:
-            logger.warning(f"TAR supplementary download failed: {e}")
-            return GEOResult(success=False, error_message=str(e))
-
-    def _try_series_matrix(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
-        """Pipeline step: Try series matrix files (for bulk data)."""
-        try:
-            logger.debug(f"Trying series matrix for {geo_id}")
-            # Use GEOparse to get series matrix
-            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
-            
-            # Check if there's a series matrix
-            if hasattr(gse, 'table') and gse.table is not None:
-                return GEOResult(
-                    data=gse.table,
-                    metadata=metadata,
-                    source=GEODataSource.GEOPARSE,
-                    processing_info={"method": "series_matrix"},
-                    success=True
-                )
-            
-            return GEOResult(success=False, error_message="No series matrix available")
-            
-        except Exception as e:
-            logger.warning(f"Series matrix download failed: {e}")
-            return GEOResult(success=False, error_message=str(e))
-
-    def _try_supplementary_files(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
-        """Pipeline step: Try supplementary files (non-TAR)."""
-        try:
-            logger.debug(f"Trying supplementary files for {geo_id}")
-            soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
-            
-            if isinstance(data_sources, dict) and 'supplementary' in data_sources:
-                matrix = self.geo_parser.parse_supplementary_file(data_sources['supplementary'])
-                if matrix is not None and not matrix.empty:
-                    return GEOResult(
-                        data=matrix,
-                        metadata=metadata,
-                        source=GEODataSource.SUPPLEMENTARY,
-                        processing_info={"method": "helper_supplementary", "source_file": str(data_sources['supplementary'])},
-                        success=True
-                    )
-            
-            return GEOResult(success=False, error_message="No supplementary files found or parsable")
-            
-        except Exception as e:
-            logger.warning(f"Supplementary files download failed: {e}")
-            return GEOResult(success=False, error_message=str(e))
-
-    def _try_sample_matrices_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
-        """Pipeline step: Try individual sample matrices as fallback."""
-        try:
-            logger.debug(f"Trying sample matrices fallback for {geo_id}")
-            # This is already handled in _try_geoparse_download, so this is a no-op
-            return GEOResult(success=False, error_message="Sample matrices already tried in GEOparse step")
-            
-        except Exception as e:
-            logger.warning(f"Sample matrices fallback failed: {e}")
-            return GEOResult(success=False, error_message=str(e))
-
-    def _try_helper_download_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
-        """Pipeline step: Final fallback using helper downloader."""
-        try:
-            logger.debug(f"Trying helper download fallback for {geo_id}")
-            soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
-            
-            if not data_sources:
-                return GEOResult(success=False, error_message="No data sources found")
-            
-            # Try all available data sources
-            if isinstance(data_sources, dict):
-                for source_name, source_path in data_sources.items():
-                    try:
-                        matrix = self.geo_parser.parse_supplementary_file(source_path)
-                        if matrix is not None and not matrix.empty:
-                            return GEOResult(
-                                data=matrix,
-                                metadata=metadata,
-                                source=GEODataSource.SOFT_FILE,
-                                processing_info={"method": f"helper_fallback_{source_name}", "source_file": str(source_path)},
-                                success=True
-                            )
-                    except Exception as e:
-                        logger.warning(f"Failed to parse {source_name}: {e}")
-                        continue
-            else:
-                # Single file
-                matrix = self.geo_parser.parse_supplementary_file(data_sources)
-                if matrix is not None and not matrix.empty:
-                    return GEOResult(
-                        data=matrix,
-                        metadata=metadata,
-                        source=GEODataSource.SOFT_FILE,
-                        processing_info={"method": "helper_fallback_single", "source_file": str(data_sources)},
-                        success=True
-                    )
-            
-            return GEOResult(success=False, error_message="All helper download attempts failed")
-            
-        except Exception as e:
-            logger.warning(f"Helper download fallback failed: {e}")
-            return GEOResult(success=False, error_message=str(e))
 
     # ========================================
     # HELPER INTEGRATION METHODS
@@ -854,49 +529,6 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             logger.error(f"Error storing sample {gsm_id}: {e}")
             return f"Error storing sample {gsm_id}: {str(e)}"
 
-    def _download_sample_with_helpers(self, gsm_id: str) -> str:
-        """Download sample using helper services."""
-        try:
-            # Use helper downloader for sample-level downloads
-            # This would need to be implemented in the helper downloader
-            # For now, return a not implemented message
-            return f"Helper-based sample download for {gsm_id} not yet implemented. Please use GEOparse method."
-            
-        except Exception as e:
-            logger.error(f"Error downloading sample with helpers {gsm_id}: {e}")
-            return f"Error downloading sample with helpers {gsm_id}: {str(e)}"
-
-    def _process_tar_directory_with_helpers(self, tar_dir: Path) -> Optional[pd.DataFrame]:
-        """Process TAR directory using helper parser."""
-        try:
-            # Look for expression files in the directory
-            expression_files = []
-            for file_path in tar_dir.rglob("*"):
-                if file_path.is_file() and any(
-                    ext in file_path.name.lower()
-                    for ext in [".txt", ".csv", ".tsv", ".gz", ".h5", ".mtx"]
-                ):
-                    if file_path.stat().st_size > 10000:  # > 10KB
-                        expression_files.append(file_path)
-            
-            # Sort by size, try largest first
-            expression_files.sort(key=lambda x: x.stat().st_size, reverse=True)
-            
-            for file_path in expression_files[:5]:  # Try top 5 files
-                try:
-                    matrix = self.geo_parser.parse_supplementary_file(file_path)
-                    if matrix is not None and not matrix.empty:
-                        logger.debug(f"Successfully parsed TAR file: {file_path.name}")
-                        return matrix
-                except Exception as e:
-                    logger.warning(f"Failed to parse {file_path.name}: {e}")
-                    continue
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error processing TAR directory: {e}")
-            return None
 
     def fetch_metadata_only(self, geo_id: str) -> str:
         """
@@ -1933,40 +1565,6 @@ The actual expression data download will be much faster now that metadata is pre
             )
             return {}
 
-    # def _download_sample_matrices(
-    #     self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
-    # ) -> Dict[str, Optional[pd.DataFrame]]:
-    #     """
-    #     Download individual sample expression matrices sequentially.
-
-    #     Args:
-    #         sample_info: Dictionary of sample information
-    #         gse_id: GEO series ID
-
-    #     Returns:
-    #         dict: Dictionary of sample matrices
-    #     """
-    #     sample_matrices = {}
-
-    #     logger.info(f"Downloading matrices for {len(sample_info)} samples...")
-
-    #     # Sequential download (no threading)
-    #     for gsm_id, info in sample_info.items():
-    #         try:
-    #             matrix = self._download_single_sample(gsm_id, info, gse_id)
-    #             sample_matrices[gsm_id] = matrix
-    #             if matrix is not None:
-    #                 logger.info(
-    #                     f"Successfully downloaded matrix for {gsm_id}: {matrix.shape}"
-    #                 )
-    #             else:
-    #                 logger.warning(f"No matrix data found for {gsm_id}")
-    #         except Exception as e:
-    #             logger.error(f"Error downloading {gsm_id}: {e}")
-    #             sample_matrices[gsm_id] = None
-
-    #     return sample_matrices
-
 
     def _download_sample_matrices(
         self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
@@ -2056,61 +1654,301 @@ The actual expression data download will be much faster now that metadata is pre
 
     def _extract_supplementary_files_from_metadata(self, metadata: Dict[str, Any], gsm_id: str) -> Dict[str, str]:
         """
-        Extract all supplementary file URLs from sample metadata and classify them.
+        Extract and classify supplementary files using robust pattern matching and scoring.
+        
+        This function uses a professional scoring system with regex patterns to classify
+        supplementary files more accurately, handling edge cases and variations in naming
+        conventions commonly found in GEO datasets.
         
         Args:
             metadata: Sample metadata dictionary
             gsm_id: GEO sample ID for logging
             
         Returns:
-            Dict[str, str]: Dictionary mapping file types ('matrix', 'barcodes', 'features') to URLs
+            Dict[str, str]: Dictionary mapping file types to URLs with highest confidence scores
         """
         try:
-            supplementary_files = {}
+            # Initialize file type definitions with regex patterns and confidence scores
+            file_type_patterns = self._initialize_file_type_patterns()
             
-            # Find all keys that contain 'supplementary'
-            suppl_keys = [key for key in metadata.keys() if 'supplementary' in key.lower()]
-            logger.info(f"Found {len(suppl_keys)} supplementary file keys for {gsm_id}: {suppl_keys}")
+            # Find all supplementary file URLs
+            file_urls = self._extract_all_supplementary_urls(metadata, gsm_id)
             
-            for key in suppl_keys:
-                file_urls = metadata[key]
-                if isinstance(file_urls, list):
-                    file_urls = file_urls
-                else:
-                    file_urls = [file_urls]
+            if not file_urls:
+                logger.warning(f"No supplementary files found for {gsm_id}")
+                return {}
+            
+            # Score and classify each file
+            classified_files = {}
+            file_scores = {}  # Track scores for debugging
+            
+            for url in file_urls:
+                filename = url.split('/')[-1]
+                file_classification = self._classify_single_file(filename, url, file_type_patterns)
                 
-                for url in file_urls:
-                    if not url or not isinstance(url, str):
-                        continue
-                        
-                    url_lower = url.lower()
-                    filename = url.split('/')[-1].lower()
-                    
-                    # Classify file type based on filename
-                    if any(pattern in filename for pattern in ['matrix.mtx', 'matrix.txt', '_matrix']):
-                        supplementary_files['matrix'] = url
-                        logger.info(f"Classified as matrix: {filename}")
-                    elif any(pattern in filename for pattern in ['barcodes.tsv', 'barcodes.txt', '_barcode', '-barcode']):
-                        supplementary_files['barcodes'] = url
-                        logger.info(f"Classified as barcodes: {filename}")
-                    elif any(pattern in filename for pattern in ['features.tsv', 'features.txt', 'genes.tsv', '_feature', '_gene']):
-                        supplementary_files['features'] = url
-                        logger.info(f"Classified as features: {filename}")
-                    elif any(ext in filename for ext in ['.h5', '.h5ad']):
-                        supplementary_files['h5_data'] = url
-                        logger.info(f"Classified as H5 data: {filename}")
-                    else:
-                        # Generic expression file
-                        if any(ext in filename for ext in ['.txt', '.csv', '.tsv']) and any(keyword in filename for keyword in ['expr', 'count', 'rpkm', 'fpkm', 'tpm']):
-                            supplementary_files['expression'] = url
-                            logger.info(f"Classified as expression file: {filename}")
+                for file_type, score in file_classification.items():
+                    if score > 0:  # Only consider positive scores
+                        # Keep track of best score for each file type
+                        if file_type not in classified_files or score > file_scores.get(file_type, 0):
+                            classified_files[file_type] = url
+                            file_scores[file_type] = score
+                            logger.debug(f"Updated {file_type}: {filename} (score: {score:.2f})")
             
-            logger.info(f"Classified supplementary files for {gsm_id}: {list(supplementary_files.keys())}")
-            return supplementary_files
+            # Report final classifications
+            logger.info(f"Final classification for {gsm_id}:")
+            for file_type, url in classified_files.items():
+                filename = url.split('/')[-1]
+                score = file_scores[file_type]
+                logger.info(f"  {file_type}: {filename} (confidence: {score:.2f})")
+            
+            # Validate 10X trio completeness if matrix found
+            if 'matrix' in classified_files:
+                self._validate_10x_trio_completeness(classified_files, gsm_id)
+            
+            return classified_files
             
         except Exception as e:
             logger.error(f"Error extracting supplementary files from metadata for {gsm_id}: {e}")
             return {}
+
+    def _initialize_file_type_patterns(self) -> Dict[str, Dict[str, Union[List[re.Pattern], float]]]:
+        """
+        Initialize comprehensive file type classification patterns with confidence scoring.
+        
+        Returns:
+            Dict containing regex patterns and base scores for each file type
+        """
+        patterns = {
+            'matrix': {
+                'patterns': [
+                    # High confidence patterns (exact matches)
+                    re.compile(r'matrix\.mtx(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'matrix\.txt(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'matrix\.csv(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'matrix\.tsv(\.gz)?$', re.IGNORECASE),
+                    
+                    # Medium confidence patterns (with context)
+                    re.compile(r'.*_matrix\.(mtx|txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*-matrix\.(mtx|txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*\.matrix\.(mtx|txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    
+                    # Lower confidence patterns (broader matches)
+                    re.compile(r'.*matrix.*\.(mtx|txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*(count|expr|expression).*matrix.*', re.IGNORECASE),
+                ],
+                'base_score': 1.0,
+                'boost_keywords': ['count', 'expression', 'sparse', '10x', 'chromium']
+            },
+            
+            'barcodes': {
+                'patterns': [
+                    # High confidence patterns
+                    re.compile(r'barcodes\.tsv(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'barcodes\.txt(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'barcodes\.csv(\.gz)?$', re.IGNORECASE),
+                    
+                    # Medium confidence patterns
+                    re.compile(r'.*_barcode.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*-barcode.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*\.barcode.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    
+                    # Lower confidence patterns
+                    re.compile(r'.*barcode.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*(cell|bc).*id.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                ],
+                'base_score': 1.0,
+                'boost_keywords': ['cell', '10x', 'chromium', 'droplet']
+            },
+            
+            'features': {
+                'patterns': [
+                    # High confidence patterns  
+                    re.compile(r'features\.tsv(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'genes\.tsv(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'features\.txt(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'genes\.txt(\.gz)?$', re.IGNORECASE),
+                    
+                    # Medium confidence patterns
+                    re.compile(r'.*_feature.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*_gene.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*-feature.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*-gene.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    
+                    # Lower confidence patterns
+                    re.compile(r'.*feature.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*gene.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*annotation.*\.(tsv|txt|csv)(\.gz)?$', re.IGNORECASE),
+                ],
+                'base_score': 1.0,
+                'boost_keywords': ['gene', 'ensembl', 'symbol', 'annotation', '10x']
+            },
+            
+            'h5_data': {
+                'patterns': [
+                    # High confidence patterns
+                    re.compile(r'.*\.h5$', re.IGNORECASE),
+                    re.compile(r'.*\.h5ad$', re.IGNORECASE),
+                    re.compile(r'.*\.hdf5$', re.IGNORECASE),
+                    
+                    # Medium confidence patterns
+                    re.compile(r'.*_filtered.*\.h5$', re.IGNORECASE),
+                    re.compile(r'.*_raw.*\.h5$', re.IGNORECASE),
+                    re.compile(r'.*matrix.*\.h5$', re.IGNORECASE),
+                ],
+                'base_score': 1.0,
+                'boost_keywords': ['filtered', 'raw', 'matrix', '10x', 'chromium']
+            },
+            
+            'expression': {
+                'patterns': [
+                    # High confidence patterns for expression files
+                    re.compile(r'.*(expr|expression|count|fpkm|tpm|rpkm).*\.(txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    
+                    # Medium confidence patterns
+                    re.compile(r'.*_counts?\.(txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*_expr\.(txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*_data\.(txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                    
+                    # Lower confidence patterns (generic data files)
+                    re.compile(r'.*\.(txt|csv|tsv)(\.gz)?$', re.IGNORECASE),
+                ],
+                'base_score': 0.5,  # Lower base score for generic expression
+                'boost_keywords': ['normalized', 'filtered', 'processed', 'log']
+            },
+            
+            'archive': {
+                'patterns': [
+                    re.compile(r'.*\.tar(\.gz)?$', re.IGNORECASE),
+                    re.compile(r'.*\.zip$', re.IGNORECASE),
+                    re.compile(r'.*\.rar$', re.IGNORECASE),
+                ],
+                'base_score': 0.8,
+                'boost_keywords': ['raw', 'supplementary', 'all', 'complete']
+            }
+        }
+        
+        return patterns
+
+    def _extract_all_supplementary_urls(self, metadata: Dict[str, Any], gsm_id: str) -> List[str]:
+        """
+        Extract all supplementary file URLs from metadata using flexible key detection.
+        
+        Args:
+            metadata: Sample metadata dictionary
+            gsm_id: GEO sample ID for logging
+            
+        Returns:
+            List[str]: All supplementary file URLs found
+        """
+        file_urls = []
+        
+        # Look for various supplementary file keys (case-insensitive)
+        supplementary_key_patterns = [
+            re.compile(r'.*supplement.*file.*', re.IGNORECASE),
+            re.compile(r'.*suppl.*file.*', re.IGNORECASE),
+            re.compile(r'.*additional.*file.*', re.IGNORECASE),
+            re.compile(r'.*raw.*file.*', re.IGNORECASE),
+            re.compile(r'.*data.*file.*', re.IGNORECASE),
+        ]
+        
+        # Find matching keys
+        matching_keys = []
+        for key in metadata.keys():
+            for pattern in supplementary_key_patterns:
+                if pattern.match(key):
+                    matching_keys.append(key)
+                    break
+        
+        if not matching_keys:
+            # Fallback to any key containing 'supplementary'
+            matching_keys = [key for key in metadata.keys() if 'supplement' in key.lower()]
+        
+        logger.debug(f"Found supplementary keys for {gsm_id}: {matching_keys}")
+        
+        # Extract URLs from matching keys
+        for key in matching_keys:
+            urls = metadata[key]
+            if isinstance(urls, str):
+                urls = [urls]
+            elif not isinstance(urls, list):
+                continue
+                
+            for url in urls:
+                if url and isinstance(url, str) and ('http' in url or 'ftp' in url):
+                    file_urls.append(url)
+        
+        logger.info(f"Extracted {len(file_urls)} supplementary file URLs for {gsm_id}")
+        return file_urls
+
+    def _classify_single_file(self, filename: str, url: str, patterns: Dict) -> Dict[str, float]:
+        """
+        Classify a single file using pattern matching and scoring.
+        
+        Args:
+            filename: Name of the file
+            url: Full URL of the file
+            patterns: File type patterns dictionary
+            
+        Returns:
+            Dict[str, float]: Scores for each file type
+        """
+        scores = {}
+        filename_lower = filename.lower()
+        url_lower = url.lower()
+        
+        for file_type, type_config in patterns.items():
+            type_patterns = type_config['patterns']
+            base_score = type_config['base_score']
+            boost_keywords = type_config.get('boost_keywords', [])
+            
+            max_pattern_score = 0.0
+            
+            # Check each pattern for this file type
+            for i, pattern in enumerate(type_patterns):
+                if pattern.search(filename):
+                    # Higher index patterns have lower confidence
+                    pattern_confidence = 1.0 - (i * 0.1)  # Decreasing confidence
+                    max_pattern_score = max(max_pattern_score, pattern_confidence)
+            
+            if max_pattern_score > 0:
+                # Apply base score
+                total_score = base_score * max_pattern_score
+                
+                # Apply keyword boosts
+                keyword_boost = 0.0
+                for keyword in boost_keywords:
+                    if keyword in filename_lower or keyword in url_lower:
+                        keyword_boost += 0.1
+                
+                total_score += keyword_boost
+                scores[file_type] = min(total_score, 2.0)  # Cap at 2.0
+        
+        return scores
+
+    def _validate_10x_trio_completeness(self, classified_files: Dict[str, str], gsm_id: str) -> None:
+        """
+        Validate and report on 10X Genomics file trio completeness.
+        
+        Args:
+            classified_files: Dictionary of classified file types and URLs
+            gsm_id: GEO sample ID for logging
+        """
+        required_10x_files = {'matrix', 'barcodes', 'features'}
+        found_10x_files = set(classified_files.keys()) & required_10x_files
+        missing_10x_files = required_10x_files - found_10x_files
+        
+        if len(found_10x_files) == 3:
+            logger.info(f"Complete 10X trio found for {gsm_id} ✓")
+        elif len(found_10x_files) >= 1:
+            logger.warning(f"Incomplete 10X trio for {gsm_id}. Found: {list(found_10x_files)}, Missing: {list(missing_10x_files)}")
+            
+            # Suggest alternatives
+            if 'h5_data' in classified_files:
+                logger.info(f"H5 format available as alternative for {gsm_id}")
+            elif 'expression' in classified_files:
+                logger.info(f"Generic expression file available as fallback for {gsm_id}")
+        else:
+            logger.info(f"No 10X format files detected for {gsm_id}")
 
     def _download_and_combine_single_cell_files(self, supplementary_files_info: Dict[str, str], gsm_id: str) -> Optional[pd.DataFrame]:
         """
