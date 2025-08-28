@@ -571,7 +571,8 @@ class GEODownloadManager:
         except (ftplib.all_errors, OSError) as e:
             logger.warning(f"Failed to download FTP {url}: {e}")
             return False
-    
+        
+    #FIXME remove soonish
     def download_geo_data(self, gse_id: str) -> Tuple[Optional[Path], Optional[Union[Path, Dict[str, Path]]]]:
         """
         Download GEO SOFT data and data files (supplementary or TAR).

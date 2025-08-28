@@ -11,6 +11,9 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrockConverse
 
+import pandas as pd
+from pydantic import Field, BaseModel
+
 from datetime import date
 
 from lobster.agents.state import DataExpertState
@@ -19,6 +22,21 @@ from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Define StrategyConfig with all field descriptions
+class StrategyConfig(BaseModel):
+    summary_file_name : str     = Field(default=None, description="name of the summary or overview file (has 'GSE' in the name). Example: 'GSE131907_Lung_Cancer_Feature_Summary'")
+    summary_file_type : str     = Field(default=None, description="Filetype of the Summary File. Example: 'xlsx'")
+    processed_matrix_name : str     = Field(default=None, description="name of the TARGET processed (log2, tpm, normalized, etc) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_normalized_log2TPM_matrix'")
+    processed_matrix_filetype : str = Field(default=None, description="filetype of the TARGET processed file (preference is non R objects). Example: 'txt'")
+    processed_matrix_size : str     = Field(default=None, description="size of the TARGET processed file. Example: '2.9 Gb'")
+    raw_UMI_like_matrix_name : str  = Field(default=None, description="name of the raw TARGET UMI-like (UMI, raw, tar) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_raw_UMI_matrix'")
+    raw_UMI_like_matrix_filetype : str = Field(default=None, description="filetype of the TARGET raw UMI-like file (preference is non R objects). Example: 'txt'")
+    raw_UMI_like_matrix_size : str  = Field(default=None, description="size of the umi-like matrix file. Example: '389.8 Mb'")
+    cell_annotation_name : str      = Field(default=None, description="Filename of the file which likely is linked to the cell annotation. Example:'GSE131907_Lung_Cancer_cell_annotation'")
+    cell_annotation_filetype : str  = Field(default=None, description="Filetype of cell annotation file. Example: 'txt'")
+    cell_annotation_size : str      = Field(default=None, description="Size of cell annotation file. Example: '1.8 Mb'")
+    raw_data_available: bool        = Field(default=False, description="If based on the metadata raw data is available for the samples. Sometimes it stated in the study description")
 
 
 def data_expert(
@@ -46,7 +64,7 @@ def data_expert(
     
     # Define tools for data operations
     @tool
-    def fetch_geo_metadata(geo_id: str) -> str:
+    def fetch_geo_metadata(geo_id: str, data_source: str = 'geo') -> str:
         """
         Fetch and validate GEO dataset metadata without downloading the full dataset.
         Use this FIRST before download_geo_dataset to preview dataset information.
@@ -70,18 +88,176 @@ def data_expert(
             
             console = getattr(data_manager, 'console', None)
             geo_service = GEOService(data_manager, console=console)
-            
+
+            #------------------------------------------------
+            # Check if metadata already in store
+            #------------------------------------------------
+            if clean_geo_id in data_manager.metadata_store:
+                logger.debug(f"Metadata already stored for: {geo_id}. returning summary")
+                summary = geo_service._format_metadata_summary(
+                    clean_geo_id,
+                    data_manager.metadata_store[clean_geo_id]
+                )
+                return summary
+                        
+            #------------------------------------------------
+            # If not fetch and return metadata & val res 
+            #------------------------------------------------
             # Fetch metadata only (no expression data download)
-            result = geo_service.fetch_metadata_only(clean_geo_id)
+            metadata, validation_result = geo_service.fetch_metadata_only(clean_geo_id)
+
+            #------------------------------------------------
+            # Extract strategy config using LLM
+            #------------------------------------------------
+            import json
             
-            return result
+
+            # Extract key metadata fields
+            title = metadata.get('title', 'N/A')
+            summary = metadata.get('summary', 'N/A')
+            overall_design = metadata.get('overall_design', 'N/A')
+            supplementary_files = metadata.get('supplementary_file', [])
+            
+            # Prepare the context for LLM
+            metadata_context = f"""
+Title: {title}
+
+Summary: {summary}
+
+Overall Design: {overall_design}
+
+Supplementary Files:
+{supplementary_files if supplementary_files else 'No supplementary files listed'}
+"""
+
+            # Get the schema from StrategyConfig class
+            strategy_schema = StrategyConfig.model_json_schema()
+            
+            # Create system prompt using the schema
+            system_prompt = f"""You are a bioinformatics expert analyzing GEO dataset metadata. Your task is to extract file information and populate a StrategyConfig object.
+
+The StrategyConfig schema is:
+{json.dumps(strategy_schema, indent=2)}
+
+Important notes:
+1. For each file type, extract the filename WITHOUT the extension (e.g., "GSE131907_Lung_Cancer_Feature_Summary" not "GSE131907_Lung_Cancer_Feature_Summary.xlsx")
+2. Extract the file extension separately (e.g., "xlsx", "txt", "csv")
+3. Prefer non-R objects (.txt, .csv) over .rds files when multiple options exist
+4. Check the summary and overall design text for mentions of raw data availability
+5. If a field cannot be determined from the metadata, populate field with "null" so it becomes None in Python
+
+Return only a valid JSON object that matches the StrategyConfig schema."""
+
+            # Initialize LLM with settings
+            llm_params = settings.get_agent_llm_params('assistant')
+            llm = ChatBedrockConverse(**llm_params)
+            
+            try:
+                # Create the prompt
+                prompt = f"""Given this GEO dataset metadata, extract the file information into a StrategyConfig:
+
+{metadata_context}
+
+Return only a valid JSON object that conforms to the StrategyConfig schema provided in the system prompt.
+"""
+
+                # Invoke the LLM
+                response = llm.invoke([
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ])
+                
+                # Extract the JSON from the response
+                response_text = response.content[0].text if hasattr(response.content[0], 'text') else str(response.content)
+                
+                # Parse the JSON response
+                # Try to extract JSON from the response in case it's wrapped in markdown or other text
+                import re
+                json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
+                if json_match:
+                    strategy_dict = json.loads(json_match.group())
+                else:
+                    strategy_dict = json.loads(response_text)
+                
+                # Create StrategyConfig object #FIXME
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                strategy_config = StrategyConfig(**strategy_dict)
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+                
+                logger.info(f"Successfully extracted strategy config for {clean_geo_id}")
+                
+                # Store strategy config in metadata
+                data_manager.metadata_store[clean_geo_id]['strategy_config'] = strategy_config.dict()
+                
+            except Exception as e:
+                logger.warning(f"Failed to extract strategy config using LLM: {e}")
+                # Create empty strategy config as fallback
+                strategy_config = StrategyConfig()
+                data_manager.metadata_store[clean_geo_id]['strategy_config'] = strategy_config.dict()
+
+
+            #------------------------------------------------
+            # store in DataManager
+            #------------------------------------------------
+            # Store metadata in data_manager for future use
+            data_manager.metadata_store[clean_geo_id] = {
+                'metadata': metadata,
+                'validation': validation_result,
+                'fetch_timestamp': pd.Timestamp.now().isoformat(),
+                'data_source': data_source,
+                'strategy_config': strategy_config.dict() if 'strategy_config' in locals() else {}
+            }
+            
+            # Log the metadata fetch operation
+            data_manager.log_tool_usage(
+                tool_name="fetch_geo_metadata_with_fallback",
+                parameters={"geo_id": clean_geo_id, "data_source": data_source},
+                description=f"Fetched metadata for GEO dataset {clean_geo_id} using {data_source}"
+            )
+            
+            # Format comprehensive metadata summary
+            base_summary = geo_service._format_metadata_summary(clean_geo_id, metadata, validation_result)
+            
+            # Add strategy config section if available
+            if 'strategy_config' in locals() and strategy_config:
+                config_dict = strategy_config.dict()
+                
+                strategy_section = f"""
+
+📁 **Extracted File Strategy Configuration:**
+- **Summary File:** {config_dict.get('summary_file_name', 'Not found')}{'.'+config_dict.get('summary_file_type') if config_dict.get('summary_file_type') else ''}
+- **Processed Matrix:** {config_dict.get('processed_matrix_name', 'Not found')}{'.'+config_dict.get('processed_matrix_filetype') if config_dict.get('processed_matrix_filetype') else ''} ({config_dict.get('processed_matrix_size', 'N/A')})
+- **Raw/UMI Matrix:** {config_dict.get('raw_UMI_like_matrix_name', 'Not found')}{'.'+config_dict.get('raw_UMI_like_matrix_filetype') if config_dict.get('raw_UMI_like_matrix_filetype') else ''} ({config_dict.get('raw_UMI_like_matrix_size', 'N/A')})
+- **Cell Annotations:** {config_dict.get('cell_annotation_name', 'Not found')}{'.'+config_dict.get('cell_annotation_filetype') if config_dict.get('cell_annotation_filetype') else ''} ({config_dict.get('cell_annotation_size', 'N/A')})
+- **Raw Data Available:** {'Yes' if config_dict.get('raw_data_available', True) else 'No (see study description for details)'}
+
+💡 **File Selection Strategy:**
+- Preferred formats: Non-R objects (.txt, .csv) over .rds files
+- Processed matrix identified for normalized expression data
+- Raw/UMI matrix identified for count-based analyses
+- Cell annotations available for cell type information"""
+                
+                summary = base_summary + strategy_section
+            else:
+                summary = base_summary
+            
+            logger.debug(f"Successfully fetched and validated metadata for {clean_geo_id} using {data_source}")
+
+            return summary
                 
         except Exception as e:
             logger.error(f"Error fetching GEO metadata for {geo_id}: {e}")
             return f"Error fetching metadata: {str(e)}"
 
     @tool
-    def download_geo_dataset(geo_id: str, modality_type: str = "single_cell") -> str:
+    def download_geo_dataset(
+        geo_id: str, modality_type: str = "single_cell",
+        **kwargs) -> str:
         """
         Download dataset from GEO using accession number and load as a modality.
         IMPORTANT: Use fetch_geo_metadata FIRST to preview dataset before downloading.
@@ -115,10 +291,8 @@ def data_expert(
 
 Use this modality for quality control, filtering, or downstream analysis."""
             
-            # # Check if metadata has been fetched first
-            # metadata_name = f"{clean_geo_id.lower()}_metadata"
-            # if metadata_name not in existing_modalities:
-            #     logger.info(f"""Metadata not found for {clean_geo_id}""")
+            if clean_geo_id not in data_manager.metadata_store:
+                return f"Error: You forgot to fetch metdata. First go fetch the metadata for {clean_geo_id}"
             
             # Use enhanced GEOService with modular architecture and fallbacks
             from lobster.tools.geo_service import GEOService
@@ -127,7 +301,10 @@ Use this modality for quality control, filtering, or downstream analysis."""
             geo_service = GEOService(data_manager, console=console)
             
             # Use the enhanced download_dataset method (handles all scenarios with fallbacks)
-            result = geo_service.download_dataset(clean_geo_id, modality_type)
+            result = geo_service.download_dataset(
+                geo_id=clean_geo_id, 
+                modality_type=modality_type,
+                **kwargs) #This kwargs contains the config dict
             
             return result
                 
@@ -529,12 +706,9 @@ The new DataManagerV2 uses a modular approach where each dataset is loaded as a 
 3. Multiple modalities → Can be combined into MuData for integrated analysis
 
 <Important Guidelines>
-1. **Use descriptive modality names** (e.g., 'geo_gse12345', 'custom_liver_sc', 'proteomics_sample1')
-2. **Auto-detect data types** when possible to choose appropriate adapters
-3. **Validate all data** before confirming successful load
-4. **Track provenance** automatically through the modular system
-5. **Provide clear modality references** so other agents can access specific data
-6. **Never hallucinate GEO identifiers** - always ask user to provide them
+1. **Auto-detect data types** when possible to choose appropriate adapters (see available adapter above)
+2. **Validate all data** before confirming successful load
+3. **Never hallucinate GEO identifiers** - always ask user to provide them
 
 <Example Workflows & Tool Usage Order>
 
@@ -551,8 +725,15 @@ get_data_summary()  # Shows all loaded modalities
 # Step 3: Fetch metadata for the dataset first
 fetch_geo_metadata("GSE123456")
 
+<important>
+Information to extract after metadata fetching. 
+Always report back after fetching the metadata. Once confirmed by the supervisor you can continue
+</important>
+
 # Step 4: Download the dataset with appropriate modality type
-download_geo_dataset("GSE123456", modality_type="single_cell")
+download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell")
+
+#<important> You will see summary information about the download with the exact name of the modality ID
 
 # Step 5: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
@@ -581,7 +762,7 @@ get_data_summary()
 fetch_geo_metadata("GSE67310")
 
 # Step 3: Review metadata summary, then download with appropriate modality type
-download_geo_dataset("GSE67310", modality_type="single_cell")
+download_geo_dataset("GSE67310", modality_type="transcriptomics_single_cell")
 # OR with auto-detection based on metadata recommendation:
 download_geo_dataset("GSE67310", modality_type="auto_detect")
 

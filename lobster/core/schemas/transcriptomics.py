@@ -251,8 +251,11 @@ class TranscriptomicsSchema:
                     "contact_address",  # Contact address from GEO
                     "contact_city",     # Contact city from GEO  
                     "contact_country",  # Contact country from GEO
+                    "contact_department", # Contact department
+                    "contact_email",    # Contact email address
                     "contact_institute", # Contact institution from GEO
                     "contact_name",     # Contact name from GEO
+                    "contact_phone",    # Contact phone number
                     "contact_zip/postal_code", # Contact ZIP/postal code from GEO (exact field name)
                     "contributor",      # List of contributors from GEO
                     "geo_accession",    # GEO accession number (e.g., GSE194247)
@@ -272,6 +275,7 @@ class TranscriptomicsSchema:
                     "supplementary_file", # Main supplementary file URL from GEO
                     "title",            # Dataset title from GEO
                     "type",             # Dataset type from GEO (e.g., "Expression profiling by high throughput sequencing")
+                    "web_link",         # Web link or URL related to the dataset
                     
                     # Sample-level metadata fields (from samples dictionary)
                     "channel_count",    # Number of channels per sample
@@ -507,7 +511,19 @@ class TranscriptomicsSchema:
                     "pca",               # PCA parameters and results
                     "differential_expression", # DE analysis results
                     "pathway_analysis",  # Pathway enrichment results
-                    "provenance"         # Provenance tracking
+                    "provenance",        # Provenance tracking
+                    
+                    # Contact and web metadata fields
+                    "contact_address",   # Contact address
+                    "contact_city",      # Contact city
+                    "contact_country",   # Contact country
+                    "contact_department", # Contact department
+                    "contact_email",     # Contact email address
+                    "contact_institute", # Contact institution
+                    "contact_name",      # Contact name
+                    "contact_phone",     # Contact phone number
+                    "contact_zip/postal_code", # Contact ZIP/postal code
+                    "web_link"           # Web link or URL related to the dataset
                 ]
             }
         }

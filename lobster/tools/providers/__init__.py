@@ -1,14 +1,43 @@
 """
-Publication providers package for modular literature and dataset discovery.
+Publication providers for literature search and dataset discovery.
 
-This package implements the provider pattern for accessing different publication
-sources including PubMed, bioRxiv, medRxiv, and others.
+This package contains different provider implementations for accessing
+various publication and dataset sources.
 """
 
-from .base_provider import BasePublicationProvider
-from .pubmed_provider import PubMedProvider
+from lobster.tools.providers.base_provider import (
+    BasePublicationProvider,
+    PublicationSource,
+    DatasetType,
+    PublicationMetadata,
+    DatasetMetadata
+)
+from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
+from lobster.tools.providers.geo_provider import GEOProvider, GEOProviderConfig
+from lobster.tools.providers.geo_query_builder import (
+    GEOQueryBuilder,
+    GEOSearchFilters,
+    GEOEntryType,
+    GEOFieldTag
+)
 
 __all__ = [
+    # Base classes
     "BasePublicationProvider",
+    "PublicationSource",
+    "DatasetType", 
+    "PublicationMetadata",
+    "DatasetMetadata",
+    
+    # PubMed provider
     "PubMedProvider",
+    "PubMedProviderConfig",
+    
+    # GEO provider
+    "GEOProvider",
+    "GEOProviderConfig",
+    "GEOQueryBuilder",
+    "GEOSearchFilters",
+    "GEOEntryType",
+    "GEOFieldTag"
 ]

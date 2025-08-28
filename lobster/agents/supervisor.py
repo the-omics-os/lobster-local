@@ -27,7 +27,12 @@ def create_supervisor_prompt(data_manager) -> str:
 
     <Available Experts>
     - **data_expert_agent**: Handles all data operations (metadata fetching, downloading, loading, formatting, managing datasets).
-    - **research_agent**: Specialist in literature discovery and dataset identification — including searching scientific publications, discovering datasets from DOIs/PMIDs, finding marker genes from literature, and identifying related studies.
+    - **research_agent**: Specialist in literature discovery and dataset identification — including:
+      * Searching scientific publications (PubMed, bioRxiv, medRxiv)
+      * Direct GEO DataSets search with advanced filters (organism, date, platform, file types)
+      * Discovering datasets from DOIs/PMIDs
+      * Finding marker genes from literature
+      * Identifying related studies
     - **method_expert_agent**: Specialist in computational parameter extraction and analysis — including extracting parameters from publications, analyzing methodologies across studies, and providing parameter recommendations.
     - **singlecell_expert_agent**: Specialist in single-cell RNA-seq analysis — including QC, normalization, doublet detection, clustering, UMAP visualization, cell type annotation, marker gene detection, and comprehensive visualizations (QC plots, UMAP plots, violin plots, feature plots, dot plots, heatmaps, elbow plots, cluster composition plots).
     - **bulk_rnaseq_expert_agent**: Specialist in bulk RNA-seq analysis — including QC, normalization, differential expression analysis, pathway enrichment, statistical analysis.
@@ -40,11 +45,12 @@ def create_supervisor_prompt(data_manager) -> str:
 
     2. **Delegate to research_agent** when the task involves:
        - Searching scientific literature (PubMed, bioRxiv, medRxiv).
+       - **Direct GEO DataSets search** (e.g., "find single-cell RNA-seq datasets for human T cells").
        - Finding datasets associated with publications (DOI/PMID to GEO/SRA discovery).
        - Discovering marker genes from literature for specific cell types.
        - Finding related studies or publications on specific topics.
        - Extracting publication metadata and bibliographic information.
-       - Literature-based research and dataset identification.
+       - Applying filters to GEO searches (organism, date range, platform, supplementary file types).
 
     3. **Delegate to data_expert_agent** when the task involves:
        - Questions about data structures like AnnData, Seurat, or Scanpy objects.
@@ -118,6 +124,18 @@ def create_supervisor_prompt(data_manager) -> str:
       3. NEVER just say "task completed" or "done".  
     - Always maintain conversation flow and scientific clarity.
 
+    <GEO Search Workflow>:
+    The system now supports a two-phase approach for GEO datasets:
+    1. **Search Phase** (research_agent): Direct search of GEO DataSets with filters
+    2. **Download Phase** (data_expert): Download selected datasets using GEO IDs
+
+    Example workflow:
+    - User: "Find recent single-cell datasets for pancreatic cancer"
+    - You delegate to research_agent to search GEO with filters (organism: human, date: last 6 months)
+    - Research agent returns list of matching datasets with metadata
+    - You present results and ask user which datasets to download
+    - Upon confirmation, you delegate to data_expert to download selected GEO IDs
+
     <Example Delegation Response>:
     "The transcriptomics expert completed QC and ambient RNA correction. Here's the summary:
     [Expert's actual output]
@@ -134,6 +152,19 @@ def create_supervisor_prompt(data_manager) -> str:
     - Once datasets are identified, you delegate to data_expert_agent to fetch metadata and download.
     - If no datasets are found, you ask the user to provide GEO accessions directly.
     - IMPORTANT: Always confirm with user before downloading datasets.
+
+    user - "Find GEO datasets for single-cell RNA-seq of immune cells"
+    - You delegate to research_agent to search GEO DataSets directly with filters.
+    - Research agent returns matching datasets with summaries.
+    - You present the results and ask which datasets to download.
+    - Upon confirmation, delegate to data_expert to download selected GEO IDs.
+
+    user - "Search for 10X Chromium datasets published in the last 3 months"
+    - You delegate to research_agent with specific filters:
+      * supplementary_file_types: ["h5", "h5ad", "matrix.mtx"]
+      * published_last_n_months: 3
+    - Present search results with metadata summaries.
+    - Confirm before downloading any datasets.
 
     user - "Fetch <DOI 1>, <DOI 2>. Can you load it and run QC?"
     - You delegate to the research_agent to find datasets from the provided DOIs.

@@ -18,11 +18,21 @@ from lobster.tools.providers.base_provider import (
     DatasetMetadata
 )
 from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
+from lobster.tools.providers.geo_provider import GEOProvider, GEOProviderConfig
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+class OmicsDataType(Enum):
+    """Enum for different omics data types - modular design for extensibility."""
+    GEO = "geo"  # Gene Expression Omnibus
+    SRA = "sra"  # Sequence Read Archive
+    DBGAP = "dbgap"  # Database of Genotypes and Phenotypes
+    BIOPROJECT = "bioproject"  # BioProject
+    BIOSAMPLE = "biosample"  # BioSample
+    PROTEOMICS = "proteomics"  # ProteomicsDB
+    METABOLOMICS = "metabolomics"  # Metabolomics Workbench
 
 class PublicationServiceConfig(BaseModel):
     """Configuration for the publication service."""
@@ -36,6 +46,7 @@ class PublicationServiceConfig(BaseModel):
     
     # Provider-specific configurations
     pubmed_config: PubMedProviderConfig = PubMedProviderConfig()
+    geo_config: GEOProviderConfig = GEOProviderConfig()
     
     # Service behavior
     auto_register_providers: bool = True
@@ -107,7 +118,8 @@ class PublicationService:
     def __init__(
         self,
         data_manager: DataManagerV2,
-        config: Optional[PublicationServiceConfig] = None
+        config: Optional[PublicationServiceConfig] = None,
+        ncbi_api_key: Optional[str] = None
     ):
         """
         Initialize publication service.
@@ -115,9 +127,11 @@ class PublicationService:
         Args:
             data_manager: DataManagerV2 instance for provenance tracking
             config: Optional configuration, uses defaults if not provided
+            ncbi_api_key: NCBI API key for PubMed provider
         """
         self.data_manager = data_manager
         self.config = config or PublicationServiceConfig()
+        self.ncbi_api_key = ncbi_api_key
         self.registry = ProviderRegistry()
         
         # Auto-register providers if enabled
@@ -127,10 +141,19 @@ class PublicationService:
     def _register_default_providers(self) -> None:
         """Register default providers based on configuration."""
         try:
+            # Create PubMed config with API key if available
+            pubmed_config = self.config.pubmed_config
+            if self.ncbi_api_key:
+                # Create a new config with the API key
+                pubmed_config = PubMedProviderConfig(
+                    **pubmed_config.model_dump(),
+                    api_key=self.ncbi_api_key
+                )
+            
             # Register PubMed provider
             pubmed_provider = PubMedProvider(
                 data_manager=self.data_manager,
-                config=self.config.pubmed_config
+                config=pubmed_config
             )
             self.registry.register_provider(
                 pubmed_provider,
@@ -138,6 +161,19 @@ class PublicationService:
             )
         except Exception as e:
             logger.error(f"Failed to register PubMed provider: {e}")
+        
+        try:
+            # Register GEO provider
+            geo_provider = GEOProvider(
+                data_manager=self.data_manager,
+                config=self.config.geo_config
+            )
+            self.registry.register_provider(
+                geo_provider,
+                set_as_default=(self.config.default_provider == PublicationSource.GEO)
+            )
+        except Exception as e:
+            logger.error(f"Failed to register GEO provider: {e}")
         
         # Future: Add other providers (bioRxiv, medRxiv) when implemented
         logger.info(f"Registered {len(self.registry.list_providers())} providers")
@@ -347,32 +383,38 @@ class PublicationService:
             # Use the first supporting provider (could be enhanced to use multiple)
             provider = supporting_providers[0]
             
-            # Check if provider has direct dataset search capability
-            if hasattr(provider, 'find_datasets_for_study'):
+            # Route to appropriate provider method
+            if provider.source == PublicationSource.GEO:
+                # GEO provider uses search_publications method for direct dataset search
+                results = provider.search_publications(
+                    query=query,
+                    max_results=max_results,
+                    filters=filters
+                )
+            elif hasattr(provider, 'find_datasets_for_study'):
                 # Legacy method from PubMedService - convert data_type
-                legacy_data_type = self._convert_to_legacy_data_type(data_type)
                 results = provider.find_datasets_for_study(
                     query=query,
-                    data_type=legacy_data_type,
+                    data_type=data_type,
                     filters=filters,
                     top_k=max_results
                 )
-                
-                # Log the search
-                self.data_manager.log_tool_usage(
-                    tool_name="search_datasets_directly",
-                    parameters={
-                        "query": query[:100],
-                        "data_type": data_type.value,
-                        "max_results": max_results,
-                        "provider": provider.source.value
-                    },
-                    description="Direct dataset search"
-                )
-                
-                return results
             else:
                 return f"Direct dataset search not supported by {provider.source.value} provider."
+            
+            # Log the search
+            self.data_manager.log_tool_usage(
+                tool_name="search_datasets_directly",
+                parameters={
+                    "query": query[:100],
+                    "data_type": data_type.value,
+                    "max_results": max_results,
+                    "provider": provider.source.value
+                },
+                description="Direct dataset search"
+            )
+            
+            return results
                 
         except Exception as e:
             logger.error(f"Direct dataset search error: {e}")
@@ -463,9 +505,7 @@ class PublicationService:
     
     def _convert_to_legacy_data_type(self, data_type: DatasetType):
         """Convert new DatasetType to legacy format for backward compatibility."""
-        # This is a helper for the legacy find_datasets_for_study method
-        from .pubmed_service import OmicsDataType
-        
+        # This is a helper for the legacy find_datasets_for_study method        
         mapping = {
             DatasetType.GEO: OmicsDataType.GEO,
             DatasetType.SRA: OmicsDataType.SRA,

@@ -18,6 +18,7 @@ class PublicationSource(Enum):
     BIORXIV = "biorxiv"
     MEDRXIV = "medrxiv"
     ARXIV = "arxiv"
+    GEO = "geo"
 
 
 class DatasetType(Enum):

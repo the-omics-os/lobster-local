@@ -136,27 +136,65 @@ class GEOService:
 
         logger.info("GEOService initialized with modular architecture: GEOparse + fallback helpers")
 
-    def _initialize_processing_pipelines(self) -> Dict[str, List[Callable]]:
+    def _initialize_processing_pipelines(self, metadata: Dict[str, Any] = None, strategy: DownloadStrategy = None) -> Dict[str, List[Callable]]:
         """
-        Initialize processing pipelines for different scenarios.
+        Initialize dynamic processing pipelines based on metadata and strategy.
         
-        Since fallback functions have been moved to GEOFallbackService,
-        the pipeline now only uses the primary GEOparse download method.
+        This function now analyzes metadata to determine the best download approach
+        and creates appropriate pipelines for different scenarios.
         
+        Args:
+            metadata: GEO metadata dictionary to analyze for data availability
+            strategy: Download strategy configuration
+            
         Returns:
             Dict[str, List[Callable]]: Pipeline functions for each scenario
         """
-        return {
-            "single_cell": [
-                self._try_geoparse_download
-            ],
-            "bulk": [
-                self._try_geoparse_download
-            ],
-            "mixed": [
-                self._try_geoparse_download
-            ]
-        }
+        # # Analyze metadata for raw data availability if provided
+        #FIXME raw_data_available = True  # Default assumption
+        # if metadata:
+        #     raw_data_available = self._check_raw_data_availability(metadata)
+        #     logger.debug(f"Raw data availability check: {raw_data_available}")
+        
+        #FIXME Use strategy preference if provided
+        # if strategy and strategy.prefer_supplementary:
+        #     raw_data_available = False  # Force supplementary-first approach
+        
+        #BUG 
+        raw_data_available = True
+        # Create dynamic pipelines based on data availability
+        if not raw_data_available:
+            # No raw data - prioritize supplementary files
+            return {
+                "single_cell_rna_seq": [
+                    self._try_supplementary_first,
+                    self._try_geoparse_download  # Fallback
+                ],
+                "bulk_rna_seq": [
+                    self._try_supplementary_first,
+                    self._try_geoparse_download  # Fallback
+                ],
+                "mixed": [
+                    self._try_supplementary_first,
+                    self._try_geoparse_download  # Fallback
+                ]
+            }
+        else:
+            # Raw data available - use standard approach
+            return {
+                "single_cell_rna_seq": [
+                    self._try_geoparse_download,
+                    # self._try_supplementary_fallback  # Only if samples fail
+                ],
+                "bulk_rna_seq": [
+                    self._try_geoparse_download,
+                    # self._try_supplementary_fallback  # Only if samples fail
+                ],
+                "mixed": [
+                    self._try_geoparse_download,
+                    # self._try_supplementary_fallback  # Only if samples fail
+                ]
+            }
 
     # ========================================
     # USED BY DATAEXPERT
@@ -551,19 +589,9 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             if not clean_geo_id.startswith('GSE'):
                 return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession (e.g., GSE194247)."
             
-            # Check if already cached
-            if clean_geo_id in self.data_manager.metadata_store:
-                logger.debug(f"Metadata already stored for: {geo_id}. returning summary")
-                summary = self._format_metadata_summary(
-                    clean_geo_id,
-                    self.data_manager.metadata_store[clean_geo_id]
-                )
-                return summary
-            
             # Primary approach: GEOparse
             metadata = None
             validation_result = None
-            data_source = "geoparse"
             
             try:
                 logger.debug(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
@@ -572,29 +600,31 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 logger.debug(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
                 
             except Exception as geoparse_error:
-                import time
-                logger.warning(f"GEOparse metadata fetch failed: {geoparse_error}")
-                time.sleep(5)
-                # Fallback: Use helper downloader to get SOFT file
-                try:
-                    logger.debug(f"Falling back to helper services for metadata: {clean_geo_id}")
-                    soft_file, _ = self.geo_downloader.download_geo_data(clean_geo_id)
+                    logger.error(f"Helper metadata fetch failed:")
+                    return f"Failed to fetch metadata for {clean_geo_id}. GEOparse ({geoparse_error}) failed."                
+                # import time
+                # logger.warning(f"GEOparse metadata fetch failed: {geoparse_error}")
+                # time.sleep(5)
+                # # Fallback: Use helper downloader to get SOFT file
+                # try:
+                #     logger.debug(f"Falling back to helper services for metadata: {clean_geo_id}")
+                #     soft_file, _ = self.geo_downloader.download_geo_data(clean_geo_id)
                     
-                    if soft_file and soft_file.exists():
-                        # Parse SOFT file using helper parser
-                        _, soft_metadata = self.geo_parser.parse_soft_file(soft_file)
-                        if soft_metadata:
-                            metadata = soft_metadata
-                            data_source = "helper_soft_file"
-                            logger.debug(f"Successfully extracted metadata using helper parser for {clean_geo_id}")
-                        else:
-                            raise GEOFallbackError("Helper parser could not extract metadata from SOFT file")
-                    else:
-                        raise GEOFallbackError("Helper downloader could not download SOFT file")
+                    # if soft_file and soft_file.exists():
+                    #     # Parse SOFT file using helper parser
+                    #     _, soft_metadata = self.geo_parser.parse_soft_file(soft_file)
+                    #     if soft_metadata:
+                    #         metadata = soft_metadata
+                    #         data_source = "helper_soft_file"
+                    #         logger.debug(f"Successfully extracted metadata using helper parser for {clean_geo_id}")
+                    #     else:
+                    #         raise GEOFallbackError("Helper parser could not extract metadata from SOFT file")
+                    # else:
+                    #     raise GEOFallbackError("Helper downloader could not download SOFT file")
                         
-                except Exception as helper_error:
-                    logger.error(f"Helper metadata fetch also failed: {helper_error}")
-                    return f"Failed to fetch metadata for {clean_geo_id}. Both GEOparse ({geoparse_error}) and helper services ({helper_error}) failed."
+                # except Exception as helper_error:
+                #     logger.error(f"Helper metadata fetch also failed: {helper_error}")
+                #     return f"Failed to fetch metadata for {clean_geo_id}. Both GEOparse ({geoparse_error}) and helper services ({helper_error}) failed."
             
             if not metadata:
                 return f"No metadata could be extracted for {clean_geo_id}"
@@ -602,26 +632,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             # Validate metadata against transcriptomics schema
             validation_result = self._validate_geo_metadata(metadata)
             
-            # Store metadata in data_manager for future use
-            self.data_manager.metadata_store[clean_geo_id] = {
-                'metadata': metadata,
-                'validation': validation_result,
-                'fetch_timestamp': pd.Timestamp.now().isoformat(),
-                'data_source': data_source
-            }
-            
-            # Log the metadata fetch operation
-            self.data_manager.log_tool_usage(
-                tool_name="fetch_geo_metadata_with_fallback",
-                parameters={"geo_id": clean_geo_id, "data_source": data_source},
-                description=f"Fetched metadata for GEO dataset {clean_geo_id} using {data_source}"
-            )
-            
-            # Format comprehensive metadata summary
-            summary = self._format_metadata_summary(clean_geo_id, metadata, validation_result)
-            
-            logger.debug(f"Successfully fetched and validated metadata for {clean_geo_id} using {data_source}")
-            return summary
+            return metadata, validation_result
             
         except Exception as e:
             logger.exception(f"Error fetching metadata for {geo_id}: {e}")
@@ -1238,6 +1249,36 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             logger.error(f"Error parsing Matrix Market file {matrix_file}: {e}")
             return None
 
+    def _safely_extract_metadata_field(self, obj, field_name: str, default: str = "") -> str:
+        """
+        Safely extract a metadata field from a GEOparse object.
+        
+        Handles the common pattern of checking for metadata attribute,
+        extracting the field, and joining all elements if it's a list.
+        
+        Args:
+            obj: GEOparse object (GSE, GPL, or GSM)
+            field_name: Name of the metadata field to extract
+            default: Default value if field is not found
+            
+        Returns:
+            str: Extracted metadata value or default
+        """
+        try:
+            if not hasattr(obj, "metadata"):
+                return default
+            
+            field_value = obj.metadata.get(field_name, [default])
+            
+            # Handle list values by joining all elements
+            if isinstance(field_value, list):
+                return ', '.join(field_value) if field_value else default
+            
+            return str(field_value) if field_value else default
+            
+        except (AttributeError, IndexError, KeyError):
+            return default
+
     def _extract_metadata(self, gse) -> Dict[str, Any]:
         """
         Extract comprehensive metadata from GEOparse GSE object.
@@ -1254,29 +1295,19 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             # Basic metadata from GEOparse
             if hasattr(gse, "metadata"):
                 for key, value in gse.metadata.items():
-                    if isinstance(value, list) and len(value) == 1:
-                        metadata[key] = value[0]
+                    if isinstance(value, list):
+                        metadata[key] = ', '.join(value)
                     else:
                         metadata[key] = value
 
-            # Platform information
+            # Platform information - now much cleaner!
             if hasattr(gse, "gpls"):
                 platforms = {}
                 for gpl_id, gpl in gse.gpls.items():
                     platforms[gpl_id] = {
-                        "title": getattr(gpl, "metadata", {}).get("title", [""])[0]
-                        if hasattr(gpl, "metadata")
-                        else "",
-                        "organism": getattr(gpl, "metadata", {}).get("organism", [""])[
-                            0
-                        ]
-                        if hasattr(gpl, "metadata")
-                        else "",
-                        "technology": getattr(gpl, "metadata", {}).get(
-                            "technology", [""]
-                        )[0]
-                        if hasattr(gpl, "metadata")
-                        else "",
+                        "title": self._safely_extract_metadata_field(gpl, "title"),
+                        "organism": self._safely_extract_metadata_field(gpl, "organism"),
+                        "technology": self._safely_extract_metadata_field(gpl, "technology"),
                     }
                 metadata["platforms"] = platforms
 
@@ -1287,8 +1318,8 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     sample_meta = {}
                     if hasattr(gsm, "metadata"):
                         for key, value in gsm.metadata.items():
-                            if isinstance(value, list) and len(value) == 1:
-                                sample_meta[key] = value[0]
+                            if isinstance(value, list):
+                                sample_meta[key] = ''.join(value)
                             else:
                                 sample_meta[key] = value
                     sample_metadata[gsm_id] = sample_meta
@@ -1440,8 +1471,8 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         try:
             # Extract key information
             title = metadata.get('title', 'N/A')
-            summary = metadata.get('summary', 'N/A')[:500] + ('...' if len(str(metadata.get('summary', ''))) > 500 else '')
-            overall_design = metadata.get('overall_design', 'N/A')[:300] + ('...' if len(str(metadata.get('overall_design', ''))) > 300 else '')
+            summary = metadata.get('summary', 'N/A')
+            overall_design = metadata.get('overall_design', 'N/A')
             
             # Sample information
             samples = metadata.get('samples', {})

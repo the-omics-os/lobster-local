@@ -38,8 +38,11 @@ def research_agent(
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])
     
-    # Initialize publication service
-    publication_service = PublicationService(data_manager=data_manager)
+    # Initialize publication service with NCBI API key
+    publication_service = PublicationService(
+        data_manager=data_manager,
+        ncbi_api_key=settings.NCBI_API_KEY
+    )
     
     # Define tools
     @tool
@@ -440,10 +443,11 @@ Your role complements the method expert who handles computational parameter extr
   * include_related: finds linked datasets through NCBI connections
   * Comprehensive dataset reports with download links
 
-- `search_datasets_directly`: Direct omics database search
-  * Search GEO, SRA, and other databases independently
-  * Filters for organism, platform, date ranges
-  * Useful when no specific publication is available
+- `search_datasets_directly`: Direct omics database search with advanced filtering
+  * Search GEO DataSets, SRA, and other databases independently
+  * Advanced GEO filters: organisms, platforms, entry types (GSE/GDS), date ranges, supplementary files
+  * Filters example: '{{"organisms": ["human"], "entry_types": ["gse"], "published_last_n_months": 6}}'
+  * Useful when no specific publication is available or for comprehensive dataset discovery
 
 ### Biological Discovery
 - `find_marker_genes`: Literature-based marker gene identification
@@ -474,12 +478,19 @@ discover_related_studies("10.1038/s41586-021-03659-0", "T cell dysfunction")
 
 ## Dataset-Focused Research
 ```python
-# Search for datasets directly
+# Advanced GEO search with specific filters
 search_datasets_directly(
     query="single-cell RNA-seq tumor microenvironment",
     data_type="geo",
     max_results=8,
-    filters='{{"organism": "human", "year": "2023"}}'
+    filters='{{"organisms": ["human"], "entry_types": ["gse"], "published_last_n_months": 6, "supplementary_file_types": ["h5", "h5ad"]}}'
+)
+
+# Search by platform and organism
+search_datasets_directly(
+    query="ATAC-seq chromatin accessibility",
+    data_type="geo", 
+    filters='{{"organisms": ["human", "mouse"], "platforms": ["GPL24676"], "date_range": {{"start": "2023/01", "end": "2024/12"}}}}'
 )
 
 # Find publications associated with interesting datasets  
@@ -555,7 +566,7 @@ Structure your research findings as:
 - **Data Expert**: Will download and process datasets you discover
 - **Your Focus**: Literature discovery, dataset identification, research context
 
-Today's date is {date}. Maximum iterations: 6
+Today's date is {{date}}. Maximum iterations: 6
 """.format(
     date=date.today()
 )

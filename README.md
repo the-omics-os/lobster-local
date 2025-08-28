@@ -10,7 +10,7 @@ Lobster AI is a powerful bioinformatics platform that uses specialized AI agents
 ## 🚀 Features
 
 ### Core Capabilities
-- **🤖 Multi-Agent System**: Specialized agents for data management, transcriptomics, proteomics, and literature research
+- **🤖 Multi-Agent System**: Specialized agents for data management, research literature discovery, computational method extraction, transcriptomics, and proteomics
 - **🔧 Centralized Agent Registry**: Single-source configuration for adding and managing agents system-wide
 - **🧬 Multi-Omics Support**: Integrated analysis of transcriptomics and proteomics data
 - **🏗️ Modular Architecture**: DataManagerV2 with extensible adapters and backends
@@ -158,9 +158,16 @@ Lobster AI now features a **modular, extensible architecture** that supports mul
 graph TB
     subgraph "AI Agents"
         DE[Data Expert<br/>🔄 Multi-Omics Data Management]
+        RA[Research Agent<br/>🔍 Literature Discovery & Dataset ID]
+        ME[Method Expert<br/>⚙️ Computational Parameter Extraction]
         TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]  
         PE[Proteomics Expert<br/>🧪 Protein Analysis]
-        ME[Method Expert<br/>📚 Literature Research]
+    end
+
+    subgraph "Publication Services"
+        PS[Publication Service<br/>🎯 Multi-Provider Orchestrator]
+        PP[PubMed Provider<br/>📚 Literature Search]
+        GP[GEO Provider<br/>🧬 Direct Dataset Search]
     end
 
     subgraph "DataManagerV2"
@@ -179,9 +186,15 @@ graph TB
     end
 
     DE --> DM2
+    RA --> PS
+    RA --> DM2
+    ME --> PS
+    ME --> DM2
     TE --> DM2
     PE --> DM2
-    ME --> DM2
+    
+    PS --> PP
+    PS --> GP
     
     DM2 --> TRA
     DM2 --> PRA
@@ -192,11 +205,13 @@ graph TB
 
     classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef orchestrator fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
+    classDef service fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
     classDef adapter fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
     classDef backend fill:#fff3e0,stroke:#e65100,stroke-width:2px
 
-    class DE,TE,PE,ME agent
+    class DE,RA,ME,TE,PE agent
     class DM2,MODS orchestrator
+    class PS,PP,GP service
     class TRA,PRA adapter
     class H5BE,MUBE backend
 ```
@@ -284,11 +299,19 @@ The integrated analysis reveals 8 multi-omics cell states with distinct protein-
 - **Statistical Analysis**: Differential protein expression with multiple testing correction
 - **Pattern Analysis**: PCA, clustering, and correlation analysis
 
-### 📚 **Literature Integration**
+### 📚 **Literature Discovery & Research Integration**
+- **Research Agent**: Specialized agent for comprehensive literature discovery and dataset identification
+- **Direct GEO Search**: Search NCBI's GEO DataSets database directly with advanced filtering
+- **PubMed Integration**: Advanced literature search with publication metadata extraction
+- **Dataset Discovery**: Filter by organism, platform, date ranges, and file types
+- **Method Agent Coordination**: Seamless handoff for computational parameter extraction
+- **Multi-Source Integration**: PubMed literature + direct GEO database access + bioRxiv/medRxiv support
+
+### 🔬 **Computational Method Extraction**
 - **Parameter Optimization**: Method-specific parameter recommendations from literature
+- **Protocol Analysis**: Extract computational methods and parameters from publications
 - **Validation**: Cross-reference results with published studies
-- **Protocol Discovery**: Find detailed protocols and best practices
-- **Dataset Discovery**: Identify related datasets for validation and comparison
+- **Methodology Comparison**: Comparative analysis across multiple studies and approaches
 
 ## 🔄 Migration from Legacy System
 

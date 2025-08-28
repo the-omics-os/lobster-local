@@ -176,6 +176,7 @@ class LobsterAgentConfigurator:
     
     # Default agents configuration - modify this to add/remove agents dynamically
     DEFAULT_AGENTS = [
+        "assistant",
         "supervisor",
         "singlecell_expert", 
         "bulk_rnaseq_expert",
@@ -196,6 +197,7 @@ class LobsterAgentConfigurator:
         },
         
         "production": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-3-7-sonnet",
             "singlecell_expert": "claude-4-sonnet",
             "bulk_rnaseq_expert": "claude-4-sonnet",
@@ -205,6 +207,7 @@ class LobsterAgentConfigurator:
         },
         
         "high-performance": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-4-opus",
             "singlecell_expert": "claude-3-7-sonnet",
             "bulk_rnaseq_expert": "claude-4-opus",
@@ -214,6 +217,7 @@ class LobsterAgentConfigurator:
         },
         
         "ultra-performance": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-4-sonnet",
             "singlecell_expert": "claude-4-sonnet",
             "bulk_rnaseq_expert": "claude-4-sonnet",
@@ -223,6 +227,7 @@ class LobsterAgentConfigurator:
         },
         
         "cost-optimized": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-3-haiku",
             "singlecell_expert": "claude-3-5-sonnet",
             "bulk_rnaseq_expert": "claude-3-5-haiku",
@@ -232,6 +237,7 @@ class LobsterAgentConfigurator:
         },
         
         "heavyweight": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-4-1-opus",
             "singlecell_expert": "claude-4-1-opus",
             "bulk_rnaseq_expert": "claude-4-1-opus",
@@ -241,6 +247,7 @@ class LobsterAgentConfigurator:
         },
         
         "eu-compliant": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-3-5-sonnet-v2-eu",
             "singlecell_expert": "claude-4-1-opus-eu",
             "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
@@ -250,6 +257,7 @@ class LobsterAgentConfigurator:
         },
         
         "eu-high-performance": {
+            "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-3-7-sonnet-eu",
             "singlecell_expert": "claude-3-7-sonnet-eu",
             "bulk_rnaseq_expert": "claude-4-opus-eu",

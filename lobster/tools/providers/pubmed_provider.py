@@ -16,7 +16,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
-from .base_provider import (
+from lobster.tools.providers.base_provider import (
     BasePublicationProvider, 
     PublicationSource, 
     DatasetType, 
@@ -27,15 +27,6 @@ from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-class OmicsDataType:
-    """Legacy enum mapping for backward compatibility."""
-    GEO = "geo"
-    SRA = "sra" 
-    DBGAP = "dbgap"
-    BIOPROJECT = "bioproject"
-    BIOSAMPLE = "biosample"
 
 
 class NCBIDatabase:

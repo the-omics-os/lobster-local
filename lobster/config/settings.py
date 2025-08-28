@@ -60,7 +60,7 @@ class Settings:
         self.NCBI_API_KEY = os.environ.get('NCBI_API_KEY', '')
 
         # AWS region (fallback for backward compatibility)
-        self.REGION = os.environ.get('AWS_REGION', 'us-east-2')
+        self.REGION = os.environ.get('AWS_REGION', 'us-east-1')
         
         # Web server settings
         self.PORT = int(os.environ.get('PORT', '8501'))
@@ -115,6 +115,24 @@ class Settings:
             return self.agent_configurator.get_llm_params(agent_name)
         except KeyError as k:
             # Fallback to legacy settings if agent not configured
+            print(f'FAILED TO GET PARAMS: {k}')
+            raise KeyError(f'{k}')
+        
+    def get_assistant_llm_params(self, agent_name: str) -> Dict[str, Any]:
+        """
+        Get LLM parameters for a specific assistants using the new configuration system.
+        
+        Args:
+            agent_name: Name of the agent (e.g., 'supervisor', 'transcriptomics_expert', 'method_agent')
+            
+        Returns:
+            Dictionary of LLM initialization parameters
+        """
+        try:
+            return self.agent_configurator.get_llm_params(agent_name)
+        except KeyError as k:
+            # Fallback to legacy settings if agent not configured
+            print(f'FAILED TO GET PARAMS: {k}')
             raise KeyError(f'{k}')
     
     def get_agent_model_config(self, agent_name: str):

@@ -23,9 +23,10 @@ graph TB
     %% Agents Layer
     subgraph "AI Agents - Dynamically Loaded"
         DE[Data Expert<br/>🔄 Data Loading & Management]
+        RA[Research Agent<br/>🔍 Literature Discovery & Dataset ID]
+        ME[Method Expert<br/>⚙️ Computational Parameter Extraction]
         TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]
         PE[Proteomics Expert<br/>🧪 Protein Analysis]
-        ME[Method Expert<br/>📚 Literature Research]
     end
 
     %% NEW: Analysis Services Layer (Stateless)
@@ -35,8 +36,15 @@ graph TB
         CLUST[ClusteringService<br/>🎯 Leiden & UMAP]
         SCELL[EnhancedSingleCellService<br/>🔬 Doublets & Annotation]
         BULK[BulkRNASeqService<br/>📈 Bulk Analysis]
-        PUBMED[PubMedService<br/>📚 Literature Mining]
         GEO_SVC[GEOService<br/>💾 Data Download]
+    end
+    
+    %% NEW: Publication Services Layer
+    subgraph "Publication & Literature Services"
+        PUBSVC[PublicationService<br/>🎯 Multi-Provider Orchestrator]
+        PUBMED[PubMedProvider<br/>📚 Literature Search]
+        GEOPROV[GEOProvider<br/>🧬 Direct GEO DataSets Search]
+        GEOQB[GEOQueryBuilder<br/>🔍 Advanced Query Construction]
     end
 
     %% DataManagerV2 Orchestration
@@ -97,7 +105,9 @@ graph TB
 
     %% NEW: Agent to Service connections
     DE --> GEO_SVC
-    DE --> PUBMED
+    RA --> PUBSVC
+    RA --> GEOPROV
+    ME --> PUBSVC
     TE --> PREP
     TE --> QUAL
     TE --> CLUST
@@ -111,7 +121,7 @@ graph TB
     CLUST --> |Clustering Results| DM2
     SCELL --> |Annotations| DM2
     GEO_SVC --> |Dataset Loading| DM2
-    PUBMED --> |Metadata| DM2
+    PUBSVC --> |Publication Metadata| DM2
 
     %% DataManager orchestration
     DM2 --> TRA
@@ -145,8 +155,8 @@ graph TB
     classDef interface fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,stroke-dasharray: 5 5
     classDef source fill:#f5f5f5,stroke:#616161,stroke-width:1px
 
-    class DE,TE,PE,ME agent
-    class PREP,QUAL,CLUST,SCELL,BULK,PUBMED,GEO_SVC service
+    class DE,RA,ME,TE,PE agent
+    class PREP,QUAL,CLUST,SCELL,BULK,PUBSVC,PUBMED,GEOPROV,GEOQB service
     class DM2,MODALITIES,PROV,ERROR orchestrator
     class TRA,PRA,TRSC,TRBL,PRMS,PRAF adapter
     class H5BE,MUBE backend
