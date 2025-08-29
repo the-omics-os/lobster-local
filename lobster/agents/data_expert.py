@@ -213,22 +213,17 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
             
             # Add strategy config section if available
             if 'strategy_config' in locals() and strategy_config:
-                config_dict = strategy_config.dict()
+                config_dict = data_manager.metadata_store[clean_geo_id]['strategy_config']
                 
                 strategy_section = f"""
 
 📁 **Extracted File Strategy Configuration:**
 - **Summary File:** {config_dict.get('summary_file_name', 'Not found')}{'.'+config_dict.get('summary_file_type') if config_dict.get('summary_file_type') else ''}
-- **Processed Matrix:** {config_dict.get('processed_matrix_name', 'Not found')}{'.'+config_dict.get('processed_matrix_filetype') if config_dict.get('processed_matrix_filetype') else ''} ({config_dict.get('processed_matrix_size', 'N/A')})
-- **Raw/UMI Matrix:** {config_dict.get('raw_UMI_like_matrix_name', 'Not found')}{'.'+config_dict.get('raw_UMI_like_matrix_filetype') if config_dict.get('raw_UMI_like_matrix_filetype') else ''} ({config_dict.get('raw_UMI_like_matrix_size', 'N/A')})
-- **Cell Annotations:** {config_dict.get('cell_annotation_name', 'Not found')}{'.'+config_dict.get('cell_annotation_filetype') if config_dict.get('cell_annotation_filetype') else ''} ({config_dict.get('cell_annotation_size', 'N/A')})
+- **Processed Matrix:** {config_dict.get('processed_matrix_name', 'Not found')}{'.'+config_dict.get('processed_matrix_filetype') if config_dict.get('processed_matrix_filetype') else ''})
+- **Raw/UMI Matrix:** {config_dict.get('raw_UMI_like_matrix_name', 'Not found')}{'.'+config_dict.get('raw_UMI_like_matrix_filetype') if config_dict.get('raw_UMI_like_matrix_filetype') else ''})
+- **Cell Annotations:** {config_dict.get('cell_annotation_name', 'Not found')}{'.'+config_dict.get('cell_annotation_filetype') if config_dict.get('cell_annotation_filetype') else ''})
 - **Raw Data Available:** {'Yes' if config_dict.get('raw_data_available', True) else 'No (see study description for details)'}
-
-💡 **File Selection Strategy:**
-- Preferred formats: Non-R objects (.txt, .csv) over .rds files
-- Processed matrix identified for normalized expression data
-- Raw/UMI matrix identified for count-based analyses
-- Cell annotations available for cell type information"""
+"""
                 
                 summary = base_summary + strategy_section
             else:
