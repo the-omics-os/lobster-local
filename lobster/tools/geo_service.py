@@ -38,6 +38,7 @@ from lobster.tools.geo_parser import GEOParser
 from lobster.tools.pipeline_strategy import (
     PipelineStrategyEngine,
     PipelineContext,
+    PipelineType,
     create_pipeline_context
 )
 
@@ -203,7 +204,7 @@ class GEOService:
             logger.exception(f"Error fetching metadata for {geo_id}: {e}")
             return f"Error fetching metadata for {geo_id}: {str(e)}"
 
-    def download_dataset(self, geo_id: str, modality_type) -> str:
+    def download_dataset(self, geo_id: str, modality_type, **kwargs) -> str:
         """
         Download and process a dataset using modular strategy with fallbacks (Scenarios 2 & 3).
 
@@ -235,7 +236,7 @@ class GEOService:
                 return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
 
             # Use the strategic download approach
-            geo_result = self.download_with_strategy(geo_id = clean_geo_id)
+            geo_result = self.download_with_strategy(geo_id = clean_geo_id, **kwargs)
             
             if not geo_result.success:
                 return f"Failed to download {clean_geo_id} using all available methods. Last error: {geo_result.error_message}"
@@ -315,7 +316,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
 # ██                                                                            ██
 # ████████████████████████████████████████████████████████████████████████████████
 
-    def download_with_strategy(self, geo_id: str) -> GEOResult:
+    def download_with_strategy(self, geo_id: str, manual_strategy_override: PipelineType = None) -> GEOResult:
         """
         Master function implementing layered download approach using dynamic pipeline strategy.
         
@@ -356,8 +357,11 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     'cell_annotation_name': ''
                 }
             
-            # Step 3: Get appropriate pipeline using strategy engine
-            pipeline = self._get_processing_pipeline(clean_geo_id, cached_metadata, strategy_config)
+            # Step 3: IF USER DECIDES WHICH APPROACH TO CHOOSE MANUALLY OVERRIDE THE AUTOMATED APPRAOCH
+            if manual_strategy_override:
+                pipeline = self.pipeline_engine.get_pipeline_functions(manual_strategy_override, self)
+            else:
+                pipeline = self._get_processing_pipeline(clean_geo_id, cached_metadata, strategy_config)
             
             logger.debug(f"Using dynamic pipeline with {len(pipeline)} steps")
             
@@ -849,15 +853,43 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         try:
             metadata = {}
 
+            # Define which fields should remain as lists vs be joined as strings
+            # Fields that need to remain as lists for downstream processing
+            LIST_FIELDS = {
+                'supplementary_file', 'relation', 'sample_id', 'platform_id', 
+                'platform_taxid', 'sample_taxid'
+            }
+            
+            # Fields that should be joined as strings for display/summary
+            STRING_FIELDS = {
+                'title', 'summary', 'overall_design', 'type', 'contributor',
+                'contact_name', 'contact_email', 'contact_phone', 'contact_department',
+                'contact_institute', 'contact_address', 'contact_city', 
+                'contact_zip/postal_code', 'contact_country', 'geo_accession',
+                'status', 'submission_date', 'last_update_date', 'pubmed_id', 'web_link'
+            }
+
             # Basic metadata from GEOparse
             if hasattr(gse, "metadata"):
                 for key, value in gse.metadata.items():
                     if isinstance(value, list):
-                        metadata[key] = ', '.join(value)
+                        # Keep file-related and ID fields as lists for downstream processing
+                        if key in LIST_FIELDS:
+                            metadata[key] = value
+                        # Join descriptive/text fields as strings for summary generation  
+                        elif key in STRING_FIELDS:
+                            metadata[key] = ', '.join(value) if value else ''
+                        else:
+                            # For unknown fields, use a conservative approach:
+                            # If it looks like a file/ID field, keep as list; otherwise join
+                            if any(keyword in key.lower() for keyword in ['file', 'url', 'id', 'accession']):
+                                metadata[key] = value
+                            else:
+                                metadata[key] = ', '.join(value) if value else ''
                     else:
                         metadata[key] = value
 
-            # Platform information - now much cleaner!
+            # Platform information - keep as structured dict
             if hasattr(gse, "gpls"):
                 platforms = {}
                 for gpl_id, gpl in gse.gpls.items():
@@ -868,7 +900,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     }
                 metadata["platforms"] = platforms
 
-            # Sample metadata
+            # Sample metadata - keep as structured dict
             if hasattr(gse, "gsms"):
                 sample_metadata = {}
                 for gsm_id, gsm in gse.gsms.items():
@@ -876,7 +908,12 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     if hasattr(gsm, "metadata"):
                         for key, value in gsm.metadata.items():
                             if isinstance(value, list):
-                                sample_meta[key] = ''.join(value)
+                                # For sample-level metadata, preserve lists for characteristics
+                                # but join others for display
+                                if key in ['characteristics_ch1', 'supplementary_file'] or 'file' in key.lower():
+                                    sample_meta[key] = value
+                                else:
+                                    sample_meta[key] = ', '.join(value) if value else ''
                             else:
                                 sample_meta[key] = value
                     sample_metadata[gsm_id] = sample_meta
@@ -1056,63 +1093,110 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             str: Formatted metadata summary
         """
         try:
-            # Extract key information
-            title = metadata.get('title', 'N/A')
-            summary = metadata.get('summary', 'N/A')
-            overall_design = metadata.get('overall_design', 'N/A')
+            # Extract key information with safe string conversion
+            title = str(metadata.get('title', 'N/A')).strip()
+            summary = str(metadata.get('summary', 'N/A')).strip()
+            overall_design = str(metadata.get('overall_design', 'N/A')).strip()
             
             # Sample information
             samples = metadata.get('samples', {})
+            if not isinstance(samples, dict):
+                samples = {}
             sample_count = len(samples)
             
-            # Platform information
+            # Platform information with safe handling
             platforms = metadata.get('platforms', {})
+            if not isinstance(platforms, dict):
+                platforms = {}
             platform_info = []
             for platform_id, platform_data in platforms.items():
-                platform_info.append(f"{platform_id}: {platform_data.get('title', 'N/A')}")
+                if isinstance(platform_data, dict):
+                    title_info = platform_data.get('title', 'N/A')
+                    platform_info.append(f"{platform_id}: {title_info}")
+                else:
+                    platform_info.append(f"{platform_id}: N/A")
             
-            # Contact information
-            contact_name = metadata.get('contact_name', 'N/A')
-            contact_institute = metadata.get('contact_institute', 'N/A')
+            # Contact information with safe string conversion
+            contact_name = str(metadata.get('contact_name', 'N/A')).strip()
+            contact_institute = str(metadata.get('contact_institute', 'N/A')).strip()
             
             # Publication info
-            pubmed_id = metadata.get('pubmed_id', 'Not available')
+            pubmed_id = str(metadata.get('pubmed_id', 'Not available')).strip()
             
-            # Dates
-            submission_date = metadata.get('submission_date', 'N/A')
-            last_update = metadata.get('last_update_date', 'N/A')
+            # Dates with safe string conversion
+            submission_date = str(metadata.get('submission_date', 'N/A')).strip()
+            last_update = str(metadata.get('last_update_date', 'N/A')).strip()
             
-            # Sample characteristics preview
+            # Sample characteristics preview with safe handling
             sample_preview = []
             for i, (sample_id, sample_data) in enumerate(samples.items()):
                 if i < 3:  # Show first 3 samples
-                    chars = sample_data.get('characteristics_ch1', [])
-                    if isinstance(chars, list) and chars:
-                        sample_preview.append(f"  - {sample_id}: {chars[0]}")
+                    if isinstance(sample_data, dict):
+                        chars = sample_data.get('characteristics_ch1', [])
+                        if isinstance(chars, list) and chars:
+                            sample_preview.append(f"  - {sample_id}: {str(chars[0]).strip()}")
+                        else:
+                            title_info = sample_data.get('title', 'No title')
+                            sample_preview.append(f"  - {sample_id}: {str(title_info).strip()}")
                     else:
-                        sample_preview.append(f"  - {sample_id}: {sample_data.get('title', 'No title')}")
+                        sample_preview.append(f"  - {sample_id}: No title")
             
             if sample_count > 3:
                 sample_preview.append(f"  ... and {sample_count - 3} more samples")
             
-            # Validation status
-            if not validation_result:
-                validation_status = None
-                alignment_pct = None
-                predicted_type = None
-            else:
-                validation_status = validation_result.get('validation_status', 'UNKNOWN')
-                alignment_pct = validation_result.get('alignment_percentage', 0.0)
-                predicted_type = validation_result.get('predicted_data_type', 'unknown')
+            # Robust validation status handling with type checking
+            validation_status = 'UNKNOWN'
+            alignment_pct_raw = 'UNKNOWN'
+            alignment_pct_formatted = 'UNKNOWN'
+            predicted_type = 'UNKNOWN'
+            aligned_fields = 'UNKNOWN'
+            missing_fields = 'UNKNOWN'
             
-            # Format the summary
+            if validation_result and isinstance(validation_result, dict):
+                # Validation status
+                validation_status = str(validation_result.get('validation_status', 'UNKNOWN')).strip()
+                
+                # Alignment percentage with robust type handling
+                alignment_raw = validation_result.get('alignment_percentage', None)
+                if alignment_raw is not None:
+                    try:
+                        # Try to convert to float
+                        alignment_float = float(alignment_raw)
+                        alignment_pct_raw = alignment_float
+                        alignment_pct_formatted = f"{alignment_float:.1f}"
+                    except (ValueError, TypeError):
+                        # If conversion fails, use string representation
+                        alignment_pct_raw = str(alignment_raw)
+                        alignment_pct_formatted = str(alignment_raw)
+                
+                # Predicted type
+                predicted_type_raw = validation_result.get('predicted_data_type', 'unknown')
+                if predicted_type_raw:
+                    predicted_type = str(predicted_type_raw).replace('_', ' ').title()
+                
+                # Schema field counts with robust type handling
+                aligned_raw = validation_result.get('schema_aligned_fields', None)
+                if aligned_raw is not None:
+                    try:
+                        aligned_fields = int(aligned_raw)
+                    except (ValueError, TypeError):
+                        aligned_fields = str(aligned_raw)
+                
+                missing_raw = validation_result.get('schema_missing_fields', None)
+                if missing_raw is not None:
+                    try:
+                        missing_fields = int(missing_raw)
+                    except (ValueError, TypeError):
+                        missing_fields = str(missing_raw)
+            
+            # Format the summary with safe string formatting
             summary_text = f"""📊 **GEO Dataset Metadata Summary: {geo_id}**
 
 🔬 **Study Information:**
 - **Title:** {title}
 - **Summary:** {summary}
 - **Design:** {overall_design}
-- **Predicted Type:** {predicted_type.replace('_', ' ').title()}
+- **Predicted Type:** {predicted_type}
 
 👥 **Research Details:**
 - **Contact:** {contact_name} ({contact_institute})
@@ -1128,9 +1212,9 @@ The dataset is now available as modality '{modality_name}' for other agents to u
 
 ✅ **Schema Validation:**
 - **Status:** {validation_status}
-- **Schema Alignment:** {alignment_pct:.1f}% of expected fields present
-- **Aligned Fields:** {validation_result.get('schema_aligned_fields', 0)}
-- **Missing Fields:** {validation_result.get('schema_missing_fields', 0)}
+- **Schema Alignment:** {alignment_pct_formatted}% of expected fields present
+- **Aligned Fields:** {aligned_fields}
+- **Missing Fields:** {missing_fields}
 
 📋 **Next Steps:**
 1. **Review this metadata** to ensure it matches your research needs
@@ -1145,6 +1229,7 @@ The actual expression data download will be much faster now that metadata is pre
             
         except Exception as e:
             logger.error(f"Error formatting metadata summary: {e}")
+            logger.exception("Full traceback for metadata formatting error:")
             return f"Error formatting metadata summary for {geo_id}: {str(e)}"
 
 
@@ -1275,7 +1360,7 @@ The actual expression data download will be much faster now that metadata is pre
                             nested_tar.extractall(path=sample_extract_dir)
 
                         # Try to parse 10X Genomics format data
-                        matrix = self._parse_10x_data(sample_extract_dir, sample_id)
+                        matrix = self.geo_parser.parse_10x_data(sample_extract_dir, sample_id)
                         if matrix is not None:
                             all_matrices.append(matrix)
                             logger.info(
@@ -1315,7 +1400,7 @@ The actual expression data download will be much faster now that metadata is pre
                 for file_path in expression_files[:3]:  # Try top 3 largest files
                     try:
                         logger.info(f"Attempting to parse: {file_path.name}")
-                        matrix = self._parse_expression_file(file_path)
+                        matrix = self.geo_parser.parse_expression_file(file_path)
                         if (
                             matrix is not None
                             and matrix.shape[0] > 0
@@ -1342,7 +1427,7 @@ The actual expression data download will be much faster now that metadata is pre
         self, file_url: str, gse_id: str
     ) -> Optional[pd.DataFrame]:
         """
-        Download and parse a single expression file.
+        Download and parse a single expression file with progress tracking.
 
         Args:
             file_url: URL to expression file
@@ -1357,411 +1442,22 @@ The actual expression data download will be much faster now that metadata is pre
 
             if not local_file.exists():
                 logger.info(f"Downloading file: {file_url}")
-                urllib.request.urlretrieve(file_url, local_file)
+                # Use geo_downloader for progress tracking and better protocol support
+                if not self.geo_downloader.download_file(file_url, local_file):
+                    logger.error(f"Failed to download file: {file_url}")
+                    return None
+                logger.info(f"Successfully downloaded: {local_file}")
+            else:
+                logger.info(f"Using cached file: {local_file}")
 
-            return self._parse_expression_file(local_file)
+            return self.geo_parser.parse_expression_file(local_file)
 
         except Exception as e:
             logger.error(f"Error downloading and parsing file: {e}")
             return None
 
-    def _parse_expression_file(self, file_path: Path) -> Optional[pd.DataFrame]:
-        """
-        Parse an expression data file.
-
-        Args:
-            file_path: Path to expression file
-
-        Returns:
-            DataFrame: Expression matrix or None
-        """
-        try:
-            logger.info(f"Parsing expression file: {file_path}")
-
-            # Check if it's a Matrix Market format file (.mtx or .mtx.gz)
-            if "matrix.mtx" in file_path.name.lower():
-                logger.info(f"Detected Matrix Market format file: {file_path.name}")
-                return self._parse_matrix_market_file(file_path)
-
-            # Handle regular text files
-            # Handle compressed files
-            if file_path.name.endswith(".gz"):
-                opener = lambda: pd.read_csv(
-                    file_path,
-                    compression="gzip",
-                    sep="\t",
-                    index_col=0,
-                    low_memory=False,
-                )
-            else:
-                opener = lambda: pd.read_csv(
-                    file_path, sep="\t", index_col=0, low_memory=False
-                )
-
-            # Try tab-separated first
-            try:
-                df = opener()
-                if df.shape[0] > 0 and df.shape[1] > 0:
-                    logger.info(f"Successfully parsed as tab-separated: {df.shape}")
-                    return df
-            except:
-                pass
-
-            # Try comma-separated
-            try:
-                if file_path.name.endswith(".gz"):
-                    df = pd.read_csv(
-                        file_path,
-                        compression="gzip",
-                        sep=",",
-                        index_col=0,
-                        low_memory=False,
-                    )
-                else:
-                    df = pd.read_csv(file_path, sep=",", index_col=0, low_memory=False)
-
-                if df.shape[0] > 0 and df.shape[1] > 0:
-                    logger.info(f"Successfully parsed as comma-separated: {df.shape}")
-                    return df
-            except:
-                pass
-
-            logger.warning(f"Could not parse expression file: {file_path}")
-            return None
-
-        except Exception as e:
-            logger.error(f"Error parsing expression file {file_path}: {e}")
-            return None
-
-    def _parse_matrix_market_file(self, matrix_file: Path) -> Optional[pd.DataFrame]:
-        """
-        Parse a Matrix Market format file (.mtx or .mtx.gz) and look for associated barcodes/features.
-
-        Args:
-            matrix_file: Path to Matrix Market format file
-
-        Returns:
-            DataFrame: Expression matrix or None
-        """
-        try:
-            logger.info(f"Parsing Matrix Market file: {matrix_file}")
-
-            # Import scipy for sparse matrix handling
-            try:
-                import scipy.io as sio
-                from scipy.sparse import csr_matrix
-            except ImportError:
-                logger.error(
-                    "scipy is required for parsing Matrix Market files but not available"
-                )
-                return None
-
-            # Read the sparse matrix
-            if matrix_file.name.endswith(".gz"):
-                import gzip
-
-                with gzip.open(matrix_file, "rt") as f:
-                    matrix = sio.mmread(f)
-            else:
-                matrix = sio.mmread(matrix_file)
-
-            # Convert to dense format and transpose (Matrix Market format is often genes x cells, we want cells x genes)
-            if hasattr(matrix, "todense"):
-                matrix_dense = matrix.todense()
-            else:
-                matrix_dense = matrix
-
-            # Transpose so that cells are rows and genes are columns
-            matrix_dense = matrix_dense.T
-
-            logger.info(f"Matrix shape after transpose: {matrix_dense.shape}")
-
-            # Look for associated barcodes and features files in the same directory
-            matrix_dir = matrix_file.parent
-            sample_id = (
-                matrix_file.name.replace("_matrix.mtx.gz", "")
-                .replace("_matrix.mtx", "")
-                .replace("matrix.mtx.gz", "")
-                .replace("matrix.mtx", "")
-            )
-            if not sample_id:
-                sample_id = matrix_dir.name
-
-            logger.info(f"Looking for barcodes/features files for sample: {sample_id}")
-
-            # Find barcodes and features files
-            barcodes_file = None
-            features_file = None
-
-            # Common patterns for barcodes and features files
-            barcode_patterns = [
-                "barcodes.tsv.gz",
-                "barcodes.tsv",
-                f"{sample_id}_barcodes.tsv.gz",
-                f"{sample_id}_barcodes.tsv",
-            ]
-            feature_patterns = [
-                "features.tsv.gz",
-                "features.tsv",
-                "genes.tsv.gz",
-                "genes.tsv",
-                f"{sample_id}_features.tsv.gz",
-                f"{sample_id}_features.tsv",
-                f"{sample_id}_genes.tsv.gz",
-                f"{sample_id}_genes.tsv",
-            ]
-
-            # Search in the same directory
-            for file_path in matrix_dir.glob("*"):
-                if file_path.is_file():
-                    name_lower = file_path.name.lower()
-                    if any(
-                        pattern.lower() in name_lower for pattern in barcode_patterns
-                    ):
-                        barcodes_file = file_path
-                    elif any(
-                        pattern.lower() in name_lower for pattern in feature_patterns
-                    ):
-                        features_file = file_path
-
-            logger.info(
-                f"Found files - Barcodes: {barcodes_file.name if barcodes_file else 'None'}, Features: {features_file.name if features_file else 'None'}"
-            )
-
-            # Read barcodes (cell identifiers)
-            cell_ids = []
-            if barcodes_file and barcodes_file.exists():
-                try:
-                    if barcodes_file.name.endswith(".gz"):
-                        import gzip
-
-                        with gzip.open(barcodes_file, "rt") as f:
-                            cell_ids = [line.strip() for line in f]
-                    else:
-                        with open(barcodes_file, "r") as f:
-                            cell_ids = [line.strip() for line in f]
-                    logger.info(f"Read {len(cell_ids)} cell barcodes")
-                except Exception as e:
-                    logger.warning(f"Error reading barcodes file: {e}")
-
-            # Read features/genes
-            gene_ids = []
-            gene_names = []
-            if features_file and features_file.exists():
-                try:
-                    if features_file.name.endswith(".gz"):
-                        import gzip
-
-                        with gzip.open(features_file, "rt") as f:
-                            lines = f.readlines()
-                    else:
-                        with open(features_file, "r") as f:
-                            lines = f.readlines()
-
-                    for line in lines:
-                        parts = line.strip().split("\t")
-                        if len(parts) >= 2:
-                            gene_ids.append(parts[0])
-                            gene_names.append(parts[1])
-                        elif len(parts) == 1:
-                            gene_ids.append(parts[0])
-                            gene_names.append(parts[0])
-
-                    logger.info(f"Read {len(gene_ids)} gene features")
-                except Exception as e:
-                    logger.warning(f"Error reading features file: {e}")
-
-            # Create appropriate cell and gene names
-            if not cell_ids:
-                cell_ids = [
-                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
-                ]
-            else:
-                # Add sample prefix to cell IDs
-                cell_ids = [f"{sample_id}_{cell_id}" for cell_id in cell_ids]
-
-            if not gene_names:
-                if gene_ids:
-                    gene_names = gene_ids
-                else:
-                    gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
-
-            # Ensure we have the right number of identifiers
-            if len(cell_ids) != matrix_dense.shape[0]:
-                logger.warning(
-                    f"Cell ID count mismatch: {len(cell_ids)} vs {matrix_dense.shape[0]}"
-                )
-                cell_ids = [
-                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
-                ]
-
-            if len(gene_names) != matrix_dense.shape[1]:
-                logger.warning(
-                    f"Gene name count mismatch: {len(gene_names)} vs {matrix_dense.shape[1]}"
-                )
-                gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
-
-            # Create DataFrame
-            df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
-
-            logger.info(
-                f"Successfully created Matrix Market DataFrame for {sample_id}: {df.shape}"
-            )
-            return df
-
-        except Exception as e:
-            logger.error(f"Error parsing Matrix Market file {matrix_file}: {e}")
-            return None
-
-    def _parse_10x_data(
-        self, extract_dir: Path, sample_id: str
-    ) -> Optional[pd.DataFrame]:
-        """
-        Parse 10X Genomics format data (matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz).
-
-        Args:
-            extract_dir: Directory containing 10X format files
-            sample_id: Sample identifier for cell naming
-
-        Returns:
-            DataFrame: Expression matrix with cells as rows, genes as columns
-        """
-        try:
-            logger.info(f"Parsing 10X data for {sample_id} in {extract_dir}")
-
-            # Look for 10X files in the directory and subdirectories
-            matrix_file = None
-            barcodes_file = None
-            features_file = None
-
-            # Search recursively for 10X files
-            for file_path in extract_dir.rglob("*"):
-                if file_path.is_file():
-                    name_lower = file_path.name.lower()
-                    if "matrix.mtx" in name_lower:
-                        matrix_file = file_path
-                    elif "barcode" in name_lower or "barcodes" in name_lower:
-                        barcodes_file = file_path
-                    elif "feature" in name_lower or "genes" in name_lower:
-                        features_file = file_path
-
-            if not matrix_file:
-                logger.warning(f"No matrix.mtx file found for {sample_id}")
-                return None
-
-            logger.info(
-                f"Found 10X files - Matrix: {matrix_file.name}, Barcodes: {barcodes_file.name if barcodes_file else 'None'}, Features: {features_file.name if features_file else 'None'}"
-            )
-
-            # Import scipy for sparse matrix handling
-            try:
-                import scipy.io as sio
-                from scipy.sparse import csr_matrix
-            except ImportError:
-                logger.error("scipy is required for parsing 10X data but not available")
-                return None
-
-            # Read the sparse matrix
-            logger.info(f"Reading sparse matrix from {matrix_file}")
-            if matrix_file.name.endswith(".gz"):
-                import gzip
-
-                with gzip.open(matrix_file, "rt") as f:
-                    matrix = sio.mmread(f)
-            else:
-                matrix = sio.mmread(matrix_file)
-
-            # Convert to dense format and transpose (10X format is genes x cells, we want cells x genes)
-            if hasattr(matrix, "todense"):
-                matrix_dense = matrix.todense()
-            else:
-                matrix_dense = matrix
-
-            # Transpose so that cells are rows and genes are columns
-            matrix_dense = matrix_dense.T
-
-            logger.info(f"Matrix shape after transpose: {matrix_dense.shape}")
-
-            # Read barcodes (cell identifiers)
-            cell_ids = []
-            if barcodes_file and barcodes_file.exists():
-                try:
-                    if barcodes_file.name.endswith(".gz"):
-                        with gzip.open(barcodes_file, "rt") as f:
-                            cell_ids = [line.strip() for line in f]
-                    else:
-                        with open(barcodes_file, "r") as f:
-                            cell_ids = [line.strip() for line in f]
-                    logger.info(f"Read {len(cell_ids)} cell barcodes")
-                except Exception as e:
-                    logger.warning(f"Error reading barcodes file: {e}")
-
-            # Read features/genes
-            gene_ids = []
-            gene_names = []
-            if features_file and features_file.exists():
-                try:
-                    if features_file.name.endswith(".gz"):
-                        with gzip.open(features_file, "rt") as f:
-                            lines = f.readlines()
-                    else:
-                        with open(features_file, "r") as f:
-                            lines = f.readlines()
-
-                    for line in lines:
-                        parts = line.strip().split("\t")
-                        if len(parts) >= 2:
-                            gene_ids.append(parts[0])
-                            gene_names.append(parts[1])
-                        elif len(parts) == 1:
-                            gene_ids.append(parts[0])
-                            gene_names.append(parts[0])
-
-                    logger.info(f"Read {len(gene_ids)} gene features")
-                except Exception as e:
-                    logger.warning(f"Error reading features file: {e}")
-
-            # Create appropriate cell and gene names
-            if not cell_ids:
-                cell_ids = [
-                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
-                ]
-            else:
-                # Add sample prefix to cell IDs
-                cell_ids = [f"{sample_id}_{cell_id}" for cell_id in cell_ids]
-
-            if not gene_names:
-                if gene_ids:
-                    gene_names = gene_ids
-                else:
-                    gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
-
-            # Ensure we have the right number of identifiers
-            if len(cell_ids) != matrix_dense.shape[0]:
-                logger.warning(
-                    f"Cell ID count mismatch: {len(cell_ids)} vs {matrix_dense.shape[0]}"
-                )
-                cell_ids = [
-                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
-                ]
-
-            if len(gene_names) != matrix_dense.shape[1]:
-                logger.warning(
-                    f"Gene name count mismatch: {len(gene_names)} vs {matrix_dense.shape[1]}"
-                )
-                gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
-
-            # Create DataFrame
-            df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
-
-            logger.info(
-                f"Successfully created 10X DataFrame for {sample_id}: {df.shape}"
-            )
-            return df
-
-        except Exception as e:
-            logger.error(f"Error parsing 10X data for {sample_id}: {e}")
-            return None
+    # Parsing functions have been moved to geo_parser.py for better separation of concerns
+    # and reusability across different modalities
 
     def _concatenate_matrices(
         self, validated_matrices: Dict[str, pd.DataFrame], geo_id: str, use_intersecting_genes_only: bool = True

@@ -6,7 +6,7 @@ the new modular DataManagerV2 system with proper modality handling and
 multi-omics support.
 """
 
-from typing import List
+from typing import List, Dict
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrockConverse
@@ -239,8 +239,7 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
 
     @tool
     def download_geo_dataset(
-        geo_id: str, modality_type: str = "single_cell",
-        **kwargs) -> str:
+        geo_id: str, modality_type: str = "single_cell", **kwargs) -> str:
         """
         Download dataset from GEO using accession number and load as a modality.
         IMPORTANT: Use fetch_geo_metadata FIRST to preview dataset before downloading.
@@ -708,15 +707,27 @@ get_data_summary()  # Shows all loaded modalities
 # Step 3: Fetch metadata for the dataset first
 fetch_geo_metadata("GSE123456")
 
-<important>
-Information to extract after metadata fetching. 
+<important: download strategy>
+You will receive meta information about the dataset AND information about available files. Its crucial that you tell the supervisor to ask the user which approach they want to take: 
+'MATRIX_FIRST' : if the processed matrix is available they could continue with this but might have unwanted preprocessing decision in there
+'H5_FIRST' : if a h5ad file is given maybe they want to directly work with this
+'SAMPLES_FIRST' : or they want to work with the raw sample data where they can guide the pre-processing part
+
+or they want the agent to decide (no input)
 Always report back after fetching the metadata. Once confirmed by the supervisor you can continue
 </important>
 
-# Step 4: Download the dataset with appropriate modality type
+# Step 4 scenario a: Download the dataset with appropriate modality type, automatically
 download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell")
 
-#<important> You will see summary information about the download with the exact name of the modality ID
+# Step 4 scenario b: Download the dataset with appropriate modality type, with manual override by user
+If the user has decided to manually choose which download strategy to choose (MATRIX_FIRST, H5_FIRST, SAMPLES_FIRST)
+### example user wants to work with the raw sample files
+download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell", manual_strategy_override='SAMPLES_FIRST')
+
+<important> 
+# You will see summary information about the download with the exact name of the modality ID
+</important>
 
 # Step 5: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality

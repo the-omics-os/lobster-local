@@ -85,6 +85,7 @@ dependencies = [
     "aws-cdk-lib>=2.212.0",
     "langfuse>=3.2.6",
     "pytest>=8.4.1",
+    "polars>=1.32.3",
 ]
 
 [project.optional-dependencies]

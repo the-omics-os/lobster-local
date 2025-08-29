@@ -276,19 +276,29 @@ class PipelineStrategyEngine:
     
     def get_pipeline_functions(
         self, 
-        pipeline_type: PipelineType,
+        pipeline_type: "PipelineType | str",
         geo_service_instance: Any
     ) -> List[Callable]:
         """
         Map pipeline type to actual processing functions.
         
         Args:
-            pipeline_type: The selected pipeline type
+            pipeline_type: The selected pipeline type (PipelineType enum or string name)
             geo_service_instance: Instance of GEOService with the processing methods
             
         Returns:
             List of processing functions to execute in order
         """
+        # Handle string pipeline_type by converting to enum
+        if isinstance(pipeline_type, str):
+            try:
+                # Convert string to PipelineType enum
+                pipeline_type = PipelineType[pipeline_type.upper()]
+                logger.debug(f"Converted string '{pipeline_type}' to PipelineType enum")
+            except KeyError:
+                logger.warning(f"Invalid pipeline type string: '{pipeline_type}'. Using FALLBACK pipeline.")
+                pipeline_type = PipelineType.FALLBACK
+        
         pipeline_map = {
             PipelineType.MATRIX_FIRST: [
                 geo_service_instance._try_processed_matrix_first,
