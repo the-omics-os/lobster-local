@@ -19,6 +19,8 @@ import gzip
 import csv
 import io
 import re
+import psutil
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 
@@ -49,6 +51,145 @@ class GEOParser:
     def __init__(self):
         """Initialize the GEO parser."""
         logger.debug("GEOParser initialized with optimized parsing capabilities")
+        self._log_system_memory()
+    
+    def _log_system_memory(self):
+        """Log current system memory status."""
+        try:
+            vm = psutil.virtual_memory()
+            logger.info(f"System memory: Total={self._format_bytes(vm.total)}, "
+                       f"Available={self._format_bytes(vm.available)}, "
+                       f"Used={vm.percent}%")
+        except Exception as e:
+            logger.warning(f"Could not get system memory info: {e}")
+    
+    def _format_bytes(self, bytes_value: int) -> str:
+        """Format bytes to human readable string."""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if bytes_value < 1024.0:
+                return f"{bytes_value:.2f} {unit}"
+            bytes_value /= 1024.0
+        return f"{bytes_value:.2f} PB"
+    
+    def _estimate_dataframe_memory(self, file_path: Path, sample_rows: int = 100) -> Optional[int]:
+        """
+        Estimate memory required for a DataFrame based on file size and sample.
+        
+        Args:
+            file_path: Path to the file
+            sample_rows: Number of rows to sample for estimation
+            
+        Returns:
+            Estimated memory in bytes, or None if estimation fails
+        """
+        try:
+            file_size = file_path.stat().st_size
+            
+            # For compressed files, estimate uncompressed size (typically 5-10x)
+            if file_path.name.endswith('.gz'):
+                file_size *= 7  # Conservative estimate
+            
+            # Quick heuristic: CSV/TSV files typically expand 2-3x in memory as DataFrame
+            # This is a rough estimate and can vary significantly
+            estimated_memory = file_size * 2.5
+            
+            logger.debug(f"Estimated memory requirement for {file_path.name}: "
+                        f"{self._format_bytes(int(estimated_memory))}")
+            
+            return int(estimated_memory)
+        except Exception as e:
+            logger.warning(f"Could not estimate memory for {file_path}: {e}")
+            return None
+    
+    def _check_memory_availability(self, required_memory: int, safety_factor: float = 1.5) -> bool:
+        """
+        Check if sufficient memory is available for an operation.
+        
+        Args:
+            required_memory: Memory required in bytes
+            safety_factor: Multiply required memory by this factor for safety margin
+            
+        Returns:
+            True if sufficient memory is available, False otherwise
+        """
+        try:
+            vm = psutil.virtual_memory()
+            available_memory = vm.available
+            total_required = int(required_memory * safety_factor)
+            
+            # Keep at least 20% of total memory free
+            min_free_memory = vm.total * 0.2
+            
+            if available_memory - total_required < min_free_memory:
+                logger.warning(
+                    f"Insufficient memory: Required={self._format_bytes(total_required)}, "
+                    f"Available={self._format_bytes(available_memory)}, "
+                    f"Minimum free={self._format_bytes(int(min_free_memory))}"
+                )
+                return False
+            
+            logger.debug(
+                f"Memory check passed: Required={self._format_bytes(total_required)}, "
+                f"Available={self._format_bytes(available_memory)}"
+            )
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Could not check memory availability: {e}")
+            # Be conservative and return False if we can't check
+            return False
+    
+    def _get_adaptive_chunk_size(self, file_path: Path, target_memory_mb: int = 500) -> int:
+        """
+        Calculate adaptive chunk size based on available memory and file characteristics.
+        
+        Args:
+            file_path: Path to the file
+            target_memory_mb: Target memory usage per chunk in MB
+            
+        Returns:
+            Number of rows per chunk
+        """
+        try:
+            # Get available memory
+            vm = psutil.virtual_memory()
+            available_mb = vm.available / (1024 * 1024)
+            
+            # Use at most 50% of available memory per chunk
+            max_chunk_memory_mb = min(available_mb * 0.5, target_memory_mb)
+            
+            # Estimate row size by sampling the file
+            delimiter = self.sniff_delimiter(file_path)
+            compression = "gzip" if file_path.name.endswith(".gz") else None
+            
+            # Read a small sample to estimate row size
+            sample_df = pd.read_csv(
+                file_path,
+                sep=delimiter,
+                compression=compression,
+                nrows=100,
+                low_memory=False
+            )
+            
+            # Estimate memory per row (in bytes)
+            memory_per_row = sample_df.memory_usage(deep=True).sum() / len(sample_df)
+            
+            # Calculate chunk size
+            chunk_size = int((max_chunk_memory_mb * 1024 * 1024) / memory_per_row)
+            
+            # Ensure reasonable bounds
+            chunk_size = max(1000, min(chunk_size, 50000))
+            
+            logger.info(
+                f"Adaptive chunk size for {file_path.name}: {chunk_size:,} rows "
+                f"(~{self._format_bytes(int(chunk_size * memory_per_row))} per chunk)"
+            )
+            
+            return chunk_size
+            
+        except Exception as e:
+            logger.warning(f"Could not calculate adaptive chunk size: {e}, using default")
+            return 10000  # Default chunk size
 
     def parse_expression_file(self, file_path: Path) -> Optional[pd.DataFrame]:
         """
@@ -65,6 +206,16 @@ class GEOParser:
         """
         try:
             logger.info(f"Parsing expression file: {file_path}")
+            
+            # Estimate memory requirement
+            estimated_memory = self._estimate_dataframe_memory(file_path)
+            if estimated_memory and not self._check_memory_availability(estimated_memory):
+                logger.warning(f"File {file_path.name} may be too large for available memory. "
+                             "Forcing chunked reading approach.")
+                # Force chunked reading for large files
+                delimiter = self.sniff_delimiter(file_path)
+                compression = "gzip" if file_path.name.endswith(".gz") else None
+                return self.parse_large_file_in_chunks(file_path, delimiter, compression)
 
             # Check if it's a Matrix Market format file (.mtx or .mtx.gz)
             if "matrix.mtx" in file_path.name.lower():
@@ -102,10 +253,14 @@ class GEOParser:
                     df = df.set_index(df.columns[0])
                 
                 logger.info(f"Successfully parsed with Polars: {df.shape}")
+                self._log_system_memory()  # Log memory after parsing
                 return df
                 
             except ImportError:
                 logger.debug("Polars not available, using pandas with optimized settings")
+            except MemoryError:
+                logger.error("Memory error with Polars, forcing chunked reading")
+                return self.parse_large_file_in_chunks(file_path, delimiter, compression)
             except Exception as polars_error:
                 logger.warning(f"Polars parsing failed: {polars_error}, falling back to pandas")
 
@@ -133,8 +288,12 @@ class GEOParser:
                     )
                     
                     logger.info(f"Successfully parsed with pandas: {df.shape}")
+                    self._log_system_memory()  # Log memory after parsing
                     return df
                     
+            except MemoryError:
+                logger.error("Memory error with pandas, forcing chunked reading")
+                return self.parse_large_file_in_chunks(file_path, delimiter, compression)
             except Exception as pandas_error:
                 # Final fallback - try with basic settings
                 logger.warning(f"Optimized pandas parsing failed: {pandas_error}, trying basic parsing")
@@ -205,8 +364,14 @@ class GEOParser:
         try:
             logger.info(f"Using chunked reading for large file: {file_path.name}")
             
-            chunk_size = 10000  # Process 10k rows at a time
+            # Get adaptive chunk size based on available memory
+            chunk_size = self._get_adaptive_chunk_size(file_path)
+            
+            # Log memory status before starting
+            self._log_system_memory()
+            
             chunks = []
+            total_rows = 0
             
             # Read file in chunks
             chunk_reader = pd.read_csv(
@@ -221,24 +386,46 @@ class GEOParser:
             )
             
             for i, chunk in enumerate(chunk_reader):
-                chunks.append(chunk)
-                if i % 10 == 0:  # Log progress every 100k rows
-                    logger.debug(f"Processed {(i + 1) * chunk_size:,} rows")
+                # Check memory before adding chunk
+                chunk_memory = chunk.memory_usage(deep=True).sum()
+                if not self._check_memory_availability(chunk_memory, safety_factor=1.2):
+                    logger.warning(f"Memory limit reached after {i} chunks ({total_rows:,} rows). "
+                                 f"Stopping early to prevent OOM.")
+                    break
                 
-                # Memory management: limit chunks to avoid OOM
-                if len(chunks) > 50:  # If we have too many chunks, combine them
-                    logger.debug("Combining intermediate chunks to manage memory")
-                    combined_chunk = pd.concat(chunks, axis=0)
-                    chunks = [combined_chunk]
+                chunks.append(chunk)
+                total_rows += len(chunk)
+                
+                if i % 10 == 0:  # Log progress
+                    logger.debug(f"Processed {total_rows:,} rows in {i+1} chunks")
+                    self._log_system_memory()
+                
+                # Memory management: dynamically adjust based on available memory
+                vm = psutil.virtual_memory()
+                if vm.percent > 80:  # If memory usage is high
+                    logger.warning(f"High memory usage ({vm.percent}%), combining chunks early")
+                    if len(chunks) > 1:
+                        combined_chunk = pd.concat(chunks, axis=0)
+                        chunks = [combined_chunk]
+                        # Force garbage collection
+                        import gc
+                        gc.collect()
+                        logger.debug("Forced garbage collection after combining chunks")
             
             # Combine all chunks
             if chunks:
+                logger.info(f"Combining {len(chunks)} chunks with {total_rows:,} total rows")
                 df = pd.concat(chunks, axis=0)
                 logger.info(f"Successfully parsed large file in chunks: {df.shape}")
+                self._log_system_memory()  # Log final memory status
                 return df
             
+            logger.warning("No data was read from the file")
             return None
             
+        except MemoryError:
+            logger.error("Memory error while parsing in chunks. File is too large for available memory.")
+            return None
         except Exception as e:
             logger.error(f"Error parsing large file in chunks: {e}")
             return None

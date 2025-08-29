@@ -723,7 +723,10 @@ download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell")
 # Step 4 scenario b: Download the dataset with appropriate modality type, with manual override by user
 If the user has decided to manually choose which download strategy to choose (MATRIX_FIRST, H5_FIRST, SAMPLES_FIRST)
 ### example user wants to work with the raw sample files
-download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell", manual_strategy_override='SAMPLES_FIRST')
+download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell", manual_strategy_override=<strategy>)
+Do not call the download_geo_dataset function with kwargs, just tner the variable:
+DONT DO "'kwargs' = {{'manual_strategy_override': 'MATRIX_FIRST'}}"
+DO 'manual_strategy_override' =  <strategy>
 
 <important> 
 # You will see summary information about the download with the exact name of the modality ID

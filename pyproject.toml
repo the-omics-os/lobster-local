@@ -86,6 +86,7 @@ dependencies = [
     "langfuse>=3.2.6",
     "pytest>=8.4.1",
     "polars>=1.32.3",
+    "psutil>=7.0.0",
 ]
 
 [project.optional-dependencies]
