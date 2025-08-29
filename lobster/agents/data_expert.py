@@ -25,17 +25,14 @@ logger = get_logger(__name__)
 
 # Define StrategyConfig with all field descriptions
 class StrategyConfig(BaseModel):
-    summary_file_name : str     = Field(default=None, description="name of the summary or overview file (has 'GSE' in the name). Example: 'GSE131907_Lung_Cancer_Feature_Summary'")
-    summary_file_type : str     = Field(default=None, description="Filetype of the Summary File. Example: 'xlsx'")
-    processed_matrix_name : str     = Field(default=None, description="name of the TARGET processed (log2, tpm, normalized, etc) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_normalized_log2TPM_matrix'")
-    processed_matrix_filetype : str = Field(default=None, description="filetype of the TARGET processed file (preference is non R objects). Example: 'txt'")
-    processed_matrix_size : str     = Field(default=None, description="size of the TARGET processed file. Example: '2.9 Gb'")
-    raw_UMI_like_matrix_name : str  = Field(default=None, description="name of the raw TARGET UMI-like (UMI, raw, tar) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_raw_UMI_matrix'")
-    raw_UMI_like_matrix_filetype : str = Field(default=None, description="filetype of the TARGET raw UMI-like file (preference is non R objects). Example: 'txt'")
-    raw_UMI_like_matrix_size : str  = Field(default=None, description="size of the umi-like matrix file. Example: '389.8 Mb'")
-    cell_annotation_name : str      = Field(default=None, description="Filename of the file which likely is linked to the cell annotation. Example:'GSE131907_Lung_Cancer_cell_annotation'")
-    cell_annotation_filetype : str  = Field(default=None, description="Filetype of cell annotation file. Example: 'txt'")
-    cell_annotation_size : str      = Field(default=None, description="Size of cell annotation file. Example: '1.8 Mb'")
+    summary_file_name : str     = Field(default="", description="name of the summary or overview file (has 'GSE' in the name). Example: 'GSE131907_Lung_Cancer_Feature_Summary'")
+    summary_file_type : str     = Field(default="", description="Filetype of the Summary File. Example: 'xlsx'")
+    processed_matrix_name : str     = Field(default="", description="name of the TARGET processed (log2, tpm, normalized, etc) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_normalized_log2TPM_matrix'")
+    processed_matrix_filetype : str = Field(default="", description="filetype of the TARGET processed file (preference is non R objects). Example: 'txt'")
+    raw_UMI_like_matrix_name : str  = Field(default="", description="name of the raw TARGET UMI-like (UMI, raw, tar) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_raw_UMI_matrix'")
+    raw_UMI_like_matrix_filetype : str = Field(default="", description="filetype of the TARGET raw UMI-like file (preference is non R objects). Example: 'txt'")
+    cell_annotation_name : str      = Field(default="", description="Filename of the file which likely is linked to the cell annotation. Example:'GSE131907_Lung_Cancer_cell_annotation'")
+    cell_annotation_filetype : str  = Field(default="", description="Filetype of cell annotation file. Example: 'txt'")
     raw_data_available: bool        = Field(default=False, description="If based on the metadata raw data is available for the samples. Sometimes it stated in the study description")
 
 
@@ -181,24 +178,15 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
                 
                 # Create StrategyConfig object #FIXME
                 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
                 strategy_config = StrategyConfig(**strategy_dict)
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
                 #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
                 
                 logger.info(f"Successfully extracted strategy config for {clean_geo_id}")
-                
-                # Store strategy config in metadata
-                data_manager.metadata_store[clean_geo_id]['strategy_config'] = strategy_config.dict()
-                
+                                
             except Exception as e:
                 logger.warning(f"Failed to extract strategy config using LLM: {e}")
                 # Create empty strategy config as fallback
-                strategy_config = StrategyConfig()
-                data_manager.metadata_store[clean_geo_id]['strategy_config'] = strategy_config.dict()
+                return 'Failed with fetching geo metadata. Try again'
 
 
             #------------------------------------------------
@@ -210,7 +198,7 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
                 'validation': validation_result,
                 'fetch_timestamp': pd.Timestamp.now().isoformat(),
                 'data_source': data_source,
-                'strategy_config': strategy_config.dict() if 'strategy_config' in locals() else {}
+                'strategy_config': strategy_config.model_dump() if 'strategy_config' in locals() else {}
             }
             
             # Log the metadata fetch operation
