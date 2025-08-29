@@ -35,13 +35,20 @@ from lobster.utils.logger import get_logger
 # Import helper modules for fallback functionality
 from lobster.tools.geo_downloader import GEODownloadManager
 from lobster.tools.geo_parser import GEOParser
+from lobster.tools.pipeline_strategy import (
+    PipelineStrategyEngine,
+    PipelineContext,
+    create_pipeline_context
+)
 
 logger = get_logger(__name__)
 
 
-# ========================================
-# DATA STRUCTURES AND ENUMS
-# ========================================
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                        DATA STRUCTURES AND ENUMS                          ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
 
 class GEODataSource(Enum):
     """Enumeration of data source types for GEO downloads."""
@@ -91,6 +98,12 @@ class GEOFallbackError(Exception):
     pass
 
 
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                           MAIN SERVICE CLASS                               ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
+
 class GEOService:
     """
     Professional service for accessing and processing GEO data using GEOparse and DataManagerV2.
@@ -128,77 +141,67 @@ class GEOService:
         )
         self.geo_parser = GEOParser()
         
+        # Initialize the pipeline strategy engine
+        self.pipeline_engine = PipelineStrategyEngine()
+        
         # Default download strategy
         self.download_strategy = DownloadStrategy()
-        
-        # Processing pipeline registry for different scenarios
-        self.processing_pipelines = self._initialize_processing_pipelines()
 
-        logger.info("GEOService initialized with modular architecture: GEOparse + fallback helpers")
+        logger.info("GEOService initialized with modular architecture: GEOparse + dynamic pipeline strategy")
 
-    def _initialize_processing_pipelines(self, metadata: Dict[str, Any] = None, strategy: DownloadStrategy = None) -> Dict[str, List[Callable]]:
+
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                  MAIN ENTRY POINTS (USED BY DATA_EXPERT)                  ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
+
+    def fetch_metadata_only(self, geo_id: str) -> str:
         """
-        Initialize dynamic processing pipelines based on metadata and strategy.
+        Fetch and validate GEO metadata with fallback mechanisms (Scenario 1).
         
-        This function now analyzes metadata to determine the best download approach
-        and creates appropriate pipelines for different scenarios.
+        This function first tries GEOparse, then falls back to helper services
+        if needed, storing the metadata in data_manager for user review.
         
         Args:
-            metadata: GEO metadata dictionary to analyze for data availability
-            strategy: Download strategy configuration
+            geo_id: GEO accession ID (e.g., GSE194247)
             
         Returns:
-            Dict[str, List[Callable]]: Pipeline functions for each scenario
+            str: Formatted metadata summary for user review
         """
-        # # Analyze metadata for raw data availability if provided
-        #FIXME raw_data_available = True  # Default assumption
-        # if metadata:
-        #     raw_data_available = self._check_raw_data_availability(metadata)
-        #     logger.debug(f"Raw data availability check: {raw_data_available}")
-        
-        #FIXME Use strategy preference if provided
-        # if strategy and strategy.prefer_supplementary:
-        #     raw_data_available = False  # Force supplementary-first approach
-        
-        #BUG 
-        raw_data_available = True
-        # Create dynamic pipelines based on data availability
-        if not raw_data_available:
-            # No raw data - prioritize supplementary files
-            return {
-                "single_cell_rna_seq": [
-                    self._try_supplementary_first,
-                    self._try_geoparse_download  # Fallback
-                ],
-                "bulk_rna_seq": [
-                    self._try_supplementary_first,
-                    self._try_geoparse_download  # Fallback
-                ],
-                "mixed": [
-                    self._try_supplementary_first,
-                    self._try_geoparse_download  # Fallback
-                ]
-            }
-        else:
-            # Raw data available - use standard approach
-            return {
-                "single_cell_rna_seq": [
-                    self._try_geoparse_download,
-                    # self._try_supplementary_fallback  # Only if samples fail
-                ],
-                "bulk_rna_seq": [
-                    self._try_geoparse_download,
-                    # self._try_supplementary_fallback  # Only if samples fail
-                ],
-                "mixed": [
-                    self._try_geoparse_download,
-                    # self._try_supplementary_fallback  # Only if samples fail
-                ]
-            }
-
-    # ========================================
-    # USED BY DATAEXPERT
-    # ========================================
+        try:
+            logger.info(f"Fetching metadata for GEO ID: {geo_id}")
+            
+            # Clean the GEO ID
+            clean_geo_id = geo_id.strip().upper()
+            if not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession (e.g., GSE194247)."
+            
+            # Primary approach: GEOparse
+            metadata = None
+            validation_result = None
+            
+            try:
+                logger.debug(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
+                gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
+                metadata = self._extract_metadata(gse)
+                logger.debug(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
+                
+            except Exception as geoparse_error:
+                logger.error(f"Helper metadata fetch failed:")
+                return f"Failed to fetch metadata for {clean_geo_id}. GEOparse ({geoparse_error}) failed."                
+            
+            if not metadata:
+                return f"No metadata could be extracted for {clean_geo_id}"
+            
+            # Validate metadata against transcriptomics schema
+            validation_result = self._validate_geo_metadata(metadata)
+            
+            return metadata, validation_result
+            
+        except Exception as e:
+            logger.exception(f"Error fetching metadata for {geo_id}: {e}")
+            return f"Error fetching metadata for {geo_id}: {str(e)}"
 
     def download_dataset(self, geo_id: str, modality_type) -> str:
         """
@@ -231,18 +234,13 @@ class GEOService:
             if modality_name in existing_modalities:
                 return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
 
-            #==================================================
-            #==================================================
             # Use the strategic download approach
             geo_result = self.download_with_strategy(geo_id = clean_geo_id)
-            #==================================================
-            #==================================================
             
             if not geo_result.success:
                 return f"Failed to download {clean_geo_id} using all available methods. Last error: {geo_result.error_message}"
             
-            
-            # # Store as modality in DataManagerV2
+            # Store as modality in DataManagerV2
             enhanced_metadata = {
                 "dataset_id": clean_geo_id,
                 "dataset_type": "GEO",
@@ -252,9 +250,8 @@ class GEOService:
                 "processing_method": geo_result.processing_info.get("method", "unknown"),
                 "data_type": geo_result.processing_info.get("data_type", "unknown")
             }
-            # enhanced_metadata.update(result.processing_info)
 
-            # # Determine appropriate adapter based on data characteristics and metadata
+            # Determine appropriate adapter based on data characteristics and metadata
             if not enhanced_metadata.get('data_type', None):
                 cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
                 predicted_type = self._determine_data_type_from_metadata(cached_metadata)
@@ -270,7 +267,7 @@ class GEOService:
 
             logger.debug(f"Using adapter '{adapter_name}' based on predicted type '{enhanced_metadata.get('data_type', None)}' and data shape {geo_result.data.shape}")
 
-            # # Load as modality in DataManagerV2
+            # Load as modality in DataManagerV2
             adata = self.data_manager.load_modality(
                 name=modality_name,
                 source=geo_result.data,
@@ -279,11 +276,11 @@ class GEOService:
                 **enhanced_metadata
             )
 
-            # # Save to workspace
+            # Save to workspace
             save_path = f"{modality_name}_raw.h5ad"
             saved_file = self.data_manager.save_modality(modality_name, save_path)
 
-            # # Log successful download and save
+            # Log successful download and save
             self.data_manager.log_tool_usage(
                 tool_name="download_geo_dataset_strategic",
                 parameters={
@@ -310,29 +307,25 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         except Exception as e:
             logger.exception(f"Error downloading dataset: {e}")
             return f"Error downloading dataset: {str(e)}"
-        
-    # ========================================
-    # MAIN PUBLIC METHODS FOR THE 3 SCENARIOS
-    # ========================================        
-    def download_with_strategy(
-        self, 
-        geo_id: str, 
-        strategy: Optional[DownloadStrategy] = None,
-        data_type: Optional[GEODataType] = None
-    ) -> GEOResult:
+
+
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                   STRATEGIC DOWNLOAD COORDINATION                          ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
+
+    def download_with_strategy(self, geo_id: str) -> GEOResult:
         """
-        Master function implementing layered download approach (Scenarios 1 & 2).
+        Master function implementing layered download approach using dynamic pipeline strategy.
         
         Args:
             geo_id: GEO accession ID
-            strategy: Download strategy configuration
-            data_type: Predicted data type (auto-detected if None)
             
         Returns:
             GEOResult: Comprehensive result with data and metadata
         """
         clean_geo_id = geo_id.strip().upper()
-        strategy = strategy or self.download_strategy
         
         logger.debug(f"Starting strategic download for {clean_geo_id}")
         
@@ -340,38 +333,40 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             # Step 1: Ensure metadata exists
             if clean_geo_id not in self.data_manager.metadata_store:
                 metadata_summary = self.fetch_metadata_only(clean_geo_id)
-                if "Error" in metadata_summary:
+                if "Error" in str(metadata_summary):
                     return GEOResult(
                         success=False,
                         error_message=f"Failed to fetch metadata: {metadata_summary}",
                         source=GEODataSource.GEOPARSE
                     )
             
-            # Step 2: Detect data type if not provided
-            cached_metadata = self.data_manager.metadata_store[clean_geo_id]['metadata']
-            if data_type is None:
-                predicted_type = self._determine_data_type_from_metadata(cached_metadata)
-                if predicted_type == 'single_cell_rna_seq':
-                    data_type = GEODataType.SINGLE_CELL
-                elif predicted_type == 'bulk_rna_seq':
-                    data_type = GEODataType.BULK
-                else:
-                    data_type = GEODataType.MIXED
+            # Step 2: Get metadata and strategy config
+            stored_metadata_info = self.data_manager.metadata_store[clean_geo_id]
+            cached_metadata = stored_metadata_info['metadata']
+            strategy_config = stored_metadata_info.get('strategy_config', {})
             
-            # Step 3: Route to appropriate pipeline
-            pipeline_name = data_type.value
-            pipeline = self.processing_pipelines.get(pipeline_name, self.processing_pipelines["mixed"])
+            if not strategy_config:
+                # Extract strategy config if not present (backward compatibility)
+                logger.warning(f"No strategy config found for {clean_geo_id}, using defaults")
+                strategy_config = {
+                    'raw_data_available': True,
+                    'summary_file_name': '',
+                    'processed_matrix_name': '',
+                    'raw_UMI_like_matrix_name': '',
+                    'cell_annotation_name': ''
+                }
             
-            logger.debug(f"Using {pipeline_name} pipeline with {len(pipeline)} steps")
+            # Step 3: Get appropriate pipeline using strategy engine
+            pipeline = self._get_processing_pipeline(clean_geo_id, cached_metadata, strategy_config)
+            
+            logger.debug(f"Using dynamic pipeline with {len(pipeline)} steps")
             
             # Step 4: Execute pipeline with retries
             for i, pipeline_func in enumerate(pipeline):
                 logger.debug(f"Executing pipeline step {i + 1}: {pipeline_func.__name__}")
                 
                 try:
-                    #========================================================================
                     result = pipeline_func(clean_geo_id, cached_metadata)
-                    #========================================================================
                     if result.success:
                         logger.debug(f"Success via {pipeline_func.__name__}")
                         return result
@@ -380,11 +375,10 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 except Exception as e:
                     logger.warning(f"Pipeline step {pipeline_func.__name__} failed: {e}")
                     continue
-
             
             return GEOResult(
                 success=False,
-                error_message=f"All pipeline steps failed after {strategy.max_retries} attempts",
+                error_message=f"All pipeline steps failed after enough attempts",
                 metadata=cached_metadata,
                 source=GEODataSource.GEOPARSE
             )
@@ -397,17 +391,354 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 source=GEODataSource.GEOPARSE
             )
 
+    def _get_processing_pipeline(
+        self, 
+        geo_id: str,
+        metadata: Dict[str, Any],
+        strategy_config: Dict[str, Any]
+    ) -> List[Callable]:
+        """
+        Get the appropriate processing pipeline using the strategy engine.
+        
+        Args:
+            geo_id: GEO accession ID  
+            metadata: GEO metadata
+            strategy_config: Extracted strategy configuration
+            
+        Returns:
+            List[Callable]: Pipeline functions to execute in order
+        """
+        # Determine data type
+        data_type = self._determine_data_type_from_metadata(metadata)
+        
+        # Create pipeline context
+        context = create_pipeline_context(
+            geo_id=geo_id,
+            strategy_config=strategy_config,
+            metadata=metadata,
+            data_type=data_type
+        )
+        
+        # Determine best pipeline type
+        pipeline_type, description = self.pipeline_engine.determine_pipeline(context)
+        
+        logger.info(f"Pipeline selection for {geo_id}: {pipeline_type.name}")
+        logger.info(f"Reason: {description}")
+        
+        # Get the actual processing functions
+        pipeline_functions = self.pipeline_engine.get_pipeline_functions(pipeline_type, self)
+        
+        return pipeline_functions
 
-    # ========================================================================================================================
-    # ========================================================================================================================
-    # ========================================================================================================================
-    # ========================================================================================================================
-    # PIPELINE STEP FUNCTIONS
-    # ========================================================================================================================
-    # ========================================================================================================================
-    # ========================================================================================================================
-    # ========================================================================================================================
 
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                        PIPELINE STEP FUNCTIONS                            ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
+
+    def _try_processed_matrix_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Try to directly download and use processed matrix files based on LLM strategy config."""
+        try:
+            logger.info(f"Attempting to use processed matrix for {geo_id}")
+            
+            # Get strategy config from stored metadata
+            stored_metadata = self.data_manager.metadata_store[geo_id]
+            strategy_config = stored_metadata.get('strategy_config', {})
+            
+            matrix_name = strategy_config.get('processed_matrix_name', '')
+            matrix_type = strategy_config.get('processed_matrix_filetype', '')
+            
+            if not matrix_name or not matrix_type:
+                return GEOResult(success=False, error_message="No processed matrix information available in strategy config")
+            
+            # Try to download the specific file from supplementary files
+            suppl_files = metadata.get('supplementary_file', [])
+            if not isinstance(suppl_files, list):
+                suppl_files = [suppl_files]
+            
+            # Find the matching file
+            target_file = None
+            for file_url in suppl_files:
+                if matrix_name in file_url and matrix_type in file_url:
+                    target_file = file_url
+                    break
+            
+            if target_file:
+                logger.info(f"Found processed matrix file: {target_file}")
+                matrix = self._download_and_parse_file(target_file, geo_id)
+                
+                if matrix is not None and not matrix.empty:
+                    return GEOResult(
+                        data=matrix,
+                        metadata=metadata,
+                        source=GEODataSource.SUPPLEMENTARY,
+                        processing_info={
+                            "method": "processed_matrix_direct",
+                            "file": f"{matrix_name}.{matrix_type}",
+                            "data_type": self._determine_data_type_from_metadata(metadata)
+                        },
+                        success=True
+                    )
+            
+            return GEOResult(success=False, error_message=f"Could not download processed matrix: {matrix_name}.{matrix_type}")
+            
+        except Exception as e:
+            logger.error(f"Error in processed matrix pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_raw_matrix_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Try to directly download and use raw UMI/count matrix files based on LLM strategy config."""
+        try:
+            logger.info(f"Attempting to use raw matrix for {geo_id}")
+            
+            # Get strategy config from stored metadata
+            stored_metadata = self.data_manager.metadata_store[geo_id]
+            strategy_config = stored_metadata.get('strategy_config', {})
+            
+            matrix_name = strategy_config.get('raw_UMI_like_matrix_name', '')
+            matrix_type = strategy_config.get('raw_UMI_like_matrix_filetype', '')
+            
+            if not matrix_name or not matrix_type:
+                return GEOResult(success=False, error_message="No raw matrix information available in strategy config")
+            
+            # Similar logic to processed matrix
+            suppl_files = metadata.get('supplementary_file', [])
+            if not isinstance(suppl_files, list):
+                suppl_files = [suppl_files]
+            
+            target_file = None
+            for file_url in suppl_files:
+                if matrix_name in file_url and matrix_type in file_url:
+                    target_file = file_url
+                    break
+            
+            if target_file:
+                logger.info(f"Found raw matrix file: {target_file}")
+                matrix = self._download_and_parse_file(target_file, geo_id)
+                
+                if matrix is not None and not matrix.empty:
+                    return GEOResult(
+                        data=matrix,
+                        metadata=metadata,
+                        source=GEODataSource.SUPPLEMENTARY,
+                        processing_info={
+                            "method": "raw_matrix_direct",
+                            "file": f"{matrix_name}.{matrix_type}",
+                            "data_type": self._determine_data_type_from_metadata(metadata)
+                        },
+                        success=True
+                    )
+            
+            return GEOResult(success=False, error_message=f"Could not download raw matrix: {matrix_name}.{matrix_type}")
+            
+        except Exception as e:
+            logger.error(f"Error in raw matrix pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_h5_format_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Try to prioritize H5/H5AD format files for efficient loading."""
+        try:
+            logger.info(f"Attempting to use H5 format files for {geo_id}")
+            
+            # Check both processed and raw for H5 formats
+            stored_metadata = self.data_manager.metadata_store[geo_id]
+            strategy_config = stored_metadata.get('strategy_config', {})
+            
+            # Check processed matrix first
+            processed_name = strategy_config.get('processed_matrix_name', '')
+            processed_type = strategy_config.get('processed_matrix_filetype', '')
+            
+            # Check raw matrix
+            raw_name = strategy_config.get('raw_UMI_like_matrix_name', '')
+            raw_type = strategy_config.get('raw_UMI_like_matrix_filetype', '')
+            
+            h5_files = []
+            if processed_type in ["h5", "h5ad"]:
+                h5_files.append((processed_name, processed_type, "processed"))
+            if raw_type in ["h5", "h5ad"]:
+                h5_files.append((raw_name, raw_type, "raw"))
+            
+            if not h5_files:
+                return GEOResult(success=False, error_message="No H5 format files found in strategy config")
+            
+            # Try to download H5 files
+            suppl_files = metadata.get('supplementary_file', [])
+            if not isinstance(suppl_files, list):
+                suppl_files = [suppl_files]
+            
+            for file_name, file_type, file_category in h5_files:
+                target_file = None
+                for file_url in suppl_files:
+                    if file_name in file_url and file_type in file_url:
+                        target_file = file_url
+                        break
+                
+                if target_file:
+                    logger.info(f"Found H5 {file_category} file: {target_file}")
+                    # For H5 files, try parsing with geo_parser directly
+                    filename = target_file.split('/')[-1]
+                    local_path = self.cache_dir / f"{geo_id}_h5_{filename}"
+                    
+                    if not local_path.exists():
+                        if not self.geo_downloader.download_file(target_file, local_path):
+                            continue
+                    
+                    matrix = self.geo_parser.parse_supplementary_file(local_path)
+                    if matrix is not None and not matrix.empty:
+                        return GEOResult(
+                            data=matrix,
+                            metadata=metadata,
+                            source=GEODataSource.SUPPLEMENTARY,
+                            processing_info={
+                                "method": f"h5_format_{file_category}",
+                                "file": f"{file_name}.{file_type}",
+                                "data_type": self._determine_data_type_from_metadata(metadata)
+                            },
+                            success=True
+                        )
+            
+            return GEOResult(success=False, error_message="Could not download or parse any H5 format files")
+            
+        except Exception as e:
+            logger.error(f"Error in H5 format pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_supplementary_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Try supplementary files as primary approach when no direct matrices available."""
+        try:
+            logger.info(f"Attempting supplementary files first for {geo_id}")
+            
+            # Get GEO object for supplementary file processing
+            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            
+            # Use existing supplementary file processing
+            data = self._process_supplementary_files(gse, geo_id)
+            if data is not None and not data.empty:
+                return GEOResult(
+                    data=data,
+                    metadata=metadata,
+                    source=GEODataSource.SUPPLEMENTARY,
+                    processing_info={
+                        "method": "supplementary_first",
+                        "data_type": self._determine_data_type_from_metadata(metadata),
+                        "n_samples": len(gse.gsms) if hasattr(gse, "gsms") else 0
+                    },
+                    success=True
+                )
+            
+            return GEOResult(success=False, error_message="No usable data found in supplementary files")
+            
+        except Exception as e:
+            logger.error(f"Error in supplementary first pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_archive_extraction_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Try extracting from archive files (TAR, ZIP) as primary approach."""
+        try:
+            logger.info(f"Attempting archive extraction first for {geo_id}")
+            
+            suppl_files = metadata.get('supplementary_file', [])
+            if not isinstance(suppl_files, list):
+                suppl_files = [suppl_files]
+            
+            # Look for archive files
+            archive_files = [f for f in suppl_files if any(ext in f.lower() for ext in ['.tar', '.zip', '.rar'])]
+            
+            if not archive_files:
+                return GEOResult(success=False, error_message="No archive files found")
+            
+            # Try processing archive files
+            for archive_url in archive_files:
+                if archive_url.lower().endswith('.tar'):
+                    matrix = self._process_tar_file(archive_url, geo_id)
+                    if matrix is not None and not matrix.empty:
+                        return GEOResult(
+                            data=matrix,
+                            metadata=metadata,
+                            source=GEODataSource.TAR_ARCHIVE,
+                            processing_info={
+                                "method": "archive_extraction_first",
+                                "file": archive_url.split('/')[-1],
+                                "data_type": self._determine_data_type_from_metadata(metadata)
+                            },
+                            success=True
+                        )
+            
+            return GEOResult(success=False, error_message="Could not extract usable data from archive files")
+            
+        except Exception as e:
+            logger.error(f"Error in archive extraction pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_supplementary_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Fallback method using supplementary files when primary approaches fail."""
+        try:
+            logger.info(f"Trying supplementary fallback for {geo_id}")
+            
+            # This is essentially the same as _try_supplementary_first but with different logging
+            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            
+            data = self._process_supplementary_files(gse, geo_id)
+            if data is not None and not data.empty:
+                return GEOResult(
+                    data=data,
+                    metadata=metadata,
+                    source=GEODataSource.SUPPLEMENTARY,
+                    processing_info={
+                        "method": "supplementary_fallback",
+                        "data_type": self._determine_data_type_from_metadata(metadata),
+                        "note": "Used as fallback after primary methods failed"
+                    },
+                    success=True
+                )
+            
+            return GEOResult(success=False, error_message="Supplementary fallback found no usable data")
+            
+        except Exception as e:
+            logger.error(f"Error in supplementary fallback pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
+
+    def _try_emergency_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+        """Emergency fallback when all other methods fail."""
+        try:
+            logger.warning(f"Using emergency fallback for {geo_id} - all other methods failed")
+            
+            # Try to get any available data using basic GEOparse approach
+            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            
+            # Try to get expression data from any available sample
+            if hasattr(gse, 'gsms') and gse.gsms:
+                for gsm_id, gsm in list(gse.gsms.items())[:5]:  # Try first 5 samples only
+                    try:
+                        if hasattr(gsm, 'table') and gsm.table is not None:
+                            matrix = gsm.table
+                            if matrix.shape[0] > 0 and matrix.shape[1] > 0:
+                                # Add sample prefix to avoid conflicts
+                                matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                                
+                                logger.warning(f"Emergency fallback found data from sample {gsm_id}: {matrix.shape}")
+                                return GEOResult(
+                                    data=matrix,
+                                    metadata=metadata,
+                                    source=GEODataSource.GEOPARSE,
+                                    processing_info={
+                                        "method": "emergency_fallback_single_sample",
+                                        "sample_id": gsm_id,
+                                        "data_type": self._determine_data_type_from_metadata(metadata),
+                                        "note": "Emergency fallback - only partial data recovered"
+                                    },
+                                    success=True
+                                )
+                    except Exception as e:
+                        logger.debug(f"Could not get data from sample {gsm_id}: {e}")
+                        continue
+            
+            return GEOResult(success=False, error_message="Emergency fallback could not recover any data")
+            
+        except Exception as e:
+            logger.error(f"Error in emergency fallback pipeline: {e}")
+            return GEOResult(success=False, error_message=str(e))
 
     def _try_geoparse_download(self, geo_id: str, metadata: Dict[str, Any], use_intersecting_genes_only: bool = True) -> GEOResult:
         """Pipeline step: Try standard GEOparse download with proper single-cell/bulk handling."""
@@ -499,146 +830,329 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             return GEOResult(success=False, error_message=str(e))
 
 
-    # ========================================
-    # HELPER INTEGRATION METHODS
-    # ========================================
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                   METADATA AND VALIDATION UTILITIES                       ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
 
-    # def _download_and_parse_10x_sample(self, suppl_url: str, gsm_id: str) -> Optional[pd.DataFrame]:
-    #     """Download and parse 10X format single-cell sample."""
-    #     try:
-    #         # Download using helper downloader for better progress tracking
-    #         local_file = self.cache_dir / f"{gsm_id}_10x_data"
-    #         if self.geo_downloader.download_file(suppl_url, local_file):
-    #             return self.geo_parser.parse_supplementary_file(local_file)
-    #         return None
-    #     except Exception as e:
-    #         logger.error(f"Error downloading 10X sample {gsm_id}: {e}")
-    #         return None
-
-    def _store_single_sample_as_modality(self, gsm_id: str, matrix: pd.DataFrame, gsm) -> str:
-        """Store single sample as modality in DataManagerV2."""
-        try:
-            modality_name = f"geo_sample_{gsm_id.lower()}"
-            
-            # Extract sample metadata
-            sample_metadata = {}
-            if hasattr(gsm, "metadata"):
-                for key, value in gsm.metadata.items():
-                    if isinstance(value, list) and len(value) == 1:
-                        sample_metadata[key] = value[0]
-                    else:
-                        sample_metadata[key] = value
-            
-            enhanced_metadata = {
-                "sample_id": gsm_id,
-                "dataset_type": "GEO_Sample",
-                "sample_metadata": sample_metadata,
-                "processing_date": pd.Timestamp.now().isoformat(),
-                "data_source": "single_sample"
-            }
-            
-            # Determine adapter based on data characteristics
-            n_obs, n_vars = matrix.shape
-            if n_vars > 5000:  # High gene count suggests single-cell
-                adapter_name = "transcriptomics_single_cell"
-            else:
-                adapter_name = "transcriptomics_bulk"
-            
-            adata = self.data_manager.load_modality(
-                name=modality_name,
-                source=matrix,
-                adapter=adapter_name,
-                validate=True,
-                **enhanced_metadata
-            )
-            
-            # Save to workspace
-            save_path = f"{gsm_id.lower()}_sample.h5ad"
-            saved_file = self.data_manager.save_modality(modality_name, save_path)
-            
-            return f"""Successfully downloaded single-cell sample {gsm_id}!
-
-📊 Modality: '{modality_name}' ({adata.n_obs} cells × {adata.n_vars} genes)
-🔬 Adapter: {adapter_name}
-💾 Saved to: {save_path}
-📈 Ready for single-cell analysis!"""
-            
-        except Exception as e:
-            logger.error(f"Error storing sample {gsm_id}: {e}")
-            return f"Error storing sample {gsm_id}: {str(e)}"
-
-
-    def fetch_metadata_only(self, geo_id: str) -> str:
+    def _extract_metadata(self, gse) -> Dict[str, Any]:
         """
-        Fetch and validate GEO metadata with fallback mechanisms (Scenario 1).
+        Extract comprehensive metadata from GEOparse GSE object.
+
+        Args:
+            gse: GEOparse GSE object
+
+        Returns:
+            dict: Extracted metadata
+        """
+        try:
+            metadata = {}
+
+            # Basic metadata from GEOparse
+            if hasattr(gse, "metadata"):
+                for key, value in gse.metadata.items():
+                    if isinstance(value, list):
+                        metadata[key] = ', '.join(value)
+                    else:
+                        metadata[key] = value
+
+            # Platform information - now much cleaner!
+            if hasattr(gse, "gpls"):
+                platforms = {}
+                for gpl_id, gpl in gse.gpls.items():
+                    platforms[gpl_id] = {
+                        "title": self._safely_extract_metadata_field(gpl, "title"),
+                        "organism": self._safely_extract_metadata_field(gpl, "organism"),
+                        "technology": self._safely_extract_metadata_field(gpl, "technology"),
+                    }
+                metadata["platforms"] = platforms
+
+            # Sample metadata
+            if hasattr(gse, "gsms"):
+                sample_metadata = {}
+                for gsm_id, gsm in gse.gsms.items():
+                    sample_meta = {}
+                    if hasattr(gsm, "metadata"):
+                        for key, value in gsm.metadata.items():
+                            if isinstance(value, list):
+                                sample_meta[key] = ''.join(value)
+                            else:
+                                sample_meta[key] = value
+                    sample_metadata[gsm_id] = sample_meta
+                metadata["samples"] = sample_metadata
+
+            return metadata
+
+        except Exception as e:
+            logger.error(f"Error extracting metadata: {e}")
+            return {}
+
+    def _safely_extract_metadata_field(self, obj, field_name: str, default: str = "") -> str:
+        """
+        Safely extract a metadata field from a GEOparse object.
         
-        This function first tries GEOparse, then falls back to helper services
-        if needed, storing the metadata in data_manager for user review.
+        Handles the common pattern of checking for metadata attribute,
+        extracting the field, and joining all elements if it's a list.
         
         Args:
-            geo_id: GEO accession ID (e.g., GSE194247)
+            obj: GEOparse object (GSE, GPL, or GSM)
+            field_name: Name of the metadata field to extract
+            default: Default value if field is not found
             
         Returns:
-            str: Formatted metadata summary for user review
+            str: Extracted metadata value or default
         """
         try:
-            logger.info(f"Fetching metadata for GEO ID: {geo_id}")
+            if not hasattr(obj, "metadata"):
+                return default
             
-            # Clean the GEO ID
-            clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
-                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession (e.g., GSE194247)."
+            field_value = obj.metadata.get(field_name, [default])
             
-            # Primary approach: GEOparse
-            metadata = None
-            validation_result = None
+            # Handle list values by joining all elements
+            if isinstance(field_value, list):
+                return ', '.join(field_value) if field_value else default
             
-            try:
-                logger.debug(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
-                gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
-                metadata = self._extract_metadata(gse)
-                logger.debug(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
-                
-            except Exception as geoparse_error:
-                    logger.error(f"Helper metadata fetch failed:")
-                    return f"Failed to fetch metadata for {clean_geo_id}. GEOparse ({geoparse_error}) failed."                
-                # import time
-                # logger.warning(f"GEOparse metadata fetch failed: {geoparse_error}")
-                # time.sleep(5)
-                # # Fallback: Use helper downloader to get SOFT file
-                # try:
-                #     logger.debug(f"Falling back to helper services for metadata: {clean_geo_id}")
-                #     soft_file, _ = self.geo_downloader.download_geo_data(clean_geo_id)
-                    
-                    # if soft_file and soft_file.exists():
-                    #     # Parse SOFT file using helper parser
-                    #     _, soft_metadata = self.geo_parser.parse_soft_file(soft_file)
-                    #     if soft_metadata:
-                    #         metadata = soft_metadata
-                    #         data_source = "helper_soft_file"
-                    #         logger.debug(f"Successfully extracted metadata using helper parser for {clean_geo_id}")
-                    #     else:
-                    #         raise GEOFallbackError("Helper parser could not extract metadata from SOFT file")
-                    # else:
-                    #     raise GEOFallbackError("Helper downloader could not download SOFT file")
-                        
-                # except Exception as helper_error:
-                #     logger.error(f"Helper metadata fetch also failed: {helper_error}")
-                #     return f"Failed to fetch metadata for {clean_geo_id}. Both GEOparse ({geoparse_error}) and helper services ({helper_error}) failed."
+            return str(field_value) if field_value else default
             
-            if not metadata:
-                return f"No metadata could be extracted for {clean_geo_id}"
+        except (AttributeError, IndexError, KeyError):
+            return default
+
+    def _validate_geo_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate GEO metadata against transcriptomics schema.
+        
+        Args:
+            metadata: Extracted GEO metadata dictionary
             
-            # Validate metadata against transcriptomics schema
-            validation_result = self._validate_geo_metadata(metadata)
+        Returns:
+            Dict containing validation results and schema alignment
+        """
+        try:
+            from lobster.core.schemas.transcriptomics import TranscriptomicsSchema
             
-            return metadata, validation_result
+            # Get the single-cell schema (covers most GEO datasets)
+            schema = TranscriptomicsSchema.get_single_cell_schema()
+            uns_schema = schema.get('uns', {}).get('optional', [])
+            
+            # Check which metadata fields align with our schema
+            schema_aligned = {}
+            schema_missing = []
+            extra_fields = []
+            
+            # Check alignment for each field in metadata
+            for field in metadata.keys():
+                if field in uns_schema:
+                    schema_aligned[field] = metadata[field]
+                else:
+                    extra_fields.append(field)
+            
+            # Check for schema fields not present in metadata
+            for schema_field in uns_schema:
+                if schema_field not in metadata:
+                    schema_missing.append(schema_field)
+            
+            # Determine data type based on metadata
+            data_type = self._determine_data_type_from_metadata(metadata)
+            
+            validation_result = {
+                'schema_aligned_fields': len(schema_aligned),
+                'schema_missing_fields': len(schema_missing),
+                'extra_fields_count': len(extra_fields),
+                'alignment_percentage': (len(schema_aligned) / len(uns_schema) * 100) if uns_schema else 0.0,
+                'aligned_metadata': schema_aligned,
+                'missing_fields': schema_missing[:10],  # Limit for display
+                'extra_fields': extra_fields[:10],  # Limit for display
+                'predicted_data_type': data_type,
+                'validation_status': 'PASS' if len(schema_aligned) > len(schema_missing) else 'WARNING'
+            }
+            
+            logger.info(f"Metadata validation: {validation_result['alignment_percentage']:.1f}% schema alignment")
+            return validation_result
             
         except Exception as e:
-            logger.exception(f"Error fetching metadata for {geo_id}: {e}")
-            return f"Error fetching metadata for {geo_id}: {str(e)}"
+            logger.error(f"Error validating metadata: {e}")
+            return {
+                'validation_status': 'ERROR',
+                'error_message': str(e),
+                'schema_aligned_fields': 0,
+                'alignment_percentage': 0.0
+            }
+
+    def _determine_data_type_from_metadata(self, metadata: Dict[str, Any]) -> str:
+        """
+        Determine likely data type (single-cell vs bulk) from metadata.
+        
+        Args:
+            metadata: GEO metadata dictionary
+            
+        Returns:
+            str: Predicted data type
+        """
+        try:
+            # Check platform information
+            platforms = metadata.get('platforms', {})
+            platform_info = str(platforms).lower()
+            
+            # Check overall design
+            overall_design = str(metadata.get('overall_design', '')).lower()
+            
+            # Check sample characteristics  
+            samples = metadata.get('samples', {})
+            sample_chars = []
+            for sample in samples.values():
+                chars = sample.get('characteristics_ch1', [])
+                if isinstance(chars, list):
+                    sample_chars.extend([str(c).lower() for c in chars])
+            
+            sample_text = ' '.join(sample_chars)
+            
+            # Keywords that suggest single-cell
+            single_cell_keywords = [
+                'single cell', 'single-cell', 'scrnaseq', 'scrna-seq', 
+                '10x', 'chromium', 'droplet', 'microwell', 'smart-seq',
+                'cell sorting', 'sorted cells', 'individual cells'
+            ]
+            
+            # Keywords that suggest bulk
+            bulk_keywords = [
+                'bulk', 'tissue', 'whole', 'total rna', 'population'
+            ]
+            
+            combined_text = f"{platform_info} {overall_design} {sample_text}"
+            
+            # Count keyword matches
+            single_cell_score = sum(1 for keyword in single_cell_keywords if keyword in combined_text)
+            bulk_score = sum(1 for keyword in bulk_keywords if keyword in combined_text)
+            
+            # Make prediction
+            if single_cell_score > bulk_score:
+                return 'single_cell_rna_seq'
+            elif bulk_score > single_cell_score:
+                return 'bulk_rna_seq'
+            else:
+                # Default to single-cell for GEO datasets (more common)
+                return 'single_cell_rna_seq'
+                
+        except Exception as e:
+            logger.warning(f"Error determining data type: {e}")
+            return 'single_cell_rna_seq'  # Default
+
+    def _format_metadata_summary(
+        self, 
+        geo_id: str, 
+        metadata: Dict[str, Any], 
+        validation_result: Dict[str, Any] = None
+    ) -> str:
+        """
+        Format comprehensive metadata summary for user review.
+        
+        Args:
+            geo_id: GEO accession ID
+            metadata: Extracted metadata dictionary
+            validation_result: Validation results
+            
+        Returns:
+            str: Formatted metadata summary
+        """
+        try:
+            # Extract key information
+            title = metadata.get('title', 'N/A')
+            summary = metadata.get('summary', 'N/A')
+            overall_design = metadata.get('overall_design', 'N/A')
+            
+            # Sample information
+            samples = metadata.get('samples', {})
+            sample_count = len(samples)
+            
+            # Platform information
+            platforms = metadata.get('platforms', {})
+            platform_info = []
+            for platform_id, platform_data in platforms.items():
+                platform_info.append(f"{platform_id}: {platform_data.get('title', 'N/A')}")
+            
+            # Contact information
+            contact_name = metadata.get('contact_name', 'N/A')
+            contact_institute = metadata.get('contact_institute', 'N/A')
+            
+            # Publication info
+            pubmed_id = metadata.get('pubmed_id', 'Not available')
+            
+            # Dates
+            submission_date = metadata.get('submission_date', 'N/A')
+            last_update = metadata.get('last_update_date', 'N/A')
+            
+            # Sample characteristics preview
+            sample_preview = []
+            for i, (sample_id, sample_data) in enumerate(samples.items()):
+                if i < 3:  # Show first 3 samples
+                    chars = sample_data.get('characteristics_ch1', [])
+                    if isinstance(chars, list) and chars:
+                        sample_preview.append(f"  - {sample_id}: {chars[0]}")
+                    else:
+                        sample_preview.append(f"  - {sample_id}: {sample_data.get('title', 'No title')}")
+            
+            if sample_count > 3:
+                sample_preview.append(f"  ... and {sample_count - 3} more samples")
+            
+            # Validation status
+            if not validation_result:
+                validation_status = None
+                alignment_pct = None
+                predicted_type = None
+            else:
+                validation_status = validation_result.get('validation_status', 'UNKNOWN')
+                alignment_pct = validation_result.get('alignment_percentage', 0.0)
+                predicted_type = validation_result.get('predicted_data_type', 'unknown')
+            
+            # Format the summary
+            summary_text = f"""📊 **GEO Dataset Metadata Summary: {geo_id}**
+
+🔬 **Study Information:**
+- **Title:** {title}
+- **Summary:** {summary}
+- **Design:** {overall_design}
+- **Predicted Type:** {predicted_type.replace('_', ' ').title()}
+
+👥 **Research Details:**
+- **Contact:** {contact_name} ({contact_institute})
+- **PubMed ID:** {pubmed_id}
+- **Submission:** {submission_date}
+- **Last Update:** {last_update}
+
+🧪 **Platform Information:**
+{chr(10).join(platform_info) if platform_info else '- No platform information available'}
+
+🔢 **Sample Information ({sample_count} samples):**
+{chr(10).join(sample_preview) if sample_preview else '- No sample information available'}
+
+✅ **Schema Validation:**
+- **Status:** {validation_status}
+- **Schema Alignment:** {alignment_pct:.1f}% of expected fields present
+- **Aligned Fields:** {validation_result.get('schema_aligned_fields', 0)}
+- **Missing Fields:** {validation_result.get('schema_missing_fields', 0)}
+
+📋 **Next Steps:**
+1. **Review this metadata** to ensure it matches your research needs
+2. **Confirm the predicted data type** is correct for your analysis
+3. **Proceed to download** the full dataset if satisfied
+4. **Use:** `download_geo_dataset('{geo_id}')` to download expression data
+
+💡 **Note:** This metadata has been cached and validated against our transcriptomics schema. 
+The actual expression data download will be much faster now that metadata is prepared."""
+
+            return summary_text
+            
+        except Exception as e:
+            logger.error(f"Error formatting metadata summary: {e}")
+            return f"Error formatting metadata summary for {geo_id}: {str(e)}"
 
 
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                     CORE PROCESSING UTILITIES                             ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
 
     def _process_supplementary_files(self, gse, gse_id: str) -> Optional[pd.DataFrame]:
         """
@@ -849,156 +1363,6 @@ The dataset is now available as modality '{modality_name}' for other agents to u
 
         except Exception as e:
             logger.error(f"Error downloading and parsing file: {e}")
-            return None
-
-    def _parse_10x_data(
-        self, extract_dir: Path, sample_id: str
-    ) -> Optional[pd.DataFrame]:
-        """
-        Parse 10X Genomics format data (matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz).
-
-        Args:
-            extract_dir: Directory containing 10X format files
-            sample_id: Sample identifier for cell naming
-
-        Returns:
-            DataFrame: Expression matrix with cells as rows, genes as columns
-        """
-        try:
-            logger.info(f"Parsing 10X data for {sample_id} in {extract_dir}")
-
-            # Look for 10X files in the directory and subdirectories
-            matrix_file = None
-            barcodes_file = None
-            features_file = None
-
-            # Search recursively for 10X files
-            for file_path in extract_dir.rglob("*"):
-                if file_path.is_file():
-                    name_lower = file_path.name.lower()
-                    if "matrix.mtx" in name_lower:
-                        matrix_file = file_path
-                    elif "barcode" in name_lower or "barcodes" in name_lower:
-                        barcodes_file = file_path
-                    elif "feature" in name_lower or "genes" in name_lower:
-                        features_file = file_path
-
-            if not matrix_file:
-                logger.warning(f"No matrix.mtx file found for {sample_id}")
-                return None
-
-            logger.info(
-                f"Found 10X files - Matrix: {matrix_file.name}, Barcodes: {barcodes_file.name if barcodes_file else 'None'}, Features: {features_file.name if features_file else 'None'}"
-            )
-
-            # Import scipy for sparse matrix handling
-            try:
-                import scipy.io as sio
-                from scipy.sparse import csr_matrix
-            except ImportError:
-                logger.error("scipy is required for parsing 10X data but not available")
-                return None
-
-            # Read the sparse matrix
-            logger.info(f"Reading sparse matrix from {matrix_file}")
-            if matrix_file.name.endswith(".gz"):
-                import gzip
-
-                with gzip.open(matrix_file, "rt") as f:
-                    matrix = sio.mmread(f)
-            else:
-                matrix = sio.mmread(matrix_file)
-
-            # Convert to dense format and transpose (10X format is genes x cells, we want cells x genes)
-            if hasattr(matrix, "todense"):
-                matrix_dense = matrix.todense()
-            else:
-                matrix_dense = matrix
-
-            # Transpose so that cells are rows and genes are columns
-            matrix_dense = matrix_dense.T
-
-            logger.info(f"Matrix shape after transpose: {matrix_dense.shape}")
-
-            # Read barcodes (cell identifiers)
-            cell_ids = []
-            if barcodes_file and barcodes_file.exists():
-                try:
-                    if barcodes_file.name.endswith(".gz"):
-                        with gzip.open(barcodes_file, "rt") as f:
-                            cell_ids = [line.strip() for line in f]
-                    else:
-                        with open(barcodes_file, "r") as f:
-                            cell_ids = [line.strip() for line in f]
-                    logger.info(f"Read {len(cell_ids)} cell barcodes")
-                except Exception as e:
-                    logger.warning(f"Error reading barcodes file: {e}")
-
-            # Read features/genes
-            gene_ids = []
-            gene_names = []
-            if features_file and features_file.exists():
-                try:
-                    if features_file.name.endswith(".gz"):
-                        with gzip.open(features_file, "rt") as f:
-                            lines = f.readlines()
-                    else:
-                        with open(features_file, "r") as f:
-                            lines = f.readlines()
-
-                    for line in lines:
-                        parts = line.strip().split("\t")
-                        if len(parts) >= 2:
-                            gene_ids.append(parts[0])
-                            gene_names.append(parts[1])
-                        elif len(parts) == 1:
-                            gene_ids.append(parts[0])
-                            gene_names.append(parts[0])
-
-                    logger.info(f"Read {len(gene_ids)} gene features")
-                except Exception as e:
-                    logger.warning(f"Error reading features file: {e}")
-
-            # Create appropriate cell and gene names
-            if not cell_ids:
-                cell_ids = [
-                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
-                ]
-            else:
-                # Add sample prefix to cell IDs
-                cell_ids = [f"{sample_id}_{cell_id}" for cell_id in cell_ids]
-
-            if not gene_names:
-                if gene_ids:
-                    gene_names = gene_ids
-                else:
-                    gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
-
-            # Ensure we have the right number of identifiers
-            if len(cell_ids) != matrix_dense.shape[0]:
-                logger.warning(
-                    f"Cell ID count mismatch: {len(cell_ids)} vs {matrix_dense.shape[0]}"
-                )
-                cell_ids = [
-                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
-                ]
-
-            if len(gene_names) != matrix_dense.shape[1]:
-                logger.warning(
-                    f"Gene name count mismatch: {len(gene_names)} vs {matrix_dense.shape[1]}"
-                )
-                gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
-
-            # Create DataFrame
-            df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
-
-            logger.info(
-                f"Successfully created 10X DataFrame for {sample_id}: {df.shape}"
-            )
-            return df
-
-        except Exception as e:
-            logger.error(f"Error parsing 10X data for {sample_id}: {e}")
             return None
 
     def _parse_expression_file(self, file_path: Path) -> Optional[pd.DataFrame]:
@@ -1249,316 +1613,212 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             logger.error(f"Error parsing Matrix Market file {matrix_file}: {e}")
             return None
 
-    def _safely_extract_metadata_field(self, obj, field_name: str, default: str = "") -> str:
+    def _parse_10x_data(
+        self, extract_dir: Path, sample_id: str
+    ) -> Optional[pd.DataFrame]:
         """
-        Safely extract a metadata field from a GEOparse object.
-        
-        Handles the common pattern of checking for metadata attribute,
-        extracting the field, and joining all elements if it's a list.
-        
-        Args:
-            obj: GEOparse object (GSE, GPL, or GSM)
-            field_name: Name of the metadata field to extract
-            default: Default value if field is not found
-            
-        Returns:
-            str: Extracted metadata value or default
-        """
-        try:
-            if not hasattr(obj, "metadata"):
-                return default
-            
-            field_value = obj.metadata.get(field_name, [default])
-            
-            # Handle list values by joining all elements
-            if isinstance(field_value, list):
-                return ', '.join(field_value) if field_value else default
-            
-            return str(field_value) if field_value else default
-            
-        except (AttributeError, IndexError, KeyError):
-            return default
-
-    def _extract_metadata(self, gse) -> Dict[str, Any]:
-        """
-        Extract comprehensive metadata from GEOparse GSE object.
+        Parse 10X Genomics format data (matrix.mtx.gz, barcodes.tsv.gz, features.tsv.gz).
 
         Args:
-            gse: GEOparse GSE object
+            extract_dir: Directory containing 10X format files
+            sample_id: Sample identifier for cell naming
 
         Returns:
-            dict: Extracted metadata
+            DataFrame: Expression matrix with cells as rows, genes as columns
         """
         try:
-            metadata = {}
+            logger.info(f"Parsing 10X data for {sample_id} in {extract_dir}")
 
-            # Basic metadata from GEOparse
-            if hasattr(gse, "metadata"):
-                for key, value in gse.metadata.items():
-                    if isinstance(value, list):
-                        metadata[key] = ', '.join(value)
+            # Look for 10X files in the directory and subdirectories
+            matrix_file = None
+            barcodes_file = None
+            features_file = None
+
+            # Search recursively for 10X files
+            for file_path in extract_dir.rglob("*"):
+                if file_path.is_file():
+                    name_lower = file_path.name.lower()
+                    if "matrix.mtx" in name_lower:
+                        matrix_file = file_path
+                    elif "barcode" in name_lower or "barcodes" in name_lower:
+                        barcodes_file = file_path
+                    elif "feature" in name_lower or "genes" in name_lower:
+                        features_file = file_path
+
+            if not matrix_file:
+                logger.warning(f"No matrix.mtx file found for {sample_id}")
+                return None
+
+            logger.info(
+                f"Found 10X files - Matrix: {matrix_file.name}, Barcodes: {barcodes_file.name if barcodes_file else 'None'}, Features: {features_file.name if features_file else 'None'}"
+            )
+
+            # Import scipy for sparse matrix handling
+            try:
+                import scipy.io as sio
+                from scipy.sparse import csr_matrix
+            except ImportError:
+                logger.error("scipy is required for parsing 10X data but not available")
+                return None
+
+            # Read the sparse matrix
+            logger.info(f"Reading sparse matrix from {matrix_file}")
+            if matrix_file.name.endswith(".gz"):
+                import gzip
+
+                with gzip.open(matrix_file, "rt") as f:
+                    matrix = sio.mmread(f)
+            else:
+                matrix = sio.mmread(matrix_file)
+
+            # Convert to dense format and transpose (10X format is genes x cells, we want cells x genes)
+            if hasattr(matrix, "todense"):
+                matrix_dense = matrix.todense()
+            else:
+                matrix_dense = matrix
+
+            # Transpose so that cells are rows and genes are columns
+            matrix_dense = matrix_dense.T
+
+            logger.info(f"Matrix shape after transpose: {matrix_dense.shape}")
+
+            # Read barcodes (cell identifiers)
+            cell_ids = []
+            if barcodes_file and barcodes_file.exists():
+                try:
+                    if barcodes_file.name.endswith(".gz"):
+                        with gzip.open(barcodes_file, "rt") as f:
+                            cell_ids = [line.strip() for line in f]
                     else:
-                        metadata[key] = value
+                        with open(barcodes_file, "r") as f:
+                            cell_ids = [line.strip() for line in f]
+                    logger.info(f"Read {len(cell_ids)} cell barcodes")
+                except Exception as e:
+                    logger.warning(f"Error reading barcodes file: {e}")
 
-            # Platform information - now much cleaner!
-            if hasattr(gse, "gpls"):
-                platforms = {}
-                for gpl_id, gpl in gse.gpls.items():
-                    platforms[gpl_id] = {
-                        "title": self._safely_extract_metadata_field(gpl, "title"),
-                        "organism": self._safely_extract_metadata_field(gpl, "organism"),
-                        "technology": self._safely_extract_metadata_field(gpl, "technology"),
-                    }
-                metadata["platforms"] = platforms
+            # Read features/genes
+            gene_ids = []
+            gene_names = []
+            if features_file and features_file.exists():
+                try:
+                    if features_file.name.endswith(".gz"):
+                        with gzip.open(features_file, "rt") as f:
+                            lines = f.readlines()
+                    else:
+                        with open(features_file, "r") as f:
+                            lines = f.readlines()
 
-            # Sample metadata
-            if hasattr(gse, "gsms"):
-                sample_metadata = {}
-                for gsm_id, gsm in gse.gsms.items():
-                    sample_meta = {}
-                    if hasattr(gsm, "metadata"):
-                        for key, value in gsm.metadata.items():
-                            if isinstance(value, list):
-                                sample_meta[key] = ''.join(value)
-                            else:
-                                sample_meta[key] = value
-                    sample_metadata[gsm_id] = sample_meta
-                metadata["samples"] = sample_metadata
+                    for line in lines:
+                        parts = line.strip().split("\t")
+                        if len(parts) >= 2:
+                            gene_ids.append(parts[0])
+                            gene_names.append(parts[1])
+                        elif len(parts) == 1:
+                            gene_ids.append(parts[0])
+                            gene_names.append(parts[0])
 
-            return metadata
+                    logger.info(f"Read {len(gene_ids)} gene features")
+                except Exception as e:
+                    logger.warning(f"Error reading features file: {e}")
 
-        except Exception as e:
-            logger.error(f"Error extracting metadata: {e}")
-            return {}
+            # Create appropriate cell and gene names
+            if not cell_ids:
+                cell_ids = [
+                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
+                ]
+            else:
+                # Add sample prefix to cell IDs
+                cell_ids = [f"{sample_id}_{cell_id}" for cell_id in cell_ids]
 
-    def _validate_geo_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Validate GEO metadata against transcriptomics schema.
-        
-        Args:
-            metadata: Extracted GEO metadata dictionary
-            
-        Returns:
-            Dict containing validation results and schema alignment
-        """
-        try:
-            from lobster.core.schemas.transcriptomics import TranscriptomicsSchema
-            
-            # Get the single-cell schema (covers most GEO datasets)
-            schema = TranscriptomicsSchema.get_single_cell_schema()
-            uns_schema = schema.get('uns', {}).get('optional', [])
-            
-            # Check which metadata fields align with our schema
-            schema_aligned = {}
-            schema_missing = []
-            extra_fields = []
-            
-            # Check alignment for each field in metadata
-            for field in metadata.keys():
-                if field in uns_schema:
-                    schema_aligned[field] = metadata[field]
+            if not gene_names:
+                if gene_ids:
+                    gene_names = gene_ids
                 else:
-                    extra_fields.append(field)
-            
-            # Check for schema fields not present in metadata
-            for schema_field in uns_schema:
-                if schema_field not in metadata:
-                    schema_missing.append(schema_field)
-            
-            # Determine data type based on metadata
-            data_type = self._determine_data_type_from_metadata(metadata)
-            
-            validation_result = {
-                'schema_aligned_fields': len(schema_aligned),
-                'schema_missing_fields': len(schema_missing),
-                'extra_fields_count': len(extra_fields),
-                'alignment_percentage': (len(schema_aligned) / len(uns_schema) * 100) if uns_schema else 0.0,
-                'aligned_metadata': schema_aligned,
-                'missing_fields': schema_missing[:10],  # Limit for display
-                'extra_fields': extra_fields[:10],  # Limit for display
-                'predicted_data_type': data_type,
-                'validation_status': 'PASS' if len(schema_aligned) > len(schema_missing) else 'WARNING'
-            }
-            
-            logger.info(f"Metadata validation: {validation_result['alignment_percentage']:.1f}% schema alignment")
-            return validation_result
-            
-        except Exception as e:
-            logger.error(f"Error validating metadata: {e}")
-            return {
-                'validation_status': 'ERROR',
-                'error_message': str(e),
-                'schema_aligned_fields': 0,
-                'alignment_percentage': 0.0
-            }
+                    gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
 
-    def _determine_data_type_from_metadata(self, metadata: Dict[str, Any]) -> str:
+            # Ensure we have the right number of identifiers
+            if len(cell_ids) != matrix_dense.shape[0]:
+                logger.warning(
+                    f"Cell ID count mismatch: {len(cell_ids)} vs {matrix_dense.shape[0]}"
+                )
+                cell_ids = [
+                    f"{sample_id}_cell_{i}" for i in range(matrix_dense.shape[0])
+                ]
+
+            if len(gene_names) != matrix_dense.shape[1]:
+                logger.warning(
+                    f"Gene name count mismatch: {len(gene_names)} vs {matrix_dense.shape[1]}"
+                )
+                gene_names = [f"Gene_{i}" for i in range(matrix_dense.shape[1])]
+
+            # Create DataFrame
+            df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
+
+            logger.info(
+                f"Successfully created 10X DataFrame for {sample_id}: {df.shape}"
+            )
+            return df
+
+        except Exception as e:
+            logger.error(f"Error parsing 10X data for {sample_id}: {e}")
+            return None
+
+    def _concatenate_matrices(
+        self, validated_matrices: Dict[str, pd.DataFrame], geo_id: str, use_intersecting_genes_only: bool = True
+    ) -> Optional[pd.DataFrame]:
         """
-        Determine likely data type (single-cell vs bulk) from metadata.
+        Concatenate multiple sample matrices into a single DataFrame.
         
         Args:
-            metadata: GEO metadata dictionary
+            validated_matrices: Dictionary of sample matrices
+            geo_id: GEO series ID
+            use_intersecting_genes_only: Whether to use only common genes
             
         Returns:
-            str: Predicted data type
+            Combined DataFrame or None
         """
         try:
-            # Check platform information
-            platforms = metadata.get('platforms', {})
-            platform_info = str(platforms).lower()
+            if not validated_matrices:
+                logger.warning("No matrices to concatenate")
+                return None
             
-            # Check overall design
-            overall_design = str(metadata.get('overall_design', '')).lower()
+            logger.info(f"Concatenating {len(validated_matrices)} matrices for {geo_id}")
             
-            # Check sample characteristics  
-            samples = metadata.get('samples', {})
-            sample_chars = []
-            for sample in samples.values():
-                chars = sample.get('characteristics_ch1', [])
-                if isinstance(chars, list):
-                    sample_chars.extend([str(c).lower() for c in chars])
+            matrices_list = list(validated_matrices.values())
             
-            sample_text = ' '.join(sample_chars)
-            
-            # Keywords that suggest single-cell
-            single_cell_keywords = [
-                'single cell', 'single-cell', 'scrnaseq', 'scrna-seq', 
-                '10x', 'chromium', 'droplet', 'microwell', 'smart-seq',
-                'cell sorting', 'sorted cells', 'individual cells'
-            ]
-            
-            # Keywords that suggest bulk
-            bulk_keywords = [
-                'bulk', 'tissue', 'whole', 'total rna', 'population'
-            ]
-            
-            combined_text = f"{platform_info} {overall_design} {sample_text}"
-            
-            # Count keyword matches
-            single_cell_score = sum(1 for keyword in single_cell_keywords if keyword in combined_text)
-            bulk_score = sum(1 for keyword in bulk_keywords if keyword in combined_text)
-            
-            # Make prediction
-            if single_cell_score > bulk_score:
-                return 'single_cell_rna_seq'
-            elif bulk_score > single_cell_score:
-                return 'bulk_rna_seq'
-            else:
-                # Default to single-cell for GEO datasets (more common)
-                return 'single_cell_rna_seq'
+            if use_intersecting_genes_only:
+                # Find common genes across all matrices
+                common_genes = set(matrices_list[0].columns)
+                for matrix in matrices_list[1:]:
+                    common_genes = common_genes.intersection(set(matrix.columns))
                 
-        except Exception as e:
-            logger.warning(f"Error determining data type: {e}")
-            return 'single_cell_rna_seq'  # Default
-
-    def _format_metadata_summary(
-        self, 
-        geo_id: str, 
-        metadata: Dict[str, Any], 
-        validation_result: Dict[str, Any] = None
-    ) -> str:
-        """
-        Format comprehensive metadata summary for user review.
-        
-        Args:
-            geo_id: GEO accession ID
-            metadata: Extracted metadata dictionary
-            validation_result: Validation results
-            
-        Returns:
-            str: Formatted metadata summary
-        """
-        try:
-            # Extract key information
-            title = metadata.get('title', 'N/A')
-            summary = metadata.get('summary', 'N/A')
-            overall_design = metadata.get('overall_design', 'N/A')
-            
-            # Sample information
-            samples = metadata.get('samples', {})
-            sample_count = len(samples)
-            
-            # Platform information
-            platforms = metadata.get('platforms', {})
-            platform_info = []
-            for platform_id, platform_data in platforms.items():
-                platform_info.append(f"{platform_id}: {platform_data.get('title', 'N/A')}")
-            
-            # Contact information
-            contact_name = metadata.get('contact_name', 'N/A')
-            contact_institute = metadata.get('contact_institute', 'N/A')
-            
-            # Publication info
-            pubmed_id = metadata.get('pubmed_id', 'Not available')
-            
-            # Dates
-            submission_date = metadata.get('submission_date', 'N/A')
-            last_update = metadata.get('last_update_date', 'N/A')
-            
-            # Sample characteristics preview
-            sample_preview = []
-            for i, (sample_id, sample_data) in enumerate(samples.items()):
-                if i < 3:  # Show first 3 samples
-                    chars = sample_data.get('characteristics_ch1', [])
-                    if isinstance(chars, list) and chars:
-                        sample_preview.append(f"  - {sample_id}: {chars[0]}")
-                    else:
-                        sample_preview.append(f"  - {sample_id}: {sample_data.get('title', 'No title')}")
-            
-            if sample_count > 3:
-                sample_preview.append(f"  ... and {sample_count - 3} more samples")
-            
-            # Validation status
-            if not validation_result:
-                validation_status = None
-                alignment_pct = None
-                predicted_type = None
+                if not common_genes:
+                    logger.error("No common genes found across matrices")
+                    return None
+                
+                # Filter matrices to common genes
+                filtered_matrices = [matrix[list(common_genes)] for matrix in matrices_list]
+                combined_matrix = pd.concat(filtered_matrices, axis=0, sort=False)
+                logger.info(f"Concatenated with {len(common_genes)} common genes")
+                
             else:
-                validation_status = validation_result.get('validation_status', 'UNKNOWN')
-                alignment_pct = validation_result.get('alignment_percentage', 0.0)
-                predicted_type = validation_result.get('predicted_data_type', 'unknown')
+                # Use all genes, filling missing with zeros
+                combined_matrix = pd.concat(matrices_list, axis=0, sort=False).fillna(0)
+                logger.info(f"Concatenated with all genes, filled missing with zeros")
             
-            # Format the summary
-            summary_text = f"""📊 **GEO Dataset Metadata Summary: {geo_id}**
-
-🔬 **Study Information:**
-- **Title:** {title}
-- **Summary:** {summary}
-- **Design:** {overall_design}
-- **Predicted Type:** {predicted_type.replace('_', ' ').title()}
-
-👥 **Research Details:**
-- **Contact:** {contact_name} ({contact_institute})
-- **PubMed ID:** {pubmed_id}
-- **Submission:** {submission_date}
-- **Last Update:** {last_update}
-
-🧪 **Platform Information:**
-{chr(10).join(platform_info) if platform_info else '- No platform information available'}
-
-🔢 **Sample Information ({sample_count} samples):**
-{chr(10).join(sample_preview) if sample_preview else '- No sample information available'}
-
-✅ **Schema Validation:**
-- **Status:** {validation_status}
-- **Schema Alignment:** {alignment_pct:.1f}% of expected fields present
-- **Aligned Fields:** {validation_result.get('schema_aligned_fields', 0)}
-- **Missing Fields:** {validation_result.get('schema_missing_fields', 0)}
-
-📋 **Next Steps:**
-1. **Review this metadata** to ensure it matches your research needs
-2. **Confirm the predicted data type** is correct for your analysis
-3. **Proceed to download** the full dataset if satisfied
-4. **Use:** `download_geo_dataset('{geo_id}')` to download expression data
-
-💡 **Note:** This metadata has been cached and validated against our transcriptomics schema. 
-The actual expression data download will be much faster now that metadata is prepared."""
-
-            return summary_text
+            logger.info(f"Final combined matrix shape: {combined_matrix.shape}")
+            return combined_matrix
             
         except Exception as e:
-            logger.error(f"Error formatting metadata summary: {e}")
-            return f"Error formatting metadata summary for {geo_id}: {str(e)}"
+            logger.error(f"Error concatenating matrices: {e}")
+            return None
+
+
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                   SAMPLE PROCESSING AND VALIDATION                        ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
 
     def _get_sample_info(self, gse) -> Dict[str, Dict[str, Any]]:
         """
@@ -1592,10 +1852,8 @@ The actual expression data download will be much faster now that metadata is pre
             return sample_info
 
         except Exception as e:
-            logger.error(f"Error getting sample info: {e}"
-            )
+            logger.error(f"Error getting sample info: {e}")
             return {}
-
 
     def _download_sample_matrices(
         self, sample_info: Dict[str, Dict[str, Any]], gse_id: str
@@ -1615,9 +1873,6 @@ The actual expression data download will be much faster now that metadata is pre
         logger.info(f"Downloading matrices for {len(sample_info)} samples...")
 
         # Use threading for parallel downloads
-        #==========================================================================================================
-        #==========================================================================================================
-        #==========================================================================================================
         with ThreadPoolExecutor(max_workers=5) as executor:
             future_to_sample = {
                 executor.submit(
@@ -1664,13 +1919,10 @@ The actual expression data download will be much faster now that metadata is pre
             # Check for 10X format supplementary files
             if hasattr(gsm, "metadata"):
                 suppl_files_mapped = self._extract_supplementary_files_from_metadata(gsm.metadata, gsm_id)
-                # suppl_files = gsm.metadata["supplementary_file"]
                 df = self._download_and_combine_single_cell_files(suppl_files_mapped, gsm_id)
                 return df
                 
         except Exception as e:
-            print(e)
-            
             # Fallback to expression table
             if hasattr(gsm, "table") and gsm.table is not None:
                 matrix = gsm.table
@@ -2235,55 +2487,6 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error processing expression file for {gsm_id}: {e}")
             return None
 
-    def _download_supplementary_file(
-        self, url: str, gsm_id: str
-    ) -> Optional[pd.DataFrame]:
-        """
-        Professional download and parse of supplementary files with FTP support.
-
-        Args:
-            url: URL to supplementary file (supports HTTP/HTTPS/FTP)
-            gsm_id: GEO sample ID
-
-        Returns:
-            DataFrame: Parsed matrix or None
-        """
-        try:
-            logger.info(f"Downloading supplementary file for {gsm_id}: {url}")
-            
-            # Extract filename and create local path
-            filename = url.split('/')[-1]
-            local_file = self.cache_dir / f"{gsm_id}_suppl_{filename}"
-
-            # Use helper downloader for better FTP/HTTP support and progress tracking
-            if not local_file.exists():
-                if not self.geo_downloader.download_file(url, local_file, f"Downloading {filename}"):
-                    logger.error(f"Failed to download supplementary file: {url}")
-                    return None
-            else:
-                logger.info(f"Using cached supplementary file: {local_file}")
-
-            # Use geo_parser for enhanced format detection and parsing
-            matrix = self.geo_parser.parse_supplementary_file(local_file)
-            
-            if matrix is not None and not matrix.empty:
-                # Add sample prefix to row names for proper identification
-                if matrix.shape[0] > matrix.shape[1]:  # More rows than columns suggests cells x genes
-                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
-                else:  # More columns than rows suggests genes x cells, transpose
-                    matrix = matrix.T
-                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
-                
-                logger.info(f"Successfully parsed supplementary file for {gsm_id}: {matrix.shape}")
-                return matrix
-            else:
-                logger.warning(f"Could not parse supplementary file or file is empty: {local_file}")
-                return None
-
-        except Exception as e:
-            logger.error(f"Error downloading supplementary file {url} for {gsm_id}: {e}")
-            return None
-
     def _validate_matrices(
         self, sample_matrices: Dict[str, Optional[pd.DataFrame]]
     ) -> Dict[str, pd.DataFrame]:
@@ -2502,78 +2705,6 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error storing samples as AnnData: {e}")
             return stored_samples
 
-    def _create_placeholder_matrix(
-        self, stored_samples: List[str], gse_id: str
-    ) -> pd.DataFrame:
-        """
-        Create a placeholder matrix for immediate compatibility.
-        This will contain summary information about the stored samples.
-        
-        Args:
-            stored_samples: List of modality names that were stored
-            gse_id: GEO series ID
-            
-        Returns:
-            DataFrame: Placeholder matrix with sample information
-        """
-        try:
-            # Collect information about stored samples
-            sample_info_list = []
-            total_cells = 0
-            all_genes = set()
-            
-            for modality_name in stored_samples:
-                adata = self.data_manager.get_modality(modality_name)
-                sample_id = modality_name.split('_')[-1].upper()
-                
-                sample_info_list.append({
-                    'sample_id': sample_id,
-                    'modality_name': modality_name,
-                    'n_cells': adata.n_obs,
-                    'n_genes': adata.n_vars,
-                    'stored': True
-                })
-                
-                total_cells += adata.n_obs
-                all_genes.update(adata.var_names)
-            
-            # Create a summary DataFrame
-            summary_df = pd.DataFrame(sample_info_list)
-            
-            # Create a minimal placeholder matrix with metadata
-            # This matrix will have one row per sample with summary statistics
-            placeholder_matrix = pd.DataFrame(
-                index=summary_df['sample_id'],
-                columns=['n_cells', 'n_genes', 'modality_name', 'status']
-            )
-            
-            for _, row in summary_df.iterrows():
-                placeholder_matrix.loc[row['sample_id']] = [
-                    row['n_cells'],
-                    row['n_genes'],
-                    row['modality_name'],
-                    'stored_for_preprocessing'
-                ]
-            
-            # Add metadata as attributes
-            placeholder_matrix.attrs = {
-                'dataset_id': gse_id,
-                'total_samples': len(stored_samples),
-                'total_cells': total_cells,
-                'total_unique_genes': len(all_genes),
-                'stored_modalities': stored_samples,
-                'note': 'Individual samples stored as AnnData objects for preprocessing',
-                'concatenation_pending': True
-            }
-            
-            logger.info(f"Created placeholder matrix with {len(stored_samples)} samples")
-            return placeholder_matrix
-            
-        except Exception as e:
-            logger.error(f"Error creating placeholder matrix: {e}")
-            # Return a minimal placeholder
-            return pd.DataFrame({'status': ['error']}, index=[gse_id])
-
     def _concatenate_stored_samples(
         self, geo_id: str, stored_samples: List[str], use_intersecting_genes_only: bool = True
     ) -> Optional[pd.DataFrame]:
@@ -2664,33 +2795,6 @@ The actual expression data download will be much faster now that metadata is pre
             
             logger.info(f"Concatenation successful: {combined_adata.shape}")
             
-            # Convert to DataFrame for compatibility with the rest of the pipeline
-            # # The expression matrix is stored in X
-            # if hasattr(combined_adata.X, 'todense'):
-            #     # Handle sparse matrix
-            #     expression_matrix = pd.DataFrame(
-            #         combined_adata.X.todense(),
-            #         index=combined_adata.obs_names,
-            #         columns=combined_adata.var_names
-            #     )
-            # else:
-            #     # Handle dense matrix
-            #     expression_matrix = pd.DataFrame(
-            #         combined_adata.X,
-            #         index=combined_adata.obs_names,
-            #         columns=combined_adata.var_names
-            #     )
-            
-            # Add batch information as a column (for compatibility)
-            # if 'batch' in combined_adata.obs.columns:
-            #     expression_matrix['batch'] = combined_adata.obs['batch'].values
-            
-            # logger.info(f"Converted to DataFrame: {expression_matrix.shape}")
-            
-            # Log statistics
-            # n_genes = combined_adata.X.shape[1]
-
-            
             return combined_adata
             
         except ImportError:
@@ -2701,7 +2805,187 @@ The actual expression data download will be much faster now that metadata is pre
             logger.exception("Full traceback:")
             return None
 
-    def _check_workspace_for_processed_data(
+
+# ████████████████████████████████████████████████████████████████████████████████
+# ██                                                                            ██
+# ██                        LEGACY FUNCTIONS - REVIEW NEEDED                   ██
+# ██                                                                            ██
+# ████████████████████████████████████████████████████████████████████████████████
+
+    def _store_single_sample_as_modality(self, gsm_id: str, matrix: pd.DataFrame, gsm) -> str:  #FIXME
+        """Store single sample as modality in DataManagerV2."""
+        try:
+            modality_name = f"geo_sample_{gsm_id.lower()}"
+            
+            # Extract sample metadata
+            sample_metadata = {}
+            if hasattr(gsm, "metadata"):
+                for key, value in gsm.metadata.items():
+                    if isinstance(value, list) and len(value) == 1:
+                        sample_metadata[key] = value[0]
+                    else:
+                        sample_metadata[key] = value
+            
+            enhanced_metadata = {
+                "sample_id": gsm_id,
+                "dataset_type": "GEO_Sample",
+                "sample_metadata": sample_metadata,
+                "processing_date": pd.Timestamp.now().isoformat(),
+                "data_source": "single_sample"
+            }
+            
+            # Determine adapter based on data characteristics
+            n_obs, n_vars = matrix.shape
+            if n_vars > 5000:  # High gene count suggests single-cell
+                adapter_name = "transcriptomics_single_cell"
+            else:
+                adapter_name = "transcriptomics_bulk"
+            
+            adata = self.data_manager.load_modality(
+                name=modality_name,
+                source=matrix,
+                adapter=adapter_name,
+                validate=True,
+                **enhanced_metadata
+            )
+            
+            # Save to workspace
+            save_path = f"{gsm_id.lower()}_sample.h5ad"
+            saved_file = self.data_manager.save_modality(modality_name, save_path)
+            
+            return f"""Successfully downloaded single-cell sample {gsm_id}!
+
+📊 Modality: '{modality_name}' ({adata.n_obs} cells × {adata.n_vars} genes)
+🔬 Adapter: {adapter_name}
+💾 Saved to: {save_path}
+📈 Ready for single-cell analysis!"""
+            
+        except Exception as e:
+            logger.error(f"Error storing sample {gsm_id}: {e}")
+            return f"Error storing sample {gsm_id}: {str(e)}"
+
+    def _download_supplementary_file(  #FIXME
+        self, url: str, gsm_id: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        Professional download and parse of supplementary files with FTP support.
+
+        Args:
+            url: URL to supplementary file (supports HTTP/HTTPS/FTP)
+            gsm_id: GEO sample ID
+
+        Returns:
+            DataFrame: Parsed matrix or None
+        """
+        try:
+            logger.info(f"Downloading supplementary file for {gsm_id}: {url}")
+            
+            # Extract filename and create local path
+            filename = url.split('/')[-1]
+            local_file = self.cache_dir / f"{gsm_id}_suppl_{filename}"
+
+            # Use helper downloader for better FTP/HTTP support and progress tracking
+            if not local_file.exists():
+                if not self.geo_downloader.download_file(url, local_file, f"Downloading {filename}"):
+                    logger.error(f"Failed to download supplementary file: {url}")
+                    return None
+            else:
+                logger.info(f"Using cached supplementary file: {local_file}")
+
+            # Use geo_parser for enhanced format detection and parsing
+            matrix = self.geo_parser.parse_supplementary_file(local_file)
+            
+            if matrix is not None and not matrix.empty:
+                # Add sample prefix to row names for proper identification
+                if matrix.shape[0] > matrix.shape[1]:  # More rows than columns suggests cells x genes
+                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                else:  # More columns than rows suggests genes x cells, transpose
+                    matrix = matrix.T
+                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                
+                logger.info(f"Successfully parsed supplementary file for {gsm_id}: {matrix.shape}")
+                return matrix
+            else:
+                logger.warning(f"Could not parse supplementary file or file is empty: {local_file}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error downloading supplementary file {url} for {gsm_id}: {e}")
+            return None
+
+    def _create_placeholder_matrix(  #FIXME
+        self, stored_samples: List[str], gse_id: str
+    ) -> pd.DataFrame:
+        """
+        Create a placeholder matrix for immediate compatibility.
+        This will contain summary information about the stored samples.
+        
+        Args:
+            stored_samples: List of modality names that were stored
+            gse_id: GEO series ID
+            
+        Returns:
+            DataFrame: Placeholder matrix with sample information
+        """
+        try:
+            # Collect information about stored samples
+            sample_info_list = []
+            total_cells = 0
+            all_genes = set()
+            
+            for modality_name in stored_samples:
+                adata = self.data_manager.get_modality(modality_name)
+                sample_id = modality_name.split('_')[-1].upper()
+                
+                sample_info_list.append({
+                    'sample_id': sample_id,
+                    'modality_name': modality_name,
+                    'n_cells': adata.n_obs,
+                    'n_genes': adata.n_vars,
+                    'stored': True
+                })
+                
+                total_cells += adata.n_obs
+                all_genes.update(adata.var_names)
+            
+            # Create a summary DataFrame
+            summary_df = pd.DataFrame(sample_info_list)
+            
+            # Create a minimal placeholder matrix with metadata
+            # This matrix will have one row per sample with summary statistics
+            placeholder_matrix = pd.DataFrame(
+                index=summary_df['sample_id'],
+                columns=['n_cells', 'n_genes', 'modality_name', 'status']
+            )
+            
+            for _, row in summary_df.iterrows():
+                placeholder_matrix.loc[row['sample_id']] = [
+                    row['n_cells'],
+                    row['n_genes'],
+                    row['modality_name'],
+                    'stored_for_preprocessing'
+                ]
+            
+            # Add metadata as attributes
+            placeholder_matrix.attrs = {
+                'dataset_id': gse_id,
+                'total_samples': len(stored_samples),
+                'total_cells': total_cells,
+                'total_unique_genes': len(all_genes),
+                'stored_modalities': stored_samples,
+                'note': 'Individual samples stored as AnnData objects for preprocessing',
+                'concatenation_pending': True
+            }
+            
+            logger.info(f"Created placeholder matrix with {len(stored_samples)} samples")
+            return placeholder_matrix
+            
+        except Exception as e:
+            logger.error(f"Error creating placeholder matrix: {e}")
+            # Return a minimal placeholder
+            return pd.DataFrame({'status': ['error']}, index=[gse_id])
+
+    def _check_workspace_for_processed_data(  #FIXME
         self, gse_id: str
     ) -> Optional[Tuple[pd.DataFrame, Dict[str, Any]]]:
         """
@@ -2768,8 +3052,7 @@ The actual expression data download will be much faster now that metadata is pre
             logger.warning(f"Error checking workspace for existing data: {e}")
             return None
 
-
-    def _format_download_response(
+    def _format_download_response(  #FIXME
         self,
         gse_id: str,
         combined_matrix: pd.DataFrame,
