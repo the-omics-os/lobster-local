@@ -12,28 +12,15 @@ from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrockConverse
 
 import pandas as pd
-from pydantic import Field, BaseModel
-
 from datetime import date
 
 from lobster.agents.state import DataExpertState
+from lobster.agents.data_expert_assistant import DataExpertAssistant, StrategyConfig
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
-# Define StrategyConfig with all field descriptions
-class StrategyConfig(BaseModel):
-    summary_file_name : str     = Field(default="", description="name of the summary or overview file (has 'GSE' in the name). Example: 'GSE131907_Lung_Cancer_Feature_Summary'")
-    summary_file_type : str     = Field(default="", description="Filetype of the Summary File. Example: 'xlsx'")
-    processed_matrix_name : str     = Field(default="", description="name of the TARGET processed (log2, tpm, normalized, etc) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_normalized_log2TPM_matrix'")
-    processed_matrix_filetype : str = Field(default="", description="filetype of the TARGET processed file (preference is non R objects). Example: 'txt'")
-    raw_UMI_like_matrix_name : str  = Field(default="", description="name of the raw TARGET UMI-like (UMI, raw, tar) matrix file (preference is non R objects). Example: 'GSE131907_Lung_Cancer_raw_UMI_matrix'")
-    raw_UMI_like_matrix_filetype : str = Field(default="", description="filetype of the TARGET raw UMI-like file (preference is non R objects). Example: 'txt'")
-    cell_annotation_name : str      = Field(default="", description="Filename of the file which likely is linked to the cell annotation. Example:'GSE131907_Lung_Cancer_cell_annotation'")
-    cell_annotation_filetype : str  = Field(default="", description="Filetype of cell annotation file. Example: 'txt'")
-    raw_data_available: bool        = Field(default=False, description="If based on the metadata raw data is available for the samples. Sometimes it stated in the study description")
 
 
 def data_expert(
@@ -50,7 +37,9 @@ def data_expert(
     
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])
-
+    
+    # Initialize the assistant for LLM operations
+    assistant = DataExpertAssistant()
     
     @tool
     def check_tmp_metadata_keys() -> List:
@@ -61,7 +50,7 @@ def data_expert(
     
     # Define tools for data operations
     @tool
-    def fetch_geo_metadata(geo_id: str, data_source: str = 'geo') -> str:
+    def fetch_geo_metadata_and_strategy_config(geo_id: str, data_source: str = 'geo') -> str:
         """
         Fetch and validate GEO dataset metadata without downloading the full dataset.
         Use this FIRST before download_geo_dataset to preview dataset information.
@@ -104,88 +93,12 @@ def data_expert(
             metadata, validation_result = geo_service.fetch_metadata_only(clean_geo_id)
 
             #------------------------------------------------
-            # Extract strategy config using LLM
+            # Extract strategy config using assistant
             #------------------------------------------------
-            import json
+            strategy_config = assistant.extract_strategy_config(metadata, clean_geo_id)
             
-
-            # Extract key metadata fields
-            title = metadata.get('title', 'N/A')
-            summary = metadata.get('summary', 'N/A')
-            overall_design = metadata.get('overall_design', 'N/A')
-            supplementary_files = metadata.get('supplementary_file', [])
-            
-            # Prepare the context for LLM
-            metadata_context = f"""
-Title: {title}
-
-Summary: {summary}
-
-Overall Design: {overall_design}
-
-Supplementary Files:
-{supplementary_files if supplementary_files else 'No supplementary files listed'}
-"""
-
-            # Get the schema from StrategyConfig class
-            strategy_schema = StrategyConfig.model_json_schema()
-            
-            # Create system prompt using the schema
-            system_prompt = f"""You are a bioinformatics expert analyzing GEO dataset metadata. Your task is to extract file information and populate a StrategyConfig object.
-
-The StrategyConfig schema is:
-{json.dumps(strategy_schema, indent=2)}
-
-Important notes:
-1. For each file type, extract the filename WITHOUT the extension (e.g., "GSE131907_Lung_Cancer_Feature_Summary" not "GSE131907_Lung_Cancer_Feature_Summary.xlsx")
-2. Extract the file extension separately (e.g., "xlsx", "txt", "csv")
-3. Prefer non-R objects (.txt, .csv) over .rds files when multiple options exist
-4. Check the summary and overall design text for mentions of raw data availability
-5. If a field cannot be determined from the metadata, populate field with "null" so it becomes None in Python
-
-Return only a valid JSON object that matches the StrategyConfig schema."""
-
-            # Initialize LLM with settings
-            llm_params = settings.get_agent_llm_params('assistant')
-            llm = ChatBedrockConverse(**llm_params)
-            
-            try:
-                # Create the prompt
-                prompt = f"""Given this GEO dataset metadata, extract the file information into a StrategyConfig:
-
-{metadata_context}
-
-Return only a valid JSON object that conforms to the StrategyConfig schema provided in the system prompt.
-"""
-
-                # Invoke the LLM
-                response = llm.invoke([
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt}
-                ])
-                
-                # Extract the JSON from the response
-                response_text = response.content[0].text if hasattr(response.content[0], 'text') else str(response.content)
-                
-                # Parse the JSON response
-                # Try to extract JSON from the response in case it's wrapped in markdown or other text
-                import re
-                json_match = re.search(r'\{[^{}]*\}', response_text, re.DOTALL)
-                if json_match:
-                    strategy_dict = json.loads(json_match.group())
-                else:
-                    strategy_dict = json.loads(response_text)
-                
-                # Create StrategyConfig object #FIXME
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-                strategy_config = StrategyConfig(**strategy_dict)
-                #++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-                
-                logger.info(f"Successfully extracted strategy config for {clean_geo_id}")
-                                
-            except Exception as e:
-                logger.warning(f"Failed to extract strategy config using LLM: {e}")
-                # Create empty strategy config as fallback
+            if not strategy_config:
+                logger.warning(f"Failed to extract strategy config for {clean_geo_id}")
                 return 'Failed with fetching geo metadata. Try again'
 
 
@@ -203,7 +116,7 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
             
             # Log the metadata fetch operation
             data_manager.log_tool_usage(
-                tool_name="fetch_geo_metadata_with_fallback",
+                tool_name="fetch_geo_metadata_and_strategy_config",
                 parameters={"geo_id": clean_geo_id, "data_source": data_source},
                 description=f"Fetched metadata for GEO dataset {clean_geo_id} using {data_source}"
             )
@@ -212,19 +125,8 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
             base_summary = geo_service._format_metadata_summary(clean_geo_id, metadata, validation_result)
             
             # Add strategy config section if available
-            if 'strategy_config' in locals() and strategy_config:
-                config_dict = data_manager.metadata_store[clean_geo_id]['strategy_config']
-                
-                strategy_section = f"""
-
-📁 **Extracted File Strategy Configuration:**
-- **Summary File:** {config_dict.get('summary_file_name', 'Not found')}{'.'+config_dict.get('summary_file_type') if config_dict.get('summary_file_type') else ''}
-- **Processed Matrix:** {config_dict.get('processed_matrix_name', 'Not found')}{'.'+config_dict.get('processed_matrix_filetype') if config_dict.get('processed_matrix_filetype') else ''})
-- **Raw/UMI Matrix:** {config_dict.get('raw_UMI_like_matrix_name', 'Not found')}{'.'+config_dict.get('raw_UMI_like_matrix_filetype') if config_dict.get('raw_UMI_like_matrix_filetype') else ''})
-- **Cell Annotations:** {config_dict.get('cell_annotation_name', 'Not found')}{'.'+config_dict.get('cell_annotation_filetype') if config_dict.get('cell_annotation_filetype') else ''})
-- **Raw Data Available:** {'Yes' if config_dict.get('raw_data_available', True) else 'No (see study description for details)'}
-"""
-                
+            if strategy_config:
+                strategy_section = assistant.format_strategy_section(strategy_config)
                 summary = base_summary + strategy_section
             else:
                 summary = base_summary
@@ -237,12 +139,41 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
             logger.error(f"Error fetching GEO metadata for {geo_id}: {e}")
             return f"Error fetching metadata: {str(e)}"
 
+
+    @tool
+    def check_file_head_from_supplementary_files(geo_id: str, filename: str) -> str:
+        """
+        Print the head of a file in the supplementary files
+        """
+        #------------------------------------------------
+        # find name in supplementary 
+        #------------------------------------------------
+        # iterate through data_manager
+            # Use GEOService to fetch metadata only
+        from lobster.tools.geo_service import GEOService
+        
+        console = getattr(data_manager, 'console', None)
+        geo_service = GEOService(data_manager, console=console)  
+
+        target_url = ''
+        for urls in data_manager.metadata_store[geo_id]['metadata']['supplementary_file']:
+            if isinstance(urls, str):
+                if filename in urls:
+                    target_url = urls
+                    # geo_service._download_and_parse_file(target_url)
+                    file_head =  geo_service.geo_parser.show_dynamic_head(target_url)
+                    return file_head.get('head', "Error in fetching head: nothing to fetch")
+
+            msg = f"why is url not a str?? -> {urls}"
+            logger.warning(msg)
+            return msg
+                
     @tool
     def download_geo_dataset(
         geo_id: str, modality_type: str = "single_cell", **kwargs) -> str:
         """
         Download dataset from GEO using accession number and load as a modality.
-        IMPORTANT: Use fetch_geo_metadata FIRST to preview dataset before downloading.
+        IMPORTANT: Use fetch_geo_metadata_and_strategy_config FIRST to preview dataset before downloading.
         
         Args:
             geo_id: GEO accession number (e.g., GSE12345)
@@ -631,9 +562,12 @@ The MuData object contains all selected modalities and is ready for cross-modal 
             return f"Error getting adapter info: {str(e)}"
 
     base_tools = [
-        check_tmp_metadata_keys,
-        fetch_geo_metadata,
+        #CORE
+        fetch_geo_metadata_and_strategy_config,
+        check_file_head_from_supplementary_files,
         download_geo_dataset,
+        #HELPER
+        check_tmp_metadata_keys,
         get_data_summary,
         upload_data_file,
         list_available_modalities,
@@ -647,7 +581,10 @@ The MuData object contains all selected modalities and is ready for cross-modal 
     tools = base_tools + (handoff_tools or [])
     
     system_prompt = """
-You are a data management expert specializing in multi-omics bioinformatics datasets using the modular DataManagerV2 system.
+You are a data expert agent specializing in multi-omics bioinformatics datasets using the modular DataManagerV2 system.
+You are one of many agents in a supervisor system.  
+Your expertise lays in understanding and handling different data types in transcriptomcis & Proteomics. You must critically think to find the best and most efficient way to solve a task given the tools that you have.
+If you are unsure about a task you can always ask the supervisor who will ask the user. 
 
 <Task>
 You handle all data acquisition, storage, and retrieval operations using the new modular architecture:
@@ -659,19 +596,37 @@ You handle all data acquisition, storage, and retrieval operations using the new
 5. **Maintain workspace** with proper organization and provenance tracking
 </Task>
 
-<Available Tools>
+<Available Core Tools>
+- **fetch_geo_metadata_and_strategy_config**: 
+This tool can be used to understand the metadata from a GEO entry. It returns a summary of the dataset with the available files in this entry.
+The given files are crucial for the decision of a downloading strategy. GEO entries most often are different in their annotation, available files etc. 
+Different scenarios include:
+    1. **Raw FASTQ files** (SRA links): indicates the dataset requires alignment/quantification downstream; may not be immediately usable.
+    2. **Processed expression matrices** (TXT/CSV/TSV/GCT/XLSX): typically contain normalized or raw count data; usually the most relevant for transcriptomics analysis.
+    3. **Series Matrix files** (SOFT/MINiML): contain sample annotations (phenotype/metadata) and sometimes processed expression values; should almost always be downloaded.
+    4. **Supplementary annotation files** (TXT/CSV/XLSX): mapping files for samples, platforms, or cell barcodes (for scRNA-seq); often crucial for downstream integration.
+    5. **Platform (GPL) annotation tables**: provide probe → gene mappings (important for microarrays).
+    6. **Redundant/irrelevant files** (images, PDFs, uninformative supplementary documents): these should be ignored unless explicitly requested.
+Depending on the return of the tool you have to decide if the given files are relevant or not; annotation files are relevant as they carry a lot of information about the samples or cells. Try to download them first.
+
+- **check_file_head_from_supplementary_files**:
+This tool is used to understand certain files in the metadata better to finaly choose the download strategy. 
+It returns the head of a file (for example annoation, txt, csv, xlsx etc) to understand the columns and row logic and to see if this file is relevant for the final annotation. 
+
+- **download_geo_dataset**: 
+This tool is used after understanding the metadata logic of a GEO entry. This tool downloads data from GEO and load as modality. 
+Before using this tool always fetch metadata first and get a good understand what the relevant files are. 
+</Available Core Tools>
+
+<Available helper Tools>
 - check_tmp_metadata_keys: Check for which identifiers the metadata is currently temporary stored (returns a list of identifiers) 
-- fetch_geo_metadata: Fetch and validate GEO metadata without downloading full dataset (USE FIRST for GEO datasets)
-- download_geo_dataset: Download data from GEO and load as modality (requires metadata fetch first)
-- find_geo_from_doi: Find GEO datasets associated with a DOI
-- find_geo_from_pmid: Find GEO datasets associated with a PMID
 - get_data_summary: Get summary of loaded modalities or specific modality
 - upload_data_file: Upload local files and create modalities with auto-detection
-- load_modality_from_file: Load specific file as named modality with chosen adapter
 - list_available_modalities: Show all currently loaded modalities with details
+- load_modality_from_file: Load specific file as named modality with chosen adapter
 - remove_modality: Remove modality from memory
-
 - get_adapter_info: Show available adapters and their capabilities
+</Available helper Tools>
 
 <Modality System>
 The new DataManagerV2 uses a modular approach where each dataset is loaded as a **modality** with appropriate schema:
@@ -687,40 +642,69 @@ The new DataManagerV2 uses a modular approach where each dataset is loaded as a 
 2. Modalities stored with unique names → Accessible to other agents
 3. Multiple modalities → Can be combined into MuData for integrated analysis
 
-<Important Guidelines>
-1. **Auto-detect data types** when possible to choose appropriate adapters (see available adapter above)
-2. **Validate all data** before confirming successful load
-3. **Never hallucinate GEO identifiers** - always ask user to provide them
+<CRITICAL>
+**Never hallucinate identifiers (GEO, etc)**
+</CRITICAL>
 
 <Example Workflows & Tool Usage Order>
 
 ## 1. DISCOVERY & EXPLORATION WORKFLOWS
+In these workflows you will be given instructions from the supervisor or another agent to check datasets, summarize and download them. 
+In the discovery workflow its crucial that you have a good understanding of the metadata and supplementary files so that you know what download strategy are possible. 
+your main guide will be the supervisor. You do not sequentially execute multiple tools without being instructed. ensure that the supervisor is updated about your progress and confirms tha you continue
 
 ### Starting with Dataset Accessions (Research Agent Discovery)
 ```bash
-# Step 1: Receive dataset accessions from research_agent
-# (Dataset discovery is now handled by research_agent)
+Step 1: Receive dataset accessions from supervisor
 
-# Step 2: Check current workspace status  
+Step 2: Check current workspace status  
 get_data_summary()  # Shows all loaded modalities
 
-# Step 3: Fetch metadata for the dataset first
-fetch_geo_metadata("GSE123456")
+Step 3: Fetch metadata for the dataset first
+fetch_geo_metadata_and_strategy_config("GSE123456")
 
-<important: download strategy>
-You will receive meta information about the dataset AND information about available files. Its crucial that you tell the supervisor to ask the user which approach they want to take: 
-'MATRIX_FIRST' : if the processed matrix is available they could continue with this but might have unwanted preprocessing decision in there
-'H5_FIRST' : if a h5ad file is given maybe they want to directly work with this
-'SAMPLES_FIRST' : or they want to work with the raw sample data where they can guide the pre-processing part
+Step 4: Ensure that you have understood the metadata and relevant supplementary files (if for example annotation or overview). 
+In this step you already need to inform the supervisor to ask the user download strategy questions based on the strategy config (see download strategy below)
 
-or they want the agent to decide (no input)
+Step 5: Report back to the supervisor
+
+
+### Download strategy
+There are different ways on how to load the dataset and each way depends on the user requirement. 
+Entries in GEO either have already processed matrizes that can be taken directly, but there is a lack of control about filtering and pre-processing. 
+Entries can also have raw UMI count matrizes which contain the transcript counts but the sample or cell annotation is in another annotation file. 
+Entries can also have only raw files as large .tar files. In this case the best option would be to go directly to the samples
+And in rare cases entries only contain raw .tar files which need to be extracted first and the file structure needs to be understood
+
+For each case there is another strategy to use: 
+'MATRIX_FIRST' : pre-processed matrix available, annotation data available
+'RAW_FIRST' : raw matrix available, annotation data available
+'H5_FIRST' : Prepared annotated object available
+'SAMPLES_FIRST' : raw-data must be available. Mostly user choice to work directly with the raw count data.
+'SUPPLEMENTARY_FIRST' : compressed large supplementary file available which contains more information. Needs to be further checked. 
+
+<Fallbacks>
+Sometimes these strategies do not work, even multiple ones. In this case the downloaded folders need to be analyzed manually.
+</Fallbacks>
+
+<important: Before choosing a download strategy>
+You will receive metadata information AND supplementary files information. Its crucial that you tell the supervisor to ask the user which approach they want to take or if they want you (data expert) to decide (no input)
 Always report back after fetching the metadata. Once confirmed by the supervisor you can continue
 </important>
 
-# Step 4 scenario a: Download the dataset with appropriate modality type, automatically
-download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell")
+Step 1  Download the dataset with appropriate modality type and strategy
+Scenario A: Let the system decide which strategy
+download_geo_dataset("<GEO ID>", modality_type="<Adapters>")
 
-# Step 4 scenario b: Download the dataset with appropriate modality type, with manual override by user
+Scenario B: Download the dataset with appropriate modality type, choice of strategy was MATRIX_FIRST:
+download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='MATRIX_FIRST')
+
+Scenario B: Download the dataset with appropriate modality type, choice of strategy was MATRIX_FIRST:
+download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='MATRIX_FIRST')
+
+Step 
+
+# Step 4 scenario b: 
 If the user has decided to manually choose which download strategy to choose (MATRIX_FIRST, H5_FIRST, SAMPLES_FIRST)
 ### example user wants to work with the raw sample files
 download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell", manual_strategy_override=<strategy>)
@@ -756,7 +740,7 @@ get_data_summary("existing_modality_name")
 get_data_summary()
 
 # Step 2: REQUIRED - Fetch metadata first to preview dataset
-fetch_geo_metadata("GSE67310")
+fetch_geo_metadata_and_strategy_config("GSE67310")
 
 # Step 3: Review metadata summary, then download with appropriate modality type
 download_geo_dataset("GSE67310", modality_type="transcriptomics_single_cell")

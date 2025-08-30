@@ -1180,3 +1180,100 @@ class GEOParser:
             analysis['recommended_source'] = list(data_sources.keys())[0] if data_sources else None
             analysis['reason'] = f"Error during analysis, using first available source: {e}"
             return analysis
+    
+    def show_dynamic_head(self, target_url: str, rows: int = 5, cols: int = 5) -> pd.DataFrame:
+        """
+        Download and preview the first rows/columns of a file from URL.
+        
+        Handles CSV, TSV, TXT, XLSX and other tabular formats intelligently.
+        
+        Args:
+            target_url: URL (http/https/ftp) to download the file from
+            rows: Number of rows to display (default: 5)
+            cols: Number of columns to display (default: 5)
+            
+        Returns:
+            DataFrame: Preview of the file (first 5 rows x 5 columns)
+        """
+        import tempfile
+        import urllib.request
+        import ssl
+        from pathlib import Path
+        
+        temp_dir = None
+        try:
+            # Create temporary directory for download
+            temp_dir = tempfile.mkdtemp()
+            temp_path = Path(temp_dir)
+            
+            # Extract filename from URL
+            filename = target_url.split('/')[-1].split('?')[0]
+            if not filename:
+                filename = "downloaded_file"
+            
+            local_file = temp_path / filename
+            
+            # Download file (handle both HTTP and FTP)
+            logger.info(f"Downloading file from: {target_url}")
+            
+            if target_url.startswith('ftp://'):
+                urllib.request.urlretrieve(target_url, local_file)
+            else:
+                # For HTTPS, create unverified context to handle certificate issues
+                context = ssl._create_unverified_context()
+                with urllib.request.urlopen(target_url, context=context) as response:
+                    with open(local_file, 'wb') as out_file:
+                        out_file.write(response.read())
+            
+            logger.info(f"Downloaded to: {local_file}")
+            
+            # Determine file type and read accordingly
+            suffix = local_file.suffix.lower()
+            
+            # Excel files
+            if suffix in ['.xlsx', '.xls']:
+                df = pd.read_excel(local_file, nrows=rows)
+                
+            # Compressed files
+            elif suffix == '.gz':
+                inner_name = local_file.stem
+                inner_suffix = Path(inner_name).suffix.lower()
+                
+                if inner_suffix in ['.csv', '.txt', '.tsv'] or not inner_suffix:
+                    delimiter = self.sniff_delimiter(local_file)
+                    df = pd.read_csv(
+                        local_file,
+                        sep=delimiter,
+                        compression='gzip',
+                        nrows=rows,
+                        low_memory=False
+                    )
+                else:
+                    raise ValueError(f"Unsupported compressed file type: {inner_name}")
+                    
+            # Regular text files (CSV, TSV, TXT)
+            else:
+                delimiter = self.sniff_delimiter(local_file)
+                df = pd.read_csv(
+                    local_file,
+                    sep=delimiter,
+                    nrows=rows,
+                    low_memory=False
+                )
+            
+            # Limit to first N columns
+            if df.shape[1] > cols:
+                df = df.iloc[:, :cols]
+            
+            logger.info(f"Preview shape: {df.shape}")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error previewing file from {target_url}: {e}")
+            raise
+        finally:
+            # Clean up temporary files
+            if temp_dir and Path(temp_dir).exists():
+                import shutil
+                shutil.rmtree(temp_dir)
+                logger.debug("Cleaned up temporary files")
