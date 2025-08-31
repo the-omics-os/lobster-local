@@ -162,6 +162,12 @@ class NCBIQueryBuilder:
         """
         Format a single search term.
         
+        Clean and escape a single query term:
+        - Do NOT wrap if the input looks like a complex boolean/expression 
+          (contains AND/OR/NOT, parentheses, field tags, ranges, or quotes).
+        - Remove accidental outer quotes if present.
+        - Quote only simple multi-word phrases.
+        
         Args:
             term: Search term to format
             
@@ -171,15 +177,36 @@ class NCBIQueryBuilder:
         if not term or not term.strip():
             return ""
         
-        term = term.strip()
+        t = term.strip()
         
-        # If term contains spaces and isn't already quoted, add quotes
-        if ' ' in term and not (term.startswith('"') and term.endswith('"')):
-            # Escape any quotes inside the term
-            term = term.replace('"', '\\"')
-            return f'"{term}"'
+        # Remove one layer of accidental outer quotes around the whole term
+        if t.startswith('"') and t.endswith('"'):
+            t = t[1:-1].strip()
         
-        return term
+        # If complex expression, return as-is (no quoting)
+        if self._is_complex_expression(t):
+            return t
+        
+        # Collapse repeated internal quotes (e.g., '""lung cancer""' -> '"lung cancer"')
+        t = re.sub(r'("{2,})', '"', t)
+        
+        # Quote only simple multi-word phrases
+        if ' ' in t:
+            return f'"{t}"'
+        
+        return t
+    
+    def _is_complex_expression(self, s: str) -> bool:
+        """Heuristic: treat as complex if it includes boolean ops, grouping, field tags, ranges, or quotes."""
+        if '"' in s:
+            return True
+        if re.search(r'\b(AND|OR|NOT)\b', s, flags=re.IGNORECASE):
+            return True
+        if any(ch in s for ch in '()[]'):
+            return True
+        if ':' in s:  # date ranges like 2018:2024[PDAT]
+            return True
+        return False
     
     def _build_filters(self, filters: Dict[str, Any]) -> List[str]:
         """
@@ -239,9 +266,8 @@ class NCBIQueryBuilder:
         if re.match(r'^[A-Z]+\d+$', value_str):
             return value_str
         
-        # Quote if contains spaces
+        # Quote if contains spaces (no escaping needed)
         if ' ' in value_str:
-            value_str = value_str.replace('"', '\\"')
             return f'"{value_str}"'
         
         return value_str
@@ -332,16 +358,16 @@ class NCBIQueryBuilder:
             operator: Boolean operator (AND, OR, NOT)
             
         Returns:
-            str: Combined query
+            str: Combined query with normalized formatting
         """
         # Filter out empty queries
-        valid_queries = [q for q in queries if q and q.strip()]
+        valid_queries = [q.strip() for q in queries if q and q.strip()]
         
         if not valid_queries:
             return ""
         
         if len(valid_queries) == 1:
-            return valid_queries[0]
+            return self._normalize_query(valid_queries[0])
         
         # Wrap each query in parentheses if complex
         wrapped_queries = []
@@ -351,7 +377,38 @@ class NCBIQueryBuilder:
             else:
                 wrapped_queries.append(query)
         
-        return f" {operator} ".join(wrapped_queries)
+        result = f" {operator} ".join(wrapped_queries)
+        return self._normalize_query(result)
+    
+    def _normalize_query(self, q: str) -> str:
+        """
+        Final cleanup to prevent top-level stray quotes:
+        - Remove outer quotes around the entire expression.
+        - Collapse duplicate quotes.
+        - Remove a dangling quote directly before an opening '(' at start.
+        
+        Args:
+            q: Query string to normalize
+            
+        Returns:
+            str: Normalized query
+        """
+        if not q:
+            return ""
+        
+        qq = q.strip()
+        
+        # Strip single layer of accidental outer quotes around the whole expression
+        if qq.startswith('"') and qq.endswith('"'):
+            qq = qq[1:-1].strip()
+        
+        # Remove any leading quote immediately before '(' (fixes: term="("single-...)
+        qq = re.sub(r'^\s*"\s*(\()', r'\1', qq)
+        
+        # Collapse repeated quotes
+        qq = re.sub(r'"{2,}', '"', qq)
+        
+        return qq
     
     def validate_query(self, query: str) -> bool:
         """
@@ -380,14 +437,8 @@ class NCBIQueryBuilder:
             return False
         
         # Check for balanced quotes (should be even number)
-        # Count quotes not preceded by backslash
-        quote_count = 0
-        i = 0
-        while i < len(query):
-            if query[i] == '"' and (i == 0 or query[i-1] != '\\'):
-                quote_count += 1
-            i += 1
-        
+        # Simple count since we don't escape quotes
+        quote_count = query.count('"')
         if quote_count % 2 != 0:
             return False
         
@@ -410,13 +461,16 @@ class NCBIQueryBuilder:
         """
         URL encode a query for use in HTTP requests.
         
+        Keep (), [], and : unencoded; encode quotes.
+        This avoids breaking field tags and date ranges while keeping quotes safe.
+        
         Args:
             query: Query string to encode
             
         Returns:
             str: URL-encoded query
         """
-        return urllib.parse.quote(query)
+        return urllib.parse.quote(query, safe='()[]:')
 
 
 class PubMedQueryBuilder(NCBIQueryBuilder):
