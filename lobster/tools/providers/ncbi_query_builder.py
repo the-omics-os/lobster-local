@@ -85,7 +85,7 @@ class NCBIQueryBuilder:
             return {
                 'title': 'TITL',
                 'organism': 'ORGN',
-                'platform': 'ACCN',
+                'platform': 'GPL',
                 'accession': 'ACCN',
                 'entry_type': 'ETYP',
                 'date': 'PDAT',

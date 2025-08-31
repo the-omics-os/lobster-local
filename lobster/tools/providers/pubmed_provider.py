@@ -731,7 +731,7 @@ class PubMedProvider(BasePublicationProvider):
         return accessions
     
     def _find_linked_datasets(self, pmid: str) -> Dict[str, List[str]]:
-        """Find datasets linked to a PubMed article using E-link."""
+        """Find datasets linked to a PubMed article using E-link, including GSE series accessions."""
         linked = {
             'GEO': [],
             'SRA': [],
@@ -739,15 +739,15 @@ class PubMedProvider(BasePublicationProvider):
             'BioSample': []
         }
         
-        # Define database mappings
+        # Database configs: include GEO (for GSE series), GDS (legacy), SRA, etc.
         db_configs = [
-            {'db': 'gds', 'key': 'GEO', 'prefix': 'GDS'},
+            {'db': 'geo', 'key': 'GEO', 'prefix': ''},       # Will fetch GSE/GSM
+            {'db': 'gds', 'key': 'GEO', 'prefix': 'GDS'},    # Legacy GEO DataSets
             {'db': 'sra', 'key': 'SRA', 'prefix': 'SRA'},
             {'db': 'bioproject', 'key': 'BioProject', 'prefix': 'PRJNA'},
             {'db': 'biosample', 'key': 'BioSample', 'prefix': 'SAMN'}
         ]
         
-        # Check each database
         for config in db_configs:
             url = self.build_ncbi_url('elink', {
                 'dbfrom': 'pubmed',
@@ -767,21 +767,47 @@ class PubMedProvider(BasePublicationProvider):
                             for db in linkset["linksetdbs"]:
                                 if db["dbto"] == config['db']:
                                     for link_id in db.get("links", []):
-                                        # Format accession based on database type
-                                        if config['db'] == 'sra':
-                                            # For SRA, need to get the actual accession
-                                            linked[config['key']].append(f"{config['prefix']}{link_id}")
+                                        # GEO accessions (geo db gives GSE/GSM IDs directly)
+                                        if config['db'] == 'geo':
+                                            # Need to fetch summary to get proper accession string
+                                            acc = self._fetch_geo_accession(link_id)
+                                            if acc:
+                                                linked[config['key']].append(acc)
                                         else:
                                             linked[config['key']].append(f"{config['prefix']}{link_id}")
                                             
             except Exception as e:
                 logger.warning(f"Error finding linked {config['key']} datasets: {e}")
         
-        # Deduplicate
+        # Deduplicate and prioritize GSE over GSM/GDS
+        if linked['GEO']:
+            gse = [x for x in linked['GEO'] if x.startswith("GSE")]
+            gsm = [x for x in linked['GEO'] if x.startswith("GSM")]
+            gds = [x for x in linked['GEO'] if x.startswith("GDS")]
+            # Prioritize GSE, but keep GSM/GDS as fallback
+            linked['GEO'] = gse + gsm + gds
+        
         for key in linked:
             linked[key] = list(set(linked[key]))
         
         return linked
+
+    def _fetch_geo_accession(self, uid: str) -> Optional[str]:
+        """Fetch GEO accession (GSE/GSM) from a uid using esummary."""
+        try:
+            url = self.build_ncbi_url('esummary', {
+                'db': 'geo',
+                'id': uid,
+                'retmode': 'json'
+            })
+            result = urllib.request.urlopen(url)
+            text = result.read().decode("utf-8")
+            summary = json.loads(text)
+            docsum = summary.get("result", {}).get(uid, {})
+            return docsum.get("accession")
+        except Exception as e:
+            logger.warning(f"Error fetching GEO accession for {uid}: {e}")
+            return None
     
     def _check_supplementary_materials(self, article: Dict) -> Dict[str, List[str]]:
         """Check for dataset mentions in supplementary materials."""
@@ -796,72 +822,80 @@ class PubMedProvider(BasePublicationProvider):
         doi: Optional[str],
         pmid: Optional[str]
     ) -> str:
-        """Format a comprehensive dataset discovery report."""
-        response = "## 📊 Dataset Discovery Report\n\n"
+        """Format a comprehensive dataset discovery report with GSE prioritized."""
+        response = "## Dataset Discovery Report\n\n"
         
-        # Publication info
-        response += "### 📄 Publication Information\n"
-        response += f"**Title**: {article.get('Title', 'N/A')}\n"
-        response += f"**PMID**: {pmid or 'N/A'}\n"
-        response += f"**DOI**: {doi or 'N/A'}\n"
-        response += f"**Journal**: {article.get('Journal', 'N/A')}\n"
-        response += f"**Published**: {article.get('Published', 'N/A')}\n\n"
+        # Publication info (compact)
+        response += f"**Publication**: {article.get('Title', 'N/A')[:100]}...\n"
+        response += f"**PMID**: {pmid or 'N/A'} | **DOI**: {doi or 'N/A'}\n"
+        response += f"**Journal**: {article.get('Journal', 'N/A')} ({article.get('Published', 'N/A')})\n\n"
         
         # Datasets found
         total_datasets = sum(len(v) for v in datasets.values())
         
         if total_datasets == 0:
-            response += "### ⚠️ No Datasets Found\n"
-            response += "No dataset accessions were identified in this publication.\n"
-            response += "Consider:\n"
-            response += "- Checking the supplementary materials manually\n"
-            response += "- Contacting the authors for data availability\n"
-            response += "- Searching for related publications\n"
+            response += "**No datasets found**. Check supplementary materials or contact authors.\n"
         else:
-            response += f"### ✅ Found {total_datasets} Dataset(s)\n\n"
+            response += f"**Found dataset(s)**:\n\n"
             
+            dataset_lines = []
+            
+            # --- GEO prioritization: GSE > GSM > GDS ---
             if datasets.get('GEO'):
-                response += "#### Gene Expression Omnibus (GEO)\n"
-                for acc in datasets['GEO']:
-                    response += f"- **{acc}** - [View on GEO](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={acc})\n"
-                response += "\n"
+                gse = [x for x in datasets['GEO'] if x.startswith("GSE")]
+                gsm = [x for x in datasets['GEO'] if x.startswith("GSM")]
+                gds = [x for x in datasets['GEO'] if x.startswith("GDS")]
+                
+                if gse:
+                    for acc in gse:
+                        dataset_lines.append(f"- GEO (Series): [{acc}](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={acc})")
+                
+                if gsm:
+                    for acc in gsm[:2]:
+                        dataset_lines.append(f"- GEO (Sample): [{acc}](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={acc})")
+                    if len(gsm) > 2:
+                        dataset_lines.append(f"  ... and {len(gsm) - 2} more GEO samples")
+                
+                if gds:
+                    for acc in gds[:2]:
+                        dataset_lines.append(f"- GEO (DataSet): [{acc}](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={acc})")
+                    if len(gds) > 2:
+                        dataset_lines.append(f"  ... and {len(gds) - 2} more GEO datasets")
             
-            if datasets.get('SRA'):
-                response += "#### Sequence Read Archive (SRA)\n"
-                for acc in datasets['SRA']:
-                    response += f"- **{acc}** - [View on SRA](https://www.ncbi.nlm.nih.gov/sra/{acc})\n"
-                response += "\n"
+            # --- SRA ---
+            # FIXME activate these once ready
+            # if datasets.get('SRA'):
+            #     for acc in datasets['SRA'][:3]:
+            #         dataset_lines.append(f"- SRA: [{acc}](https://www.ncbi.nlm.nih.gov/sra/{acc})")
+            #     if len(datasets['SRA']) > 3:
+            #         dataset_lines.append(f"  ... and {len(datasets['SRA']) - 3} more SRA datasets")
             
-            if datasets.get('ArrayExpress'):
-                response += "#### ArrayExpress\n"
-                for acc in datasets['ArrayExpress']:
-                    response += f"- **{acc}** - [View on ArrayExpress](https://www.ebi.ac.uk/arrayexpress/experiments/{acc}/)\n"
-                response += "\n"
+            # # --- ArrayExpress ---
+            # if datasets.get('ArrayExpress'):
+            #     for acc in datasets['ArrayExpress'][:2]:
+            #         dataset_lines.append(f"- ArrayExpress: [{acc}](https://www.ebi.ac.uk/arrayexpress/experiments/{acc}/)")
             
-            if datasets.get('Platforms'):
-                response += "#### Platform Information\n"
-                for acc in datasets['Platforms']:
-                    response += f"- **{acc}** - Platform/Array design\n"
-                response += "\n"
+            # # --- BioProject ---
+            # if datasets.get('BioProject'):
+            #     for acc in datasets['BioProject'][:2]:
+            #         dataset_lines.append(f"- BioProject: [{acc}](https://www.ncbi.nlm.nih.gov/bioproject/{acc})")
             
-            if datasets.get('BioProject'):
-                response += "#### BioProject\n"
-                for acc in datasets['BioProject']:
-                    response += f"- **{acc}** - [View on BioProject](https://www.ncbi.nlm.nih.gov/bioproject/{acc})\n"
-                response += "\n"
+            # # --- BioSample ---
+            # if datasets.get('BioSample'):
+            #     for acc in datasets['BioSample'][:2]:
+            #         dataset_lines.append(f"- BioSample: [{acc}](https://www.ncbi.nlm.nih.gov/biosample/{acc})")
             
-            if datasets.get('BioSample'):
-                response += "#### BioSample\n"
-                for acc in datasets['BioSample']:
-                    response += f"- **{acc}** - [View on BioSample](https://www.ncbi.nlm.nih.gov/biosample/{acc})\n"
-                response += "\n"
+            response += "\n".join(dataset_lines) + "\n\n"
         
-        # Recommendations
-        response += "### 💡 Next Steps\n"
+        # Brief next steps
+        response += "**Next steps**: "
+        steps = []
         if datasets.get('GEO'):
-            response += f"1. Download GEO dataset: Use `download_geo_dataset('{datasets['GEO'][0]}')`\n"
-        response += "2. Extract methods: Use `extract_computational_methods()` for this publication\n"
-        response += "3. Find similar studies: Search for related datasets with similar methodology\n"
+            # Prefer GSE if present, otherwise first available accession
+            preferred_geo = next((x for x in datasets['GEO'] if x.startswith("GSE")), datasets['GEO'][0])
+            steps.append(f"`download_geo_dataset('{preferred_geo}')`")
+        steps.append("`extract_computational_methods()`")
+        response += " → ".join(steps) + "\n"
         
         return response
     

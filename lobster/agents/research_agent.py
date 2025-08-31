@@ -446,7 +446,7 @@ Given a research inquiry, you will:
   * Standardized format across different sources
 
 ### Dataset Discovery
-- `find_datasets_from_publication`: Discover datasets from DOI/PMID
+- `find_datasets_from_publication`: Discover datasets from from different providers: Pubmed, Biorxiv, medrxiv, arxiv or GEO. 
   * dataset_types: "geo,sra,arrayexpress,ena,bioproject,biosample,dbgap"
   * include_related: finds linked datasets through NCBI connections
   * Comprehensive dataset reports with download links
@@ -474,7 +474,7 @@ These principles apply to **all query-building functions** (`search_literature` 
 - **Balance AND/OR logic**: connect concepts with AND, allow synonyms/variants with OR
 - **Restrict by publication date** (literature): 2018:2024[PDAT]
 - **Refine with organism/entry-type filters (human by default unless specified)** (datasets): {{ "organisms": ["human"], "entry_types": ["gse"], ... }}
-- **Avoid impossible logic**: don;t require mutually exclusive terms like "smoker AND non-smoker"
+- **Avoid impossible logic**: don't require mutually exclusive terms like "smoker AND non-smoker"
 - **Iterative refinement**: start broad, then add dataset filters (organism, assay type, date, file types)
 </Query Construction Guidelines>
 
@@ -487,8 +487,10 @@ search_literature(
     max_results=10,
     sources="pubmed"
 )
-
-find_datasets_from_publication("10.1038/s41586-021-03659-0")
+### for a more precise dataset search
+find_datasets_from_publication(identifier = "10.1038/s41586-021-03659-0", dataset_types='geo', include_related=False)
+### for a broader search (to also find related datasets)
+find_datasets_from_publication(identifier = "10.1038/s41586-021-03659-0", dataset_types='geo,sra,biosample', include_related=True)
 
 discover_related_studies("10.1038/s41586-021-03659-0", "T cell dysfunction")
 ```

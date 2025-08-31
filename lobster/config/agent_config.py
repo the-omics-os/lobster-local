@@ -6,7 +6,7 @@ per-agent model configuration for easy testing and deployment.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from enum import Enum
 import os
 import json
@@ -31,6 +31,24 @@ class ModelTier(Enum):
     ULTRA = "ultra"
 
 @dataclass
+class ThinkingConfig:
+    """Configuration for model thinking/reasoning feature."""
+    enabled: bool = False
+    budget_tokens: int = 2000
+    type: str = "enabled"  # Could be extended to support different thinking modes
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for API parameters."""
+        if not self.enabled:
+            return {}
+        return {
+            "thinking": {
+                "type": self.type,
+                "budget_tokens": self.budget_tokens
+            }
+        }
+
+@dataclass
 class ModelConfig:
     """Configuration for a specific model."""
     provider: ModelProvider
@@ -39,6 +57,7 @@ class ModelConfig:
     temperature: float = 1.0
     region: str = "us-east-2"
     description: str = ""
+    supports_thinking: bool = False  # Flag for models that support thinking
     
     def __post_init__(self):
         if isinstance(self.provider, str):
@@ -54,6 +73,7 @@ class AgentModelConfig:
     fallback_model: Optional[str] = None
     enabled: bool = True
     custom_params: Dict = field(default_factory=dict)
+    thinking_config: Optional[ThinkingConfig] = None
 
 class LobsterAgentConfigurator:
     """
@@ -65,6 +85,7 @@ class LobsterAgentConfigurator:
     - Fallback mechanisms
     - Easy testing profiles
     - Production-ready validation
+    - Thinking/reasoning support for compatible models
     """
     
     # Pre-defined model configurations
@@ -75,7 +96,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-3-haiku-20240307-v1:0",
             tier=ModelTier.LIGHTWEIGHT,
             temperature=1.0,
-            description="Fast, cost-effective Claude 3 Haiku for simple tasks"
+            description="Fast, cost-effective Claude 3 Haiku for simple tasks",
+            supports_thinking=False
         ),
         
         "claude-3-5-haiku": ModelConfig(
@@ -83,7 +105,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
             tier=ModelTier.LIGHTWEIGHT,
             temperature=1.0,
-            description="Fast, cost-effective Claude 3.5 Haiku for simple tasks"
+            description="Fast, cost-effective Claude 3.5 Haiku for simple tasks",
+            supports_thinking=False
         ),
         
         "claude-3-5-sonnet-v2": ModelConfig(
@@ -91,7 +114,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
             tier=ModelTier.STANDARD,
             temperature=1.0,
-            description="Latest Claude 3.5 Sonnet v2 with enhanced capabilities"
+            description="Latest Claude 3.5 Sonnet v2 with enhanced capabilities",
+            supports_thinking=False
         ),
         
         "claude-4-sonnet": ModelConfig(
@@ -99,7 +123,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
             tier=ModelTier.STANDARD,
             temperature=1.0,
-            description="Next-generation Claude 4 Sonnet model"
+            description="Next-generation Claude 4 Sonnet model",
+            supports_thinking=True
         ),
         
         "claude-4-opus": ModelConfig(
@@ -107,7 +132,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-opus-4-20250514-v1:0",
             tier=ModelTier.HEAVY,
             temperature=1.0,
-            description="Advanced Claude 4 Opus for complex reasoning"
+            description="Advanced Claude 4 Opus for complex reasoning",
+            supports_thinking=True
         ),
         
         "claude-4-1-opus": ModelConfig(
@@ -115,7 +141,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-opus-4-1-20250805-v1:0",
             tier=ModelTier.HEAVY,
             temperature=1.0,
-            description="Latest Claude 4.1 Opus with cutting-edge capabilities"
+            description="Latest Claude 4.1 Opus with cutting-edge capabilities",
+            supports_thinking=True
         ),
         
         # Ultra Performance Models
@@ -124,7 +151,8 @@ class LobsterAgentConfigurator:
             model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
             tier=ModelTier.ULTRA,
             temperature=1.0,
-            description="Highest-performance Claude 3.7 Sonnet model"
+            description="Highest-performance Claude 3.7 Sonnet model with thinking support",
+            supports_thinking=True
         ),
         
         # EU Region Models (for EU compliance)
@@ -134,7 +162,8 @@ class LobsterAgentConfigurator:
             tier=ModelTier.LIGHTWEIGHT,
             temperature=1.0,
             region="eu-central-1",
-            description="EU region Claude 3.5 Haiku model"
+            description="EU region Claude 3.5 Haiku model",
+            supports_thinking=False
         ),
         
         "claude-3-5-sonnet-v2-eu": ModelConfig(
@@ -143,7 +172,8 @@ class LobsterAgentConfigurator:
             tier=ModelTier.STANDARD,
             temperature=1.0,
             region="eu-central-1",
-            description="EU region Claude 3.5 Sonnet v2 model"
+            description="EU region Claude 3.5 Sonnet v2 model",
+            supports_thinking=False
         ),
         
         "claude-4-opus-eu": ModelConfig(
@@ -152,7 +182,8 @@ class LobsterAgentConfigurator:
             tier=ModelTier.HEAVY,
             temperature=1.0,
             region="eu-central-1",
-            description="EU region Claude 4 Opus model"
+            description="EU region Claude 4 Opus model",
+            supports_thinking=True
         ),
         
         "claude-4-1-opus-eu": ModelConfig(
@@ -161,7 +192,8 @@ class LobsterAgentConfigurator:
             tier=ModelTier.HEAVY,
             temperature=1.0,
             region="eu-central-1",
-            description="EU region Claude 4.1 Opus model"
+            description="EU region Claude 4.1 Opus model",
+            supports_thinking=True
         ),
         
         "claude-3-7-sonnet-eu": ModelConfig(
@@ -170,7 +202,8 @@ class LobsterAgentConfigurator:
             tier=ModelTier.ULTRA,
             temperature=1.0,
             region="eu-central-1",
-            description="EU region Claude 3.7 Sonnet model"
+            description="EU region Claude 3.7 Sonnet model with thinking support",
+            supports_thinking=True
         )
     }
     
@@ -185,6 +218,15 @@ class LobsterAgentConfigurator:
         "data_expert"
     ]
     
+    # Thinking configuration presets
+    THINKING_PRESETS = {
+        "disabled": ThinkingConfig(enabled=False),
+        "light": ThinkingConfig(enabled=True, budget_tokens=1000),
+        "standard": ThinkingConfig(enabled=True, budget_tokens=2000),
+        "extended": ThinkingConfig(enabled=True, budget_tokens=5000),
+        "deep": ThinkingConfig(enabled=True, budget_tokens=10000)
+    }
+    
     # Pre-defined testing profiles - automatically includes all agents
     TESTING_PROFILES = {
         "development": {
@@ -193,7 +235,8 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-5-haiku",
             "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-haiku"
+            "research_agent": "claude-3-5-haiku",
+            "thinking": {}  # No thinking in development mode
         },
         
         "production": {
@@ -203,7 +246,11 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-sonnet",
             "method_agent": "claude-3-7-sonnet",
             "data_expert": "claude-3-7-sonnet",
-            "research_agent": "claude-3-7-sonnet"
+            "research_agent": "claude-3-7-sonnet",
+            "thinking": {
+                "supervisor": "standard",
+                "assistant": "extended"
+            }
         },
         
         "high-performance": {
@@ -213,7 +260,12 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-opus",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-haiku"
+            "research_agent": "claude-3-5-haiku",
+            "thinking": {
+                "supervisor": "extended",
+                "singlecell_expert": "standard",
+                "bulk_rnaseq_expert": "extended"
+            }
         },
         
         "ultra-performance": {
@@ -223,7 +275,8 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-sonnet",
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
-            "research_agent": "claude-4-sonnet"
+            "research_agent": "claude-4-sonnet",
+            "thinking": {}  # Most models don't support thinking yet
         },
         
         "cost-optimized": {
@@ -233,7 +286,8 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-haiku",
             "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-3-haiku"
+            "research_agent": "claude-3-haiku",
+            "thinking": {}  # No thinking for cost optimization
         },
         
         "heavyweight": {
@@ -243,7 +297,8 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-1-opus",
             "method_agent": "claude-4-opus",
             "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-4-opus"
+            "research_agent": "claude-4-opus",
+            "thinking": {}  # Opus models don't support thinking yet
         },
         
         "eu-compliant": {
@@ -253,7 +308,8 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
             "method_agent": "claude-3-5-sonnet-eu",
             "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-sonnet-eu"
+            "research_agent": "claude-3-5-sonnet-eu",
+            "thinking": {}  # EU models configuration
         },
         
         "eu-high-performance": {
@@ -263,7 +319,11 @@ class LobsterAgentConfigurator:
             "bulk_rnaseq_expert": "claude-4-opus-eu",
             "method_agent": "claude-4-opus-eu",
             "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-sonnet-v2-eu"
+            "research_agent": "claude-3-5-sonnet-v2-eu",
+            "thinking": {
+                "supervisor": "deep",
+                "singlecell_expert": "extended"
+            }
         }
     }
     
@@ -289,13 +349,33 @@ class LobsterAgentConfigurator:
         
         profile_config = self.TESTING_PROFILES[self.profile]
         
+        # Load model configurations
         for agent_name, model_preset in profile_config.items():
+            if agent_name == 'thinking':
+                continue  # Skip thinking configuration here
+                
             if model_preset not in self.MODEL_PRESETS:
                 raise ValueError(f"Unknown model preset: {model_preset}")
             
+            model_config = self.MODEL_PRESETS[model_preset]
+            
+            # Initialize thinking config if specified in profile
+            thinking_config = None
+            if 'thinking' in profile_config and agent_name in profile_config['thinking']:
+                thinking_preset = profile_config['thinking'][agent_name]
+                if thinking_preset in self.THINKING_PRESETS:
+                    thinking_config = self.THINKING_PRESETS[thinking_preset]
+                elif isinstance(thinking_preset, dict):
+                    thinking_config = ThinkingConfig(**thinking_preset)
+                
+                # Only apply thinking if model supports it
+                if thinking_config and not model_config.supports_thinking:
+                    thinking_config = None
+            
             self._agent_configs[agent_name] = AgentModelConfig(
                 name=agent_name,
-                model_config=self.MODEL_PRESETS[model_preset]
+                model_config=model_config,
+                thinking_config=thinking_config
             )
     
     def _apply_env_overrides(self):
@@ -324,6 +404,35 @@ class LobsterAgentConfigurator:
                     self._agent_configs[agent_name].model_config.temperature = temperature
                 except ValueError:
                     pass
+        
+        # Thinking configuration overrides
+        for agent_name in self._agent_configs:
+            # Enable/disable thinking
+            env_key = f'GENIE_{agent_name.upper()}_THINKING_ENABLED'
+            if os.environ.get(env_key):
+                enabled = os.environ.get(env_key).lower() == 'true'
+                if enabled and self._agent_configs[agent_name].model_config.supports_thinking:
+                    if not self._agent_configs[agent_name].thinking_config:
+                        self._agent_configs[agent_name].thinking_config = ThinkingConfig()
+                    self._agent_configs[agent_name].thinking_config.enabled = True
+            
+            # Thinking token budget
+            env_key = f'GENIE_{agent_name.upper()}_THINKING_BUDGET'
+            if os.environ.get(env_key):
+                try:
+                    budget = int(os.environ.get(env_key))
+                    if self._agent_configs[agent_name].thinking_config:
+                        self._agent_configs[agent_name].thinking_config.budget_tokens = budget
+                except ValueError:
+                    pass
+        
+        # Global thinking preset
+        if os.environ.get('GENIE_GLOBAL_THINKING'):
+            thinking_preset = os.environ.get('GENIE_GLOBAL_THINKING')
+            if thinking_preset in self.THINKING_PRESETS:
+                for agent_config in self._agent_configs.values():
+                    if agent_config.model_config.supports_thinking:
+                        agent_config.thinking_config = self.THINKING_PRESETS[thinking_preset]
     
     def get_agent_model_config(self, agent_name: str) -> AgentModelConfig:
         """
@@ -355,6 +464,19 @@ class LobsterAgentConfigurator:
         """
         return self.get_agent_model_config(agent_name).model_config
     
+    def get_thinking_config(self, agent_name: str) -> Optional[ThinkingConfig]:
+        """
+        Get thinking configuration for a specific agent.
+        
+        Args:
+            agent_name: Name of the agent
+            
+        Returns:
+            ThinkingConfig for the specified agent or None if not configured
+        """
+        agent_config = self.get_agent_model_config(agent_name)
+        return agent_config.thinking_config
+    
     def get_llm_params(self, agent_name: str) -> Dict:
         """
         Get LLM initialization parameters for a specific agent.
@@ -365,7 +487,8 @@ class LobsterAgentConfigurator:
         Returns:
             Dictionary of parameters for LLM initialization
         """
-        model_config = self.get_model_config(agent_name)
+        agent_config = self.get_agent_model_config(agent_name)
+        model_config = agent_config.model_config
         
         # Base parameters
         params = {
@@ -385,6 +508,12 @@ class LobsterAgentConfigurator:
                 "openai_api_key": os.environ.get('OPENAI_API_KEY'),
             })
         
+        # Add thinking configuration if enabled
+        if agent_config.thinking_config and agent_config.thinking_config.enabled:
+            thinking_params = agent_config.thinking_config.to_dict()
+            if thinking_params:
+                params["additional_model_request_fields"] = thinking_params
+        
         return params
     
     def list_available_models(self) -> Dict[str, ModelConfig]:
@@ -394,6 +523,10 @@ class LobsterAgentConfigurator:
     def list_available_profiles(self) -> Dict[str, Dict]:
         """List all available testing profiles."""
         return self.TESTING_PROFILES.copy()
+    
+    def list_thinking_presets(self) -> Dict[str, ThinkingConfig]:
+        """List all available thinking presets."""
+        return self.THINKING_PRESETS.copy()
     
     def get_current_profile(self) -> str:
         """Get current active profile."""
@@ -419,11 +552,17 @@ class LobsterAgentConfigurator:
                     "tier": agent_config.model_config.tier.value,
                     "temperature": agent_config.model_config.temperature,
                     "region": agent_config.model_config.region,
-                    "description": agent_config.model_config.description
+                    "description": agent_config.model_config.description,
+                    "supports_thinking": agent_config.model_config.supports_thinking
                 },
                 "fallback_model": agent_config.fallback_model,
                 "enabled": agent_config.enabled,
-                "custom_params": agent_config.custom_params
+                "custom_params": agent_config.custom_params,
+                "thinking_config": {
+                    "enabled": agent_config.thinking_config.enabled,
+                    "budget_tokens": agent_config.thinking_config.budget_tokens,
+                    "type": agent_config.thinking_config.type
+                } if agent_config.thinking_config else None
             }
         
         with open(filepath, 'w') as f:
@@ -444,6 +583,10 @@ class LobsterAgentConfigurator:
             print(f"   Temperature: {model.temperature}")
             if model.description:
                 print(f"   Description: {model.description}")
+            if agent_config.thinking_config and agent_config.thinking_config.enabled:
+                print(f"   🧠 Thinking: Enabled (Budget: {agent_config.thinking_config.budget_tokens} tokens)")
+            elif model.supports_thinking:
+                print(f"   🧠 Thinking: Available but disabled")
 
 # Singleton instance
 _configurator = None

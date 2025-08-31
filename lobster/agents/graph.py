@@ -38,6 +38,11 @@ def create_bioinformatics_graph(
         model_params = manual_model_params
     else:
         model_params = settings.get_agent_llm_params('supervisor')
+    
+    # Log if thinking is enabled for supervisor
+    if 'additional_model_request_fields' in model_params and 'thinking' in model_params.get('additional_model_request_fields', {}):
+        thinking_config = model_params['additional_model_request_fields']['thinking']
+        logger.info(f"Supervisor thinking enabled with {thinking_config.get('budget_tokens', 0)} token budget")
 
     supervisor_model = ChatBedrockConverse(**model_params)
     

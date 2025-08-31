@@ -392,7 +392,8 @@ class GEOProvider(BasePublicationProvider):
             if filters.entry_types:
                 # Add entry types as special filters
                 for et in filters.entry_types:
-                    filter_dict[et] = True
+                    # Use the enum value (e.g., "gse") not the enum object
+                    filter_dict[et.value if isinstance(et, GEOEntryType) else et] = True
             if filters.date_range:
                 filter_dict['date_range'] = filters.date_range
             if filters.published_last_n_months:
