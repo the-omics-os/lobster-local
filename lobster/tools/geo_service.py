@@ -204,7 +204,7 @@ class GEOService:
             logger.exception(f"Error fetching metadata for {geo_id}: {e}")
             return f"Error fetching metadata for {geo_id}: {str(e)}"
 
-    def download_dataset(self, geo_id: str, modality_type, **kwargs) -> str:
+    def download_dataset(self, geo_id: str, adapter: str = None, **kwargs) -> str:
         """
         Download and process a dataset using modular strategy with fallbacks (Scenarios 2 & 3).
 
@@ -230,7 +230,7 @@ class GEOService:
                     return f"Failed to fetch metadata: {metadata_result}"
 
             # Check if modality already exists in DataManagerV2
-            modality_name = f"geo_{clean_geo_id.lower()}_{modality_type}"
+            modality_name = f"geo_{clean_geo_id.lower()}_{adapter}"
             existing_modalities = self.data_manager.list_modalities()
             if modality_name in existing_modalities:
                 return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
@@ -258,13 +258,18 @@ class GEOService:
                 predicted_type = self._determine_data_type_from_metadata(cached_metadata)
                 
             n_obs, n_vars = geo_result.data.shape
-            if enhanced_metadata.get('data_type') == 'single_cell_rna_seq':
-                adapter_name = "transcriptomics_single_cell"
-            elif enhanced_metadata.get('data_type') == 'bulk_rna_seq':
-                adapter_name = "transcriptomics_bulk"
-            else:
-                # Default to single-cell for GEO datasets (more common)
-                adapter_name = 'single_cell_rna_seq'
+
+            # if no adapter name is given find out from data downloading step
+            if not adapter:
+                if enhanced_metadata.get('data_type') == 'single_cell_rna_seq':
+                    adapter_name = "transcriptomics_single_cell"
+                elif enhanced_metadata.get('data_type') == 'bulk_rna_seq':
+                    adapter_name = "transcriptomics_bulk"
+                else:
+                    # Default to single-cell for GEO datasets (more common)
+                    adapter_name = 'single_cell_rna_seq'
+            else: 
+                adapter_name = adapter
 
             logger.debug(f"Using adapter '{adapter_name}' based on predicted type '{enhanced_metadata.get('data_type', None)}' and data shape {geo_result.data.shape}")
 
@@ -370,7 +375,9 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 logger.debug(f"Executing pipeline step {i + 1}: {pipeline_func.__name__}")
                 
                 try:
+                    #===============================================================
                     result = pipeline_func(clean_geo_id, cached_metadata)
+                    #===============================================================
                     if result.success:
                         logger.debug(f"Success via {pipeline_func.__name__}")
                         return result

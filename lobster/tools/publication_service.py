@@ -381,6 +381,10 @@ class PublicationService:
                 return f"No providers available for {data_type.value} dataset search."
             
             # Use the first supporting provider (could be enhanced to use multiple)
+            #TODO add multiple provider support
+            #---------------------------------
+            # PROBLEM
+            #---------------------------------
             provider = supporting_providers[0]
             
             # Route to appropriate provider method

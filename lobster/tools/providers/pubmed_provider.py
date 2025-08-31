@@ -23,19 +23,16 @@ from lobster.tools.providers.base_provider import (
     PublicationMetadata, 
     DatasetMetadata
 )
+from lobster.tools.providers.ncbi_query_builder import (
+    NCBIDatabase,
+    PubMedQueryBuilder as QueryBuilder,
+    build_pubmed_query
+)
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
+from lobster.config.settings import get_settings
 
 logger = get_logger(__name__)
-
-
-class NCBIDatabase:
-    """NCBI database identifiers."""
-    PUBMED = "pubmed"
-    GEO = "gds"  # GEO DataSets
-    SRA = "sra"
-    BIOPROJECT = "bioproject"
-    BIOSAMPLE = "biosample"
 
 
 class PubMedProviderConfig(BaseModel):
@@ -48,7 +45,7 @@ class PubMedProviderConfig(BaseModel):
     
     # NCBI API settings
     email: str = "kevin.yar@homara.ai"
-    api_key: Optional[str] = ""
+    api_key: Optional[str] = None
     max_retry: int = Field(default=5, ge=1, le=10)
     sleep_time: float = Field(default=0.3, ge=0.1, le=5.0)
     
@@ -88,7 +85,17 @@ class PubMedProvider(BasePublicationProvider):
             config: Optional configuration, uses defaults if not provided
         """
         self.data_manager = data_manager
-        self.config = config or PubMedProviderConfig()
+        settings = get_settings()
+        
+        # Create config with API key from settings if not provided
+        if config is None:
+            self.config = PubMedProviderConfig(api_key=settings.NCBI_API_KEY)
+        else:
+            # If config provided but no API key, update it with settings
+            if config.api_key is None:
+                self.config = config.model_copy(update={'api_key': settings.NCBI_API_KEY})
+            else:
+                self.config = config
         
         # Initialize XML parser
         try:
@@ -114,8 +121,6 @@ class PubMedProvider(BasePublicationProvider):
     def supported_dataset_types(self) -> List[DatasetType]:
         """Return list of dataset types supported by NCBI."""
         return [
-            DatasetType.GEO,
-            DatasetType.SRA,
             DatasetType.BIOPROJECT,
             DatasetType.BIOSAMPLE,
             DatasetType.DBGAP
@@ -358,6 +363,26 @@ class PubMedProvider(BasePublicationProvider):
                 abstract=f"Could not retrieve publication metadata for: {identifier}"
             )
     
+    def build_ncbi_url(self, endpoint: str, params: Dict[str, Any]) -> str:
+        """
+        Build NCBI URL with proper parameter encoding and API key.
+        
+        Args:
+            endpoint: The NCBI endpoint (esearch, efetch, elink, esummary)
+            params: Dictionary of parameters
+            
+        Returns:
+            str: Properly formatted URL
+        """
+        base = getattr(self, f"base_url_{endpoint}")
+        # Filter out None values
+        params = {k: v for k, v in params.items() if v is not None}
+        query = urllib.parse.urlencode(params)
+        
+        if self.config.api_key:
+            return f"{base}{query}&api_key={self.config.api_key}"
+        return f"{base}{query}"
+    
     def extract_computational_methods(
         self,
         identifier: str,
@@ -438,39 +463,43 @@ class PubMedProvider(BasePublicationProvider):
     
     def _apply_search_filters(self, query: str, filters: Dict[str, Any]) -> str:
         """Apply search filters to PubMed query."""
-        filtered_query = query
+        # Wrap the main query in parentheses for safety
+        filtered_query = f"({query})"
         
         if 'date_range' in filters:
             date_range = filters['date_range']
             if isinstance(date_range, dict):
                 start = date_range.get('start')
                 end = date_range.get('end')
-                if start:
-                    filtered_query += f" AND {start}[PDAT]"
-                if end:
-                    filtered_query += f" AND {end}[PDAT]"
+                if start and end:
+                    # Use PubMed date range syntax
+                    filtered_query += f" AND ({start}:{end}[PDAT])"
+                elif start:
+                    filtered_query += f" AND ({start}[PDAT])"
+                elif end:
+                    filtered_query += f" AND ({end}[PDAT])"
         
         if 'journal' in filters:
-            filtered_query += f" AND {filters['journal']}[JOUR]"
+            filtered_query += f" AND ({filters['journal']}[JOUR])"
         
         if 'author' in filters:
-            filtered_query += f" AND {filters['author']}[AUTH]"
+            filtered_query += f" AND ({filters['author']}[AUTH])"
         
         if 'publication_type' in filters:
-            filtered_query += f" AND {filters['publication_type']}[PTYP]"
+            filtered_query += f" AND ({filters['publication_type']}[PTYP])"
         
         return filtered_query
     
     def _load_with_params(self, query: str, top_k_results: int) -> Iterator[dict]:
         """Load PubMed results with specific parameters."""
-        url = (
-            self.base_url_esearch +
-            f"db=pubmed&term={urllib.parse.quote(query)}" +
-            f"&retmode=json&retmax={top_k_results}&usehistory=y"
-        )
-        
-        if self.config.api_key:
-            url += f"&api_key={self.config.api_key}"
+        # Use URL builder for search
+        url = self.build_ncbi_url('esearch', {
+            'db': 'pubmed',
+            'term': query,
+            'retmode': 'json',
+            'retmax': top_k_results,
+            'usehistory': 'y'
+        })
         
         result = urllib.request.urlopen(url)
         text = result.read().decode("utf-8")
@@ -480,28 +509,92 @@ class PubMedProvider(BasePublicationProvider):
             return
         
         webenv = json_text["esearchresult"]["webenv"]
-        for uid in json_text["esearchresult"]["idlist"]:
-            yield self.retrieve_article(uid, webenv)
-    
-    def retrieve_article(self, uid: str, webenv: str) -> dict:
-        """Retrieve article metadata."""
-        url = (
-            self.base_url_efetch +
-            f"db=pubmed&retmode=xml&id={uid}&webenv={webenv}"
-        )
+        idlist = json_text["esearchresult"]["idlist"]
         
-        if self.config.api_key:
-            url += f"&api_key={self.config.api_key}"
+        # Batch fetch articles for efficiency
+        if idlist:
+            yield from self._batch_fetch_articles(idlist, webenv)
+    
+    def _batch_fetch_articles(self, idlist: List[str], webenv: str) -> Iterator[dict]:
+        """
+        Batch fetch multiple articles in a single request.
+        
+        Args:
+            idlist: List of PMIDs to fetch
+            webenv: Web environment for the search
+            
+        Yields:
+            dict: Parsed article data
+        """
+        # Fetch all articles in one request
+        ids = ",".join(idlist)
+        url = self.build_ncbi_url('efetch', {
+            'db': 'pubmed',
+            'retmode': 'xml',
+            'id': ids,
+            'webenv': webenv
+        })
         
         retry = 0
+        delay = self.config.sleep_time
+        
         while True:
             try:
                 result = urllib.request.urlopen(url)
                 break
             except urllib.error.HTTPError as e:
                 if e.code == 429 and retry < self.config.max_retry:
-                    time.sleep(self.config.sleep_time)
-                    self.config.sleep_time *= 2
+                    time.sleep(delay)
+                    delay *= 2
+                    retry += 1
+                else:
+                    raise e
+        
+        xml_text = result.read().decode("utf-8")
+        text_dict = self.parse(xml_text)
+        
+        # Handle multiple articles in response
+        articles = []
+        if "PubmedArticleSet" in text_dict:
+            article_set = text_dict["PubmedArticleSet"]
+            
+            # Check if it's a single article or multiple
+            if "PubmedArticle" in article_set:
+                if isinstance(article_set["PubmedArticle"], list):
+                    articles = article_set["PubmedArticle"]
+                else:
+                    articles = [article_set["PubmedArticle"]]
+            elif "PubmedBookArticle" in article_set:
+                if isinstance(article_set["PubmedBookArticle"], list):
+                    articles = article_set["PubmedBookArticle"]
+                else:
+                    articles = [article_set["PubmedBookArticle"]]
+        
+        # Process each article
+        for idx, article_data in enumerate(articles):
+            uid = idlist[idx] if idx < len(idlist) else f"unknown_{idx}"
+            yield self._parse_article_from_data(uid, article_data)
+    
+    def retrieve_article(self, uid: str, webenv: str) -> dict:
+        """Retrieve article metadata."""
+        url = self.build_ncbi_url('efetch', {
+            'db': 'pubmed',
+            'retmode': 'xml',
+            'id': uid,
+            'webenv': webenv
+        })
+        
+        retry = 0
+        delay = self.config.sleep_time  # Use local variable for retry delay
+        
+        while True:
+            try:
+                result = urllib.request.urlopen(url)
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 429 and retry < self.config.max_retry:
+                    time.sleep(delay)
+                    delay *= 2  # Exponential backoff on local variable
                     retry += 1
                 else:
                     raise e
@@ -511,19 +604,43 @@ class PubMedProvider(BasePublicationProvider):
         return self._parse_article(uid, text_dict)
     
     def _parse_article(self, uid: str, text_dict: dict) -> dict:
-        """Parse article metadata from XML."""
+        """Parse article metadata from XML dictionary."""
+        # Extract the article from the full response
+        article_data = None
+        
+        if "PubmedArticleSet" in text_dict:
+            article_set = text_dict["PubmedArticleSet"]
+            if "PubmedArticle" in article_set:
+                article_data = article_set["PubmedArticle"]
+            elif "PubmedBookArticle" in article_set:
+                article_data = article_set["PubmedBookArticle"]
+        
+        if article_data:
+            return self._parse_article_from_data(uid, article_data)
+        
+        return {
+            "uid": uid,
+            "Title": "Could not parse article",
+            "Published": "",
+            "Summary": "Article data could not be parsed."
+        }
+    
+    def _parse_article_from_data(self, uid: str, article_data: dict) -> dict:
+        """Parse article metadata from article data structure."""
         try:
-            ar = text_dict["PubmedArticleSet"]["PubmedArticle"]["MedlineCitation"]["Article"]
+            if "MedlineCitation" in article_data:
+                ar = article_data["MedlineCitation"]["Article"]
+            elif "BookDocument" in article_data:
+                ar = article_data["BookDocument"]
+            else:
+                raise KeyError("No valid article structure found")
         except KeyError:
-            try:
-                ar = text_dict["PubmedArticleSet"]["PubmedBookArticle"]["BookDocument"]
-            except KeyError:
-                return {
-                    "uid": uid,
-                    "Title": "Could not parse article",
-                    "Published": "",
-                    "Summary": "Article data could not be parsed."
-                }
+            return {
+                "uid": uid,
+                "Title": "Could not parse article",
+                "Published": "",
+                "Summary": "Article data could not be parsed."
+            }
         
         # Extract abstract
         abstract_text = ar.get("Abstract", {}).get("AbstractText", [])
@@ -615,32 +732,54 @@ class PubMedProvider(BasePublicationProvider):
     
     def _find_linked_datasets(self, pmid: str) -> Dict[str, List[str]]:
         """Find datasets linked to a PubMed article using E-link."""
-        linked = {'GEO': [], 'SRA': []}
+        linked = {
+            'GEO': [],
+            'SRA': [],
+            'BioProject': [],
+            'BioSample': []
+        }
         
-        # Link to GEO
-        url_geo = (
-            self.base_url_elink +
-            f"dbfrom=pubmed&db=gds&id={pmid}&retmode=json"
-        )
+        # Define database mappings
+        db_configs = [
+            {'db': 'gds', 'key': 'GEO', 'prefix': 'GDS'},
+            {'db': 'sra', 'key': 'SRA', 'prefix': 'SRA'},
+            {'db': 'bioproject', 'key': 'BioProject', 'prefix': 'PRJNA'},
+            {'db': 'biosample', 'key': 'BioSample', 'prefix': 'SAMN'}
+        ]
         
-        if self.config.api_key:
-            url_geo += f"&api_key={self.config.api_key}"
-        
-        try:
-            result = urllib.request.urlopen(url_geo)
-            text = result.read().decode("utf-8")
-            json_response = json.loads(text)
+        # Check each database
+        for config in db_configs:
+            url = self.build_ncbi_url('elink', {
+                'dbfrom': 'pubmed',
+                'db': config['db'],
+                'id': pmid,
+                'retmode': 'json'
+            })
             
-            if "linksets" in json_response:
-                for linkset in json_response["linksets"]:
-                    if "linksetdbs" in linkset:
-                        for db in linkset["linksetdbs"]:
-                            if db["dbto"] == "gds":
-                                for link_id in db.get("links", []):
-                                    linked['GEO'].append(f"GDS{link_id}")
-                                    
-        except Exception as e:
-            logger.warning(f"Error finding linked GEO datasets: {e}")
+            try:
+                result = urllib.request.urlopen(url)
+                text = result.read().decode("utf-8")
+                json_response = json.loads(text)
+                
+                if "linksets" in json_response:
+                    for linkset in json_response["linksets"]:
+                        if "linksetdbs" in linkset:
+                            for db in linkset["linksetdbs"]:
+                                if db["dbto"] == config['db']:
+                                    for link_id in db.get("links", []):
+                                        # Format accession based on database type
+                                        if config['db'] == 'sra':
+                                            # For SRA, need to get the actual accession
+                                            linked[config['key']].append(f"{config['prefix']}{link_id}")
+                                        else:
+                                            linked[config['key']].append(f"{config['prefix']}{link_id}")
+                                            
+            except Exception as e:
+                logger.warning(f"Error finding linked {config['key']} datasets: {e}")
+        
+        # Deduplicate
+        for key in linked:
+            linked[key] = list(set(linked[key]))
         
         return linked
     
@@ -703,6 +842,18 @@ class PubMedProvider(BasePublicationProvider):
                 response += "#### Platform Information\n"
                 for acc in datasets['Platforms']:
                     response += f"- **{acc}** - Platform/Array design\n"
+                response += "\n"
+            
+            if datasets.get('BioProject'):
+                response += "#### BioProject\n"
+                for acc in datasets['BioProject']:
+                    response += f"- **{acc}** - [View on BioProject](https://www.ncbi.nlm.nih.gov/bioproject/{acc})\n"
+                response += "\n"
+            
+            if datasets.get('BioSample'):
+                response += "#### BioSample\n"
+                for acc in datasets['BioSample']:
+                    response += f"- **{acc}** - [View on BioSample](https://www.ncbi.nlm.nih.gov/biosample/{acc})\n"
                 response += "\n"
         
         # Recommendations

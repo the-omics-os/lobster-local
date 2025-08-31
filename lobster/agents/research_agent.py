@@ -40,8 +40,7 @@ def research_agent(
     
     # Initialize publication service with NCBI API key
     publication_service = PublicationService(
-        data_manager=data_manager,
-        ncbi_api_key=settings.NCBI_API_KEY
+        data_manager=data_manager
     )
     
     # Define tools
@@ -96,6 +95,68 @@ def research_agent(
         except Exception as e:
             logger.error(f"Error searching literature: {e}")
             return f"Error searching literature: {str(e)}"
+
+    @tool
+    def discover_related_studies(
+        identifier: str,
+        research_topic: str = None,
+        max_results: int = 5
+    ) -> str:
+        """
+        Discover studies related to a given publication or research topic.
+        
+        Args:
+            identifier: Publication identifier (DOI or PMID) to find related studies
+            research_topic: Optional research topic to focus the search
+            max_results: Number of results to retrieve (default: 5)
+        """
+        try:
+            # First get metadata from the source publication
+            metadata = publication_service.extract_publication_metadata(identifier)
+            
+            if isinstance(metadata, str):
+                return f"Could not extract metadata for {identifier}: {metadata}"
+            
+            # Build search query based on metadata and research topic
+            search_terms = []
+            
+            # Extract key terms from title
+            if metadata.title:
+                # Simple keyword extraction (could be enhanced with NLP)
+                title_words = re.findall(r'\b[a-zA-Z]{4,}\b', metadata.title.lower())
+                # Filter common words and take meaningful terms
+                meaningful_terms = [w for w in title_words if w not in ['study', 'analysis', 'using', 'with', 'from', 'data']]
+                search_terms.extend(meaningful_terms[:3])
+            
+            # Add research topic if provided
+            if research_topic:
+                search_terms.append(research_topic)
+            
+            # Build search query
+            search_query = ' '.join(search_terms[:5])  # Limit to avoid too broad search
+            
+            if not search_query.strip():
+                search_query = "related studies"
+            
+            results = publication_service.search_literature(
+                query=search_query,
+                max_results=max_results
+            )
+            
+            # Add context header
+            context_header = f"## Related Studies for {identifier}\n"
+            context_header += f"**Source publication**: {metadata.title[:100]}...\n"
+            context_header += f"**Search strategy**: {search_query}\n"
+            if research_topic:
+                context_header += f"**Research focus**: {research_topic}\n"
+            context_header += "\n"
+            
+            logger.info(f"Related studies search completed for {identifier}")
+            return context_header + results
+            
+        except Exception as e:
+            logger.error(f"Error discovering related studies: {e}")
+            return f"Error discovering related studies: {str(e)}"
 
     @tool
     def find_datasets_from_publication(
@@ -202,68 +263,6 @@ def research_agent(
             return f"Error finding marker genes: {str(e)}"
 
     @tool
-    def discover_related_studies(
-        identifier: str,
-        research_topic: str = None,
-        max_results: int = 5
-    ) -> str:
-        """
-        Discover studies related to a given publication or research topic.
-        
-        Args:
-            identifier: Publication identifier (DOI or PMID) to find related studies
-            research_topic: Optional research topic to focus the search
-            max_results: Number of results to retrieve (default: 5)
-        """
-        try:
-            # First get metadata from the source publication
-            metadata = publication_service.extract_publication_metadata(identifier)
-            
-            if isinstance(metadata, str):
-                return f"Could not extract metadata for {identifier}: {metadata}"
-            
-            # Build search query based on metadata and research topic
-            search_terms = []
-            
-            # Extract key terms from title
-            if metadata.title:
-                # Simple keyword extraction (could be enhanced with NLP)
-                title_words = re.findall(r'\b[a-zA-Z]{4,}\b', metadata.title.lower())
-                # Filter common words and take meaningful terms
-                meaningful_terms = [w for w in title_words if w not in ['study', 'analysis', 'using', 'with', 'from', 'data']]
-                search_terms.extend(meaningful_terms[:3])
-            
-            # Add research topic if provided
-            if research_topic:
-                search_terms.append(research_topic)
-            
-            # Build search query
-            search_query = ' '.join(search_terms[:5])  # Limit to avoid too broad search
-            
-            if not search_query.strip():
-                search_query = "related studies"
-            
-            results = publication_service.search_literature(
-                query=search_query,
-                max_results=max_results
-            )
-            
-            # Add context header
-            context_header = f"## Related Studies for {identifier}\n"
-            context_header += f"**Source publication**: {metadata.title[:100]}...\n"
-            context_header += f"**Search strategy**: {search_query}\n"
-            if research_topic:
-                context_header += f"**Research focus**: {research_topic}\n"
-            context_header += "\n"
-            
-            logger.info(f"Related studies search completed for {identifier}")
-            return context_header + results
-            
-        except Exception as e:
-            logger.error(f"Error discovering related studies: {e}")
-            return f"Error discovering related studies: {str(e)}"
-
-    @tool
     def search_datasets_directly(
         query: str,
         data_type: str = "geo",
@@ -277,7 +276,7 @@ def research_agent(
             query: Search query for datasets
             data_type: Type of omics data (default: "geo", options: "geo,sra,bioproject,biosample,dbgap")
             max_results: Maximum results to return (default: 5)
-            filters: Optional filters as JSON string (e.g., '{"organism": "human", "year": "2023"}')
+            filters: Optional filters as JSON string (e.g., '{{"organism": "human", "year": "2023"}}')
         """
         try:
             # Map string to DatasetType
@@ -405,7 +404,11 @@ def research_agent(
 You are a research specialist focused on scientific literature discovery and dataset identification in bioinformatics and computational biology.
 
 <Role>
-Your primary expertise lies in comprehensive literature search, dataset discovery, and research context provision. You work closely with method experts who focus on parameter extraction and computational analysis.
+Your expertise lies in comprehensive literature search, dataset discovery, and research context provision.  
+You are precise in formulating queries that maximize relevance and minimize noise.  
+You work closely with:
+- **Method Experts**: who extract computational parameters
+- **Data Experts**: who download and preprocess datasets
 </Role>
 
 <Task>
@@ -417,8 +420,6 @@ Given a research inquiry, you will:
 5. **Extract publication metadata** for comprehensive research context
 6. **Provide research landscape overview** for specific topics
 7. **Bridge literature to datasets** for downstream analysis
-
-Your role complements the method expert who handles computational parameter extraction and the data expert who manages dataset downloads and processing.
 </Task>
 
 <Available Research Tools>
@@ -458,60 +459,79 @@ Your role complements the method expert who handles computational parameter extr
 ### System Information
 - `get_research_capabilities`: Available providers and features
 
+<Query Construction Guidelines>
+
+These principles apply to **all query-building functions** (`search_literature` and `search_datasets_directly`) because both rely on NCBI E-utilities under the hood.
+- **Use parentheses for grouping**: ("lung cancer"), ("smoker OR non-smoker OR vaping")
+- **Prefer phrase searching**: keep key terms together ("single-cell RNA-seq")
+- **Balance AND/OR logic**: connect concepts with AND, allow synonyms/variants with OR
+- **Restrict by publication date** (literature): 2018:2024[PDAT]
+- **Refine with organism/entry-type filters** (datasets): {{ "organisms": ["human"], "entry_types": ["gse"], ... }}
+- **Avoid impossible logic**: don;t require mutually exclusive terms like "smoker AND non-smoker"
+- **Iterative refinement**: start broad, then add dataset filters (organism, assay type, date, file types)
+
 <Research Strategies>
 
 ## Comprehensive Literature Review
-```python
-# 1. Start with broad search to understand landscape
+```
 search_literature(
     query="single-cell RNA-seq T cell exhaustion",
     max_results=10,
     sources="pubmed"
 )
 
-# 2. Find datasets for each relevant study
 find_datasets_from_publication("10.1038/s41586-021-03659-0")
 
-# 3. Discover related studies
 discover_related_studies("10.1038/s41586-021-03659-0", "T cell dysfunction")
 ```
 
 ## Dataset-Focused Research
-```python
-# Advanced GEO search with specific filters
 search_datasets_directly(
-    query="single-cell RNA-seq tumor microenvironment",
+    query="(\"single-cell RNA-seq\" OR \"scRNA-seq\") AND (\"lung cancer\") AND (\"smoker\" OR \"non-smoker\" OR \"vaping\")",
     data_type="geo",
     max_results=8,
     filters='{{"organisms": ["human"], "entry_types": ["gse"], "published_last_n_months": 6, "supplementary_file_types": ["h5", "h5ad"]}}'
 )
 
-# Search by platform and organism
-search_datasets_directly(
-    query="ATAC-seq chromatin accessibility",
-    data_type="geo", 
-    filters='{{"organisms": ["human", "mouse"], "platforms": ["GPL24676"], "date_range": {{"start": "2023/01", "end": "2024/12"}}}}'
-)
-
-# Find publications associated with interesting datasets  
 discover_related_studies("GSE162498")
-```
 
 ## Marker Gene Discovery
-```python
-# Find marker genes with disease context
 find_marker_genes(
     query="cell_type=CD8_T_cell disease=cancer",
     max_results=6
 )
 
-# Cross-reference with recent literature
 search_literature(
     query="CD8 T cell markers cancer immunotherapy",
     max_results=5,
     filters='{{"date_range": {{"start": "2022", "end": "2024"}}}}'
 )
-```
+
+
+<Few-Shot Query Examples>
+Example 1 — General Research Question
+Question:
+“I'm exploring the role of the tumor microenvironment in colorectal cancer using single-cell RNA-seq. I want both datasets and relevant literature.”
+Optimized Query:
+("single-cell RNA-seq") AND ("colorectal cancer" OR "colon cancer") AND ("tumor microenvironment") AND 2019:2024[PDAT]
+
+Example 2 — Marker Discovery
+Question:
+“I'm looking for markers of exhausted CD8+ T cells in chronic infection models.”
+Optimized Query:
+("CD8 T cell exhaustion") AND ("chronic infection" OR "persistent infection") AND ("marker genes" OR "signature")
+
+Example 3 — Your Lung Cancer / Vaping Question
+Question:
+“I'm working in the space of lung cancer research of vaping. Focusing on the expression profile of certain genes. I’m looking for datasets, single-cell transcriptomics RNA-seq that focus on smoker vs non-smokers for lung cancer.”
+Optimized Query:
+("single-cell RNA-seq" OR "scRNA-seq") AND ("lung cancer") AND ("smoker" OR "non-smoker" OR "vaping") AND ("gene expression" OR "expression profile") AND 2018:2024[PDAT]
+
+### Example 4 — Direct Dataset Discovery
+**Question:**  
+"I'm working in the space of lung cancer research of vaping. Focusing on the expression profile of certain genes. I'm looking for datasets, single-cell transcriptomics RNA-seq that focus on smoker vs non-smokers for lung cancer. Please look directly for the datasets."
+**Optimized Query:**  
+(“single-cell RNA-seq” OR “scRNA-seq”) AND (“lung cancer”) AND (“smoker” OR “non-smoker” OR “vaping”) AND (“gene expression”)
 
 <Response Format>
 Structure your research findings as:
@@ -519,58 +539,32 @@ Structure your research findings as:
 ## Literature Research Summary
 
 ### Key Publications Found
-1. **[Title]** - PMID: [number] | DOI: [doi]
-   - **Key finding**: Brief description
-   - **Relevance**: Why important for the query
-   - **Datasets**: Associated dataset accessions
+	1.	[Title] - PMID: [number] | DOI: [doi]
+	•	Key finding: Brief description
+	•	Relevance: Why important for the query
+	•	Datasets: Associated dataset accessions
 
 ### Associated Datasets
-- **[Accession]** - [Description]
-  - Platform: [technology]
-  - Samples: [count]
-  - Organism: [species]
-  - **Download recommendation**: "Recommend data expert retrieve [accession] for [analysis purpose]"
+	•	[Accession] - [Description]
+	•	Platform: [technology]
+	•	Samples: [count]
+	•	Organism: [species]
+	•	Download recommendation: “Recommend data expert retrieve [accession] for [analysis purpose]”
 
 ### Biological Markers Identified
-- **[Cell Type]**: Gene1, Gene2, Gene3 (Evidence: X studies)
-- **Consensus markers**: Genes found across multiple studies
-- **Context-specific**: Disease or condition-specific markers
+	•	[Cell Type]: Gene1, Gene2, Gene3 (Evidence: X studies)
+	•	Consensus markers: Genes found across multiple studies
+	•	Context-specific: Disease or condition-specific markers
 
 ### Research Trends & Gaps
-- **Current methods**: What approaches are being used
-- **Methodological consensus**: Areas of agreement in the field
-- **Research gaps**: Understudied areas or missing datasets
-- **Future directions**: Emerging approaches or technologies
+	•	Current methods: What approaches are being used
+	•	Methodological consensus: Areas of agreement in the field
+	•	Research gaps: Understudied areas or missing datasets
+	•	Future directions: Emerging approaches or technologies
 
-### Recommendations for Method Expert
-- **Parameter extraction needed**: Specific publications for computational methods
-- **Method standardization**: Areas where parameter consensus is needed
-- **Tool comparisons**: Studies comparing different software/approaches
-
-### Next Steps
-1. **For method expert**: "Extract computational parameters from PMID:[number]"
-2. **For data expert**: "Download and prepare datasets: [accessions]"
-3. **Additional literature**: "Search for [specific topic] if needed"
-
-<Important Guidelines>
-- **Use multiple sources**: Don't rely solely on PubMed for comprehensive research
-- **Cross-reference findings**: Validate important findings across multiple studies
-- **Consider recency**: Balance recent developments with foundational studies
-- **Link literature to data**: Always identify associated datasets when available
-- **Provide context**: Explain why specific studies or datasets are relevant
-- **Note limitations**: Mention when literature is sparse or contradictory
-- **Suggest follow-ups**: Recommend additional searches if gaps are identified
-
-<Collaboration Notes>
-- **Method Expert**: Will extract computational parameters from publications you identify
-- **Data Expert**: Will download and process datasets you discover
-- **Your Focus**: Literature discovery, dataset identification, research context
-
-Today's date is {{date}}. Maximum iterations: 6
 """.format(
     date=date.today()
 )
-
     return create_react_agent(
         model=llm,
         tools=tools,

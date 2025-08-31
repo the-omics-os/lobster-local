@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 from pydantic import BaseModel, Field
+from enum import Enum
 
 from lobster.tools.providers.base_provider import (
     BasePublicationProvider, 
@@ -23,16 +24,36 @@ from lobster.tools.providers.base_provider import (
     PublicationMetadata, 
     DatasetMetadata
 )
-from lobster.tools.providers.geo_query_builder import (
-    GEOQueryBuilder, 
-    GEOSearchFilters, 
-    GEOEntryType,
-    GEOFieldTag
+from lobster.tools.providers.ncbi_query_builder import (
+    NCBIDatabase,
+    GEOQueryBuilder,
+    build_geo_query
 )
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
+from lobster.config.settings import get_settings
 
 logger = get_logger(__name__)
+
+
+class GEOEntryType(str, Enum):
+    """GEO database entry types."""
+    SERIES = "gse"  # Series (experiments)
+    DATASET = "gds"  # Curated datasets
+    PLATFORM = "gpl"  # Platforms
+    SAMPLE = "gsm"  # Individual samples
+
+
+class GEOSearchFilters(BaseModel):
+    """Filters for GEO dataset searches."""
+    entry_types: Optional[List[str]] = None  # gse, gds, gpl, gsm
+    organisms: Optional[List[str]] = None
+    platforms: Optional[List[str]] = None
+    date_range: Optional[Dict[str, str]] = None  # {"start": "2023/01", "end": "2024/12"}
+    supplementary_file_types: Optional[List[str]] = None  # ["cel", "txt", "h5"]
+    published_last_n_months: Optional[int] = None
+    max_results: int = Field(default=20, ge=1, le=5000)
+    use_history: bool = True
 
 
 class GEOProviderConfig(BaseModel):
@@ -40,7 +61,7 @@ class GEOProviderConfig(BaseModel):
     
     # GEO search settings
     max_results: int = Field(default=20, ge=1, le=1000)
-    default_entry_types: List[GEOEntryType] = Field(default=[GEOEntryType.SERIES, GEOEntryType.DATASET])
+    default_entry_types: List[str] = Field(default=["gse", "gds"])
     
     # NCBI API settings
     email: str = "kevin.yar@homara.ai"
@@ -89,7 +110,18 @@ class GEOProvider(BasePublicationProvider):
             config: Optional configuration, uses defaults if not provided
         """
         self.data_manager = data_manager
-        self.config = config or GEOProviderConfig()
+        settings = get_settings()
+        
+        # Create config with API key from settings if not provided
+        if config is None:
+            self.config = GEOProviderConfig(api_key=settings.NCBI_API_KEY)
+        else:
+            # If config provided but no API key, update it with settings
+            if config.api_key is None:
+                self.config = config.model_copy(update={'api_key': settings.NCBI_API_KEY})
+            else:
+                self.config = config
+        
         self.query_builder = GEOQueryBuilder()
         
         # Initialize XML parser
@@ -349,18 +381,35 @@ class GEOProvider(BasePublicationProvider):
         Returns:
             GEOSearchResult: Search results with IDs and WebEnv
         """
-        # Build the complete query
+        # Build the complete query using the new query builder
         if filters:
-            complete_query = self.query_builder.build_geo_query(query, filters)
+            # Convert filters to dict format for the query builder
+            filter_dict = {}
+            if filters.organisms:
+                filter_dict['organism'] = filters.organisms
+            if filters.platforms:
+                filter_dict['platform'] = filters.platforms
+            if filters.entry_types:
+                # Add entry types as special filters
+                for et in filters.entry_types:
+                    filter_dict[et] = True
+            if filters.date_range:
+                filter_dict['date_range'] = filters.date_range
+            if filters.published_last_n_months:
+                filter_dict['published_last_n_months'] = filters.published_last_n_months
+            if filters.supplementary_file_types:
+                filter_dict['supplementary'] = filters.supplementary_file_types
+            
+            complete_query = self.query_builder.build_query(query, filter_dict)
             max_results = filters.max_results
             use_history = filters.use_history
         else:
-            complete_query = self.query_builder.escape_query_term(query)
+            complete_query = self.query_builder.build_query(query)
             max_results = self.config.max_results
             use_history = True
         
         # Validate query syntax
-        if not self.query_builder.validate_query_syntax(complete_query):
+        if not self.query_builder.validate_query(complete_query):
             raise ValueError(f"Invalid query syntax: {complete_query}")
         
         logger.info(f"Executing GEO search: {complete_query}")

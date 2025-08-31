@@ -14,12 +14,7 @@ from lobster.tools.providers.base_provider import (
 )
 from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
 from lobster.tools.providers.geo_provider import GEOProvider, GEOProviderConfig
-from lobster.tools.providers.geo_query_builder import (
-    GEOQueryBuilder,
-    GEOSearchFilters,
-    GEOEntryType,
-    GEOFieldTag
-)
+
 
 __all__ = [
     # Base classes
@@ -31,13 +26,5 @@ __all__ = [
     
     # PubMed provider
     "PubMedProvider",
-    "PubMedProviderConfig",
-    
-    # GEO provider
-    "GEOProvider",
-    "GEOProviderConfig",
-    "GEOQueryBuilder",
-    "GEOSearchFilters",
-    "GEOEntryType",
-    "GEOFieldTag"
+    "PubMedProviderConfig"
 ]

@@ -287,7 +287,7 @@ Use this modality for quality control, filtering, or downstream analysis."""
     def upload_data_file(
         file_path: str, 
         dataset_id: str, 
-        modality_type: str = "auto_detect",
+        adapter: str = "auto_detect",
         dataset_type: str = "custom"
     ) -> str:
         """
@@ -296,7 +296,7 @@ Use this modality for quality control, filtering, or downstream analysis."""
         Args:
             file_path: Path to the data file (CSV, H5, Excel, etc.)
             dataset_id: Unique identifier for this dataset
-            modality_type: Type of biological data ('single_cell', 'bulk', 'proteomics_ms', 'auto_detect')
+            adapter: Type of biological data ('transcriptomics_single_cell', 'transcriptomics_bulk', 'auto_detect')
             dataset_type: Source type (e.g., 'custom', 'local', 'processed')
             
         Returns:
@@ -309,8 +309,13 @@ Use this modality for quality control, filtering, or downstream analysis."""
             if not file_path.exists():
                 return f"File not found: {file_path}"
             
+            if not isinstance(adapter, str):
+                return f"Modality type must be a string"
+            elif not adapter:
+                return f"Modality type can not be None"            
+            
             # Auto-detect modality type if requested
-            if modality_type == "auto_detect":
+            if adapter == "auto_detect":
                 # Read file to detect data characteristics
                 import pandas as pd
                 try:
@@ -319,39 +324,30 @@ Use this modality for quality control, filtering, or downstream analysis."""
                     
                     # Heuristics for detection
                     if n_cols > 5000:
-                        modality_type = "single_cell"
+                        adapter = "transcriptomics_single_cell"
                     elif n_cols < 1000:
-                        modality_type = "proteomics_ms"
+                        adapter = "proteomics_ms"
                     else:
-                        modality_type = "bulk"  # Middle ground
+                        adapter = "transcriptomics_bulk"  # Middle ground
                     
-                    logger.info(f"Auto-detected modality type: {modality_type} (based on {n_cols} features)")
+                    logger.info(f"Auto-detected modality type: {adapter} (based on {n_cols} features)")
                 except:
-                    modality_type = "single_cell"  # Safe default
-            
-            # Map modality types to adapter names
-            adapter_mapping = {
-                "single_cell": "transcriptomics_single_cell",
-                "bulk": "transcriptomics_bulk", 
-                "proteomics_ms": "proteomics_ms",
-                "proteomics_affinity": "proteomics_affinity"
-            }
-            
-            adapter_name = adapter_mapping.get(modality_type, "transcriptomics_single_cell")
+                    adapter = "single_cell"  # Safe default
+
             modality_name = f"{dataset_type}_{dataset_id}"
             
             # Load using appropriate adapter
             adata = data_manager.load_modality(
                 name=modality_name,
                 source=file_path,
-                adapter=adapter_name,
+                adapter=adapter,
                 validate=True,
                 dataset_id=dataset_id,
                 dataset_type=dataset_type
             )
             
             # Save to workspace
-            save_path = f"{dataset_id}_{modality_type}.h5ad"
+            save_path = f"{dataset_id}_{adapter}.h5ad"
             saved_path = data_manager.save_modality(modality_name, save_path)
             
             # Get quality metrics
@@ -360,8 +356,8 @@ Use this modality for quality control, filtering, or downstream analysis."""
             return f"""Successfully uploaded and processed file {file_path.name}!
 
 📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
-🔬 Data type: {modality_type}
-🎯 Adapter: {adapter_name}
+🔬 Data type: {adapter}
+🎯 Adapter: {adapter}
 💾 Saved to: {save_path}
 📈 Quality metrics: {len([k for k, v in metrics.items() if isinstance(v, (int, float))])} metrics calculated
 
@@ -692,35 +688,26 @@ You will receive metadata information AND supplementary files information. Its c
 Always report back after fetching the metadata. Once confirmed by the supervisor you can continue
 </important>
 
-Step 1  Download the dataset with appropriate modality type and strategy
+Step 1: Download the dataset with appropriate modality type and strategy:
 Scenario A: Let the system decide which strategy
 download_geo_dataset("<GEO ID>", modality_type="<Adapters>")
 
 Scenario B: Download the dataset with appropriate modality type, choice of strategy was MATRIX_FIRST:
 download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='MATRIX_FIRST')
 
-Scenario B: Download the dataset with appropriate modality type, choice of strategy was MATRIX_FIRST:
-download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='MATRIX_FIRST')
+Scenario C: Download the dataset with appropriate modality type, choice of strategy was SAMPLES_FIRST:
+download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='SAMPLES_FIRST')
 
-Step 
+Do not call the download_geo_dataset function with kwargs, just enter the variable:
+DONT DO download_geo_dataset("<GEO ID>", modality_type="<Adapters>", 'kwargs' = {{'manual_strategy_override': 'MATRIX_FIRST'}})
 
-# Step 4 scenario b: 
-If the user has decided to manually choose which download strategy to choose (MATRIX_FIRST, H5_FIRST, SAMPLES_FIRST)
-### example user wants to work with the raw sample files
-download_geo_dataset("GSE123456", modality_type="transcriptomics_single_cell", manual_strategy_override=<strategy>)
-Do not call the download_geo_dataset function with kwargs, just tner the variable:
-DONT DO "'kwargs' = {{'manual_strategy_override': 'MATRIX_FIRST'}}"
-DO 'manual_strategy_override' =  <strategy>
-
-<important> 
-# You will see summary information about the download with the exact name of the modality ID
-</important>
+once the dataset is downloaded you will see summary information about the download with the exact name of the modality ID
 
 # Step 5: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
 ```
 
-### Starting with Workspace Exploration
+### Workspace Exploration
 ```bash
 # Step 1: Check what's already loaded
 list_available_modalities()
@@ -729,7 +716,7 @@ list_available_modalities()
 get_adapter_info()
 
 # Step 3: Examine specific modality if exists
-get_data_summary("existing_modality_name")
+get_data_summary("<existing_modality_name>")
 ```
 
 ## 2. DATA LOADING WORKFLOWS
@@ -743,9 +730,9 @@ get_data_summary()
 fetch_geo_metadata_and_strategy_config("GSE67310")
 
 # Step 3: Review metadata summary, then download with appropriate modality type
-download_geo_dataset("GSE67310", modality_type="transcriptomics_single_cell")
+download_geo_dataset("GSE67310", modality_type="<adapter>")
 # OR with auto-detection based on metadata recommendation:
-download_geo_dataset("GSE67310", modality_type="auto_detect")
+download_geo_dataset("GSE67310", modality_type="<adapter>")
 
 # Step 4: Verify successful loading
 get_data_summary("geo_gse67310")
@@ -756,32 +743,23 @@ list_available_modalities()
 
 ### Custom File Upload Workflow
 ```bash
-# Step 1: Check available adapters first
+
+Step 0: Ensure that you have the necessary information about the file type and modality type. Ask the supervisor if unclear.
+
+Step 1: Check available adapters first
 get_adapter_info()
 
-# Step 2: Upload with auto-detection (recommended)
-upload_data_file("/path/to/data.csv", "liver_sc_study", modality_type="auto_detect", dataset_type="custom")
+Step 2: Upload with specified modality type
+upload_data_file(file_path = "/path/to/data.csv", dataset_id = "internal_liver_SC_01", adapter="<Adapters>", dataset_type="custom")
 
-# Step 3: OR upload with specific type if known
-upload_data_file("/path/to/proteomics.csv", "protein_expr", modality_type="proteomics_ms", dataset_type="processed")
+# Step 3: or call the tool with autodetect
+upload_data_file(file_path = "/path/to/data.csv", dataset_id = "internal_liver_SC_01", adapter="<Adapters>", dataset_type="processed")
 
 # Step 4: Verify upload success
-get_data_summary("custom_liver_sc_study")
+get_data_summary("internal_liver_SC_01")
 
 # Step 5: List all to see the new modality
 list_available_modalities()
-```
-
-### Advanced File Loading (Expert Use)
-```bash
-# Step 1: Check available adapters for compatibility
-get_adapter_info()
-
-# Step 2: Load with specific adapter and custom name
-load_modality_from_file("custom_name", "/path/to/h5ad_file.h5ad", "transcriptomics_single_cell")
-
-# Step 3: Verify loading with custom parameters
-get_data_summary("custom_name")
 ```
 
 ## 4. WORKSPACE MANAGEMENT WORKFLOWS
@@ -822,17 +800,6 @@ load_modality_from_file("manual_load", "/path/to/file.csv", "transcriptomics_bul
 ```
 
 ## 6. TOOL USAGE GUIDELINES
-
-### When to Use Each Tool:
-
-**list_available_modalities()** - Use FIRST to check workspace state
-**get_data_summary()** - Use to check specific modality details or overview
-**get_adapter_info()** - Use when unsure about data types/formats
-**download_geo_dataset()** - Primary tool for GEO data acquisition
-**upload_data_file()** - Use for local files with auto-detection
-**load_modality_from_file()** - Use for expert/manual loading with specific adapters
-**create_mudata_from_modalities()** - Use for multi-modal integration
-**remove_modality()** - Use for workspace cleanup
 
 ### Tool Order Best Practices:
 1. **Always start with**: `list_available_modalities()` or `get_data_summary()`
