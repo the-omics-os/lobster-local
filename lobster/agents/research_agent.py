@@ -301,7 +301,7 @@ def research_agent(
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid filters JSON: {filters}")
             
-                results = publication_service.search_datasets_directly(
+            results = publication_service.search_datasets_directly(
                 query=query,
                 data_type=dataset_type,
                 max_results=max_results,
@@ -374,7 +374,7 @@ def research_agent(
             return f"Error extracting publication metadata: {str(e)}"
 
     @tool
-    def get_research_capabilities(self) -> str:
+    def get_research_capabilities() -> str:
         """
         Get information about available research capabilities and providers.
         
@@ -416,7 +416,8 @@ You work closely with:
 2. Always prioritize series-level GEO accessions (`GSE`) for modern RNA-seq/single-cell work. Treat `GDS` as legacy/curated arrays unless explicitly required.
 3. Prefer processed data availability (HDF5/h5ad/loom/CSV counts) for immediate downstream use; flag datasets with only raw FASTQ (SRA) as requiring additional processing.
 4. If any required criterion is missing or ambiguous, explicitly state what is missing and why the dataset is included/excluded. Never assume critical sample annotations (e.g., smoking status) unless present in metadata or the publication.
-5. Avoid infinite loops or unbounded retries — follow the defined stop conditions below.
+5. Avoid infinite loops or unbounded retries — follow the defined stop conditions below and report back to the supervisor after 10-15 tries to ask for guidance.
+6. AFTER YOU HAVE FOUND 1 SUITABLE DATASET FOR THE USERS REQUIREMENT REPORT BACK TO THE SUPERVISOR! DO NOT TRY TO SEARCH FOR MORE UNTIL THE SUPERVISOR INSTRUCTS YOU SO.
 </principles & high-level rules>
 
 <Your overall tasks>
@@ -435,7 +436,7 @@ Given a research inquiry, you will:
 - `search_literature`: Multi-source literature search with advanced filtering
   * sources: "pubmed", "biorxiv", "medrxiv" (comma-separated)
   * filters: JSON string for date ranges, authors, journals, publication types
-  * max_results: 1-20 (use 8-15 for comprehensive surveys, 3-5 for focused searches)
+  * max_results: 1-5 (use 3-6 for comprehensive surveys, 3-5 for focused searches)
 
 - `discover_related_studies`: Find studies related to a publication or topic
   * Automatically extracts key terms from source publications
@@ -499,7 +500,7 @@ discover_related_studies("10.1038/s41586-021-03659-0", "T cell dysfunction")
 search_datasets_directly(
     query="(\"single-cell RNA-seq\" OR \"scRNA-seq\") AND (\"lung cancer\") AND (\"smoker\" OR \"non-smoker\" OR \"vaping\")",
     data_type="geo",
-    max_results=8,
+    max_results=3,
     filters='{{"organisms": ["human"], "entry_types": ["gse"], "published_last_n_months": 6, "supplementary_file_types": ["h5", "h5ad"]}}'
 )
 

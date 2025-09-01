@@ -43,7 +43,6 @@ dependencies = [
     "langchain-openai>=0.0.5",
     "langchain-aws>=0.1.0",
     "langgraph>=0.0.20",
-    "langgraph-supervisor>=0.0.1",
     "openai>=1.0.0",
     # Bioinformatics (bumped versions for Python 3.12 support)
     "scanpy>=1.10.2", # was 1.9.3 — now supports Python 3.12

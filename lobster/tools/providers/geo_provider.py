@@ -247,7 +247,7 @@ class GEOProvider(BasePublicationProvider):
             
         except Exception as e:
             logger.exception(f"GEO search error: {e}")
-            return f"GEO search error: {str(e)}"
+            raise TypeError(f"GEO search error: {str(e)}")
     
     def find_datasets_from_publication(
         self, 

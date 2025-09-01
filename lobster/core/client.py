@@ -110,7 +110,8 @@ class AgentClient:
         
         config = {
             "configurable": {"thread_id": self.session_id},
-            "callbacks": self.callbacks
+            "callbacks": self.callbacks,
+            "recursion_limit": 100  # Prevent hitting default limit of 25
         }
         
         if stream:
@@ -225,11 +226,48 @@ class AgentClient:
             # Find the last AIMessage in the supervisor's messages
             for msg in reversed(messages):
                 if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content:
-                    content = msg.content.strip()
+                    content = self._extract_content_from_message(msg.content)
                     if content:
                         return content
         
         return "No response generated."
+    
+    def _extract_content_from_message(self, content) -> str:
+        """Extract text content from a message, handling both string and list formats."""
+        # Handle backward compatibility - if content is still a string
+        if isinstance(content, str):
+            return content.strip()
+        
+        # Handle new list format with content blocks
+        if isinstance(content, list):
+            text_parts = []
+            reasoning_parts = []
+            
+            for block in content:
+                if isinstance(block, dict):
+                    # Extract text content
+                    if block.get('type') == 'text' and 'text' in block:
+                        text_parts.append(block['text'])
+                    
+                    # Extract reasoning content if enabled
+                    elif block.get('type') == 'reasoning_content' and self.enable_reasoning:
+                        if 'reasoning_content' in block and isinstance(block['reasoning_content'], dict):
+                            reasoning_text = block['reasoning_content'].get('text', '')
+                            if reasoning_text:
+                                reasoning_parts.append(f"[Thinking: {reasoning_text}]")
+            
+            # Combine parts - show reasoning first if enabled, then the main text
+            result_parts = []
+            if reasoning_parts and self.enable_reasoning:
+                result_parts.extend(reasoning_parts)
+            if text_parts:
+                result_parts.extend(text_parts)
+            
+            if result_parts:
+                return '\n\n'.join(result_parts).strip()
+        
+        # Fallback for any other format
+        return str(content).strip() if content else ""
     
     def _extract_event_content(self, node_output: Dict) -> Optional[str]:
         """Extract displayable content from a node output."""
@@ -241,7 +279,7 @@ class AgentClient:
             # Look for the last AI message in this event
             for msg in reversed(node_output["messages"]):
                 if isinstance(msg, AIMessage) and hasattr(msg, 'content') and msg.content:
-                    return msg.content
+                    return self._extract_content_from_message(msg.content)
         
         # Check for other relevant fields
         for key in ["analysis_results", "next", "data_context"]:

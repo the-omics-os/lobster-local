@@ -2045,19 +2045,6 @@ wheels = [
 ]
 
 [[package]]
-name = "langgraph-supervisor"
-version = "0.0.29"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "langchain-core" },
-    { name = "langgraph" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/78/f0/fc8d5b5926caf3becfc75ff399c4b855daaff957f804973942457864ce94/langgraph_supervisor-0.0.29.tar.gz", hash = "sha256:0ab6e06e102096071d605268a4138084b87128f0c965e1544f77a7d4f65ca16b", size = 21095, upload-time = "2025-07-28T14:16:23.079Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/15/e3b4ad69b2a5fd6ba3d92bcca92b59ebd3a40f2a55751946728506ba618e/langgraph_supervisor-0.0.29-py3-none-any.whl", hash = "sha256:611dd4545f566f690d30004af3742887ec78134921118706ae7eeb12ce77763d", size = 16039, upload-time = "2025-07-28T14:16:22.259Z" },
-]
-
-[[package]]
 name = "langsmith"
 version = "0.4.14"
 source = { registry = "https://pypi.org/simple" }
@@ -2159,7 +2146,6 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langfuse" },
     { name = "langgraph" },
-    { name = "langgraph-supervisor" },
     { name = "leidenalg" },
     { name = "llvmlite" },
     { name = "matplotlib" },
@@ -2271,7 +2257,6 @@ requires-dist = [
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "langfuse", marker = "extra == 'dev'", specifier = ">=2.0.0" },
     { name = "langgraph", specifier = ">=0.0.20" },
-    { name = "langgraph-supervisor", specifier = ">=0.0.1" },
     { name = "leidenalg", specifier = ">=0.9.0" },
     { name = "llvmlite", specifier = ">=0.39.0" },
     { name = "matplotlib", specifier = ">=3.7.0" },

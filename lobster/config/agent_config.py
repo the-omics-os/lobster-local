@@ -236,7 +236,7 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-3-5-haiku",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-5-haiku",
-            "thinking": {}  # No thinking in development mode
+            "thinking": {}  # No thinking in development mode #FIXME
         },
         
         "production": {
@@ -249,8 +249,12 @@ class LobsterAgentConfigurator:
             "research_agent": "claude-3-7-sonnet",
             "thinking": {
                 "supervisor": "standard",
-                "assistant": "extended"
-            }
+                "singlecell_expert": "standard",
+                "bulk_rnaseq_expert": "standard",
+                "method_agent": "standard",
+                "data_expert": "standard",
+                "research_agent": "standard"
+                }
         },
         
         "high-performance": {
@@ -261,7 +265,7 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-5-haiku",
-            "thinking": {
+            "thinking": { #FIXME
                 "supervisor": "extended",
                 "singlecell_expert": "standard",
                 "bulk_rnaseq_expert": "extended"
@@ -276,7 +280,7 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
             "research_agent": "claude-4-sonnet",
-            "thinking": {}  # Most models don't support thinking yet
+            "thinking": {}  # Most models don't support thinking yet #FIXME
         },
         
         "cost-optimized": {

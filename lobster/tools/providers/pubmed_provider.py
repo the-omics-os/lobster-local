@@ -684,15 +684,52 @@ class PubMedProvider(BasePublicationProvider):
             "Summary": summary
         }
     
+    def _safe_extract_text(self, field_value: Union[str, dict, None]) -> str:
+        """
+        Safely extract text content from a field that might be a string, dict, or None.
+        
+        Args:
+            field_value: The field value to extract text from
+            
+        Returns:
+            str: Extracted text content or empty string
+        """
+        if field_value is None:
+            return ""
+        
+        if isinstance(field_value, str):
+            return field_value
+        
+        if isinstance(field_value, dict):
+            # Handle common XML-to-dict patterns
+            if '#text' in field_value:
+                return field_value['#text']
+            elif 'text' in field_value:
+                return field_value['text']
+            elif len(field_value) == 1:
+                # If dict has only one key, try to get its value
+                key = list(field_value.keys())[0]
+                return str(field_value[key])
+            else:
+                # Fallback: try to construct meaningful text from dict
+                text_parts = []
+                for key, value in field_value.items():
+                    if isinstance(value, str) and key not in ['sup', 'sub', '@Label']:
+                        text_parts.append(value)
+                return " ".join(text_parts) if text_parts else str(field_value)
+        
+        # Fallback for other types
+        return str(field_value)
+
     def _convert_to_metadata(self, article: dict) -> PublicationMetadata:
         """Convert article dict to PublicationMetadata."""
         return PublicationMetadata(
-            uid=article.get('uid', ''),
-            title=article.get('Title', ''),
-            journal=article.get('Journal'),
-            published=article.get('Published'),
-            pmid=article.get('uid'),
-            abstract=article.get('Summary')
+            uid=        article.get('uid', ''),
+            title=      self._safe_extract_text(article.get('Title')),
+            journal=    self._safe_extract_text(article.get('Journal')),
+            published=  self._safe_extract_text(article.get('Published')),
+            pmid=       article.get('uid', ''),
+            abstract=   self._safe_extract_text(article.get('Summary'))
         )
     
     def _extract_dataset_accessions(self, text: str) -> Dict[str, List[str]]:

@@ -6,8 +6,9 @@ Implementation using langgraph_supervisor package for hierarchical multi-agent c
 
 from langgraph.checkpoint.memory import InMemorySaver
  
-from langgraph_supervisor import create_supervisor
-from langgraph_supervisor.handoff import create_forward_message_tool
+from lobster.agents.langgraph_supervisor import create_supervisor
+from lobster.agents.langgraph_supervisor import create_forward_message_tool
+
 from langchain_aws import ChatBedrockConverse
 
 from lobster.agents.supervisor import create_supervisor_prompt
@@ -26,7 +27,13 @@ def create_bioinformatics_graph(
     callback_handler=None,
     manual_model_params: dict = None
 ):
-    """Create the bioinformatics multi-agent graph using langgraph_supervisor."""
+    """Create the bioinformatics multi-agent graph using langgraph_supervisor.
+    
+    Note: When invoking this graph, set the recursion_limit in the config to prevent
+    hitting the default limit of 25. Example:
+        config = {"recursion_limit": 100, ...}
+        graph.invoke(input, config)
+    """
     logger.info("Creating bioinformatics multi-agent graph")
     
     # Get model configuration for the supervisor

@@ -219,6 +219,7 @@ class PublicationService:
             else:
                 # Use single provider (first available)
                 provider = providers[0]
+                logger.info(f"Search Publication, using provder: {provider}")
                 results = provider.search_publications(
                     query=query,
                     max_results=max_results,
@@ -422,7 +423,7 @@ class PublicationService:
                 
         except Exception as e:
             logger.error(f"Direct dataset search error: {e}")
-            return f"Direct dataset search error: {str(e)}"
+            raise NameError(f"Direct dataset search error: {str(e)}")
     
     def get_provider_capabilities(self) -> str:
         """
