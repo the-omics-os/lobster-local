@@ -229,10 +229,6 @@ class NCBIQueryBuilder:
                 date_filter = self._build_date_range_filter(value)
                 if date_filter:
                     filter_queries.append(date_filter)
-            elif key == 'published_last_n_months' and isinstance(value, int):
-                # GEO-specific filter
-                if self.database == NCBIDatabase.GEO:
-                    filter_queries.append(f'"published last {value} months"[Filter]')
             elif key in self._field_mappings:
                 # Standard field filter
                 field_tag = self._field_mappings[key]
@@ -274,7 +270,7 @@ class NCBIQueryBuilder:
     
     def _build_date_range_filter(self, date_range: Dict[str, str]) -> Optional[str]:
         """
-        Build a date range filter.
+        Build a date range filter using proper NCBI E-utilities syntax.
         
         Args:
             date_range: Dictionary with 'start' and/or 'end' dates
@@ -296,38 +292,49 @@ class NCBIQueryBuilder:
         end = self._format_date(end) if end else None
         
         if start and end:
-            return f"{start}:{end}[{date_field}]"
+            # Use proper NCBI date range syntax with parentheses
+            return f'("{start}"[{date_field}] : "{end}"[{date_field}])'
         elif start:
-            return f"{start}[{date_field}]"
+            return f'"{start}"[{date_field}]'
         elif end:
-            return f"1900:{end}[{date_field}]"
+            # Default start date for open-ended ranges
+            return f'("1900/01/01"[{date_field}] : "{end}"[{date_field}])'
         
         return None
     
     def _format_date(self, date_str: str) -> Optional[str]:
-        """Format a date for NCBI queries."""
+        """Format a date for NCBI queries (requires YYYY/MM/DD format)."""
         if not date_str:
             return None
         
-        # Already in YYYY/MM format
+        # Already in YYYY/MM/DD format
+        if re.match(r'^\d{4}/\d{1,2}/\d{1,2}$', date_str):
+            year, month, day = date_str.split('/')
+            return f"{year}/{month.zfill(2)}/{day.zfill(2)}"
+        
+        # Already in YYYY/MM format - add day
         if re.match(r'^\d{4}/\d{1,2}$', date_str):
             year, month = date_str.split('/')
-            return f"{year}/{month.zfill(2)}"
+            return f"{year}/{month.zfill(2)}/01"
         
-        # Just year
+        # Just year - add month and day
         if re.match(r'^\d{4}$', date_str):
-            return date_str
+            return f"{date_str}/01/01"
         
         # Try to parse other formats
         try:
-            # Try ISO format
-            if '-' in date_str:
+            # ISO format YYYY-MM-DD
+            if re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', date_str):
                 parts = date_str.split('-')
-                if len(parts) >= 2:
-                    return f"{parts[0]}/{parts[1].zfill(2)}"
+                return f"{parts[0]}/{parts[1].zfill(2)}/{parts[2].zfill(2)}"
+            # ISO format YYYY-MM
+            elif re.match(r'^\d{4}-\d{1,2}$', date_str):
+                parts = date_str.split('-')
+                return f"{parts[0]}/{parts[1].zfill(2)}/01"
         except:
             pass
         
+        # If we can't parse it, return as-is and let NCBI handle it
         return date_str
     
     def add_field_tag(self, term: str, field: str) -> str:
@@ -535,9 +542,20 @@ class GEOQueryBuilder(NCBIQueryBuilder):
         self,
         seq_type: str,
         organism: Optional[str] = None,
-        recent_months: Optional[int] = None
+        date_range: Optional[Dict[str, str]] = None
     ) -> str:
-        """Build a query for sequencing datasets."""
+        """
+        Build a query for sequencing datasets.
+        
+        Args:
+            seq_type: Type of sequencing (e.g., 'rna-seq', 'chip-seq')
+            organism: Optional organism filter
+            date_range: Optional date range dict with 'start' and/or 'end' dates
+                       (e.g., {'start': '2020/01/01', 'end': '2024/12/31'})
+        
+        Returns:
+            str: Formatted query string
+        """
         # Common sequencing keywords
         keywords = {
             'rna-seq': 'RNA-seq',
@@ -555,8 +573,8 @@ class GEOQueryBuilder(NCBIQueryBuilder):
         if organism:
             filters['organism'] = organism
         
-        if recent_months:
-            filters['published_last_n_months'] = recent_months
+        if date_range:
+            filters['date_range'] = date_range
         
         # Default to series
         filters['gse'] = True

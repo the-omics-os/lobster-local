@@ -79,12 +79,14 @@ def data_expert(
             # Check if metadata already in store
             #------------------------------------------------
             if clean_geo_id in data_manager.metadata_store:
-                logger.debug(f"Metadata already stored for: {geo_id}. returning summary")
-                summary = geo_service._format_metadata_summary(
-                    clean_geo_id,
-                    data_manager.metadata_store[clean_geo_id]
-                )
-                return summary
+                if data_manager.metadata_store[clean_geo_id]['strategy_config']:
+                    logger.debug(f"Metadata already stored for: {geo_id}. returning summary")
+                    summary = geo_service._format_metadata_summary(
+                        clean_geo_id,
+                        data_manager.metadata_store[clean_geo_id]
+                    )
+                    return summary
+                logger.info(f"{clean_geo_id} is in metadata but no strategy config has been generated yet. Proceeding doing so")
                         
             #------------------------------------------------
             # If not fetch and return metadata & val res 

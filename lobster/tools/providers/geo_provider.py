@@ -49,9 +49,8 @@ class GEOSearchFilters(BaseModel):
     entry_types: Optional[List[str]] = None  # gse, gds, gpl, gsm
     organisms: Optional[List[str]] = None
     platforms: Optional[List[str]] = None
-    date_range: Optional[Dict[str, str]] = None  # {"start": "2023/01", "end": "2024/12"}
+    date_range: Optional[Dict[str, str]] = None  # {"start": "2023/01/01", "end": "2024/12/31"}
     supplementary_file_types: Optional[List[str]] = None  # ["cel", "txt", "h5"]
-    published_last_n_months: Optional[int] = None
     max_results: int = Field(default=20, ge=1, le=5000)
     use_history: bool = True
 
@@ -396,8 +395,6 @@ class GEOProvider(BasePublicationProvider):
                     filter_dict[et.value if isinstance(et, GEOEntryType) else et] = True
             if filters.date_range:
                 filter_dict['date_range'] = filters.date_range
-            if filters.published_last_n_months:
-                filter_dict['published_last_n_months'] = filters.published_last_n_months
             if filters.supplementary_file_types:
                 filter_dict['supplementary'] = filters.supplementary_file_types
             
@@ -626,9 +623,6 @@ class GEOProvider(BasePublicationProvider):
         
         if 'date_range' in filters:
             geo_filters.date_range = filters['date_range']
-        
-        if 'published_last_n_months' in filters:
-            geo_filters.published_last_n_months = filters['published_last_n_months']
         
         if 'supplementary_file_types' in filters:
             geo_filters.supplementary_file_types = filters['supplementary_file_types']

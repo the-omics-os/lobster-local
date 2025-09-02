@@ -35,7 +35,7 @@ class ThinkingConfig:
     """Configuration for model thinking/reasoning feature."""
     enabled: bool = False
     budget_tokens: int = 2000
-    type: str = "enabled"  # Could be extended to support different thinking modes
+    type: str = "enabled"  # AWS Bedrock uses "enabled" as the type value
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API parameters."""
@@ -43,7 +43,7 @@ class ThinkingConfig:
             return {}
         return {
             "thinking": {
-                "type": self.type,
+                "type": self.type,  # AWS Bedrock expects "type": "enabled"
                 "budget_tokens": self.budget_tokens
             }
         }
@@ -230,13 +230,14 @@ class LobsterAgentConfigurator:
     # Pre-defined testing profiles - automatically includes all agents
     TESTING_PROFILES = {
         "development": {
-            "supervisor": "claude-3-5-haiku",
-            "singlecell_expert": "claude-3-5-haiku",
-            "bulk_rnaseq_expert": "claude-3-5-haiku",
-            "method_agent": "claude-3-5-haiku",
-            "data_expert": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-haiku",
-            "thinking": {}  # No thinking in development mode #FIXME
+            "assistant": "claude-3-7-sonnet",
+            "supervisor": "claude-3-7-sonnet",
+            "singlecell_expert": "claude-4-sonnet",
+            "bulk_rnaseq_expert": "claude-4-sonnet",
+            "method_agent": "claude-3-7-sonnet",
+            "data_expert": "claude-3-7-sonnet",
+            "research_agent": "claude-3-7-sonnet",
+            "thinking": {}  # No thinking in development mode for faster testing
         },
         
         "production": {
@@ -248,7 +249,7 @@ class LobsterAgentConfigurator:
             "data_expert": "claude-3-7-sonnet",
             "research_agent": "claude-3-7-sonnet",
             "thinking": {
-                "supervisor": "standard",
+                # Supervisor doesn't support thinking with langgraph_supervisor
                 "singlecell_expert": "standard",
                 "bulk_rnaseq_expert": "standard",
                 "method_agent": "standard",
@@ -266,7 +267,7 @@ class LobsterAgentConfigurator:
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-5-haiku",
             "thinking": { #FIXME
-                "supervisor": "extended",
+                # "supervisor": "extended",
                 "singlecell_expert": "standard",
                 "bulk_rnaseq_expert": "extended"
             }
@@ -274,7 +275,7 @@ class LobsterAgentConfigurator:
         
         "ultra-performance": {
             "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-4-sonnet",
+            # "supervisor": "claude-4-sonnet",
             "singlecell_expert": "claude-4-sonnet",
             "bulk_rnaseq_expert": "claude-4-sonnet",
             "method_agent": "claude-4-sonnet",
@@ -285,7 +286,7 @@ class LobsterAgentConfigurator:
         
         "cost-optimized": {
             "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-3-haiku",
+            # "supervisor": "claude-3-haiku",
             "singlecell_expert": "claude-3-5-sonnet",
             "bulk_rnaseq_expert": "claude-3-5-haiku",
             "method_agent": "claude-3-haiku",
@@ -296,7 +297,7 @@ class LobsterAgentConfigurator:
         
         "heavyweight": {
             "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-4-1-opus",
+            # "supervisor": "claude-4-1-opus",
             "singlecell_expert": "claude-4-1-opus",
             "bulk_rnaseq_expert": "claude-4-1-opus",
             "method_agent": "claude-4-opus",
@@ -307,7 +308,7 @@ class LobsterAgentConfigurator:
         
         "eu-compliant": {
             "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-3-5-sonnet-v2-eu",
+            # "supervisor": "claude-3-5-sonnet-v2-eu",
             "singlecell_expert": "claude-4-1-opus-eu",
             "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
             "method_agent": "claude-3-5-sonnet-eu",
@@ -318,7 +319,7 @@ class LobsterAgentConfigurator:
         
         "eu-high-performance": {
             "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-3-7-sonnet-eu",
+            # "supervisor": "claude-3-7-sonnet-eu",
             "singlecell_expert": "claude-3-7-sonnet-eu",
             "bulk_rnaseq_expert": "claude-4-opus-eu",
             "method_agent": "claude-4-opus-eu",

@@ -162,7 +162,7 @@ def create_supervisor_prompt(data_manager) -> str:
     user - "Search for 10X Chromium datasets published in the last 3 months"
     - You delegate to research_agent with specific filters:
       * supplementary_file_types: ["h5", "h5ad", "matrix.mtx"]
-      * published_last_n_months: 3
+      * date_range: {{"start": "2024/10/01", "end": "2025/01/01"}}
     - Present search results with metadata summaries.
     - Confirm before downloading any datasets.
 
