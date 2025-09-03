@@ -2,7 +2,7 @@
 GEO provider implementation for direct GEO DataSets search.
 
 This provider implements direct search capabilities for NCBI's GEO DataSets database
-using E-utilities, supporting all query patterns from the official API examples.
+using E-utilities, supporting all query patterns from the official API examples. hi
 """
 
 import json
