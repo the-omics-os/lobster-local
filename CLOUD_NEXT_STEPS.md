@@ -132,9 +132,8 @@ def lambda_handler(event, context):
 ### **Phase 1: Environment Setup**
 
 ```bash
-# 1. Create private repository
-git init lobster-cloud-private
-cd lobster-cloud-private
+# 1. switch to cloud repo
+cd lobster-cloud
 
 # 2. Set up AWS credentials
 aws configure
