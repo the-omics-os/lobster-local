@@ -1,0 +1,32 @@
+# Lobster Server (AWS Lambda) Requirements
+# Minimal dependencies for production deployment
+
+# Core dependencies
+requests>=2.31.0
+typing-extensions>=4.5.0
+
+# Lobster dependencies (will be packaged separately)
+# These will be installed via file:// during deployment:
+# lobster-core
+# lobster-local
+
+# Optional: Add specific versions for production stability
+langchain>=0.1.0,<0.2.0
+langgraph>=0.0.20,<0.1.0
+pandas>=1.5.0,<2.1.0
+numpy>=1.23.0,<1.25.0
+
+# Bioinformatics tools (lightweight versions)
+biopython>=1.81,<1.84
+matplotlib>=3.6.0,<3.8.0
+seaborn>=0.12.0,<0.13.0
+
+# Exclude heavy dependencies that cause Lambda size issues:
+# - tensorflow
+# - torch
+# - scikit-learn (use minimal version if needed)
+# - plotly (too large)
+# - bokeh (too large)
+
+# AWS SDK (already available in Lambda runtime)
+# boto3>=1.26.0

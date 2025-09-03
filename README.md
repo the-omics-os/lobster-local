@@ -3,9 +3,23 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-**Multi-Omics Multi-Agent Bioinformatics Analysis System powered by LangGraph**
+**Multi-Omics Multi-Agent Bioinformatics Analysis System with Cloud & Local Deployment**
 
-Lobster AI is a powerful bioinformatics platform that uses specialized AI agents to analyze multi-omics data including transcriptomics and proteomics. Built on a modular architecture, it combines state-of-the-art language models with proven bioinformatics tools to provide intelligent, reproducible analyses.
+Lobster AI is a powerful bioinformatics platform that uses specialized AI agents to analyze multi-omics data including transcriptomics and proteomics. Now available in both **local** and **cloud** versions, it combines state-of-the-art language models with proven bioinformatics tools to provide intelligent, reproducible analyses.
+
+## 🌟 **NEW: Cloud & Local Split Architecture**
+
+Lobster AI now offers a **freemium business model** with seamless cloud/local switching:
+
+- **🖥️ Lobster Local**: Full-featured local installation with complete bioinformatics capabilities
+- **☁️ Lobster Cloud**: Serverless cloud platform with API key authentication for scalable analysis
+- **🔄 Smart CLI Router**: Automatically detects `LOBSTER_CLOUD_KEY` environment variable and switches modes
+- **📦 Modular Packages**: Clean separation between core interfaces, local implementation, cloud client, and AWS backend
+
+### Freemium Model
+- **Local Mode**: Free, full-featured local installation
+- **Cloud Mode**: Tiered access with enterprise and demo API keys
+- **Business Validation Ready**: Production deployment with AWS Lambda + API Gateway
 
 ## 🚀 Features
 
@@ -32,7 +46,7 @@ Lobster AI is a powerful bioinformatics platform that uses specialized AI agents
 
 ## 📦 Installation
 
-### Quick Install (Recommended)
+### 🖥️ Local Installation (Recommended)
 
 ```bash
 git clone https://github.com/homara-ai/lobster-ai.git
@@ -47,9 +61,77 @@ This will:
 - ✅ Set up environment configuration
 - ✅ Provide clear next steps
 
+### ☁️ Cloud Installation & Setup
+
+For cloud usage, you'll need API keys from the Lobster Cloud service:
+
+```bash
+# Install the cloud client package
+pip install -e ./lobster-cloud
+
+# Set your cloud API key
+export LOBSTER_CLOUD_KEY=your-api-key-here
+
+# Optional: Set custom endpoint
+export LOBSTER_ENDPOINT=https://your-api-gateway-url.com/prod
+```
+
+### 📦 Modular Package Architecture
+
+Lobster AI is now split into 4 modular packages:
+
+| Package | Purpose | Installation |
+|---------|---------|--------------|
+| **lobster-core** | Shared interfaces and base classes | `pip install -e ./lobster-core` |
+| **lobster-local** | Full local implementation | `pip install -e ./lobster-local` |
+| **lobster-cloud** | Cloud client (minimal dependencies) | `pip install -e ./lobster-cloud` |
+| **lobster-server** | AWS Lambda backend | Used for cloud deployment |
+
+### 🔧 Development Installation
+
+For development across all packages:
+
+```bash
+# Run the development installation script
+./dev_install.sh
+
+# Or install manually
+pip install -e ./lobster-core
+pip install -e ./lobster-local
+pip install -e ./lobster-cloud
+```
+
 # Command Line Interface
 
 ## 🎯 Quick Start
+
+### 🔄 Smart CLI Routing
+
+The Lobster CLI automatically detects your environment and switches between local and cloud modes:
+
+#### Local Mode (Default)
+```bash
+# No cloud key set - uses local installation
+lobster chat
+# Output: 💻 Using Lobster Local
+```
+
+#### Cloud Mode (Automatic Detection)
+```bash
+# Set cloud API key - automatically switches to cloud
+export LOBSTER_CLOUD_KEY=your-api-key-here
+lobster chat  
+# Output: 🌩️ Using Lobster Cloud
+```
+
+#### With Custom Endpoint
+```bash
+# Use custom cloud endpoint
+export LOBSTER_CLOUD_KEY=your-api-key-here
+export LOBSTER_ENDPOINT=https://your-custom-api.com/prod
+lobster chat
+# Output: 🌩️ Using Lobster Cloud (Custom Endpoint)
+```
 
 ### Interactive Chat Mode
 
