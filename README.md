@@ -1,324 +1,249 @@
-# 🦞 Lobster (Coming Soon)
+# 🦞 Lobster AI - Local Installation Guide
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-**Multi-Omics Multi-Agent Bioinformatics Analysis System with Cloud & Local Deployment**
+**Complete Local Installation & Configuration Guide**
 
-Lobster AI is a powerful bioinformatics platform that uses specialized AI agents to analyze multi-omics data including transcriptomics and proteomics. Now available in both **local** and **cloud** versions, it combines state-of-the-art language models with proven bioinformatics tools to provide intelligent, reproducible analyses.
+This guide provides comprehensive instructions for installing and configuring Lobster AI locally. For a quick overview, see the main [README.md](README.md).
 
-## 🌟 **NEW: Cloud & Local Split Architecture**
+## 🌟 **Cloud Platform Coming Soon!**
 
-Lobster AI now offers a **freemium business model** with seamless cloud/local switching:
+While you can use Lobster AI locally today, we're actively developing a **cloud-hosted platform** that will provide:
 
-- **🖥️ Lobster Local**: Full-featured local installation with complete bioinformatics capabilities
-- **☁️ Lobster Cloud**: Serverless cloud platform with API key authentication for scalable analysis
-- **🔄 Smart CLI Router**: Automatically detects `LOBSTER_CLOUD_KEY` environment variable and switches modes
-- **📦 Modular Packages**: Clean separation between core interfaces, local implementation, cloud client, and AWS backend
+- ☁️ **Zero Setup Experience** - Run analyses directly in your browser
+- 🚀 **Unlimited Scalability** - Process massive datasets on cloud infrastructure
+- 💾 **Persistent Storage** - Your analyses saved and accessible anywhere
+- 👥 **Team Collaboration** - Share projects and work together in real-time
+- 🔧 **Managed Infrastructure** - No need to manage dependencies or API keys
+- 📊 **Enhanced Analytics** - Advanced monitoring and usage insights
 
-### Freemium Model
-- **Local Mode**: Free, full-featured local installation
-- **Cloud Mode**: Tiered access with enterprise and demo API keys
-- **Business Validation Ready**: Production deployment with AWS Lambda + API Gateway
+**Expected Launch: Q1 2025** | **[Join Early Access Waitlist →](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20Early%20Access)**
 
-## 🚀 Features
+For now, this local installation provides the complete Lobster AI experience on your own hardware.
 
-### Core Capabilities
-- **🤖 Multi-Agent System**: Specialized agents for data management, research literature discovery, computational method extraction, transcriptomics, and proteomics
-- **🔧 Centralized Agent Registry**: Single-source configuration for adding and managing agents system-wide
-- **🧬 Multi-Omics Support**: Integrated analysis of transcriptomics and proteomics data
-- **🏗️ Modular Architecture**: DataManagerV2 with extensible adapters and backends
-- **📊 MuData Integration**: Professional multi-modal data analysis and visualization
-- **☁️ Cloud-Ready**: S3-ready design for scalable cloud deployment
+## 🏗️ **Architecture Overview**
 
-### Data Management
-- **GEO Integration**: Download and analyze datasets from Gene Expression Omnibus
-- **Format Support**: CSV, TSV, Excel, H5AD, 10X MTX, and more
-- **Schema Validation**: Flexible validation with warnings (not failures) for exploratory analysis
-- **Provenance Tracking**: Complete W3C-PROV-like audit trail for reproducibility
+Lobster AI features a **modular, cloud-ready architecture** designed for both local and distributed deployment:
 
-### Analysis Capabilities
-- **Single-Cell RNA-seq**: Quality control, filtering, normalization, clustering, marker genes
-- **Bulk RNA-seq**: Differential expression, pathway analysis, batch correction
-- **Proteomics**: Mass spectrometry and affinity data, missing value handling, peptide mapping
-- **Literature Mining**: PubMed integration for method parameters and validation
-- **Multi-Modal Integration**: Cross-omics analysis using MuData framework
+### 📦 **Package Structure**
 
-## 📦 Installation
+Lobster AI is organized into 4 modular packages:
 
-### 🖥️ Local Installation (Recommended)
+| Package | Purpose | Status |
+|---------|---------|---------|
+| **lobster-core** | Shared interfaces and base classes | ✅ Available |
+| **lobster-local** | Full local implementation (this guide) | ✅ Available |
+| **lobster-cloud** | Minimal cloud client | 🚧 Coming Soon |
+| **lobster-server** | AWS serverless backend | 🚧 Coming Soon |
+
+### 🔄 **Smart CLI Router**
+
+The Lobster CLI automatically detects your environment:
 
 ```bash
-git clone https://github.com/homara-ai/lobster-ai.git
-cd lobster
-make install
-```
-
-This will:
-- ✅ Check Python 3.12+ is installed
-- ✅ Create isolated virtual environment
-- ✅ Install all dependencies
-- ✅ Set up environment configuration
-- ✅ Provide clear next steps
-
-### ☁️ Cloud Installation & Setup
-
-For cloud usage, you'll need API keys from the Lobster Cloud service:
-
-```bash
-# Install the cloud client package
-pip install -e ./lobster-cloud
-
-# Set your cloud API key
-export LOBSTER_CLOUD_KEY=your-api-key-here
-
-# Optional: Set custom endpoint
-export LOBSTER_ENDPOINT=https://your-api-gateway-url.com/prod
-```
-
-### 📦 Modular Package Architecture
-
-Lobster AI is now split into 4 modular packages:
-
-| Package | Purpose | Installation |
-|---------|---------|--------------|
-| **lobster-core** | Shared interfaces and base classes | `pip install -e ./lobster-core` |
-| **lobster-local** | Full local implementation | `pip install -e ./lobster-local` |
-| **lobster-cloud** | Cloud client (minimal dependencies) | `pip install -e ./lobster-cloud` |
-| **lobster-server** | AWS Lambda backend | Used for cloud deployment |
-
-### 🔧 Development Installation
-
-For development across all packages:
-
-```bash
-# Run the development installation script
-./dev_install.sh
-
-# Or install manually
-pip install -e ./lobster-core
-pip install -e ./lobster-local
-pip install -e ./lobster-cloud
-```
-
-# Command Line Interface
-
-## 🎯 Quick Start
-
-### 🔄 Smart CLI Routing
-
-The Lobster CLI automatically detects your environment and switches between local and cloud modes:
-
-#### Local Mode (Default)
-```bash
-# No cloud key set - uses local installation
+# Local mode (current)
 lobster chat
 # Output: 💻 Using Lobster Local
-```
 
-#### Cloud Mode (Automatic Detection)
-```bash
-# Set cloud API key - automatically switches to cloud
-export LOBSTER_CLOUD_KEY=your-api-key-here
+# Cloud mode (coming soon)
+export LOBSTER_CLOUD_KEY=your-api-key
 lobster chat  
 # Output: 🌩️ Using Lobster Cloud
 ```
 
-#### With Custom Endpoint
-```bash
-# Use custom cloud endpoint
-export LOBSTER_CLOUD_KEY=your-api-key-here
-export LOBSTER_ENDPOINT=https://your-custom-api.com/prod
-lobster chat
-# Output: 🌩️ Using Lobster Cloud (Custom Endpoint)
-```
+## 🚀 **Core Capabilities**
 
-### Interactive Chat Mode
+### 🤖 **Multi-Agent System**
+- **Data Expert**: Multi-omics data management and loading
+- **Research Agent**: Literature discovery and dataset identification  
+- **Method Expert**: Computational parameter extraction from publications
+- **Transcriptomics Expert**: Single-cell and bulk RNA-seq analysis
+- **Proteomics Expert**: Mass spectrometry and protein analysis
 
-```bash
-lobster chat
-```
+### 🧬 **Analysis Features**
+- **Single-Cell RNA-seq**: Quality control, filtering, normalization, clustering, marker genes
+- **Bulk RNA-seq**: Differential expression, pathway analysis, batch correction
+- **Proteomics**: Missing value handling, statistical analysis, protein networks
+- **Literature Mining**: PubMed integration for method parameters and validation
+- **Multi-Modal Integration**: Cross-omics analysis using MuData framework
 
-### Key Commands
+### 📊 **Data Management**
+- **GEO Integration**: Automatic dataset download and processing
+- **Format Support**: CSV, TSV, Excel, H5AD, 10X MTX, and more
+- **Schema Validation**: Flexible validation with exploratory analysis support
+- **Provenance Tracking**: Complete W3C-PROV-like audit trails
 
-### 🦞 Lobster CLI Commands
+## 📦 **Installation Instructions**
 
-| Command            | Description                                 |
-|--------------------|---------------------------------------------|
-| `/help`            | Show help message with all commands         |
-| `/status`          | Show system status                          |
-| `/files`           | List workspace files                        |
-| `/data`            | Show current data summary                   |
-| `/plots`           | List generated plots                        |
-| `/save`            | Save current state to workspace             |
-| `/read <file>`     | Read a file from workspace                  |
-| `/export`          | Export session data                         |
-| `/reset`           | Reset conversation                          |
-| `/mode <name>`     | Change operation mode                       |
-| `/modes`           | List available modes                        |
-| `/clear`           | Clear screen                                |
-| `/exit`            | Exit the chat                               |
-
-### Enhanced File Reading
-
-The `/read` command now supports:
-- Reading files from subdirectories (`/read data.csv` finds files in `.lobster_workspace/data/`)
-- Absolute paths (`/read /Users/name/Desktop/file.csv`)
-- Case-insensitive matching
-- Detailed debug logging
-
-## 🔧 Configuration
-
-### Quick Setup
+### 🎯 **Quick Install (Recommended)**
 
 ```bash
-Read config/README_CONFIGURATION.md
+git clone https://github.com/homara-ai/lobster.git
+cd lobster
+make install
 ```
 
-In short: 
-1. Populate .env file
-This interactive command will help you set up:
-- API keys (OpenAI, AWS Bedrock, NCBI)
-- Model preferences
-- Default settings
+This automated installer will:
+- ✅ Verify Python 3.12+ installation
+- ✅ Create isolated virtual environment
+- ✅ Install all required dependencies
+- ✅ Set up configuration templates
+- ✅ Run verification tests
 
-### Manual Setup
+### 🔧 **Manual Installation**
+
+If you prefer manual control or the automated installer fails:
+
+```bash
+# Clone repository
+git clone https://github.com/homara-ai/lobster.git
+cd lobster
+
+# Create virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install package in development mode
+pip install -e .
+
+# Install additional dependencies
+pip install -r requirements.txt
+```
+
+### 🏗️ **Modular Development Installation**
+
+For developers working with the modular architecture:
+
+```bash
+# Install all packages in development mode
+./dev_install.sh
+
+# Or manually:
+pip install -e ./lobster-core
+pip install -e ./lobster-local
+pip install -e ./lobster-cloud  # Cloud components (optional)
+```
+
+### 🐳 **Docker Installation**
+
+```bash
+# Build and run with Docker
+docker build -f Dockerfile -t lobster-ai:latest .
+docker run -p 8501:8501 --env-file .env lobster-ai:latest
+
+# Or use Docker Compose
+docker-compose up
+```
+
+## 🔧 **Configuration**
+
+### 📋 **Environment Setup**
 
 Create a `.env` file in your working directory:
 
 ```env
-# Required
-OPENAI_API_KEY=your-openai-key
-AWS_BEDROCK_ACCESS_KEY=your-aws-key
-AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret
+# Required API Keys
+OPENAI_API_KEY=your-openai-key-here
+AWS_BEDROCK_ACCESS_KEY=your-aws-access-key  
+AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret-key
 
-# Optional
-NCBI_API_KEY=your-ncbi-key
-GENIE_PROFILE=production
+# Optional Configurations
+NCBI_API_KEY=your-ncbi-api-key  # For enhanced literature search
+GENIE_PROFILE=production         # Model configuration preset
+
+# Advanced Settings
+GENIE_MAX_FILE_SIZE_MB=500
+GENIE_CLUSTER_RESOLUTION=0.5
+GENIE_CACHE_DIR=data/cache
 ```
 
-### Interactive Chat Mode for debugging
+### 🎛️ **Model Profiles**
+
+Configure AI model usage with built-in profiles:
 
 ```bash
+# High-performance for complex analyses
+export GENIE_PROFILE=high-performance
+
+# Cost-optimized for routine tasks  
+export GENIE_PROFILE=cost-optimized
+
+# Development profile for testing
+export GENIE_PROFILE=development
+```
+
+Available profiles: `development`, `production`, `high-performance`, `cost-optimized`, `eu-compliant`
+
+### 🔍 **Configuration Management**
+
+```bash
+# Interactive configuration setup
+lobster config generate-env
+
+# View current configuration
+lobster config show-config
+
+# Test configuration
+lobster config test --profile production
+
+# List available models
+lobster config list-models
+```
+
+## 🖥️ **Command Line Interface**
+
+### 💬 **Interactive Chat Mode**
+
+```bash
+# Start interactive session
+lobster chat
+
+# With debugging enabled
 lobster chat --reasoning --debug
-```
 
-### Single Query
-
-```bash
-lobster query "Download and analyze GSE109564 from GEO"
-```
-
-### With Custom Workspace
-
-```bash
+# Custom workspace
 lobster chat --workspace ./my-analysis
 ```
 
-# Streamlit
+### 📝 **Single Query Mode**
 
-## local run
 ```bash
+# Process single queries directly
+lobster query "Download and analyze GSE109564 from GEO"
+
+# Save output to file
+lobster query "Perform clustering analysis" --output results.md
+```
+
+### 🌐 **Web Interface**
+
+```bash
+# Launch Streamlit web interface
 streamlit run lobster/streamlit_app.py
+
+# Or use the built-in command
+lobster serve --port 8501
 ```
 
-### Using Docker
+### 🔧 **Essential Commands**
 
-```bash
-docker build -f Dockerfile -t lobster-ai:py313 .
-docker run -p 8501:8501 --env-file .env lobster-ai:py313
-```
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all available commands |
+| `/status` | Display system status |
+| `/files` | List workspace files |
+| `/data` | Show current data summary |
+| `/plots` | List generated visualizations |
+| `/read <file>` | Display file contents |
+| `/save` | Save current state |
+| `/export` | Export session data |
+| `/reset` | Reset conversation |
 
-## 🏗️ Modular DataManagerV2 Architecture
+## 🧬 **Usage Examples**
 
-Lobster AI now features a **modular, extensible architecture** that supports multi-omics analysis through specialized adapters and storage backends.
+### 🔬 **Single-Cell RNA-seq Analysis**
 
-### Architecture Overview
-![Architecture](docs/architecture_diagram.md)
-
-```mermaid
-graph TB
-    subgraph "AI Agents"
-        DE[Data Expert<br/>🔄 Multi-Omics Data Management]
-        RA[Research Agent<br/>🔍 Literature Discovery & Dataset ID]
-        ME[Method Expert<br/>⚙️ Computational Parameter Extraction]
-        TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]  
-        PE[Proteomics Expert<br/>🧪 Protein Analysis]
-    end
-
-    subgraph "Publication Services"
-        PS[Publication Service<br/>🎯 Multi-Provider Orchestrator]
-        PP[PubMed Provider<br/>📚 Literature Search]
-        GP[GEO Provider<br/>🧬 Direct Dataset Search]
-    end
-
-    subgraph "DataManagerV2"
-        DM2[Central Orchestrator<br/>🎯 Modality Management]
-        MODS[Loaded Modalities<br/>📊 In-Memory Storage]
-    end
-
-    subgraph "Modality Adapters"
-        TRA[TranscriptomicsAdapter<br/>Single-cell & Bulk RNA-seq]
-        PRA[ProteomicsAdapter<br/>MS & Affinity Proteomics]
-    end
-
-    subgraph "Storage Backends"
-        H5BE[H5AD Backend<br/>💾 AnnData Storage]
-        MUBE[MuData Backend<br/>🔗 Multi-Modal Storage]
-    end
-
-    DE --> DM2
-    RA --> PS
-    RA --> DM2
-    ME --> PS
-    ME --> DM2
-    TE --> DM2
-    PE --> DM2
-    
-    PS --> PP
-    PS --> GP
-    
-    DM2 --> TRA
-    DM2 --> PRA
-    DM2 --> MODS
-    
-    MODS --> H5BE
-    MODS --> MUBE
-
-    classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef orchestrator fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
-    classDef service fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
-    classDef adapter fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
-    classDef backend fill:#fff3e0,stroke:#e65100,stroke-width:2px
-
-    class DE,RA,ME,TE,PE agent
-    class DM2,MODS orchestrator
-    class PS,PP,GP service
-    class TRA,PRA adapter
-    class H5BE,MUBE backend
-```
-
-### Key Components
-
-#### 🎯 **DataManagerV2** - Central Orchestrator
-- **Modality Management**: Load, store, and manage multiple data modalities
-- **Schema Validation**: Flexible validation with warnings for exploratory analysis
-- **Provenance Tracking**: Complete audit trail for reproducible research
-- **Multi-Modal Integration**: MuData support for integrated omics analysis
-
-#### 🔌 **Modality Adapters**
-- **TranscriptomicsAdapter**: Single-cell and bulk RNA-seq with automatic gene flagging
-- **ProteomicsAdapter**: Mass spectrometry and affinity data with missing value handling
-- **Extensible**: Easy to add new modalities (metabolomics, imaging, etc.)
-
-#### 💾 **Storage Backends** 
-- **H5ADBackend**: AnnData storage with S3-ready path handling
-- **MuDataBackend**: Multi-modal data storage for integrated analysis
-- **Cloud-Ready**: Designed for seamless S3 integration
-
-## 💬 Multi-Omics Example Usage
-
-### Single-Cell RNA-seq Analysis
 ```bash
 🦞 You: Download GSE109564 and perform single-cell analysis
 
@@ -335,15 +260,11 @@ graph TB
 ✓ Clustered modality: 12 clusters identified using Leiden algorithm
 ✓ Marker genes: Found distinctive markers for each cluster
 
-[Visualizations created:]
-- Quality control metrics
-- UMAP clustering plot  
-- Marker gene heatmap
-
 Analysis complete! The dataset shows 12 distinct cell populations.
 ```
 
-### Multi-Omics Integrated Analysis
+### 🧪 **Multi-Omics Integration**
+
 ```bash
 🦞 You: Load transcriptomics data GSE12345 and proteomics data proteins.csv, then perform integrated analysis
 
@@ -356,62 +277,37 @@ Analysis complete! The dataset shows 12 distinct cell populations.
 
 [Multi-Modal Analysis]
 ✓ Cross-modal correlation analysis
-✓ Integrated dimensionality reduction
+✓ Integrated dimensionality reduction  
 ✓ Multi-omics clustering with 8 joint clusters
 ✓ Protein-RNA correlation networks
 
-The integrated analysis reveals 8 multi-omics cell states with distinct protein-RNA signatures.
+The integrated analysis reveals 8 multi-omics cell states with distinct signatures.
 ```
 
-## 🧬 Specialized Analysis Capabilities
+## 🔬 **Advanced Features**
 
-### 🧬 **Transcriptomics** (Single-cell & Bulk)
-- **Quality Control**: Automated filtering with literature-based thresholds
-- **Preprocessing**: Normalization, scaling, highly variable gene selection
-- **Clustering**: Leiden/Louvain algorithms with resolution optimization
-- **Cell Annotation**: Marker-based and reference atlas approaches
-- **Differential Expression**: Between clusters, conditions, or time points
-- **Integration**: Batch correction and dataset integration methods
+### 📚 **Literature Integration**
 
-### 🧪 **Proteomics** (Mass Spec & Affinity)
-- **Missing Value Handling**: Multiple imputation strategies for sparse proteomics data
-- **Quality Control**: Contaminant detection, reverse hit removal, CV filtering
-- **Normalization**: Median, quantile, and total sum normalization methods
-- **Peptide Mapping**: Integration of peptide-to-protein relationships for MS data
-- **Statistical Analysis**: Differential protein expression with multiple testing correction
-- **Pattern Analysis**: PCA, clustering, and correlation analysis
-
-### 📚 **Literature Discovery & Research Integration**
-- **Research Agent**: Specialized agent for comprehensive literature discovery and dataset identification
-- **Direct GEO Search**: Search NCBI's GEO DataSets database directly with advanced filtering
-- **PubMed Integration**: Advanced literature search with publication metadata extraction
-- **Dataset Discovery**: Filter by organism, platform, date ranges, and file types
-- **Method Agent Coordination**: Seamless handoff for computational parameter extraction
-- **Multi-Source Integration**: PubMed literature + direct GEO database access + bioRxiv/medRxiv support
-
-### 🔬 **Computational Method Extraction**
-- **Parameter Optimization**: Method-specific parameter recommendations from literature
-- **Protocol Analysis**: Extract computational methods and parameters from publications
-- **Validation**: Cross-reference results with published studies
-- **Methodology Comparison**: Comparative analysis across multiple studies and approaches
-
-## 🔄 Migration from Legacy System
-
-The system maintains backward compatibility while providing enhanced capabilities:
-
-### Legacy Usage (Still Supported)
 ```python
-from lobster.core.data_manager import DataManager
-dm = DataManager()
-dm.set_data(dataframe)
+# Programmatic usage with literature mining
+from lobster import LobsterClient
+
+client = LobsterClient()
+result = client.query(
+    "Find optimal clustering parameters for my single-cell data based on recent publications"
+)
 ```
 
-### New Modular Usage (Recommended)
+### 🏗️ **Modular Architecture Usage**
+
 ```python
+# Direct DataManagerV2 usage
 from lobster.core.data_manager_v2 import DataManagerV2
-dm = DataManagerV2()
 
-# Load multiple modalities
+# Initialize data manager
+dm = DataManagerV2(workspace_path="./analysis")
+
+# Load multiple data modalities
 dm.load_modality("rna_seq", "data.csv", "transcriptomics_single_cell")
 dm.load_modality("proteins", "proteins.csv", "proteomics_ms")
 
@@ -420,104 +316,140 @@ mudata = dm.to_mudata()
 dm.save_mudata("integrated_study.h5mu")
 ```
 
-## 🎯 Available Data Adapters
+### 🎯 **Available Data Adapters**
 
-| Adapter | Data Type | Supported Formats | Key Features |
-|---------|-----------|-------------------|--------------|
-| `transcriptomics_single_cell` | Single-cell RNA-seq | CSV, TSV, Excel, H5AD, MTX | Mitochondrial flagging, doublet detection |
-| `transcriptomics_bulk` | Bulk RNA-seq | CSV, TSV, Excel, H5AD | Batch effect handling, DE analysis |
-| `proteomics_ms` | Mass Spectrometry | CSV, TSV, Excel | Missing value strategies, contaminant removal |
-| `proteomics_affinity` | Antibody Arrays | CSV, TSV, Excel | Signal-to-background analysis |
+| Adapter | Data Type | Formats | Features |
+|---------|-----------|---------|----------|
+| `transcriptomics_single_cell` | Single-cell RNA-seq | CSV, TSV, H5AD, MTX | Mitochondrial flagging, doublet detection |
+| `transcriptomics_bulk` | Bulk RNA-seq | CSV, TSV, H5AD | Batch correction, DE analysis |
+| `proteomics_ms` | Mass Spectrometry | CSV, TSV | Missing value imputation, contaminant removal |
+| `proteomics_affinity` | Antibody Arrays | CSV, TSV | Signal normalization, background correction |
 
-## 📊 Export & Reproducibility
+## 📊 **Workspace Management**
 
-This creates a ZIP file containing:
-- Raw and processed data
-- All generated plots (interactive HTML + static PNG)
-- Complete methodology report
-- Tool parameters and timestamps
+### 📁 **File Organization**
 
-## 🛠️ Advanced Usage
+```
+.lobster_workspace/
+├── data/           # Raw and processed datasets
+├── plots/          # Generated visualizations
+├── exports/        # Analysis reports and exports
+├── cache/          # Cached computations
+└── provenance/     # Analysis history and logs
+```
 
-### Using Different Models
+### 💾 **Data Export & Reproducibility**
 
 ```bash
-# Use Claude for complex analyses
-export GENIE_PROFILE=high-performance
-lobster chat
+# Export complete analysis
+/export
 
-# Use lightweight models for quick tasks
+# This creates a ZIP containing:
+# - Raw and processed data files
+# - Interactive HTML + static PNG plots  
+# - Complete methodology report
+# - Tool parameters and timestamps
+# - Full provenance trail
+```
+
+## 🔧 **Troubleshooting**
+
+### 🚨 **Common Issues**
+
+**Installation Problems:**
+```bash
+# Clear package cache
+pip cache purge
+
+# Reinstall with no cache
+pip install --no-cache-dir -e .
+
+# Check Python version
+python --version  # Must be 3.12+
+```
+
+**API Key Issues:**
+```bash
+# Verify environment variables
+echo $OPENAI_API_KEY
+echo $AWS_BEDROCK_ACCESS_KEY
+
+# Test API connectivity
+lobster config test
+```
+
+**Memory Issues:**
+```bash
+# Reduce memory usage
+export GENIE_MAX_FILE_SIZE_MB=100
+
+# Use lightweight models
 export GENIE_PROFILE=cost-optimized
-lobster chat
 ```
 
-### Programmatic Usage
+### 📞 **Getting Help**
 
-```python
-from lobster import LobsterClient
+- 📚 **[Full Documentation](docs/)** - Comprehensive guides
+- 💬 **[Discord Community](https://discord.gg/homaraai)** - Real-time help
+- 🐛 **[GitHub Issues](https://github.com/homara-ai/lobster/issues)** - Bug reports
+- 📧 **[Email Support](mailto:support@homara.ai)** - Direct assistance
 
-client = LobsterClient()
-result = client.query("Analyze my single-cell data for T cell markers")
-print(result['response'])
-```
+## 🛣️ **Roadmap & Cloud Migration**
 
-## Deploy Streamlit to AWS fargate via CDK
+### 🚀 **Upcoming Cloud Features**
 
-Taken from [aws-examples repo](https://github.com/aws-samples/deploy-streamlit-app)
+**Q1 2025 - Cloud Beta Launch:**
+- ☁️ Fully managed cloud infrastructure
+- 🔄 Seamless local-to-cloud migration tools
+- 📊 Enhanced web interface with real-time collaboration
+- 🔒 Enterprise security and compliance features
+
+**Q2 2025 - Advanced Features:**
+- 🤖 Enhanced AI models with domain-specific training
+- 📈 Advanced analytics and experiment tracking
+- 🔗 Integration with popular data platforms
+- 📱 Mobile companion app
+
+### 🔄 **Migration Path**
+
+When the cloud platform launches, migrating will be seamless:
+
+1. **Export Current Work**: Use `/export` to package your analyses
+2. **Cloud Account Setup**: Automatic migration of workspace data  
+3. **Hybrid Usage**: Continue using local installation alongside cloud
+4. **Full Migration**: Optional complete transition to cloud-only usage
+
+Your local installation will remain fully functional and continue receiving updates.
+
+## 🤝 **Contributing**
+
+We welcome contributions to Lobster AI! See our [Contributing Guide](CONTRIBUTING.md) for details.
 
 ```bash
-cdk bootstrap
-cdk deploy
-```
-
-The deployment takes 5 to 10 minutes.
-
-Make a note of the output, in which you will find the CloudFront distribution URL
-and the Cognito user pool id.
-
-4. Create a user in the Cognito UserPool that has been created. You can perform this action from your AWS Console. 
-5. From your browser, connect to the CloudFront distribution url.
-6. Log in to the Streamlit app with the user you have created in Cognito.
-
-## Some limitations
-
-* The connection between CloudFront and the ALB is in HTTP, not SSL encrypted.
-This means traffic between CloudFront and the ALB is unencrypted.
-It is **strongly recommended** to configure HTTPS by bringing your own domain name and SSL/TLS certificate to the ALB.
-
-## � Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
-
-```bash
-# Setup development environment
+# Development setup
 make dev-install
-
-# Run tests
 make test
-
-# Format code
 make format
+
+# Run local development
+lobster chat --reasoning --debug
 ```
 
-## 📄 License
+## 📄 **License & Acknowledgments**
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Built with [LangGraph](https://github.com/langchain-ai/langgraph) and [LangChain](https://github.com/langchain-ai/langchain)
-- Bioinformatics tools: [Scanpy](https://scanpy.readthedocs.io/), [BioPython](https://biopython.org/)
-- Created by [Homara AI](https://homara.ai)
-
-## 📞 Support
-
-- 📧 Email: support@homara.ai
-- 💬 Discord: [Join our community](https://discord.gg/homaraai)
-- 🐛 Issues: [GitHub Issues](https://github.com/homara-ai/lobster-ai/issues)
+- **License**: MIT License - see [LICENSE](LICENSE) for details
+- **Built with**: [LangGraph](https://github.com/langchain-ai/langgraph), [LangChain](https://github.com/langchain-ai/langchain)
+- **Bioinformatics**: [Scanpy](https://scanpy.readthedocs.io/), [BioPython](https://biopython.org/)
+- **Created by**: [Homara AI](https://homara.ai)
 
 ---
 
-<p align="center">
-  Made with ❤️ by <a href="https://homara.ai">Homara AI</a>
-</p>
+<div align="center">
+
+**🦞 Ready to Transform Your Bioinformatics Research?**
+
+[Get Started Now](https://github.com/homara-ai/lobster) • [Join Community](https://discord.gg/homaraai) • [Cloud Waitlist](mailto:cloud@homara.ai)
+
+*Experience the future of bioinformatics analysis today, with cloud deployment coming soon.*
+
+</div>
