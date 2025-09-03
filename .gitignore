@@ -191,3 +191,44 @@ models/
 
 # Langfuse
 .langfuse/
+
+# ===================================
+# LOBSTER AI PROPRIETARY COMPONENTS
+# ===================================
+# Cloud implementation (keep private)
+lobster-cloud/
+lobster-server/
+
+# AWS/Cloud deployment files
+aws_setup_guide.md
+deploy_to_aws.sh
+test_aws_deployment.py
+CLOUD_USAGE_GUIDE.md
+
+# Cloud-specific documentation
+*-cloud-*
+*cloud*config*
+deployment/
+infrastructure/
+
+# AWS credentials and configs
+*.pem
+*.key
+aws-config/
+.aws/
+terraform.tfstate*
+*.tfvars
+
+# Cloud test files
+test_cloud_*.py
+*_cloud_test.py
+
+# Business/implementation details
+implementation_plan.md
+NEXT_AGENT_INSTRUCTIONS.md
+BUSINESS_STRATEGY.md
+PRODUCTION_CLEANUP_PLAN.md
+
+# Private documentation
+*_PRIVATE.md
+INTERNAL_*.md

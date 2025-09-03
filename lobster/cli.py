@@ -95,14 +95,15 @@ def init_client(
     cloud_endpoint = os.environ.get('LOBSTER_ENDPOINT')
     
     if cloud_key:
-        # Enhanced cloud client initialization with retry logic
-        console.print("[bold blue]🌩️  Initializing Lobster Cloud...[/bold blue]")
-        
-        if cloud_endpoint:
-            console.print(f"[dim blue]   Endpoint: {cloud_endpoint}[/dim blue]")
+        # Detect cloud key but provide better user experience
+        console.print("[bold blue]🌩️  Cloud API key detected...[/bold blue]")
         
         try:
             from lobster_cloud.client import CloudLobsterClient
+            
+            console.print("[bold blue]   Initializing Lobster Cloud...[/bold blue]")
+            if cloud_endpoint:
+                console.print(f"[dim blue]   Endpoint: {cloud_endpoint}[/dim blue]")
             
             # Initialize cloud client with endpoint support
             client_kwargs = {"api_key": cloud_key}
@@ -117,7 +118,6 @@ def init_client(
             
             for attempt in range(max_retries):
                 try:
-                    # Test the connection with a status check
                     status_result = client.get_status()
                     
                     if status_result.get("success", False):
@@ -163,16 +163,21 @@ def init_client(
                         raise Exception(f"{error_type}: {e}")
             
         except ImportError:
-            console.print("[red]❌ lobster-cloud package not installed[/red]")
-            console.print("[yellow]   Install with: pip install -e ./lobster-cloud[/yellow]")
-            console.print("[yellow]   Falling back to local mode...[/yellow]")
+            # Provide better guidance for cloud users
+            console.print("[bold yellow]☁️  Lobster Cloud Not Available Locally[/bold yellow]")
+            console.print("[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/cyan]")
+            console.print("[white]You have a [bold blue]LOBSTER_CLOUD_KEY[/bold blue] set, but this is the open-source version.[/white]")
+            console.print("")
+            console.print("[bold white]🌟 Get Lobster Cloud Access:[/bold white]")
+            console.print("   • Visit: [bold blue]https://cloud.lobster.ai[/bold blue]")
+            console.print("   • Email: [bold blue]cloud@homara.ai[/bold blue]")
+            console.print("")
+            console.print("[bold white]💻 For now, using local mode with full functionality:[/bold white]")
+            console.print("[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/cyan]")
+            
         except Exception as e:
-            console.print(f"[red]❌ Cloud client initialization failed: {e}[/red]")
+            console.print(f"[red]❌ Cloud connection error: {e}[/red]")
             console.print("[yellow]   Falling back to local mode...[/yellow]")
-            console.print("[dim yellow]   Troubleshooting:[/dim yellow]")
-            console.print("[dim yellow]   - Verify LOBSTER_CLOUD_KEY is set correctly[/dim yellow]")
-            console.print("[dim yellow]   - Check LOBSTER_ENDPOINT if using custom endpoint[/dim yellow]")
-            console.print("[dim yellow]   - Ensure internet connectivity[/dim yellow]")
     
     # Use local client (existing code)
     console.print("[bold red]💻 Using Lobster Local[/bold red]")

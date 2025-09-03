@@ -166,7 +166,7 @@ def data_expert(
                     file_head =  geo_service.geo_parser.show_dynamic_head(target_url)
                     return file_head.get('head', "Error in fetching head: nothing to fetch")
 
-            msg = f"why is url not a str?? -> {urls}"
+            msg = f"why is url not a str?? -> {urls}. Instead is type {type(urls)}"
             logger.warning(msg)
             return msg
                 
@@ -218,7 +218,7 @@ Use this modality for quality control, filtering, or downstream analysis."""
             # Use the enhanced download_dataset method (handles all scenarios with fallbacks)
             result = geo_service.download_dataset(
                 geo_id=clean_geo_id, 
-                modality_type=modality_type,
+                # modality_type=modality_type,
                 **kwargs) #This kwargs contains the config dict
             
             return result

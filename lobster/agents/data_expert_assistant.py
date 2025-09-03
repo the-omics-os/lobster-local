@@ -66,6 +66,53 @@ class DataExpertAssistant:
         self.settings = get_settings()
         self._llm = None
     
+    def _sanitize_null_values(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sanitize various null value representations to ensure consistency.
+        
+        Args:
+            data: Dictionary that may contain various null representations
+            
+        Returns:
+            Dictionary with null values properly sanitized
+        """
+        sanitized = {}
+        
+        for key, value in data.items():
+            # Handle various null representations
+            if value is None:
+                # Actual Python None
+                if key == 'raw_data_available':
+                    sanitized[key] = False
+                else:
+                    sanitized[key] = "NA"
+            elif isinstance(value, str):
+                # Handle string representations of null
+                null_strings = ['null', 'None', 'NULL', 'none', 'nil', 'NIL', 'n/a', 'N/A', 'na', 'NA']
+                if value.strip() in null_strings or value.strip() == "":
+                    if key == 'raw_data_available':
+                        sanitized[key] = False
+                    else:
+                        sanitized[key] = "NA"
+                else:
+                    sanitized[key] = value.strip()
+            elif isinstance(value, bool):
+                # Boolean values are fine as-is
+                sanitized[key] = value
+            else:
+                # Convert any other type to string, but check for null-like values
+                str_value = str(value).strip()
+                null_strings = ['null', 'None', 'NULL', 'none', 'nil', 'NIL', 'n/a', 'N/A', 'na', 'NA']
+                if str_value in null_strings or str_value == "":
+                    if key == 'raw_data_available':
+                        sanitized[key] = False
+                    else:
+                        sanitized[key] = "NA"
+                else:
+                    sanitized[key] = str_value
+        
+        return sanitized
+    
     @property
     def llm(self):
         """Lazy initialization of LLM."""
@@ -122,7 +169,8 @@ Important notes:
 2. Extract the file extension separately (e.g., "xlsx", "txt", "csv")
 3. Prefer non-R objects (.txt, .csv) over .rds files when multiple options exist
 4. Check the summary and overall design text for mentions of raw data availability
-5. If a field cannot be determined from the metadata, populate field with "null" so it becomes None in Python
+5. If a field cannot be determined from the metadata, use an empty string "" for string fields and false for boolean fields
+6. DO NOT use null, None, or any null-like values - use empty strings for unknown string fields
 
 Return only a valid JSON object that matches the StrategyConfig schema."""
 
@@ -151,8 +199,11 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
             else:
                 strategy_dict = json.loads(response_text)
             
+            # Sanitize null values before creating StrategyConfig
+            sanitized_dict = self._sanitize_null_values(strategy_dict)
+            
             # Create StrategyConfig object
-            strategy_config = StrategyConfig(**strategy_dict)
+            strategy_config = StrategyConfig(**sanitized_dict)
             
             logger.info(f"Successfully extracted strategy config for {geo_id}")
             return strategy_config
@@ -160,6 +211,26 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
         except Exception as e:
             logger.warning(f"Failed to extract strategy config using LLM for {geo_id}: {e}")
             return None
+    
+    def _format_file_display(self, filename: str, filetype: str) -> str:
+        """
+        Format filename and filetype for display, handling NA values.
+        
+        Args:
+            filename: The filename (may be "NA")
+            filetype: The filetype (may be "NA")
+            
+        Returns:
+            Formatted string for display
+        """
+        # Handle various null-like values
+        if not filename or filename in ["NA", "Not found", ""]:
+            return "Not found"
+        
+        if not filetype or filetype in ["NA", "Not found", ""]:
+            return filename
+        
+        return f"{filename}.{filetype}"
     
     def format_strategy_section(self, strategy_config: StrategyConfig) -> str:
         """
@@ -173,17 +244,54 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
         """
         config_dict = strategy_config.model_dump()
         
+        # Format each file type with proper null handling
+        summary_file = self._format_file_display(
+            config_dict.get('summary_file_name', ''),
+            config_dict.get('summary_file_type', '')
+        )
+        
+        processed_matrix = self._format_file_display(
+            config_dict.get('processed_matrix_name', ''),
+            config_dict.get('processed_matrix_filetype', '')
+        )
+        
+        raw_matrix = self._format_file_display(
+            config_dict.get('raw_UMI_like_matrix_name', ''),
+            config_dict.get('raw_UMI_like_matrix_filetype', '')
+        )
+        
+        cell_annotations = self._format_file_display(
+            config_dict.get('cell_annotation_name', ''),
+            config_dict.get('cell_annotation_filetype', '')
+        )
+        
         strategy_section = f"""
 
 📁 **Extracted File Strategy Configuration:**
-- **Summary File:** {config_dict.get('summary_file_name', 'Not found')}{'.'+config_dict.get('summary_file_type') if config_dict.get('summary_file_type') else ''}
-- **Processed Matrix:** {config_dict.get('processed_matrix_name', 'Not found')}{'.'+config_dict.get('processed_matrix_filetype') if config_dict.get('processed_matrix_filetype') else ''}
-- **Raw/UMI Matrix:** {config_dict.get('raw_UMI_like_matrix_name', 'Not found')}{'.'+config_dict.get('raw_UMI_like_matrix_filetype') if config_dict.get('raw_UMI_like_matrix_filetype') else ''}
-- **Cell Annotations:** {config_dict.get('cell_annotation_name', 'Not found')}{'.'+config_dict.get('cell_annotation_filetype') if config_dict.get('cell_annotation_filetype') else ''}
-- **Raw Data Available:** {'Yes' if config_dict.get('raw_data_available', True) else 'No (see study description for details)'}
+- **Summary File:** {summary_file}
+- **Processed Matrix:** {processed_matrix}
+- **Raw/UMI Matrix:** {raw_matrix}
+- **Cell Annotations:** {cell_annotations}
+- **Raw Data Available:** {'Yes' if config_dict.get('raw_data_available', False) else 'No (see study description for details)'}
 """
         
         return strategy_section
+    
+    def _has_valid_file(self, filename: str) -> bool:
+        """
+        Check if a filename represents a valid file (not null/NA/empty).
+        
+        Args:
+            filename: The filename to check
+            
+        Returns:
+            True if filename is valid, False otherwise
+        """
+        if not filename:
+            return False
+        
+        null_values = ["NA", "N/A", "na", "n/a", "null", "None", "NULL", "none", "", " "]
+        return filename.strip() not in null_values
     
     def analyze_download_strategy(
         self, 
@@ -201,10 +309,10 @@ Return only a valid JSON object that conforms to the StrategyConfig schema provi
             Dictionary with analysis results and recommendations
         """
         analysis = {
-            "has_processed_matrix": bool(strategy_config.processed_matrix_name),
-            "has_raw_matrix": bool(strategy_config.raw_UMI_like_matrix_name),
-            "has_cell_annotations": bool(strategy_config.cell_annotation_name),
-            "has_summary": bool(strategy_config.summary_file_name),
+            "has_processed_matrix": self._has_valid_file(strategy_config.processed_matrix_name),
+            "has_raw_matrix": self._has_valid_file(strategy_config.raw_UMI_like_matrix_name),
+            "has_cell_annotations": self._has_valid_file(strategy_config.cell_annotation_name),
+            "has_summary": self._has_valid_file(strategy_config.summary_file_name),
             "raw_data_available": strategy_config.raw_data_available,
             "recommendations": []
         }

@@ -241,20 +241,20 @@ class LobsterAgentConfigurator:
         },
         
         "production": {
-            "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-3-7-sonnet",
+            "assistant": "claude-4-sonnet",
+            "supervisor": "claude-4-sonnet",
             "singlecell_expert": "claude-4-sonnet",
             "bulk_rnaseq_expert": "claude-4-sonnet",
-            "method_agent": "claude-3-7-sonnet",
-            "data_expert": "claude-3-7-sonnet",
-            "research_agent": "claude-3-7-sonnet",
+            "method_agent": "claude-4-sonnet",
+            "data_expert": "claude-4-sonnet",
+            "research_agent": "claude-4-sonnet",
             "thinking": {
-                # Supervisor doesn't support thinking with langgraph_supervisor
-                "singlecell_expert": "standard",
-                "bulk_rnaseq_expert": "standard",
-                "method_agent": "standard",
-                "data_expert": "standard",
-                "research_agent": "standard"
+                # # Supervisor doesn't support thinking with langgraph_supervisor
+                # "singlecell_expert": "standard",
+                # "bulk_rnaseq_expert": "standard",
+                # "method_agent": "standard",
+                # "data_expert": "standard",
+                # "research_agent": "standard"
                 }
         },
         

@@ -1,96 +1,67 @@
-# Lobster AI Architecture - Cloud & Local Split
+# Lobster AI - Open Source Architecture
 
-## 🌟 **NEW: Cloud & Local Split Architecture Overview**
+## 🏗️ **System Architecture Overview**
 
-Lobster AI now features a **production-ready freemium business model** with seamless cloud/local deployment:
+Lobster AI is a powerful **multi-agent bioinformatics platform** designed for both local and cloud deployment. This documentation covers the open source components available in this repository.
 
-### 📦 **Modular Package Architecture**
+### 📦 **Open Source Package Structure**
 
 ```mermaid
 graph TB
-    subgraph "Package Distribution"
-        CORE[lobster-core<br/>🔗 Shared Interfaces & Base Classes]
-        LOCAL[lobster-local<br/>🖥️ Full Local Implementation]
-        CLOUD[lobster-cloud<br/>☁️ Minimal Cloud Client]
-        SERVER[lobster-server<br/>🚀 AWS Lambda Backend]
+    subgraph "Open Source Components"
+        MAIN[lobster/<br/>🦞 Main Package<br/>Complete Local Implementation]
+        CORE[lobster-core/<br/>🔗 Shared Interfaces<br/>Abstract Base Classes]
+        LOCAL[lobster-local/<br/>🖥️ Modular Implementation<br/>Development Structure]
     end
 
-    subgraph "Smart CLI Router"
-        CLI[lobster/cli.py<br/>🔄 Automatic Mode Detection]
-        DETECT[Environment Detection<br/>LOBSTER_CLOUD_KEY Check]
+    subgraph "Smart CLI Detection"
+        CLI[lobster/cli.py<br/>🔄 Cloud Detection]
+        DETECT[Environment Check<br/>LOBSTER_CLOUD_KEY]
+        MESSAGE[Cloud Upgrade Message<br/>☁️ Visit cloud.lobster.ai]
     end
 
-    subgraph "Local Deployment"
-        LOCAL_CLIENT[AgentClient<br/>💻 Full Local Features]
-        LOCAL_DM[DataManagerV2<br/>📊 Complete Data Management]
-    end
-
-    subgraph "Cloud Deployment"
-        CLOUD_CLIENT[CloudLobsterClient<br/>☁️ API Communication]
-        AWS_LAMBDA[AWS Lambda Function<br/>🚀 Serverless Backend]
-        API_GATEWAY[API Gateway<br/>🌐 RESTful API]
+    subgraph "Local Deployment (Free)"
+        CLIENT[AgentClient<br/>💻 Full Local Features]
+        DM[DataManagerV2<br/>📊 Complete Data Management]
+        AGENTS[AI Agents<br/>🤖 All Analysis Capabilities]
     end
 
     CLI --> DETECT
-    DETECT --> |No Cloud Key| LOCAL_CLIENT
-    DETECT --> |Cloud Key Found| CLOUD_CLIENT
+    DETECT --> |No Cloud Key| CLIENT
+    DETECT --> |Cloud Key Set| MESSAGE
+    MESSAGE --> |Fallback| CLIENT
     
-    LOCAL_CLIENT --> LOCAL_DM
-    CLOUD_CLIENT --> API_GATEWAY
-    API_GATEWAY --> AWS_LAMBDA
-    AWS_LAMBDA --> |Uses| LOCAL
+    CLIENT --> DM
+    CLIENT --> AGENTS
+    
+    MAIN --> CLIENT
+    CORE --> MAIN
+    LOCAL --> MAIN
 
-    CORE --> LOCAL
-    CORE --> CLOUD
-    LOCAL --> LOCAL_CLIENT
-    CLOUD --> CLOUD_CLIENT
-    SERVER --> AWS_LAMBDA
+    classDef opensource fill:#4caf50,stroke:#2e7d32,stroke-width:3px
+    classDef cli fill:#2196f3,stroke:#1976d2,stroke-width:2px
+    classDef local fill:#ff9800,stroke:#f57c00,stroke-width:2px
 
-    classDef core fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
-    classDef local fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef cloud fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
-    classDef aws fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-    classDef cli fill:#fce4ec,stroke:#c2185b,stroke-width:2px
-
-    class CORE core
-    class LOCAL,LOCAL_CLIENT,LOCAL_DM local
-    class CLOUD,CLOUD_CLIENT cloud
-    class SERVER,AWS_LAMBDA,API_GATEWAY aws
-    class CLI,DETECT cli
+    class MAIN,CORE,LOCAL opensource
+    class CLI,DETECT,MESSAGE cli
+    class CLIENT,DM,AGENTS local
 ```
 
-### 🔄 **Smart CLI Routing Logic**
+### 🌟 **Cloud Platform (Coming Soon)**
 
 ```mermaid
-flowchart TD
-    START[User runs: lobster chat] --> CHECK{LOBSTER_CLOUD_KEY<br/>environment variable?}
+graph LR
+    LOCAL[🖥️ Local Installation<br/>Free & Open Source] --> UPGRADE{Want Cloud?}
+    UPGRADE --> |Yes| CLOUD[☁️ Lobster Cloud<br/>Managed Platform]
+    UPGRADE --> |No| LOCAL
     
-    CHECK -->|Not Set| LOCAL_INIT[Initialize Local Client]
-    CHECK -->|Set| CLOUD_INIT[Initialize Cloud Client]
-    
-    LOCAL_INIT --> LOCAL_CHECK[Import lobster_local packages]
-    LOCAL_CHECK --> LOCAL_SUCCESS[💻 Using Lobster Local]
-    
-    CLOUD_INIT --> CLOUD_IMPORT{Import lobster_cloud?}
-    CLOUD_IMPORT -->|Success| CLOUD_TEST[Test Connection]
-    CLOUD_IMPORT -->|Failed| FALLBACK[☁️→💻 Fallback to Local]
-    
-    CLOUD_TEST --> RETRY_LOGIC[Retry Logic:<br/>3 attempts, 2s delay]
-    RETRY_LOGIC --> CLOUD_SUCCESS[🌩️ Using Lobster Cloud]
-    RETRY_LOGIC --> RETRY_FAIL[Connection Failed<br/>After 3 attempts]
-    RETRY_FAIL --> FALLBACK
-    
-    FALLBACK --> LOCAL_INIT
+    CLOUD --> FEATURES[🚀 Scalable Computing<br/>👥 Team Collaboration<br/>💾 Persistent Storage]
 
-    classDef start fill:#f9f,stroke:#333,stroke-width:2px
-    classDef decision fill:#bbf,stroke:#333,stroke-width:2px
-    classDef success fill:#bfb,stroke:#333,stroke-width:2px
-    classDef fallback fill:#ffb,stroke:#333,stroke-width:2px
-
-    class START start
-    class CHECK,CLOUD_IMPORT decision
-    class LOCAL_SUCCESS,CLOUD_SUCCESS success
-    class FALLBACK,RETRY_FAIL fallback
+    classDef free fill:#4caf50,stroke:#2e7d32,stroke-width:2px
+    classDef cloud fill:#2196f3,stroke:#1976d2,stroke-width:3px
+    
+    class LOCAL free
+    class CLOUD,FEATURES cloud
 ```
 
 ## System Architecture Overview - Post Migration
@@ -639,360 +610,26 @@ python tests/test_agent_registry.py
 
 This centralized approach ensures professional, maintainable, and error-free agent management across the entire Lobster AI system.
 
-## ☁️ **Cloud Deployment Architecture**
+## 🌟 **Open Source Benefits**
 
-### 🚀 **AWS Infrastructure Overview**
+### 🆓 **What You Get for Free**
+- **Complete Bioinformatics Platform**: All analysis capabilities included
+- **AI-Powered Analysis**: Natural language interface to bioinformatics
+- **Publication-Ready Outputs**: Professional visualizations and reports
+- **Extensible Architecture**: Add custom analysis methods easily
+- **Active Development**: Regular updates and community contributions
 
-```mermaid
-graph TB
-    subgraph "User Interface"
-        USER[End User<br/>🧑‍💻 Bioinformatics Researcher]
-        CLI[Lobster CLI<br/>🔄 Smart Router]
-    end
+### 📈 **Why Choose Local Installation**
+- **Privacy**: Your data never leaves your computer
+- **Customization**: Full control over analysis parameters
+- **Learning**: Study the source code to understand methods
+- **Contribution**: Help improve the platform for everyone
+- **Cost**: Completely free (you pay only for your own API keys)
 
-    subgraph "Cloud Client Layer"
-        CC[CloudLobsterClient<br/>☁️ Python SDK]
-        AUTH[API Key Authentication<br/>🔑 Bearer Token]
-        RETRY[Retry Logic<br/>🔄 3 attempts, 2s delay]
-        ENDPOINTS[Multiple Endpoints<br/>📍 /query, /status, /usage, /models]
-    end
+### ☁️ **Interested in Cloud?**
+For teams needing scalable infrastructure, managed services, or collaborative features, we're developing a cloud platform. 
 
-    subgraph "AWS API Gateway"
-        AGW[API Gateway<br/>🌐 REST API]
-        CORS[CORS Support<br/>🌍 Browser Compatibility]
-        THROTTLE[Rate Limiting<br/>⚡ Request Throttling] 
-        AUTH_GATEWAY[API Key Validation<br/>🛡️ Authentication Layer]
-    end
-
-    subgraph "AWS Lambda Backend"
-        LAMBDA[Lambda Function<br/>🚀 lobster-api]
-        HANDLER[Lambda Handler<br/>📞 Event Processing]
-        ROUTING[Request Routing<br/>🗺️ Path-based Endpoints]
-        
-        subgraph "Hardcoded API Keys (MVP)"
-            ENT1[test-enterprise-001<br/>💼 Enterprise Tier]
-            ENT2[test-enterprise-002<br/>💼 Enterprise Tier] 
-            DEMO[demo-user-001<br/>🆓 Demo Tier]
-        end
-    end
-
-    subgraph "Lobster Backend Processing"
-        LAMBDA_CLIENT[Local Lobster Client<br/>🦞 Full Processing Power]
-        LAMBDA_DM[DataManagerV2<br/>📊 Cloud Data Management]
-        LAMBDA_AGENTS[AI Agents<br/>🤖 Analysis Pipeline]
-    end
-
-    subgraph "Response Processing"
-        RESULTS[Analysis Results<br/>📈 JSON Response]
-        METADATA[Cloud Metadata<br/>☁️ Processing Info]
-        ERROR_HANDLING[Error Management<br/>⚠️ Professional Error Response]
-    end
-
-    USER --> CLI
-    CLI --> CC
-    CC --> AUTH
-    CC --> RETRY
-    CC --> ENDPOINTS
-    
-    ENDPOINTS --> AGW
-    AGW --> CORS
-    AGW --> THROTTLE
-    AGW --> AUTH_GATEWAY
-    
-    AUTH_GATEWAY --> LAMBDA
-    LAMBDA --> HANDLER
-    HANDLER --> ROUTING
-    
-    ROUTING --> ENT1
-    ROUTING --> ENT2
-    ROUTING --> DEMO
-    
-    LAMBDA --> LAMBDA_CLIENT
-    LAMBDA_CLIENT --> LAMBDA_DM
-    LAMBDA_DM --> LAMBDA_AGENTS
-    
-    LAMBDA_AGENTS --> RESULTS
-    RESULTS --> METADATA
-    RESULTS --> ERROR_HANDLING
-    
-    ERROR_HANDLING --> USER
-
-    classDef user fill:#f9f,stroke:#333,stroke-width:2px
-    classDef client fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef aws fill:#ff9800,stroke:#e65100,stroke-width:3px
-    classDef lambda fill:#4caf50,stroke:#2e7d32,stroke-width:2px
-    classDef processing fill:#9c27b0,stroke:#6a1b9a,stroke-width:2px
-    classDef auth fill:#f44336,stroke:#c62828,stroke-width:2px
-
-    class USER,CLI user
-    class CC,RETRY,ENDPOINTS client
-    class AGW,CORS,THROTTLE,AUTH_GATEWAY aws
-    class LAMBDA,HANDLER,ROUTING lambda
-    class LAMBDA_CLIENT,LAMBDA_DM,LAMBDA_AGENTS processing
-    class ENT1,ENT2,DEMO,AUTH auth
-```
-
-### 💼 **Freemium Business Model Structure**
-
-```mermaid
-graph TB
-    subgraph "Local Tier (Free)"
-        LOCAL_FREE[🖥️ Lobster Local<br/>Complete Features]
-        LOCAL_FEATURES[✅ All AI agents<br/>✅ Full data processing<br/>✅ Unlimited usage<br/>✅ Local computation]
-    end
-
-    subgraph "Demo Tier (Cloud)"
-        DEMO_TIER[🆓 Demo Access<br/>demo-user-001]
-        DEMO_LIMITS[⚡ 10 queries/hour<br/>📊 Basic features<br/>🕒 Limited processing time]
-    end
-
-    subgraph "Enterprise Tier (Cloud)"
-        ENT_TIER[💼 Enterprise Access<br/>test-enterprise-001/002]
-        ENT_FEATURES[⚡ 100 queries/hour<br/>🚀 Full cloud processing<br/>📈 Advanced analytics<br/>☁️ Scalable infrastructure]
-    end
-
-    subgraph "Future Tiers (Planned)"
-        PREMIUM[🌟 Premium Tier<br/>Enhanced Features]
-        RESEARCH[🎓 Research Tier<br/>Academic Pricing]
-        CUSTOM[🏢 Custom Enterprise<br/>Dedicated Infrastructure]
-    end
-
-    LOCAL_FREE --> LOCAL_FEATURES
-    DEMO_TIER --> DEMO_LIMITS
-    ENT_TIER --> ENT_FEATURES
-
-    classDef free fill:#4caf50,stroke:#2e7d32,stroke-width:2px
-    classDef demo fill:#ff9800,stroke:#f57c00,stroke-width:2px
-    classDef enterprise fill:#2196f3,stroke:#1976d2,stroke-width:2px
-    classDef future fill:#9e9e9e,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5
-
-    class LOCAL_FREE,LOCAL_FEATURES free
-    class DEMO_TIER,DEMO_LIMITS demo
-    class ENT_TIER,ENT_FEATURES enterprise
-    class PREMIUM,RESEARCH,CUSTOM future
-```
-
-### 🏗️ **Package Organization & Dependencies**
-
-```mermaid
-graph TB
-    subgraph "lobster-core (Shared)"
-        CORE_INTERFACES[Base Interfaces<br/>📋 BaseLobsterClient<br/>📋 BaseDataManager]
-        CORE_DEPS[Minimal Dependencies<br/>📦 pandas, numpy<br/>📦 anndata, typing-extensions]
-    end
-
-    subgraph "lobster-local (Full Stack)" 
-        LOCAL_IMPL[Complete Implementation<br/>🦞 AgentClient<br/>📊 DataManagerV2<br/>🤖 All AI Agents]
-        LOCAL_DEPS[Full Dependencies<br/>🧬 scanpy, matplotlib<br/>🔬 biopython, seaborn<br/>🤖 langchain, langgraph<br/>📚 requests for APIs]
-    end
-
-    subgraph "lobster-cloud (Minimal)"
-        CLOUD_CLIENT[Cloud Client Only<br/>☁️ CloudLobsterClient<br/>🌐 HTTP Communication]
-        CLOUD_DEPS[Minimal Dependencies<br/>📦 requests<br/>📦 lobster-core]
-    end
-
-    subgraph "lobster-server (AWS Lambda)"
-        LAMBDA_FUNC[Lambda Function<br/>🚀 lambda_function.py<br/>🔧 Deployment Scripts]
-        LAMBDA_DEPS[Optimized Dependencies<br/>📦 langchain (lightweight)<br/>📦 pandas, numpy<br/>📦 lobster-local (runtime)]
-    end
-
-    CORE_INTERFACES --> LOCAL_IMPL
-    CORE_INTERFACES --> CLOUD_CLIENT
-    LOCAL_IMPL --> LAMBDA_FUNC
-
-    classDef core fill:#f3e5f5,stroke:#4a148c,stroke-width:3px
-    classDef local fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef cloud fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
-    classDef server fill:#fff3e0,stroke:#f57c00,stroke-width:2px
-
-    class CORE_INTERFACES,CORE_DEPS core
-    class LOCAL_IMPL,LOCAL_DEPS local
-    class CLOUD_CLIENT,CLOUD_DEPS cloud
-    class LAMBDA_FUNC,LAMBDA_DEPS server
-```
-
-### 🔄 **Cloud Request Processing Flow**
-
-```mermaid
-sequenceDiagram
-    participant User as User
-    participant CLI as Lobster CLI
-    participant CC as CloudLobsterClient  
-    participant AGW as API Gateway
-    participant Lambda as AWS Lambda
-    participant LobsterLocal as Lobster Local
-
-    Note over User,LobsterLocal: Cloud Query Processing Flow
-
-    User->>CLI: lobster query "Analyze RNA-seq data"
-    Note over CLI: Detects LOBSTER_CLOUD_KEY
-    CLI->>CLI: Initialize CloudLobsterClient
-
-    CLI->>CC: query(user_request)
-    CC->>CC: Validate API key format
-    CC->>CC: Prepare request payload
-
-    loop Retry Logic (max 3 attempts)
-        CC->>AGW: POST /query with Bearer token
-        AGW->>AGW: Validate API key
-        AGW->>AGW: Apply rate limiting
-        
-        alt Valid API key
-            AGW->>Lambda: Forward request
-            Lambda->>Lambda: Parse event & headers
-            Lambda->>Lambda: Validate API key against hardcoded list
-            Lambda->>Lambda: Extract query from request body
-            
-            Lambda->>LobsterLocal: Initialize local client
-            LobsterLocal->>LobsterLocal: Process query with full AI pipeline
-            LobsterLocal-->>Lambda: Analysis results
-            
-            Lambda->>Lambda: Add cloud metadata
-            Lambda->>Lambda: Format JSON response
-            Lambda-->>AGW: 200 OK with results
-            AGW-->>CC: JSON response
-            break
-        else Invalid API key
-            AGW-->>CC: 401 Unauthorized
-            CC->>CC: Handle authentication error
-        else Rate limited
-            AGW-->>CC: 429 Too Many Requests
-            CC->>CC: Wait and retry
-        else Server error
-            Lambda-->>AGW: 500 Internal Server Error
-            AGW-->>CC: 500 response
-            CC->>CC: Log error and retry
-        end
-    end
-
-    CC-->>CLI: Formatted response or error
-    CLI-->>User: Display results with cloud indicators
-
-    Note over User,LobsterLocal: Complete cloud processing cycle
-```
-
-### 🛠️ **Deployment & Testing Infrastructure**
-
-```mermaid
-graph TB
-    subgraph "Development Workflow"
-        DEV[Developer<br/>💻 Code Changes]
-        BUILD[Build Process<br/>🔨 deploy_to_aws.sh]
-        TEST_LOCAL[Local Testing<br/>🧪 lambda_function.py]
-    end
-
-    subgraph "AWS Deployment"
-        PACKAGE[Lambda Package<br/>📦 Dependency Installation]
-        UPLOAD[Deploy to AWS<br/>🚀 ZIP Upload]
-        CONFIG[Lambda Configuration<br/>⚙️ Runtime Settings]
-    end
-
-    subgraph "Production Testing"
-        HEALTH[Health Checks<br/>❤️ /status endpoint]
-        INTEGRATION[Integration Tests<br/>🔧 test_aws_deployment.py]
-        MONITORING[Performance Tests<br/>📊 Response Times]
-    end
-
-    subgraph "Business Validation"
-        API_KEYS[API Key Testing<br/>🔑 test-enterprise-001/002]
-        USER_TESTING[Alpha User Testing<br/>👥 Real Usage Scenarios]
-        METRICS[Usage Analytics<br/>📈 Business Metrics]
-    end
-
-    DEV --> BUILD
-    BUILD --> TEST_LOCAL
-    TEST_LOCAL --> PACKAGE
-    
-    PACKAGE --> UPLOAD
-    UPLOAD --> CONFIG
-    CONFIG --> HEALTH
-    
-    HEALTH --> INTEGRATION
-    INTEGRATION --> MONITORING
-    MONITORING --> API_KEYS
-    
-    API_KEYS --> USER_TESTING
-    USER_TESTING --> METRICS
-
-    classDef dev fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef deploy fill:#ff9800,stroke:#f57c00,stroke-width:2px
-    classDef test fill:#4caf50,stroke:#2e7d32,stroke-width:2px
-    classDef business fill:#9c27b0,stroke:#6a1b9a,stroke-width:2px
-
-    class DEV,BUILD,TEST_LOCAL dev
-    class PACKAGE,UPLOAD,CONFIG deploy
-    class HEALTH,INTEGRATION,MONITORING test
-    class API_KEYS,USER_TESTING,METRICS business
-```
-
-### 📊 **API Endpoint Specifications**
-
-| Endpoint | Method | Purpose | Authentication | Response |
-|----------|--------|---------|----------------|----------|
-| `/query` | POST | Process bioinformatics queries | Bearer token | Analysis results + metadata |
-| `/status` | POST | Health check and system status | Bearer token | Service status + version info |
-| `/usage` | POST | Get usage statistics for API key | Bearer token | Usage limits + consumption |
-| `/models` | POST | List available analysis capabilities | Bearer token | Available models + descriptions |
-
-### 🔒 **Authentication & Security**
-
-#### **API Key Management (MVP)**
-```python
-# Hardcoded for business validation (lambda_function.py)
-VALID_API_KEYS = {
-    "test-enterprise-001": {
-        "name": "Test Enterprise User 1",
-        "tier": "enterprise", 
-        "max_queries_per_hour": 100
-    },
-    "test-enterprise-002": {
-        "name": "Test Enterprise User 2",
-        "tier": "enterprise",
-        "max_queries_per_hour": 100  
-    },
-    "demo-user-001": {
-        "name": "Demo User",
-        "tier": "demo",
-        "max_queries_per_hour": 10
-    }
-}
-```
-
-#### **Security Features**
-- **Bearer Token Authentication**: Standard HTTP Authorization header
-- **Rate Limiting**: Per-tier query limits (10-100 queries/hour)
-- **CORS Support**: Browser compatibility with proper headers
-- **Error Handling**: No sensitive information leaked in error responses
-- **Request Validation**: Input sanitization and payload validation
-
-#### **Future Security Enhancements**
-- **AWS Secrets Manager**: Production API key storage
-- **JWT Tokens**: Secure token-based authentication
-- **Usage Analytics**: DynamoDB integration for usage tracking
-- **IP Whitelisting**: Additional security layer for enterprise users
-
-### 🎯 **Business Validation Ready Features**
-
-#### **Immediate Market Testing Capabilities**
-1. **✅ Production-Ready Backend**: AWS Lambda + API Gateway deployment
-2. **✅ Tiered Access Control**: Demo and enterprise API key tiers
-3. **✅ Comprehensive Testing**: Automated deployment and integration tests
-4. **✅ Professional Documentation**: Complete setup and usage guides
-5. **✅ Error Handling**: Robust error management and user feedback
-6. **✅ Performance Monitoring**: Response time tracking and health checks
-
-#### **Alpha User Onboarding Flow**
-```
-1. User receives API key (test-enterprise-001 or demo-user-001)
-2. User installs cloud client: pip install -e ./lobster-cloud
-3. User sets environment: export LOBSTER_CLOUD_KEY=their-api-key
-4. User runs analysis: lobster query "Analyze my RNA-seq data"
-5. System automatically uses cloud backend
-6. User receives full bioinformatics analysis results
-7. Usage tracked for business metrics and validation
-```
-
-This cloud architecture enables immediate business model validation with enterprise-grade reliability and professional user experience.
+**[Join the Waitlist →](mailto:cloud@homara.ai)**
 
 ## Architecture Migration Summary
 
