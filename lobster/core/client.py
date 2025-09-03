@@ -16,13 +16,14 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langfuse.langchain import CallbackHandler as LangfuseCallback
 
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.core.interfaces.base_client import BaseClient
 from lobster.agents.graph import create_bioinformatics_graph
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 
-class AgentClient:
+class AgentClient(BaseClient):
     def __init__(
         self,
         data_manager: Optional[DataManagerV2] = None,

@@ -78,15 +78,33 @@ lobster chat  # Start analyzing immediately!
 - 4GB+ RAM recommended
 - API keys for LLM providers (OpenAI, AWS Bedrock)
 
-## 🌟 **Coming Soon: Cloud Platform**
+## ☁️ **Lobster Cloud: Seamless Cloud Integration**
 
-We're launching a **cloud-hosted version** with:
-- ☁️ **No Local Setup Required** - Access through web browser or API
+Experience the power of cloud computing with **automatic cloud detection**:
+- ☁️ **Zero Configuration** - Just set your API key and go
 - 🚀 **Scalable Computing** - Handle large datasets without local hardware limits  
-- 🔄 **Seamless Sync** - Work across devices with cloud storage
-- 👥 **Team Collaboration** - Share analyses and collaborate in real-time
+- 🔄 **Seamless Switching** - Automatic fallback to local mode if needed
+- 🔒 **Secure Processing** - Enterprise-grade security for your data
 
-**[Join the Waitlist →](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20Early%20Access)**
+### **Getting Started with Cloud**
+
+1. **Get your API key** from [cloud.lobster.ai](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)
+2. **Set your environment variable**:
+   ```bash
+   # Add to your .env file
+   LOBSTER_CLOUD_KEY=your-api-key-here
+   ```
+3. **Run Lobster as usual** - it automatically detects and uses cloud mode:
+   ```bash
+   lobster chat  # Automatically uses cloud when key is present
+   ```
+
+### **Smart Local Fallback**
+- **No Cloud Key?** → Runs locally with full functionality
+- **Cloud Unavailable?** → Automatically falls back to local mode
+- **Same Experience** → Identical interface whether cloud or local
+
+**[Request Cloud Access →](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)**
 
 ## 📚 **Learn More**
 

@@ -201,6 +201,18 @@ AWS_BEDROCK_SECRET_ACCESS_KEY="your-aws-secret-key-here"
 NCBI_API_KEY="your-ncbi-api-key-here"
 
 # =============================================================================
+# LOBSTER CLOUD CONFIGURATION (Optional)
+# =============================================================================
+# Set these to use Lobster Cloud instead of local processing
+# Get your API key from https://cloud.lobster.ai or contact cloud@homara.ai
+
+# LOBSTER_CLOUD_KEY="your-cloud-api-key-here"
+# LOBSTER_ENDPOINT="https://api.lobster.homara.ai"  # Optional: defaults to production
+
+# When LOBSTER_CLOUD_KEY is set, all processing will be done in the cloud
+# When not set, Lobster will run locally with full functionality
+
+# =============================================================================
 # AGENT CONFIGURATION (Professional System)
 # =============================================================================
 

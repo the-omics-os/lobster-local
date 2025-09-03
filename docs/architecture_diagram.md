@@ -1,8 +1,126 @@
-# Lobster AI - Open Source Architecture
+# Lobster AI - Cloud & Local Architecture
 
 ## 🏗️ **System Architecture Overview**
 
-Lobster AI is a powerful **multi-agent bioinformatics platform** designed for both local and cloud deployment. This documentation covers the open source components available in this repository.
+Lobster AI is a powerful **multi-agent bioinformatics platform** with seamless cloud and local deployment capabilities. The system automatically detects your configuration and routes requests appropriately.
+
+## ☁️ **Cloud/Local Architecture Pattern**
+
+```mermaid
+graph TB
+    subgraph "User Interface Layer"
+        CLI[🦞 Lobster CLI<br/>lobster chat]
+        STREAMLIT[📊 Streamlit Web UI<br/>streamlit_app.py]
+        API[🔌 FastAPI Server<br/>lobster serve]
+    end
+
+    subgraph "Smart Client Detection"
+        DETECT[Environment Check<br/>LOBSTER_CLOUD_KEY?]
+        INIT[init_client()<br/>🔄 Automatic Switching]
+    end
+
+    subgraph "☁️ Cloud Mode (LOBSTER_CLOUD_KEY set)"
+        CLOUD_CLIENT[CloudLobsterClient<br/>🌩️ HTTP API Calls]
+        CLOUD_API[Lobster Cloud API<br/>api.lobster.homara.ai]
+        AWS_INFRA[AWS Infrastructure<br/>🏗️ Scalable Compute]
+    end
+
+    subgraph "💻 Local Mode (No cloud key or fallback)"
+        LOCAL_CLIENT[AgentClient<br/>🖥️ Local LangGraph Processing]
+        LOCAL_AGENTS[Local AI Agents<br/>🤖 Full Agent Pipeline]
+        LOCAL_DATA[DataManagerV2<br/>📊 Local Data Management]
+    end
+
+    subgraph "🔄 Unified Interface"
+        BASE_CLIENT[BaseClient Interface<br/>📋 Common Methods Contract]
+        METHODS[query(), get_status()<br/>read_file(), export_session()]
+    end
+
+    CLI --> INIT
+    STREAMLIT --> INIT
+    API --> INIT
+    
+    INIT --> DETECT
+    DETECT --> |Cloud Key Present| CLOUD_CLIENT
+    DETECT --> |No Key/Fallback| LOCAL_CLIENT
+    
+    CLOUD_CLIENT --> |HTTP/REST| CLOUD_API
+    CLOUD_API --> AWS_INFRA
+    
+    LOCAL_CLIENT --> LOCAL_AGENTS
+    LOCAL_CLIENT --> LOCAL_DATA
+    
+    CLOUD_CLIENT -.-> |Implements| BASE_CLIENT
+    LOCAL_CLIENT -.-> |Implements| BASE_CLIENT
+    BASE_CLIENT --> METHODS
+
+    classDef ui fill:#e3f2fd,stroke:#0277bd,stroke-width:2px
+    classDef detect fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef cloud fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
+    classDef local fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef interface fill:#fce4ec,stroke:#c2185b,stroke-width:2px
+
+    class CLI,STREAMLIT,API ui
+    class DETECT,INIT detect
+    class CLOUD_CLIENT,CLOUD_API,AWS_INFRA cloud
+    class LOCAL_CLIENT,LOCAL_AGENTS,LOCAL_DATA local
+    class BASE_CLIENT,METHODS interface
+```
+
+## 🔄 **Seamless Mode Switching Flow**
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI
+    participant init_client
+    participant CloudClient
+    participant LocalClient
+    participant CloudAPI
+
+    User->>CLI: lobster chat
+    CLI->>init_client: Initialize client
+    
+    Note over init_client: Check LOBSTER_CLOUD_KEY
+    
+    alt Cloud Key Present
+        init_client->>CloudClient: new CloudLobsterClient(api_key)
+        CloudClient->>CloudAPI: Test connection (get_status)
+        
+        alt Connection Success
+            CloudAPI-->>CloudClient: ✅ Status OK
+            CloudClient-->>init_client: ✅ Cloud client ready
+            init_client-->>CLI: CloudLobsterClient instance
+            CLI-->>User: 🌩️ "Cloud mode active"
+        else Connection Failed
+            CloudAPI-->>CloudClient: ❌ Connection failed
+            CloudClient-->>init_client: ❌ Error
+            init_client->>LocalClient: Fallback to local
+            LocalClient-->>init_client: ✅ Local client ready
+            init_client-->>CLI: AgentClient instance
+            CLI-->>User: 💻 "Using local mode (cloud unavailable)"
+        end
+    else No Cloud Key
+        init_client->>LocalClient: new AgentClient()
+        LocalClient-->>init_client: ✅ Local client ready
+        init_client-->>CLI: AgentClient instance
+        CLI-->>User: 💻 "Using local mode"
+    end
+    
+    User->>CLI: "Analyze my RNA-seq data"
+    CLI->>init_client: client.query(user_input)
+    
+    alt Using Cloud Client
+        init_client->>CloudAPI: POST /query
+        CloudAPI-->>init_client: Analysis response
+    else Using Local Client
+        init_client->>LocalClient: Process with local agents
+        LocalClient-->>init_client: Analysis response
+    end
+    
+    init_client-->>CLI: Standardized response
+    CLI-->>User: 🦞 Analysis results
+```
 
 ### 📦 **Clean Single Package Structure**
 
