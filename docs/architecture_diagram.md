@@ -4,47 +4,60 @@
 
 Lobster AI is a powerful **multi-agent bioinformatics platform** designed for both local and cloud deployment. This documentation covers the open source components available in this repository.
 
-### 📦 **Open Source Package Structure**
+### 📦 **Clean Single Package Structure**
 
 ```mermaid
 graph TB
-    subgraph "Open Source Components"
-        MAIN[lobster/<br/>🦞 Main Package<br/>Complete Local Implementation]
-        CORE[lobster-core/<br/>🔗 Shared Interfaces<br/>Abstract Base Classes]
-        LOCAL[lobster-local/<br/>🖥️ Modular Implementation<br/>Development Structure]
+    subgraph "Lobster AI Open Source"
+        MAIN[lobster/<br/>🦞 Complete Bioinformatics Platform<br/>All Features Included]
+        
+        subgraph "Core Components"
+            CLI[cli.py<br/>🔄 Smart CLI with Cloud Detection]
+            AGENTS[agents/<br/>🤖 All AI Agents]
+            CORE[core/<br/>📊 DataManagerV2 & Client]
+            TOOLS[tools/<br/>🔧 Analysis Services]
+            UTILS[utils/<br/>🛠️ Utilities & Callbacks]
+            CONFIG[config/<br/>⚙️ Configuration System]
+        end
+        
+        MAIN --> CLI
+        MAIN --> AGENTS
+        MAIN --> CORE
+        MAIN --> TOOLS
+        MAIN --> UTILS
+        MAIN --> CONFIG
     end
 
     subgraph "Smart CLI Detection"
-        CLI[lobster/cli.py<br/>🔄 Cloud Detection]
-        DETECT[Environment Check<br/>LOBSTER_CLOUD_KEY]
-        MESSAGE[Cloud Upgrade Message<br/>☁️ Visit cloud.lobster.ai]
+        DETECT[Environment Check<br/>LOBSTER_CLOUD_KEY?]
+        NO_KEY[💻 Use Local Mode<br/>Full Functionality]
+        WITH_KEY[☁️ Show Cloud Message<br/>→ cloud.lobster.ai<br/>→ Fallback to Local]
     end
 
-    subgraph "Local Deployment (Free)"
-        CLIENT[AgentClient<br/>💻 Full Local Features]
-        DM[DataManagerV2<br/>📊 Complete Data Management]
-        AGENTS[AI Agents<br/>🤖 All Analysis Capabilities]
+    subgraph "Local Processing (100% Functional)"
+        CLIENT[AgentClient<br/>💻 Complete Features]
+        DM[DataManagerV2<br/>📊 All Data Management]
+        AI_PIPELINE[AI Agent Pipeline<br/>🧬 Full Analysis Power]
     end
 
     CLI --> DETECT
-    DETECT --> |No Cloud Key| CLIENT
-    DETECT --> |Cloud Key Set| MESSAGE
-    MESSAGE --> |Fallback| CLIENT
+    DETECT --> |No Cloud Key| NO_KEY
+    DETECT --> |Cloud Key Set| WITH_KEY
+    NO_KEY --> CLIENT
+    WITH_KEY --> CLIENT
     
     CLIENT --> DM
-    CLIENT --> AGENTS
-    
-    MAIN --> CLIENT
-    CORE --> MAIN
-    LOCAL --> MAIN
+    CLIENT --> AI_PIPELINE
 
-    classDef opensource fill:#4caf50,stroke:#2e7d32,stroke-width:3px
+    classDef main fill:#4caf50,stroke:#2e7d32,stroke-width:4px
+    classDef component fill:#81c784,stroke:#4caf50,stroke-width:2px
     classDef cli fill:#2196f3,stroke:#1976d2,stroke-width:2px
-    classDef local fill:#ff9800,stroke:#f57c00,stroke-width:2px
+    classDef processing fill:#ff9800,stroke:#f57c00,stroke-width:2px
 
-    class MAIN,CORE,LOCAL opensource
-    class CLI,DETECT,MESSAGE cli
-    class CLIENT,DM,AGENTS local
+    class MAIN main
+    class CLI,AGENTS,CORE,TOOLS,UTILS,CONFIG component
+    class DETECT,NO_KEY,WITH_KEY cli
+    class CLIENT,DM,AI_PIPELINE processing
 ```
 
 ### 🌟 **Cloud Platform (Coming Soon)**

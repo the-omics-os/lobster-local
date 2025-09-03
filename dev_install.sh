@@ -35,42 +35,23 @@ else
 fi
 
 echo ""
-echo -e "${YELLOW}📦 Installing open source packages...${NC}"
+echo -e "${YELLOW}📦 Installing Lobster AI (single package)...${NC}"
 
-# Install core package first
-if [ -d "lobster-core" ]; then
-    echo "1/2 Installing lobster-core..."
-    pip install -e ./lobster-core/ || {
-        echo -e "${RED}❌ Failed to install lobster-core${NC}"
-        exit 1
-    }
-else
-    echo -e "${YELLOW}⚠️  lobster-core directory not found, skipping...${NC}"
-fi
-
-# Install local package (includes CLI)
-if [ -d "lobster-local" ]; then
-    echo "2/2 Installing lobster-local..."
-    pip install -e ./lobster-local/ || {
-        echo -e "${RED}❌ Failed to install lobster-local${NC}"
-        exit 1
-    }
-else
-    echo -e "${YELLOW}⚠️  lobster-local directory not found, using main package...${NC}"
-    echo "2/2 Installing main lobster package..."
-    pip install -e . || {
-        echo -e "${RED}❌ Failed to install main package${NC}"
-        exit 1
-    }
-fi
+# Install the main lobster package
+echo "Installing lobster package..."
+pip install -e . || {
+    echo -e "${RED}❌ Failed to install lobster package${NC}"
+    exit 1
+}
 
 echo ""
 echo -e "${GREEN}🎉 Open source installation complete!${NC}"
 echo ""
 echo -e "${BLUE}📋 What you have installed:${NC}"
-echo "   • 🔗 lobster-core: Shared interfaces and utilities"
-echo "   • 💻 lobster-local: Complete local bioinformatics implementation"
-echo "   • 🦞 Full CLI with all features"
+echo "   • 🦞 Complete Lobster AI bioinformatics platform"
+echo "   • 🤖 All AI agents (Data, Research, Transcriptomics, Proteomics)"
+echo "   • 🔧 Full analysis capabilities and visualization tools"
+echo "   • 💻 Interactive CLI with natural language interface"
 echo ""
 echo -e "${BLUE}🚀 Getting started:${NC}"
 echo "1. Configure your API keys:"
