@@ -50,7 +50,7 @@ class AgentEvent:
 
 class TerminalCallbackHandler(BaseCallbackHandler):
     """
-    Modern callback handler with Rich terminal display.
+    Modern Callback handler with Rich terminal display.
     Shows agent reasoning, tool usage, and execution flow in a clean format.
     """
     
