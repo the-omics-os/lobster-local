@@ -463,8 +463,8 @@ class StreamingTerminalCallback(TerminalCallbackHandler):
             self.layout.update(panel)
 
 
-# Integration with the new agent_cli ReasoningCallback
-class RichReasoningCallback(TerminalCallbackHandler):
+# Integration with the new agent_cli SimpleCallback
+class SimpleTerminalCallback(TerminalCallbackHandler):
     """
     Simplified callback specifically for the agent_cli integration.
     Inherits from TerminalCallbackHandler but provides simpler interface.

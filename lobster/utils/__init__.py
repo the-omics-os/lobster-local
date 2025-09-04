@@ -9,9 +9,10 @@ This module contains various utility functions and classes:
 """
 
 from .logger import get_logger
-from .callbacks import TerminalCallbackHandler
+from .callbacks import TerminalCallbackHandler, SimpleTerminalCallback
 
 __all__ = [
     'get_logger',
-    'TerminalCallbackHandler'
+    'TerminalCallbackHandler',
+    'SimpleTerminalCallback'
 ]

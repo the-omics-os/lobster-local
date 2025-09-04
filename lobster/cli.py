@@ -26,7 +26,7 @@ from rich import console
 
 from lobster.core.client import AgentClient
 # Implobsterort the proper callback handler
-from lobster.utils import TerminalCallbackHandler
+from lobster.utils import TerminalCallbackHandler, SimpleTerminalCallback
 from lobster.config.agent_config import get_agent_configurator, initialize_configurator, LobsterAgentConfigurator
 import json
 
@@ -192,14 +192,23 @@ def init_client(
     from lobster.core.data_manager_v2 import DataManagerV2
     data_manager = DataManagerV2(workspace_path=workspace, console=console)
     
-    # Create reasoning callback using the terminal_callback_handler
+    # Create callback using the appropriate terminal_callback_handler
     callbacks = []
     if reasoning:
+        # Use full TerminalCallbackHandler for detailed reasoning output
         reasoning_callback = TerminalCallbackHandler(
-            console=console, 
-            show_reasoning=True
+            console=console,
+            show_reasoning=True,
+            verbose=True
         )
         callbacks.append(reasoning_callback)
+    else:
+        # Use simplified callback for basic output
+        simple_callback = SimpleTerminalCallback(
+            console=console,
+            show_reasoning=False
+        )
+        callbacks.append(simple_callback)
     
     # Initialize client with proper data_manager connection
     client = AgentClient(
