@@ -113,6 +113,38 @@ Experience the power of cloud computing with **automatic cloud detection**:
 - 🧪 **[Example Analyses](examples/)** - Real-world use cases
 - 🎓 **[Video Tutorials](https://youtube.com/@homaraai)** - Step-by-step walkthroughs
 
+## 🔍 **Data Quality & Compliance**
+
+Lobster AI maintains **publication-grade data quality standards** for transcriptomics and proteomics analysis -> [source publication](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=9926151): 
+
+### ✅ **Quality Assessment Results**
+- **✅ 60% COMPLIANT** - Strong foundational QC infrastructure
+- **⚠️ 26% PARTIAL** - Areas identified for enhancement  
+- **❌ 14% MISSING** - Clear roadmap for remaining features
+
+### 🏗️ **Robust QC Architecture**
+- **Comprehensive Provenance Tracking** - W3C-PROV compliant analysis history
+- **Automated Quality Control** - Built-in metrics for genes, cells, and proteins
+- **Schema Validation** - Structured metadata for reproducible research
+- **Batch Effect Management** - Detection and correction workflows
+- **Reproducible Workflows** - Containerized analysis with parameter logging
+
+### 📋 **Key QC Components Analyzed**
+- `lobster/tools/quality_service.py` - Quality assessment algorithms
+- `lobster/tools/preprocessing_service.py` - Normalization and batch correction  
+- `lobster/core/provenance.py` - Complete analysis history tracking
+- `lobster/core/schemas/` - Transcriptomics and proteomics metadata validation
+- `AGENT_DATA_QC_CHECKLIST.md` - Comprehensive quality requirements checklist
+
+### 🎯 **Next Steps for Highest Quality**
+**Priority improvements identified:**
+1. **Missing Data Handling** - Implement imputation strategies for proteomics
+2. **Reference Harmonization** - Add Ensembl/UniProt version management
+3. **Statistical Rigor** - Systematic FDR control across all analyses
+4. **Proteomics Enhancement** - Multi-level PSM/peptide/protein QC
+
+📊 **[View Full Quality Report →](AGENT_DATA_QC_CHECKLIST_report.md)**
+
 ## 🤝 **Community & Support**
 
 - 💬 **[Discord Community](https://discord.gg/homaraai)** - Chat with users and developers
