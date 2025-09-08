@@ -1122,6 +1122,7 @@ class DataManagerV2:
     def get_data_summary(self) -> Dict[str, Any]:
         """
         Get summary of current dataset or all modalities.
+        Handles various data types robustly (h5ad, sparse matrices, etc.).
         
         Returns:
             Dict[str, Any]: Summary information
@@ -1132,44 +1133,237 @@ class DataManagerV2:
         if self.current_dataset and self.current_dataset in self.modalities:
             # Summary for current dataset
             adata = self.modalities[self.current_dataset]
-            metrics = self.get_quality_metrics(self.current_dataset)
+            
+            try:
+                metrics = self.get_quality_metrics(self.current_dataset)
+            except Exception as e:
+                logger.warning(f"Could not get quality metrics for {self.current_dataset}: {e}")
+                metrics = {"error": str(e)}
+            
+            # Safely get memory usage for different matrix types
+            memory_usage = self._get_safe_memory_usage(adata.X)
+            
+            # Safely get data type information
+            data_type_info = self._get_safe_data_type_info(adata.X)
             
             summary = {
                 "status": "Modality loaded",
                 "modality_name": self.current_dataset,
-                "shape": adata.shape,
-                "obs_names": list(adata.obs_names[:5]),  # First 5 observations
-                "var_names": list(adata.var_names[:5]),  # First 5 variables
-                "obs_columns": list(adata.obs.columns[:10]),  # First 10 obs columns
-                "var_columns": list(adata.var.columns[:10]),  # First 10 var columns
-                "layers": list(adata.layers.keys()) if adata.layers else [],
-                "obsm": list(adata.obsm.keys()) if adata.obsm else [],
-                "memory_usage": f"{adata.X.nbytes / 1024**2:.1f} MB" if hasattr(adata.X, 'nbytes') else "Unknown",
-                "metadata_keys": list(self.current_metadata.keys()),
+                "shape": self._get_safe_shape(adata),
+                "data_type": data_type_info,
+                "sample_names": self._get_safe_obs_names(adata),  # CLI expects 'sample_names'
+                "columns": self._get_safe_obs_columns(adata),      # CLI expects 'columns' for obs columns
+                "memory_usage": memory_usage,
+                "is_sparse": self._is_sparse_matrix(adata.X),
+                "metadata_keys": list(self.current_metadata.keys()) if self.current_metadata else [],
                 "processing_log": self.processing_log[-5:] if self.processing_log else [],
+                # Additional fields for advanced usage
+                "obs_names": self._get_safe_obs_names(adata),
+                "var_names": self._get_safe_var_names(adata),
+                "obs_columns": self._get_safe_obs_columns(adata),
+                "var_columns": self._get_safe_var_columns(adata),
+                "layers": self._get_safe_layers(adata),
+                "obsm": self._get_safe_obsm(adata),
+                "uns": self._get_safe_uns(adata),
                 "quality_metrics": metrics
             }
         else:
             # Summary for all modalities
             modality_summaries = {}
             for mod_name, adata in self.modalities.items():
-                modality_summaries[mod_name] = {
-                    "shape": adata.shape,
-                    "obs_columns": len(adata.obs.columns),
-                    "var_columns": len(adata.var.columns),
-                    "layers": len(adata.layers) if adata.layers else 0,
-                }
+                try:
+                    modality_summaries[mod_name] = {
+                        "shape": self._get_safe_shape(adata),
+                        "data_type": self._get_safe_data_type_info(adata.X),
+                        "obs_columns": len(adata.obs.columns) if hasattr(adata, 'obs') and adata.obs is not None else 0,
+                        "var_columns": len(adata.var.columns) if hasattr(adata, 'var') and adata.var is not None else 0,
+                        "layers": len(adata.layers) if hasattr(adata, 'layers') and adata.layers else 0,
+                        "memory_usage": self._get_safe_memory_usage(adata.X),
+                        "is_sparse": self._is_sparse_matrix(adata.X),
+                    }
+                except Exception as e:
+                    logger.warning(f"Error getting summary for modality {mod_name}: {e}")
+                    modality_summaries[mod_name] = {
+                        "error": str(e),
+                        "shape": (0, 0),
+                        "data_type": "unknown"
+                    }
+            
+            # Safely calculate totals
+            total_obs, total_vars = 0, 0
+            for adata in self.modalities.values():
+                try:
+                    shape = self._get_safe_shape(adata)
+                    total_obs += shape[0]
+                    total_vars += shape[1]
+                except Exception:
+                    continue
             
             summary = {
                 "status": f"{len(self.modalities)} modalities loaded",
                 "modalities": modality_summaries,
-                "total_obs": sum(adata.shape[0] for adata in self.modalities.values()),
-                "total_vars": sum(adata.shape[1] for adata in self.modalities.values()),
-                "metadata_keys": list(self.current_metadata.keys()),
+                "total_obs": total_obs,
+                "total_vars": total_vars,
+                "metadata_keys": list(self.current_metadata.keys()) if self.current_metadata else [],
                 "processing_log": self.processing_log[-5:] if self.processing_log else [],
             }
         
         return summary
+
+    def _get_safe_memory_usage(self, X) -> str:
+        """Safely get memory usage for different matrix types."""
+        try:
+            if X is None:
+                return "N/A (No data matrix)"
+            
+            # Handle sparse matrices
+            if hasattr(X, 'nnz') and hasattr(X, 'data'):  # Likely a sparse matrix
+                # For sparse matrices, calculate memory from data + indices + indptr
+                if hasattr(X, 'data') and hasattr(X.data, 'nbytes'):
+                    data_bytes = X.data.nbytes
+                    if hasattr(X, 'indices') and hasattr(X.indices, 'nbytes'):
+                        data_bytes += X.indices.nbytes
+                    if hasattr(X, 'indptr') and hasattr(X.indptr, 'nbytes'):
+                        data_bytes += X.indptr.nbytes
+                    return f"{data_bytes / 1024**2:.2f} MB (sparse)"
+                else:
+                    return f"~{X.nnz * 12 / 1024**2:.2f} MB (sparse, estimated)"
+            
+            # Handle dense matrices
+            elif hasattr(X, 'nbytes'):
+                return f"{X.nbytes / 1024**2:.2f} MB (dense)"
+            
+            # Handle arrays with size and dtype
+            elif hasattr(X, 'size') and hasattr(X, 'dtype'):
+                bytes_estimate = X.size * X.dtype.itemsize
+                return f"{bytes_estimate / 1024**2:.2f} MB (estimated)"
+            
+            # Fallback for other types
+            else:
+                return "Unknown (unsupported matrix type)"
+                
+        except Exception as e:
+            return f"Error calculating memory: {str(e)}"
+
+    def _get_safe_data_type_info(self, X) -> str:
+        """Safely get data type information."""
+        try:
+            if X is None:
+                return "None"
+            
+            # Check if it's a sparse matrix
+            if hasattr(X, 'nnz'):
+                matrix_type = type(X).__name__
+                if hasattr(X, 'dtype'):
+                    return f"{matrix_type}[{X.dtype}]"
+                else:
+                    return f"{matrix_type}[unknown dtype]"
+            
+            # Dense array/matrix
+            elif hasattr(X, 'dtype'):
+                return f"{type(X).__name__}[{X.dtype}]"
+            
+            # Other types
+            else:
+                return str(type(X).__name__)
+                
+        except Exception:
+            return "unknown"
+
+    def _get_safe_shape(self, adata) -> tuple:
+        """Safely get shape from AnnData object."""
+        try:
+            if hasattr(adata, 'shape'):
+                return adata.shape
+            elif hasattr(adata, 'n_obs') and hasattr(adata, 'n_vars'):
+                return (adata.n_obs, adata.n_vars)
+            elif hasattr(adata, 'X') and adata.X is not None and hasattr(adata.X, 'shape'):
+                return adata.X.shape
+            else:
+                return (0, 0)
+        except Exception:
+            return (0, 0)
+
+    def _get_safe_obs_names(self, adata) -> list:
+        """Safely get observation names."""
+        try:
+            if hasattr(adata, 'obs_names') and adata.obs_names is not None:
+                return list(adata.obs_names[:5])
+            elif hasattr(adata, 'obs') and adata.obs is not None and hasattr(adata.obs, 'index'):
+                return list(adata.obs.index[:5])
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _get_safe_var_names(self, adata) -> list:
+        """Safely get variable names."""
+        try:
+            if hasattr(adata, 'var_names') and adata.var_names is not None:
+                return list(adata.var_names[:5])
+            elif hasattr(adata, 'var') and adata.var is not None and hasattr(adata.var, 'index'):
+                return list(adata.var.index[:5])
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _get_safe_obs_columns(self, adata) -> list:
+        """Safely get observation columns."""
+        try:
+            if hasattr(adata, 'obs') and adata.obs is not None and hasattr(adata.obs, 'columns'):
+                return list(adata.obs.columns[:10])
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _get_safe_var_columns(self, adata) -> list:
+        """Safely get variable columns."""
+        try:
+            if hasattr(adata, 'var') and adata.var is not None and hasattr(adata.var, 'columns'):
+                return list(adata.var.columns[:10])
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _get_safe_layers(self, adata) -> list:
+        """Safely get layer names."""
+        try:
+            if hasattr(adata, 'layers') and adata.layers is not None:
+                return list(adata.layers.keys())
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _get_safe_obsm(self, adata) -> list:
+        """Safely get obsm keys."""
+        try:
+            if hasattr(adata, 'obsm') and adata.obsm is not None:
+                return list(adata.obsm.keys())
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _get_safe_uns(self, adata) -> list:
+        """Safely get uns keys."""
+        try:
+            if hasattr(adata, 'uns') and adata.uns is not None:
+                return list(adata.uns.keys())
+            else:
+                return []
+        except Exception:
+            return []
+
+    def _is_sparse_matrix(self, X) -> bool:
+        """Check if matrix is sparse."""
+        try:
+            return hasattr(X, 'nnz') or 'sparse' in str(type(X)).lower()
+        except Exception:
+            return False
 
     def set_data(self, data: pd.DataFrame, metadata: Dict[str, Any] = None) -> pd.DataFrame:
         """

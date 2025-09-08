@@ -172,7 +172,7 @@ def data_expert(
                 
     @tool
     def download_geo_dataset(
-        geo_id: str, modality_type: str = "single_cell", **kwargs) -> str:
+        geo_id: str, modality_type: str = "single_cell", manual_strategy_override = 'MATRIX_FIRST', **kwargs) -> str:
         """
         Download dataset from GEO using accession number and load as a modality.
         IMPORTANT: Use fetch_geo_metadata_and_strategy_config FIRST to preview dataset before downloading.
@@ -180,6 +180,7 @@ def data_expert(
         Args:
             geo_id: GEO accession number (e.g., GSE12345)
             modality_type: Type of data modality ('single_cell', 'bulk', or 'auto_detect')
+            manual_strategy_override: Optional manual override for download strategy
             
         Returns:
             str: Summary of downloaded data with modality information
@@ -219,6 +220,7 @@ Use this modality for quality control, filtering, or downstream analysis."""
             result = geo_service.download_dataset(
                 geo_id=clean_geo_id, 
                 # modality_type=modality_type,
+                manual_strategy_override=manual_strategy_override,
                 **kwargs) #This kwargs contains the config dict
             
             return result
@@ -700,8 +702,12 @@ download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_ove
 Scenario C: Download the dataset with appropriate modality type, choice of strategy was SAMPLES_FIRST:
 download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='SAMPLES_FIRST')
 
-Do not call the download_geo_dataset function with kwargs, just enter the variable:
-DONT DO download_geo_dataset("<GEO ID>", modality_type="<Adapters>", 'kwargs' = {{'manual_strategy_override': 'MATRIX_FIRST'}})
+Other strategies include: 
+RAW_FIRST               # Prioritize raw UMI/count matrices
+SAMPLES_FIRST           # Download individual samples
+H5_FIRST                # Prioritize H5/H5AD files
+ARCHIVE_FIRST           # Extract from archives first
+FALLBACK                # Use fallback mechanisms
 
 once the dataset is downloaded you will see summary information about the download with the exact name of the modality ID
 

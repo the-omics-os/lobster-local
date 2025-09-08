@@ -1,7 +1,7 @@
 # Lobster AI Makefile
 # Professional build and development commands
 
-.PHONY: help install dev-install test format lint clean docker-build docker-run release check-python setup-env
+.PHONY: help install dev-install install-global uninstall-global test format lint clean docker-build docker-run release check-python setup-env
 
 # Configuration
 PYTHON := python3
@@ -52,6 +52,7 @@ help:
 	@echo "Installation:"
 	@echo "  make install        Install Lobster AI in virtual environment"
 	@echo "  make dev-install    Install with development dependencies"
+	@echo "  make install-global Install lobster command globally (macOS/Linux)"
 	@echo "  make clean-install  Clean install (remove existing installation)"
 	@echo "  make setup-env      Setup environment configuration"
 	@echo "  make activate       Show activation command"
@@ -76,6 +77,7 @@ help:
 	@echo "  make clean         Remove build artifacts"
 	@echo "  make clean-all     Remove all generated files"
 	@echo "  make uninstall     Remove virtual environment"
+	@echo "  make uninstall-global Remove global lobster command"
 
 # Python version check
 check-python:
@@ -232,6 +234,42 @@ clean-install:
 activate:
 	@echo "To activate the virtual environment, run:"
 	@echo "$(YELLOW)source $(VENV_PATH)/bin/activate$(NC)"
+
+# Global installation (macOS/Linux)
+install-global: $(VENV_PATH)
+	@echo "🌍 Installing lobster command globally..."
+	@if [ ! -f "$(VENV_PATH)/bin/lobster" ]; then \
+		echo "$(RED)❌ Lobster not found in virtual environment. Run 'make install' first.$(NC)"; \
+		exit 1; \
+	fi
+	@if [ ! -d "/usr/local/bin" ]; then \
+		echo "$(YELLOW)📁 Creating /usr/local/bin directory...$(NC)"; \
+		sudo mkdir -p /usr/local/bin; \
+	fi
+	@if [ -L "/usr/local/bin/lobster" ]; then \
+		echo "$(YELLOW)🔗 Removing existing lobster symlink...$(NC)"; \
+		sudo rm /usr/local/bin/lobster; \
+	fi
+	@echo "🔗 Creating global symlink..."
+	@sudo ln -sf "$(shell pwd)/$(VENV_PATH)/bin/lobster" /usr/local/bin/lobster
+	@echo "$(GREEN)✅ Lobster command installed globally!$(NC)"
+	@echo ""
+	@echo "$(BLUE)📋 You can now use 'lobster' from anywhere:$(NC)"
+	@echo "   $(YELLOW)lobster --help$(NC)"
+	@echo "   $(YELLOW)lobster chat$(NC)"
+	@echo ""
+	@echo "$(BLUE)💡 Note: The global command will use the virtual environment at:$(NC)"
+	@echo "   $(YELLOW)$(shell pwd)/$(VENV_PATH)$(NC)"
+
+uninstall-global:
+	@echo "🗑️  Removing global lobster command..."
+	@if [ -L "/usr/local/bin/lobster" ]; then \
+		echo "🔗 Removing symlink from /usr/local/bin/lobster..."; \
+		sudo rm /usr/local/bin/lobster; \
+		echo "$(GREEN)✅ Global lobster command removed$(NC)"; \
+	else \
+		echo "$(YELLOW)⚠️ No global lobster command found$(NC)"; \
+	fi
 
 # Testing targets (require virtual environment)
 test: $(VENV_PATH)

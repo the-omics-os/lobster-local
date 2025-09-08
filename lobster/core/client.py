@@ -289,6 +289,301 @@ class AgentClient(BaseClient):
         
         return None
     
+    # Enhanced file operations
+    def detect_file_type(self, file_path: Path) -> Dict[str, Any]:
+        """
+        Detect file type with comprehensive format identification.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Dictionary with file type information
+        """
+        import mimetypes
+        
+        # File extension mapping for bioinformatics and common formats
+        extension_map = {
+            # Bioinformatics data formats
+            '.h5ad': {'category': 'bioinformatics', 'type': 'single_cell_data', 'description': 'Single-cell RNA-seq data (H5AD format)', 'binary': True},
+            '.h5mu': {'category': 'bioinformatics', 'type': 'multimodal_data', 'description': 'Multi-modal omics data (H5MU format)', 'binary': True},
+            '.loom': {'category': 'bioinformatics', 'type': 'genomics_data', 'description': 'Genomics data (Loom format)', 'binary': True},
+            '.h5': {'category': 'bioinformatics', 'type': 'hdf5_data', 'description': 'HDF5 data file', 'binary': True},
+            '.mtx': {'category': 'bioinformatics', 'type': 'matrix_data', 'description': 'Matrix Market sparse matrix', 'binary': False},
+            '.mex': {'category': 'bioinformatics', 'type': 'matrix_data', 'description': 'Matrix Exchange format', 'binary': False},
+            
+            # Tabular data formats
+            '.csv': {'category': 'tabular', 'type': 'delimited_data', 'description': 'Comma-separated values', 'binary': False},
+            '.tsv': {'category': 'tabular', 'type': 'delimited_data', 'description': 'Tab-separated values', 'binary': False},
+            '.txt': {'category': 'tabular', 'type': 'delimited_data', 'description': 'Plain text data', 'binary': False},
+            '.xlsx': {'category': 'tabular', 'type': 'spreadsheet_data', 'description': 'Excel spreadsheet', 'binary': True},
+            '.xls': {'category': 'tabular', 'type': 'spreadsheet_data', 'description': 'Excel spreadsheet (legacy)', 'binary': True},
+            
+            # Configuration and metadata
+            '.json': {'category': 'metadata', 'type': 'structured_data', 'description': 'JSON metadata', 'binary': False},
+            '.yaml': {'category': 'metadata', 'type': 'structured_data', 'description': 'YAML configuration', 'binary': False},
+            '.yml': {'category': 'metadata', 'type': 'structured_data', 'description': 'YAML configuration', 'binary': False},
+            '.xml': {'category': 'metadata', 'type': 'structured_data', 'description': 'XML data', 'binary': False},
+            
+            # Code and scripts  
+            '.py': {'category': 'code', 'type': 'python_script', 'description': 'Python script', 'binary': False},
+            '.r': {'category': 'code', 'type': 'r_script', 'description': 'R script', 'binary': False},
+            '.sh': {'category': 'code', 'type': 'shell_script', 'description': 'Shell script', 'binary': False},
+            '.bash': {'category': 'code', 'type': 'shell_script', 'description': 'Bash script', 'binary': False},
+            
+            # Documentation
+            '.md': {'category': 'documentation', 'type': 'markdown', 'description': 'Markdown document', 'binary': False},
+            '.rst': {'category': 'documentation', 'type': 'restructured_text', 'description': 'reStructuredText document', 'binary': False},
+            
+            # Archives
+            '.gz': {'category': 'archive', 'type': 'compressed', 'description': 'Gzip compressed file', 'binary': True},
+            '.zip': {'category': 'archive', 'type': 'compressed', 'description': 'ZIP archive', 'binary': True},
+            '.tar': {'category': 'archive', 'type': 'compressed', 'description': 'TAR archive', 'binary': True},
+        }
+        
+        ext = file_path.suffix.lower()
+        
+        # Handle compound extensions like .csv.gz
+        if file_path.name.endswith('.gz'):
+            # Check the extension before .gz
+            name_without_gz = file_path.name[:-3]  # Remove .gz
+            inner_ext = Path(name_without_gz).suffix.lower()
+            if inner_ext in extension_map:
+                info = extension_map[inner_ext].copy()
+                info['compressed'] = True
+                info['description'] += ' (gzip compressed)'
+                return info
+            ext = '.gz'
+        
+        # Direct extension match
+        if ext in extension_map:
+            return extension_map[ext].copy()
+        
+        # Fallback to MIME type detection
+        mime_type, _ = mimetypes.guess_type(str(file_path))
+        if mime_type:
+            if mime_type.startswith('text/'):
+                return {
+                    'category': 'text',
+                    'type': 'plain_text',
+                    'description': f'Text file ({mime_type})',
+                    'binary': False
+                }
+            elif mime_type.startswith('image/'):
+                return {
+                    'category': 'image', 
+                    'type': 'image_file',
+                    'description': f'Image file ({mime_type})',
+                    'binary': True
+                }
+        
+        # Unknown file type
+        return {
+            'category': 'unknown',
+            'type': 'unknown',
+            'description': f'Unknown file type ({ext or "no extension"})',
+            'binary': True  # Assume binary for safety
+        }
+    
+    def locate_file(self, filename: str) -> Dict[str, Any]:
+        """
+        Locate file with comprehensive search and validation.
+        
+        Args:
+            filename: Filename or path to search for
+            
+        Returns:
+            Dictionary with file location and metadata
+        """
+        file_path = Path(filename)
+        
+        # If it's an absolute path, check directly
+        if file_path.is_absolute():
+            if file_path.exists():
+                if file_path.is_file():
+                    file_info = self.detect_file_type(file_path)
+                    return {
+                        'found': True,
+                        'path': file_path,
+                        'relative_to_workspace': file_path.relative_to(self.workspace_path) if file_path.is_relative_to(self.workspace_path) else None,
+                        'size_bytes': file_path.stat().st_size,
+                        'modified': datetime.fromtimestamp(file_path.stat().st_mtime),
+                        'readable': os.access(file_path, os.R_OK),
+                        **file_info
+                    }
+                else:
+                    return {'found': False, 'error': f"Path exists but is not a file: {file_path}"}
+            else:
+                return {'found': False, 'error': f"File not found: {file_path}"}
+        
+        # For relative paths, search in workspace directories
+        search_paths = [
+            self.workspace_path / filename,
+            self.workspace_path / "data" / filename,
+            self.data_manager.data_dir / filename,
+            self.data_manager.workspace_path / "plots" / filename,
+            self.data_manager.exports_dir / filename,
+            self.data_manager.cache_dir / filename,
+            Path.cwd() / filename  # Current working directory
+        ]
+        
+        # Remove duplicates while preserving order
+        unique_search_paths = []
+        seen = set()
+        for path in search_paths:
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_search_paths.append(path)
+        
+        for search_path in unique_search_paths:
+            if search_path.exists() and search_path.is_file():
+                try:
+                    file_info = self.detect_file_type(search_path)
+                    return {
+                        'found': True,
+                        'path': search_path.resolve(),
+                        'relative_to_workspace': search_path.relative_to(self.workspace_path) if search_path.is_relative_to(self.workspace_path) else None,
+                        'size_bytes': search_path.stat().st_size,
+                        'modified': datetime.fromtimestamp(search_path.stat().st_mtime),
+                        'readable': os.access(search_path, os.R_OK),
+                        'searched_paths': [str(p) for p in unique_search_paths],
+                        **file_info
+                    }
+                except (OSError, PermissionError):
+                    continue
+        
+        return {
+            'found': False,
+            'error': f"File '{filename}' not found in any search location",
+            'searched_paths': [str(p) for p in unique_search_paths]
+        }
+    
+    def load_data_file(self, filename: str) -> Dict[str, Any]:
+        """
+        Smart data loading into DataManagerV2 based on file type.
+        
+        Args:
+            filename: File to load
+            
+        Returns:
+            Dictionary with loading results and metadata
+        """
+        # First, locate the file
+        file_info = self.locate_file(filename)
+        
+        if not file_info['found']:
+            return {
+                'success': False,
+                'error': file_info['error'],
+                'searched_paths': file_info.get('searched_paths', [])
+            }
+        
+        file_path = file_info['path']
+        file_type = file_info['type']
+        
+        # Check if file is readable
+        if not file_info.get('readable', True):
+            return {
+                'success': False,
+                'error': f"Permission denied: Cannot read {file_path}"
+            }
+        
+        # Generate modality name from filename
+        modality_name = file_path.stem  # Filename without extension
+        
+        try:
+            # Check if this modality already exists
+            if modality_name in self.data_manager.list_modalities():
+                # Generate unique name
+                counter = 1
+                original_name = modality_name
+                while modality_name in self.data_manager.list_modalities():
+                    modality_name = f"{original_name}_{counter}"
+                    counter += 1
+            
+            # Load based on file type
+            if file_type in ['single_cell_data', 'multimodal_data', 'genomics_data', 'hdf5_data']:
+                # Use DataManager's load_modality method for bioinformatics formats
+                # Try to auto-detect if it's single-cell or bulk based on file
+                adapter_name = "transcriptomics_single_cell"  # Default assumption
+                
+                adata = self.data_manager.load_modality(
+                    name=modality_name,
+                    source=str(file_path),
+                    adapter=adapter_name,
+                    validate=False  # Skip validation for now to be more permissive
+                )
+                
+                return {
+                    'success': True,
+                    'modality_name': modality_name,
+                    'file_path': str(file_path),
+                    'file_type': file_info['description'],
+                    'data_shape': (adata.n_obs, adata.n_vars),
+                    'size_bytes': file_info['size_bytes'],
+                    'message': f"Data loaded successfully as modality '{modality_name}'"
+                }
+                
+            elif file_type in ['delimited_data', 'spreadsheet_data']:
+                # For tabular data, load as DataFrame and convert using transcriptomics adapter
+                try:
+                    if file_path.suffix.lower() in ['.csv']:
+                        import pandas as pd
+                        df = pd.read_csv(file_path)
+                    elif file_path.suffix.lower() in ['.tsv', '.txt']:
+                        import pandas as pd  
+                        df = pd.read_csv(file_path, sep='\t')
+                    elif file_path.suffix.lower() in ['.xlsx', '.xls']:
+                        import pandas as pd
+                        df = pd.read_excel(file_path)
+                    else:
+                        return {
+                            'success': False,
+                            'error': f"Unsupported tabular format: {file_path.suffix}"
+                        }
+                    
+                    # Use transcriptomics adapter for tabular data (genes x samples or samples x genes)
+                    adapter_name = "transcriptomics_bulk"  # Bulk is more generic for tabular data
+                    
+                    adata = self.data_manager.load_modality(
+                        name=modality_name,
+                        source=df,
+                        adapter=adapter_name,
+                        validate=False  # Skip validation to be more permissive
+                    )
+                    
+                    return {
+                        'success': True,
+                        'modality_name': modality_name,
+                        'file_path': str(file_path),
+                        'file_type': file_info['description'],
+                        'data_shape': (adata.n_obs, adata.n_vars),
+                        'size_bytes': file_info['size_bytes'],
+                        'message': f"Tabular data loaded successfully as modality '{modality_name}'"
+                    }
+                    
+                except Exception as e:
+                    return {
+                        'success': False,
+                        'error': f"Failed to load tabular data: {str(e)}"
+                    }
+            
+            else:
+                return {
+                    'success': False,
+                    'error': f"File type '{file_info['description']}' is not a supported data format for loading into workspace",
+                    'suggestion': "Use '/read' for text files or ensure file is in a supported bioinformatics format (.h5ad, .csv, .tsv, etc.)"
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Failed to load file: {str(e)}",
+                'file_path': str(file_path),
+                'file_type': file_info['description']
+            }
+
     # Workspace operations
     def list_workspace_files(self, pattern: str = "*") -> List[Dict[str, Any]]:
         """List files in the workspace."""

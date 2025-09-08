@@ -688,30 +688,138 @@ def handle_command(command: str, client: AgentClient):
     
     elif cmd.startswith("/read "):
         filename = cmd[6:].strip()
-        try:
-            content = client.read_file(filename)
-            if content:
-                # Try to guess syntax from extension, fallback to plain text
-                import mimetypes
-                ext = Path(filename).suffix
-                mime, _ = mimetypes.guess_type(filename)
-                language = "python" if ext == ".py" else (mime.split("/")[1] if mime and "/" in mime else "text")
-                syntax = Syntax(content, language, theme="monokai", line_numbers=True)
-                console.print(Panel(
-                    syntax, 
-                    title=f"[bold white on red] 📄 {filename} [/bold white on red]",
-                    border_style="red",
-                    box=box.DOUBLE
-                ))
+        
+        # First, locate and identify the file
+        file_info = client.locate_file(filename)
+        
+        if not file_info['found']:
+            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]{file_info['error']}[/red]")
+            if 'searched_paths' in file_info:
+                console.print("[grey50]Searched in:[/grey50]")
+                for path in file_info['searched_paths'][:5]:  # Show first 5 paths
+                    console.print(f"  • [grey50]{path}[/grey50]")
+                if len(file_info['searched_paths']) > 5:
+                    console.print(f"  • [grey50]... and {len(file_info['searched_paths'])-5} more[/grey50]")
+            return
+        
+        # Show file location info
+        file_path = file_info['path']
+        file_type = file_info['type']
+        file_category = file_info['category']
+        file_description = file_info['description']
+        
+        console.print(f"[cyan]📄 Located file:[/cyan] [white]{file_path.name}[/white]")
+        console.print(f"[grey50]   Path: {file_path}[/grey50]")
+        console.print(f"[grey50]   Type: {file_description}[/grey50]")
+        
+        # Handle different file types
+        if file_category == 'bioinformatics' or (file_category == 'tabular' and file_type in ['delimited_data', 'spreadsheet_data']):
+            # This is a data file - load it into DataManager
+            console.print(f"[cyan]🧬 Loading data into workspace...[/cyan]")
+            
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+                transient=True
+            ) as progress:
+                progress.add_task("Loading data...", total=None)
+                load_result = client.load_data_file(filename)
+                progress.stop()
+            
+            if load_result['success']:
+                console.print(f"[bold green]✅ {load_result['message']}[/bold green]")
+                
+                # Create info table
+                info_table = Table(
+                    title=f"🧬 Data Summary: {load_result['modality_name']}",
+                    box=box.ROUNDED,
+                    border_style="green",
+                    title_style="bold green on white"
+                )
+                info_table.add_column("Property", style="bold grey93")
+                info_table.add_column("Value", style="white")
+                
+                info_table.add_row("Modality Name", load_result['modality_name'])
+                info_table.add_row("File Type", load_result['file_type'])
+                info_table.add_row("Data Shape", f"{load_result['data_shape'][0]:,} × {load_result['data_shape'][1]:,}")
+                
+                # Format file size
+                size_bytes = load_result['size_bytes']
+                if size_bytes < 1024:
+                    size_str = f"{size_bytes} bytes"
+                elif size_bytes < 1024**2:
+                    size_str = f"{size_bytes/1024:.1f} KB"
+                elif size_bytes < 1024**3:
+                    size_str = f"{size_bytes/1024**2:.1f} MB"
+                else:
+                    size_str = f"{size_bytes/1024**3:.1f} GB"
+                
+                info_table.add_row("File Size", size_str)
+                
+                console.print(info_table)
+                
+                # Provide next step suggestions
+                console.print(f"\n[bold white]🎯 Ready for Analysis![/bold white]")
+                console.print(f"[white]Use these commands to analyze your data:[/white]")
+                console.print(f"  • [yellow]/data[/yellow] - View data summary")
+                console.print(f"  • [yellow]Analyze the {load_result['modality_name']} dataset[/yellow] - Start analysis")
+                console.print(f"  • [yellow]Generate a quality control report for {load_result['modality_name']}[/yellow] - QC analysis")
+                console.print(f"  • [yellow]Show me the first few rows of {load_result['modality_name']}[/yellow] - Data preview")
             else:
-                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {filename}[/red]")
-                console.log(f"File not found or empty: {filename}")
-        except FileNotFoundError:
-            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]File not found: {filename}[/red]")
-            console.log(f"FileNotFoundError: {filename}")
-        except Exception as e:
-            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {filename}[/red]")
-            console.log(f"Exception while reading file {filename}: {e}")
+                console.print(f"[bold red on white] ⚠️  Loading Failed [/bold red on white] [red]{load_result['error']}[/red]")
+                if 'suggestion' in load_result:
+                    console.print(f"[yellow]💡 Suggestion: {load_result['suggestion']}[/yellow]")
+        
+        elif file_category in ['code', 'documentation', 'metadata'] or not file_info.get('binary', True):
+            # This is a text file - display content
+            try:
+                content = client.read_file(filename)
+                if content and not content.startswith("Error reading file"):
+                    # Try to guess syntax from extension, fallback to plain text
+                    import mimetypes
+                    ext = file_path.suffix
+                    mime, _ = mimetypes.guess_type(str(file_path))
+                    
+                    # Enhanced language detection
+                    language_map = {
+                        '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+                        '.html': 'html', '.css': 'css', '.json': 'json',
+                        '.xml': 'xml', '.yaml': 'yaml', '.yml': 'yaml',
+                        '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash',
+                        '.sql': 'sql', '.md': 'markdown', '.txt': 'text',
+                        '.log': 'text', '.conf': 'text', '.cfg': 'text',
+                        '.r': 'r', '.csv': 'csv', '.tsv': 'csv'
+                    }
+                    
+                    language = language_map.get(ext.lower(), 'text')
+                    if language == 'text' and mime and "/" in mime:
+                        language = mime.split("/")[1]
+                    
+                    syntax = Syntax(content, language, theme="monokai", line_numbers=True)
+                    console.print(Panel(
+                        syntax, 
+                        title=f"[bold white on red] 📄 {file_path.name} [/bold white on red]",
+                        border_style="red",
+                        box=box.DOUBLE
+                    ))
+                else:
+                    console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]")
+            except Exception as e:
+                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {e}[/red]")
+        
+        else:
+            # Binary file or unsupported type
+            console.print(f"[bold yellow on black] ℹ️  File Info [/bold yellow on black]")
+            console.print(f"[white]File type '[yellow]{file_description}[/yellow]' is not supported for reading or loading.[/white]")
+            console.print(f"[grey50]This appears to be a binary file or unsupported format.[/grey50]")
+            
+            if file_category == 'image':
+                console.print(f"[cyan]💡 This is an image file. Use your system's image viewer to open it.[/cyan]")
+            elif file_category == 'archive':
+                console.print(f"[cyan]💡 This is an archive file. Extract it first to access the contents.[/cyan]")
+            else:
+                console.print(f"[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]")
     
     elif cmd == "/export":
         export_path = client.export_session()
@@ -737,32 +845,107 @@ def handle_command(command: str, client: AgentClient):
             table.add_column("Value", style="white")
             
             table.add_row("Status", summary["status"])
-            table.add_row("Shape", f"{summary['shape'][0]} × {summary['shape'][1]}")
-            table.add_row("Memory Usage", summary["memory_usage"])
             
-            if summary.get("columns"):
-                cols_preview = ", ".join(summary["columns"][:5])
-                if len(summary["columns"]) > 5:
-                    cols_preview += f" ... (+{len(summary['columns'])-5} more)"
-                table.add_row("Columns", cols_preview)
+            # Handle shape - might be single modality or total for multiple modalities
+            if "shape" in summary:
+                table.add_row("Shape", f"{summary['shape'][0]} × {summary['shape'][1]}")
+            elif "total_obs" in summary and "total_vars" in summary:
+                table.add_row("Total Shape", f"{summary['total_obs']} × {summary['total_vars']}")
             
-            if summary.get("sample_names"):
-                samples_preview = ", ".join(summary["sample_names"][:3])
-                if len(summary.get("sample_names", [])) > 3:
-                    samples_preview += f" ... (+{len(summary['sample_names'])-3} more)"
+            # Handle memory usage
+            if "memory_usage" in summary:
+                table.add_row("Memory Usage", summary["memory_usage"])
+            
+            # Show modality name if available
+            if summary.get("modality_name"):
+                table.add_row("Modality", summary["modality_name"])
+            
+            # Show data type if available
+            if summary.get("data_type"):
+                table.add_row("Data Type", summary["data_type"])
+            
+            # Show if sparse matrix
+            if summary.get("is_sparse") is not None:
+                sparse_status = "✓ Sparse" if summary["is_sparse"] else "✗ Dense"
+                table.add_row("Matrix Type", sparse_status)
+            
+            # Handle observation columns (prefer 'columns' key, fallback to 'obs_columns')
+            obs_cols = summary.get("columns") or summary.get("obs_columns", [])
+            if obs_cols:
+                cols_preview = ", ".join(obs_cols[:5])
+                if len(obs_cols) > 5:
+                    cols_preview += f" ... (+{len(obs_cols)-5} more)"
+                table.add_row("Obs Columns", cols_preview)
+            
+            # Handle variable columns if available
+            if summary.get("var_columns"):
+                var_cols = summary["var_columns"]
+                var_preview = ", ".join(var_cols[:5])
+                if len(var_cols) > 5:
+                    var_preview += f" ... (+{len(var_cols)-5} more)"
+                table.add_row("Var Columns", var_preview)
+            
+            # Handle sample names (prefer 'sample_names' key, fallback to 'obs_names')
+            sample_names = summary.get("sample_names") or summary.get("obs_names", [])
+            if sample_names:
+                samples_preview = ", ".join(sample_names[:3])
+                if len(sample_names) > 3:
+                    samples_preview += f" ... (+{len(sample_names)-3} more)"
                 table.add_row("Samples", samples_preview)
             
+            # Show layers if available
+            if summary.get("layers"):
+                layers_str = ", ".join(summary["layers"])
+                table.add_row("Layers", layers_str)
+            
+            # Show obsm keys if available
+            if summary.get("obsm"):
+                obsm_str = ", ".join(summary["obsm"])
+                table.add_row("Obsm Keys", obsm_str)
+            
+            # Show metadata keys
             if summary.get("metadata_keys"):
                 meta_preview = ", ".join(summary["metadata_keys"][:3])
                 if len(summary["metadata_keys"]) > 3:
                     meta_preview += f" ... (+{len(summary['metadata_keys'])-3} more)"
                 table.add_row("Metadata Keys", meta_preview)
             
+            # Show processing log
             if summary.get("processing_log"):
                 recent_steps = summary["processing_log"][-2:] if len(summary["processing_log"]) > 2 else summary["processing_log"]
                 table.add_row("Recent Steps", "; ".join(recent_steps))
             
             console.print(table)
+            
+            # Show individual modality details if multiple modalities are loaded
+            if summary.get("modalities"):
+                console.print(f"\n[bold red]🧬 Individual Modality Details[/bold red]")
+                
+                modalities_table = Table(
+                    box=box.SIMPLE,
+                    border_style="red",
+                    show_header=True
+                )
+                modalities_table.add_column("Modality", style="bold white")
+                modalities_table.add_column("Shape", style="white")
+                modalities_table.add_column("Type", style="cyan")
+                modalities_table.add_column("Memory", style="grey74")
+                modalities_table.add_column("Sparse", style="grey50")
+                
+                for mod_name, mod_info in summary["modalities"].items():
+                    if isinstance(mod_info, dict) and not mod_info.get("error"):
+                        shape_str = f"{mod_info['shape'][0]} × {mod_info['shape'][1]}"
+                        data_type = mod_info.get("data_type", "unknown")
+                        memory = mod_info.get("memory_usage", "N/A")
+                        sparse = "✓" if mod_info.get("is_sparse") else "✗"
+                        
+                        modalities_table.add_row(mod_name, shape_str, data_type, memory, sparse)
+                    else:
+                        # Handle error case
+                        error_msg = mod_info.get("error", "Unknown error") if isinstance(mod_info, dict) else "Invalid data"
+                        modalities_table.add_row(mod_name, "Error", error_msg[:20] + "...", "N/A", "N/A")
+                
+                console.print(modalities_table)
             
             # Show detailed metadata if available
             if hasattr(client.data_manager, 'current_metadata') and client.data_manager.current_metadata:
