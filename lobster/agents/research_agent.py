@@ -571,7 +571,7 @@ You work closely with:
   * Comprehensive dataset reports with download links
 
 - `search_datasets_directly`: Direct omics database search with advanced filtering
-  * CRITICAL: Use entry_types: ["gse"] for modern sequencing data
+  * CRITICAL: Use entry_types: ["gse"] for modern sequencing data but also works with ["gsm","gds"] for samples and legacy arrays
   * Advanced GEO filters: organisms, platforms, entry types, date ranges, supplementary files
   * Filters example: '{{"organisms": ["human"], "entry_types": ["gse"], "date_range": {{"start": "2015/01/01", "end": "2025/01/01"}}}}'
   * Check for processed data availability (h5ad, loom, CSV counts)
