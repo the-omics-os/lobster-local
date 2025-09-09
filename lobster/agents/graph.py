@@ -5,6 +5,8 @@ Implementation using langgraph_supervisor package for hierarchical multi-agent c
 """
 
 from langgraph.checkpoint.memory import InMemorySaver
+
+from langchain_core.tools import tool
  
 from lobster.agents.langgraph_supervisor import create_supervisor
 from lobster.agents.langgraph_supervisor import create_forward_message_tool
@@ -81,6 +83,46 @@ def create_bioinformatics_graph(
             handoff_tools.append(handoff_tool)
         
         logger.info(f"Created agent: {agent_config.display_name} ({agent_config.name})")
+
+
+    # Supervisor only tools
+    @tool
+    def list_available_modalities() -> str:
+        """
+        List all currently loaded modalities and their details.
+        
+        Returns:
+            str: Formatted list of available modalities
+        """
+        try:
+            modalities = data_manager.list_modalities()
+            
+            if not modalities:
+                return "No modalities currently loaded. Use download_geo_dataset or upload_data_file to load data."
+            
+            response = f"Currently loaded modalities ({len(modalities)}):\n\n"
+            
+            for mod_name in modalities:
+                adata = data_manager.get_modality(mod_name)
+                response += f"**{mod_name}**:\n"
+                response += f"  - Shape: {adata.n_obs} obs × {adata.n_vars} vars\n"
+                response += f"  - Obs columns: {len(adata.obs.columns)} ({', '.join(list(adata.obs.columns)[:3])}...)\n"
+                response += f"  - Var columns: {len(adata.var.columns)} ({', '.join(list(adata.var.columns)[:3])}...)\n"
+                if adata.layers:
+                    response += f"  - Layers: {', '.join(list(adata.layers.keys()))}\n"
+                response += "\n"
+            
+            # Add workspace information
+            workspace_status = data_manager.get_workspace_status()
+            response += f"Workspace: {workspace_status['workspace_path']}\n"
+            response += f"Available adapters: {len(workspace_status['registered_adapters'])}\n"
+            response += f"Available backends: {len(workspace_status['registered_backends'])}"
+            
+            return response
+                
+        except Exception as e:
+            logger.error(f"Error listing available data: {e}")
+            return f"Error listing available data: {str(e)}"    
     
     # UPDATED SUPERVISOR PROMPT - More explicit about response handling
     system_prompt = create_supervisor_prompt(data_manager)
@@ -100,7 +142,8 @@ def create_bioinformatics_graph(
         # Change from "full_history" to "messages" or "last_message"
         # output_mode="full_history",  # This ensures the actual messages are returned
         output_mode="last_message",  # This ensures the actual messages are returned
-        tools=handoff_tools  # Use dynamically created handoff tools
+        tools=handoff_tools.append(list_available_modalities) # Use dynamically created handoff tools
+              
     )
     
     # Compile the graph with the provided checkpointer

@@ -19,6 +19,12 @@ from lobster.tools.providers.base_provider import (
 )
 from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
 from lobster.tools.providers.geo_provider import GEOProvider, GEOProviderConfig
+from lobster.tools.providers.geo_utils import (
+    is_direct_accession,
+    is_geo_sample_accession,
+    detect_accession_type,
+    extract_accession_info
+)
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
@@ -363,8 +369,11 @@ class PublicationService:
         """
         Search for datasets directly across omics databases.
         
+        Enhanced to detect direct accessions (e.g., GSM6204600) and provide
+        comprehensive information including parent series for sample IDs.
+        
         Args:
-            query: Search query
+            query: Search query or direct accession
             data_type: Type of omics data to search for
             max_results: Maximum results to return
             filters: Additional filters
@@ -375,55 +384,172 @@ class PublicationService:
         logger.info(f"Direct dataset search: {query[:50]}... for {data_type.value}")
         
         try:
-            # Find providers that support this dataset type
-            supporting_providers = self.registry.get_providers_for_dataset_type(data_type)
+            # Check if query is a direct accession
+            detected_type, normalized_accession = extract_accession_info(query)
             
-            if not supporting_providers:
-                return f"No providers available for {data_type.value} dataset search."
-            
-            # Use the first supporting provider (could be enhanced to use multiple)
-            #TODO add multiple provider support
-            #---------------------------------
-            # PROBLEM
-            #---------------------------------
-            provider = supporting_providers[0]
-            
-            # Route to appropriate provider method
-            if provider.source == PublicationSource.GEO:
-                # GEO provider uses search_publications method for direct dataset search
-                results = provider.search_publications(
-                    query=query,
-                    max_results=max_results,
-                    filters=filters
+            # If it's a direct accession, route to appropriate handler
+            if detected_type is not None:
+                logger.info(f"Detected direct accession: {normalized_accession} (type: {detected_type.value})")
+                return self._handle_direct_accession(
+                    normalized_accession, 
+                    detected_type, 
+                    max_results, 
+                    filters
                 )
-            elif hasattr(provider, 'find_datasets_for_study'):
-                # Legacy method from PubMedService - convert data_type
-                results = provider.find_datasets_for_study(
-                    query=query,
-                    data_type=data_type,
-                    filters=filters,
-                    top_k=max_results
-                )
-            else:
-                return f"Direct dataset search not supported by {provider.source.value} provider."
             
-            # Log the search
-            self.data_manager.log_tool_usage(
-                tool_name="search_datasets_directly",
-                parameters={
-                    "query": query[:100],
-                    "data_type": data_type.value,
-                    "max_results": max_results,
-                    "provider": provider.source.value
-                },
-                description="Direct dataset search"
-            )
-            
-            return results
+            # Fall back to regular text-based search
+            return self._handle_text_search(query, data_type, max_results, filters)
                 
         except Exception as e:
             logger.error(f"Direct dataset search error: {e}")
             raise NameError(f"Direct dataset search error: {str(e)}")
+    
+    def _handle_direct_accession(
+        self,
+        accession: str,
+        accession_type: DatasetType,
+        max_results: int,
+        filters: Optional[Dict[str, str]] = None
+    ) -> str:
+        """
+        Handle direct accession searches with enhanced functionality.
+        
+        Args:
+            accession: Normalized accession string
+            accession_type: Detected accession type
+            max_results: Maximum results
+            filters: Additional filters
+            
+        Returns:
+            str: Formatted search results with enhanced information
+        """
+        # Find providers that support this accession type
+        supporting_providers = self.registry.get_providers_for_dataset_type(accession_type)
+        
+        if not supporting_providers:
+            return f"No providers available for {accession_type.value} accession lookup."
+        
+        provider = supporting_providers[0]
+        
+        # Special handling for GEO accessions
+        if accession_type == DatasetType.GEO and provider.source == PublicationSource.GEO:
+            # Check if it's a GSM sample that needs parent lookup
+            if is_geo_sample_accession(accession):
+                logger.info(f"GSM sample detected: {accession}, searching with parent series lookup")
+                
+                # Use the enhanced search_by_accession method
+                if hasattr(provider, 'search_by_accession'):
+                    results = provider.search_by_accession(
+                        accession, 
+                        include_parent_series=True
+                    )
+                else:
+                    # Fallback to regular search
+                    results = provider.search_publications(
+                        query=accession,
+                        max_results=max_results,
+                        filters=filters
+                    )
+            else:
+                # For GSE, GDS, GPL - use enhanced accession search if available
+                if hasattr(provider, 'search_by_accession'):
+                    results = provider.search_by_accession(
+                        accession, 
+                        include_parent_series=False
+                    )
+                else:
+                    # Fallback to regular search
+                    results = provider.search_publications(
+                        query=accession,
+                        max_results=max_results,
+                        filters=filters
+                    )
+        else:
+            # For other accession types, use standard search
+            if hasattr(provider, 'search_publications'):
+                results = provider.search_publications(
+                    query=accession,
+                    max_results=max_results,
+                    filters=filters
+                )
+            else:
+                return f"Direct accession search not supported by {provider.source.value} provider."
+        
+        # Log the search with accession context
+        self.data_manager.log_tool_usage(
+            tool_name="search_datasets_directly_accession",
+            parameters={
+                "accession": accession,
+                "accession_type": accession_type.value,
+                "max_results": max_results,
+                "provider": provider.source.value,
+                "is_sample": is_geo_sample_accession(accession) if accession_type == DatasetType.GEO else False
+            },
+            description="Direct accession search with enhanced functionality"
+        )
+        
+        return results
+    
+    def _handle_text_search(
+        self,
+        query: str,
+        data_type: DatasetType,
+        max_results: int,
+        filters: Optional[Dict[str, str]] = None
+    ) -> str:
+        """
+        Handle regular text-based searches (original functionality).
+        
+        Args:
+            query: Text search query
+            data_type: Type of omics data to search for
+            max_results: Maximum results to return
+            filters: Additional filters
+            
+        Returns:
+            str: Formatted dataset search results
+        """
+        # Find providers that support this dataset type
+        supporting_providers = self.registry.get_providers_for_dataset_type(data_type)
+        
+        if not supporting_providers:
+            return f"No providers available for {data_type.value} dataset search."
+        
+        # Use the first supporting provider
+        provider = supporting_providers[0]
+        
+        # Route to appropriate provider method
+        if provider.source == PublicationSource.GEO:
+            # GEO provider uses search_publications method for direct dataset search
+            results = provider.search_publications(
+                query=query,
+                max_results=max_results,
+                filters=filters
+            )
+        elif hasattr(provider, 'find_datasets_for_study'):
+            # Legacy method from PubMedService - convert data_type
+            results = provider.find_datasets_for_study(
+                query=query,
+                data_type=data_type,
+                filters=filters,
+                top_k=max_results
+            )
+        else:
+            return f"Direct dataset search not supported by {provider.source.value} provider."
+        
+        # Log the search
+        self.data_manager.log_tool_usage(
+            tool_name="search_datasets_directly_text",
+            parameters={
+                "query": query[:100],
+                "data_type": data_type.value,
+                "max_results": max_results,
+                "provider": provider.source.value
+            },
+            description="Text-based dataset search"
+        )
+        
+        return results
     
     def get_provider_capabilities(self) -> str:
         """

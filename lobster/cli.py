@@ -624,13 +624,20 @@ def handle_command(command: str, client: AgentClient):
         [red]/plot[/red]         [grey50]-[/grey50] Open plots directory in file manager
         [red]/plot[/red] <ID>    [grey50]-[/grey50] Open specific plot by ID or name
         [red]/save[/red]         [grey50]-[/grey50] Save current state to workspace
-        [red]/read[/red] <file>  [grey50]-[/grey50] Read a file from workspace
+        [red]/read[/red] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
         [red]/export[/red]       [grey50]-[/grey50] Export session data
         [red]/reset[/red]        [grey50]-[/grey50] Reset conversation
         [red]/mode[/red] <name>  [grey50]-[/grey50] Change operation mode
         [red]/modes[/red]        [grey50]-[/grey50] List available modes
         [red]/clear[/red]        [grey50]-[/grey50] Clear screen
         [red]/exit[/red]         [grey50]-[/grey50] Exit the chat
+        
+        [bold white]File Loading Examples:[/bold white]
+        
+        [red]/read[/red] data.h5ad      [grey50]-[/grey50] Load single file
+        [red]/read[/red] *.h5ad         [grey50]-[/grey50] Load all .h5ad files in current directory
+        [red]/read[/red] data/*.csv     [grey50]-[/grey50] Load all .csv files in data/ directory
+        [red]/read[/red] sample_*.h5ad  [grey50]-[/grey50] Load files matching pattern
         
         [bold white]Shell Commands:[/bold white] [grey50](execute directly without /)[/grey50]
         
@@ -689,6 +696,153 @@ def handle_command(command: str, client: AgentClient):
     elif cmd.startswith("/read "):
         filename = cmd[6:].strip()
         
+        # Check if filename contains glob patterns
+        import glob as glob_module
+        is_glob_pattern = any(char in filename for char in ['*', '?', '[', ']'])
+        
+        if is_glob_pattern:
+            # Handle glob patterns for multiple files
+            from pathlib import Path
+            
+            # Use current directory as base for relative patterns
+            if not Path(filename).is_absolute():
+                base_path = current_directory
+                search_pattern = str(base_path / filename)
+            else:
+                search_pattern = filename
+            
+            # Find matching files
+            matching_files = glob_module.glob(search_pattern)
+            
+            if not matching_files:
+                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]No files found matching pattern: {filename}[/red]")
+                console.print(f"[grey50]Searched in: {current_directory}[/grey50]")
+                return
+            
+            # Sort files for consistent output
+            matching_files.sort()
+            
+            console.print(f"[cyan]📁 Found {len(matching_files)} files matching pattern '[white]{filename}[/white]'[/cyan]")
+            
+            loaded_files = []
+            failed_files = []
+            
+            for file_path in matching_files:
+                file_name = Path(file_path).name
+                console.print(f"\n[cyan]📄 Processing: [white]{file_name}[/white][/cyan]")
+                
+                # Use existing file processing logic
+                file_info = client.locate_file(file_name)
+                
+                if not file_info['found']:
+                    # Try with full path if locate_file fails with just filename
+                    try:
+                        file_info = {'found': True, 'path': Path(file_path), 'type': 'unknown', 
+                                   'category': 'bioinformatics', 'description': 'File from glob pattern'}
+                        # Detect format based on extension
+                        ext = Path(file_path).suffix.lower()
+                        if ext in ['.h5ad']:
+                            file_info['type'] = 'h5ad_data'
+                        elif ext in ['.csv', '.tsv', '.txt']:
+                            file_info['type'] = 'delimited_data'
+                        elif ext in ['.xlsx', '.xls']:
+                            file_info['type'] = 'spreadsheet_data'
+                    except Exception:
+                        failed_files.append(file_name)
+                        console.print(f"[red]   ❌ Failed to process: {file_name}[/red]")
+                        continue
+                
+                # Process based on file type (reusing existing logic)
+                file_type = file_info['type']
+                file_category = file_info['category']
+                file_description = file_info['description']
+                
+                console.print(f"[grey50]   Type: {file_description}[/grey50]")
+                
+                try:
+                    if file_category == 'bioinformatics' or (file_category == 'tabular' and file_type in ['delimited_data', 'spreadsheet_data', 'h5ad_data']):
+                        # Load data file using existing logic
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn("[progress.description]{task.description}"),
+                            console=console,
+                            transient=True
+                        ) as progress:
+                            progress.add_task(f"Loading {file_name}...", total=None)
+                            load_result = client.load_data_file(file_name)
+                            progress.stop()
+                        
+                        if load_result['success']:
+                            loaded_files.append({
+                                'name': file_name,
+                                'modality_name': load_result['modality_name'],
+                                'shape': load_result['data_shape'],
+                                'size_bytes': load_result['size_bytes']
+                            })
+                            console.print(f"[green]   ✅ Loaded as: {load_result['modality_name']}[/green]")
+                        else:
+                            failed_files.append(file_name)
+                            console.print(f"[red]   ❌ Loading failed: {load_result.get('error', 'Unknown error')}[/red]")
+                    
+                    else:
+                        # For non-data files, just acknowledge them
+                        console.print(f"[yellow]   ⚠️  Skipped: {file_description} (not a data file)[/yellow]")
+                        
+                except Exception as e:
+                    failed_files.append(file_name)
+                    console.print(f"[red]   ❌ Error processing {file_name}: {e}[/red]")
+            
+            # Show summary
+            console.print(f"\n[bold cyan]📊 Bulk Loading Summary[/bold cyan]")
+            
+            if loaded_files:
+                summary_table = Table(
+                    title="✅ Successfully Loaded Files",
+                    box=box.ROUNDED,
+                    border_style="green",
+                    title_style="bold green"
+                )
+                summary_table.add_column("File", style="white")
+                summary_table.add_column("Modality Name", style="cyan")
+                summary_table.add_column("Shape", style="grey74")
+                summary_table.add_column("Size", style="grey50")
+                
+                for loaded in loaded_files:
+                    # Format file size
+                    size_bytes = loaded['size_bytes']
+                    if size_bytes < 1024:
+                        size_str = f"{size_bytes} bytes"
+                    elif size_bytes < 1024**2:
+                        size_str = f"{size_bytes/1024:.1f} KB"
+                    elif size_bytes < 1024**3:
+                        size_str = f"{size_bytes/1024**2:.1f} MB"
+                    else:
+                        size_str = f"{size_bytes/1024**3:.1f} GB"
+                    
+                    summary_table.add_row(
+                        loaded['name'],
+                        loaded['modality_name'],
+                        f"{loaded['shape'][0]:,} × {loaded['shape'][1]:,}",
+                        size_str
+                    )
+                
+                console.print(summary_table)
+                
+                # Show next steps
+                console.print(f"\n[bold white]🎯 Ready for Analysis![/bold white]")
+                console.print(f"[white]Use these commands to work with your data:[/white]")
+                console.print(f"  • [yellow]/data[/yellow] - View data summary for all loaded datasets")
+                console.print(f"  • [yellow]/modalities[/yellow] - View detailed information for each modality")
+                console.print(f"  • [yellow]Compare the {loaded_files[0]['modality_name']} and {loaded_files[-1]['modality_name']} datasets[/yellow] - Start comparative analysis")
+            
+            if failed_files:
+                console.print(f"\n[red]❌ Failed to load {len(failed_files)} files:[/red]")
+                for failed in failed_files:
+                    console.print(f"  • [red]{failed}[/red]")
+            
+            return
+        
+        # Single file processing (existing logic)
         # First, locate and identify the file
         file_info = client.locate_file(filename)
         

@@ -25,6 +25,9 @@ def create_supervisor_prompt(data_manager) -> str:
     - ALWAYS return meaningful, content-rich responses — never empty acknowledgments.
     - NEVER LIE. NEVER
 
+    <Available Tools>
+    **list_available_modalities**: A tool that lists all data modalities currently loaded in the system. Use this to inform your decisions about analysis steps and agent delegation. You can use this tool if a user asks to do something with a loaded modality.
+
     <Available Experts>
     - **data_expert_agent**: Handles all data operations (metadata fetching, downloading, loading, formatting, managing datasets).
     - **research_agent**: Specialist in literature discovery and dataset identification — including:
@@ -53,6 +56,7 @@ def create_supervisor_prompt(data_manager) -> str:
        - Applying filters to GEO searches (organism, date range, platform, supplementary file types).
 
     3. **Delegate to data_expert_agent** when the task involves:
+       - Use the list_available_modalities tool to check loaded data before proceeding to inform the data expert. 
        - Questions about data structures like AnnData, Seurat, or Scanpy objects.
        - Downloading datasets (e.g., from GEO using GSE IDs provided by research_agent).
        - Loading raw count matrices (e.g., CSV, H5AD).

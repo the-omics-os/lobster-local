@@ -29,6 +29,13 @@ from lobster.tools.providers.ncbi_query_builder import (
     GEOQueryBuilder,
     build_geo_query
 )
+from lobster.tools.providers.geo_utils import (
+    is_geo_sample_accession,
+    is_geo_series_accession,
+    detect_geo_accession_subtype,
+    GEOAccessionType,
+    get_ncbi_geo_url
+)
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 from lobster.config.settings import get_settings
@@ -737,3 +744,262 @@ class GEOProvider(BasePublicationProvider):
         response += f"- **FTP Access**: Check GEO FTP site for raw files\n"
         
         return response
+    
+    def search_by_accession(
+        self,
+        accession: str,
+        include_parent_series: bool = True,
+        **kwargs
+    ) -> str:
+        """
+        Search for GEO data using a direct accession (GSE, GSM, GDS, GPL).
+        
+        For GSM sample accessions, optionally includes parent series information.
+        
+        Args:
+            accession: Direct GEO accession (GSE123456, GSM789012, etc.)
+            include_parent_series: For GSM samples, also fetch parent GSE info
+            **kwargs: Additional parameters
+            
+        Returns:
+            str: Formatted search results with accession-specific information
+        """
+        logger.info(f"GEO accession search: {accession}")
+        
+        try:
+            # Detect accession type
+            geo_type = detect_geo_accession_subtype(accession)
+            
+            if geo_type is None:
+                return f"Invalid GEO accession format: {accession}"
+            
+            # Handle GSM samples with parent lookup
+            if geo_type == GEOAccessionType.SAMPLE and include_parent_series:
+                return self._search_sample_with_parent(accession)
+            
+            # Handle other accessions (GSE, GDS, GPL) with direct search
+            elif geo_type in [GEOAccessionType.SERIES, GEOAccessionType.DATASET, GEOAccessionType.PLATFORM]:
+                return self._search_direct_accession(accession, geo_type)
+            
+            else:
+                # Fallback to regular search
+                return self.search_publications(accession, max_results=5)
+                
+        except Exception as e:
+            logger.error(f"Error in accession search for {accession}: {e}")
+            return f"Error searching for accession {accession}: {str(e)}"
+    
+    def find_parent_series_for_sample(self, gsm_accession: str) -> Optional[str]:
+        """
+        Find the parent GSE series for a given GSM sample using NCBI E-link.
+        
+        Args:
+            gsm_accession: GSM sample accession (e.g., GSM6204600)
+            
+        Returns:
+            GSE series accession if found, None otherwise
+        """
+        if not is_geo_sample_accession(gsm_accession):
+            logger.warning(f"Not a valid GSM accession: {gsm_accession}")
+            return None
+        
+        try:
+            # First, get the GEO UID for this accession using esearch
+            search_url = f"{self.base_url_esearch}?db=geo&term={gsm_accession}&retmode=json"
+            if self.config.api_key:
+                search_url += f"&api_key={self.config.api_key}"
+            
+            search_result = self._execute_request_with_retry(search_url)
+            search_data = json.loads(search_result)
+            
+            if not search_data.get("esearchresult", {}).get("idlist"):
+                logger.warning(f"No GEO ID found for {gsm_accession}")
+                return None
+            
+            geo_uid = search_data["esearchresult"]["idlist"][0]
+            
+            # Use E-link to find related GSE series
+            link_url = f"{self.base_url_elink}?dbfrom=geo&db=geo&id={geo_uid}&retmode=json"
+            if self.config.api_key:
+                link_url += f"&api_key={self.config.api_key}"
+            
+            link_result = self._execute_request_with_retry(link_url)
+            link_data = json.loads(link_result)
+            
+            # Extract linked IDs
+            linked_ids = []
+            if "linksets" in link_data:
+                for linkset in link_data["linksets"]:
+                    if "linksetdbs" in linkset:
+                        for db in linkset["linksetdbs"]:
+                            if db.get("dbto") == "geo":
+                                linked_ids.extend(db.get("links", []))
+            
+            # Get summaries for linked IDs to find GSE series
+            if linked_ids:
+                ids_str = ",".join(linked_ids[:10])  # Limit to first 10
+                summary_url = f"{self.base_url_esummary}?db=geo&id={ids_str}&retmode=json"
+                if self.config.api_key:
+                    summary_url += f"&api_key={self.config.api_key}"
+                
+                summary_result = self._execute_request_with_retry(summary_url)
+                summary_data = json.loads(summary_result)
+                
+                # Look for GSE accessions in the results
+                for uid in linked_ids:
+                    uid_data = summary_data.get("result", {}).get(uid, {})
+                    accession = uid_data.get("accession", "")
+                    if accession.startswith("GSE"):
+                        logger.info(f"Found parent series {accession} for sample {gsm_accession}")
+                        return accession
+            
+            logger.warning(f"No parent GSE series found for {gsm_accession}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding parent series for {gsm_accession}: {e}")
+            return None
+    
+    def _search_sample_with_parent(self, gsm_accession: str) -> str:
+        """
+        Search for GSM sample and include parent GSE series information.
+        
+        Args:
+            gsm_accession: GSM sample accession
+            
+        Returns:
+            Formatted response with sample and parent series info
+        """
+        response = f"## GEO Sample Search Results\n\n"
+        response += f"**Sample Accession**: [{gsm_accession}]({get_ncbi_geo_url(gsm_accession)})\n\n"
+        
+        try:
+            # Get sample information
+            sample_info = self._get_accession_summary(gsm_accession)
+            
+            if sample_info:
+                response += "### Sample Information\n"
+                response += f"**Title**: {sample_info.get('title', 'N/A')}\n"
+                if sample_info.get('summary'):
+                    summary_preview = sample_info['summary'][:300]
+                    if len(sample_info['summary']) > 300:
+                        summary_preview += "..."
+                    response += f"**Description**: {summary_preview}\n"
+                
+                if sample_info.get('taxon'):
+                    response += f"**Organism**: {sample_info['taxon']}\n"
+                
+                response += "\n"
+            
+            # Find parent series
+            parent_gse = self.find_parent_series_for_sample(gsm_accession)
+            
+            if parent_gse:
+                response += f"### Parent Series: {parent_gse}\n"
+                response += f"**Series Accession**: [{parent_gse}]({get_ncbi_geo_url(parent_gse)})\n"
+                
+                # Get parent series information
+                parent_info = self._get_accession_summary(parent_gse)
+                if parent_info:
+                    response += f"**Series Title**: {parent_info.get('title', 'N/A')}\n"
+                    if parent_info.get('n_samples'):
+                        response += f"**Total Samples in Series**: {parent_info['n_samples']}\n"
+                
+                response += "\n### 💾 Recommended Next Steps\n"
+                response += f"- **Download Full Series**: `download_geo_dataset('{parent_gse}')`\n"
+                response += f"- **Download Sample Only**: `download_geo_dataset('{gsm_accession}')`\n"
+                response += f"- **View Series**: [Browse {parent_gse} on GEO]({get_ncbi_geo_url(parent_gse)})\n"
+            else:
+                response += "### Parent Series\n"
+                response += "⚠️ Could not find parent GSE series for this sample.\n\n"
+                response += "### 💾 Next Steps\n"
+                response += f"- **Download Sample**: `download_geo_dataset('{gsm_accession}')`\n"
+                response += f"- **View Sample**: [Browse {gsm_accession} on GEO]({get_ncbi_geo_url(gsm_accession)})\n"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in sample with parent search: {e}")
+            return f"Error retrieving information for {gsm_accession}: {str(e)}"
+    
+    def _search_direct_accession(self, accession: str, geo_type: GEOAccessionType) -> str:
+        """
+        Search for direct GEO accession (GSE, GDS, GPL).
+        
+        Args:
+            accession: GEO accession
+            geo_type: Type of GEO accession
+            
+        Returns:
+            Formatted response with accession information
+        """
+        try:
+            # Get accession summary
+            summary_info = self._get_accession_summary(accession)
+            
+            if not summary_info:
+                return f"Could not retrieve information for {accession}"
+            
+            response = f"## {geo_type.value.upper()} Accession Search Results\n\n"
+            response += f"**Accession**: [{accession}]({get_ncbi_geo_url(accession)})\n"
+            response += f"**Title**: {summary_info.get('title', 'N/A')}\n\n"
+            
+            if summary_info.get('summary'):
+                response += f"**Description**: {summary_info['summary']}\n"
+            
+            if summary_info.get('taxon'):
+                response += f"**Organism**: {summary_info['taxon']}\n"
+                
+            if summary_info.get('n_samples'):
+                response += f"**Sample Count**: {summary_info['n_samples']}\n"
+                
+            if summary_info.get('PDAT'):
+                response += f"**Publication Date**: {summary_info['PDAT']}\n"
+            
+            response += "\n### 💾 Next Steps\n"
+            response += f"- **Download Dataset**: `download_geo_dataset('{accession}')`\n"
+            response += f"- **View on GEO**: [Browse {accession}]({get_ncbi_geo_url(accession)})\n"
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in direct accession search: {e}")
+            return f"Error retrieving information for {accession}: {str(e)}"
+    
+    def _get_accession_summary(self, accession: str) -> Optional[Dict[str, Any]]:
+        """
+        Get summary information for a GEO accession using esummary.
+        
+        Args:
+            accession: GEO accession (GSE, GSM, GDS, GPL)
+            
+        Returns:
+            Dictionary with summary information or None if not found
+        """
+        try:
+            # First, get the UID for this accession
+            search_url = f"{self.base_url_esearch}?db=geo&term={accession}&retmode=json"
+            if self.config.api_key:
+                search_url += f"&api_key={self.config.api_key}"
+            
+            search_result = self._execute_request_with_retry(search_url)
+            search_data = json.loads(search_result)
+            
+            if not search_data.get("esearchresult", {}).get("idlist"):
+                return None
+            
+            geo_uid = search_data["esearchresult"]["idlist"][0]
+            
+            # Get summary using esummary
+            summary_url = f"{self.base_url_esummary}?db=geo&id={geo_uid}&retmode=json"
+            if self.config.api_key:
+                summary_url += f"&api_key={self.config.api_key}"
+            
+            summary_result = self._execute_request_with_retry(summary_url)
+            summary_data = json.loads(summary_result)
+            
+            return summary_data.get("result", {}).get(geo_uid, {})
+            
+        except Exception as e:
+            logger.error(f"Error getting summary for {accession}: {e}")
+            return None

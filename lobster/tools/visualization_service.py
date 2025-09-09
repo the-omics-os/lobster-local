@@ -823,34 +823,23 @@ class SingleCellVisualizationService:
         title: Optional[str] = None
     ) -> go.Figure:
         """
-        Create comprehensive QC plots for single-cell data.
+        Create comprehensive, publication-quality QC plots for single-cell transcriptomics data.
+        
+        This method generates a sophisticated multi-panel figure with all essential QC metrics
+        for single-cell RNA-seq analysis, including advanced visualizations and statistical summaries.
         
         Args:
-            adata: AnnData object
-            title: Overall title for the QC plots
+            adata: AnnData object with single-cell data
+            title: Optional overall title for the QC plots
             
         Returns:
-            go.Figure: Multi-panel QC plot
+            go.Figure: Professional multi-panel QC figure
         """
         try:
-            # Create subplots
-            fig = make_subplots(
-                rows=2, cols=3,
-                subplot_titles=[
-                    "nGenes vs nUMIs",
-                    "Mitochondrial %",
-                    "nGenes Distribution",
-                    "nUMIs Distribution",
-                    "% Mitochondrial Distribution",
-                    "Cells per Sample"
-                ],
-                specs=[
-                    [{"type": "scatter"}, {"type": "scatter"}, {"type": "histogram"}],
-                    [{"type": "histogram"}, {"type": "histogram"}, {"type": "bar"}]
-                ]
-            )
+            # Calculate all QC metrics upfront
+            logger.info("Computing comprehensive QC metrics for single-cell data")
             
-            # Calculate QC metrics if not present
+            # Basic metrics
             if "n_genes" not in adata.obs.columns:
                 adata.obs["n_genes"] = (adata.X > 0).sum(axis=1)
             if "n_counts" not in adata.obs.columns:
@@ -859,7 +848,14 @@ class SingleCellVisualizationService:
                 else:
                     adata.obs["n_counts"] = adata.X.sum(axis=1)
             
-            # Calculate mitochondrial percentage if not present
+            # Calculate gene detection rate (complexity)
+            adata.obs["gene_detection_rate"] = adata.obs["n_genes"] / adata.n_vars * 100
+            
+            # Calculate log10 counts for better visualization
+            adata.obs["log10_counts"] = np.log10(adata.obs["n_counts"] + 1)
+            adata.obs["log10_genes"] = np.log10(adata.obs["n_genes"] + 1)
+            
+            # Mitochondrial percentage
             if "percent_mito" not in adata.obs.columns:
                 mito_genes = adata.var_names.str.startswith("MT-") | adata.var_names.str.startswith("mt-")
                 if mito_genes.sum() > 0:
@@ -874,25 +870,118 @@ class SingleCellVisualizationService:
                 else:
                     adata.obs["percent_mito"] = 0
             
-            # 1. nGenes vs nUMIs scatter plot
+            # Ribosomal percentage
+            if "percent_ribo" not in adata.obs.columns:
+                ribo_genes = adata.var_names.str.startswith(("RPS", "RPL", "rps", "rpl"))
+                if ribo_genes.sum() > 0:
+                    if issparse(adata.X):
+                        adata.obs["percent_ribo"] = np.sum(
+                            adata[:, ribo_genes].X, axis=1
+                        ).A1 / adata.obs["n_counts"] * 100
+                    else:
+                        adata.obs["percent_ribo"] = np.sum(
+                            adata[:, ribo_genes].X, axis=1
+                        ) / adata.obs["n_counts"] * 100
+                else:
+                    adata.obs["percent_ribo"] = 0
+            
+            # Hemoglobin percentage (important for blood samples)
+            hb_genes = adata.var_names.str.startswith(("HBA", "HBB", "hba", "hbb"))
+            if hb_genes.sum() > 0:
+                if issparse(adata.X):
+                    adata.obs["percent_hb"] = np.sum(
+                        adata[:, hb_genes].X, axis=1
+                    ).A1 / adata.obs["n_counts"] * 100
+                else:
+                    adata.obs["percent_hb"] = np.sum(
+                        adata[:, hb_genes].X, axis=1
+                    ) / adata.obs["n_counts"] * 100
+            else:
+                adata.obs["percent_hb"] = 0
+            
+            # Calculate doublet scores if available
+            has_doublet = "doublet_score" in adata.obs.columns
+            
+            # Detect batch column
+            batch_cols = ["batch", "sample", "patient", "Patient_ID", "donor", "replicate"]
+            batch_col = None
+            for col in batch_cols:
+                if col in adata.obs.columns:
+                    batch_col = col
+                    break
+            
+            # Create sophisticated subplot layout
+            # Using a 4x4 grid for comprehensive visualization
+            fig = make_subplots(
+                rows=4, cols=4,
+                subplot_titles=[
+                    "A. Transcriptional Complexity",  # Main scatter
+                    "B. Mitochondrial QC",             # Mito vs counts
+                    "C. Ribosomal Content",            # Ribo vs counts  
+                    "D. nUMI Distribution",            # Violin + box
+                    "E. nGene Distribution",           # Violin + box
+                    "F. MT% Distribution",             # Violin + box
+                    "G. Library Saturation",           # Complexity curve
+                    "H. Cell Quality Categories",      # Pie chart
+                    "I. Gene Detection Rate",          # Histogram
+                    "J. Sample Composition" if batch_col else "J. Top Genes", 
+                    "K. Correlation Matrix",           # QC metrics correlation
+                    "L. Statistical Summary",          # Table
+                    "M. Doublet Detection" if has_doublet else "M. Ribo% Distribution",
+                    "N. QC Thresholds",                # Threshold visualization
+                    "O. Cell Filtering Impact",        # Before/after
+                    "P. Batch Effects" if batch_col else "P. Overall Quality"
+                ],
+                specs=[
+                    [{"type": "scatter"}, {"type": "scatter"}, {"type": "scatter"}, {"type": "violin"}],
+                    [{"type": "violin"}, {"type": "violin"}, {"type": "scatter"}, {"type": "pie"}],
+                    [{"type": "histogram"}, {"type": "bar"}, {"type": "heatmap"}, {"type": "table"}],
+                    [{"type": "scatter" if has_doublet else "histogram"}, {"type": "scatter"}, {"type": "bar"}, {"type": "scatter" if batch_col else "indicator"}]
+                ],
+                horizontal_spacing=0.12,
+                vertical_spacing=0.12,
+                column_widths=[0.25, 0.25, 0.25, 0.25],
+                row_heights=[0.25, 0.25, 0.25, 0.25]
+            )
+            
+            # Define professional color scheme
+            color_quality = px.colors.sequential.Viridis
+            color_mito = px.colors.sequential.Reds
+            color_ribo = px.colors.sequential.Blues
+            color_discrete = px.colors.qualitative.Set2
+            
+            # Calculate QC thresholds using MAD-based approach
+            def calculate_outlier_thresholds(values, nmads=3):
+                median = np.median(values)
+                mad = np.median(np.abs(values - median))
+                lower = median - nmads * mad
+                upper = median + nmads * mad
+                return lower, upper
+            
+            genes_lower, genes_upper = calculate_outlier_thresholds(adata.obs["n_genes"])
+            mito_lower, mito_upper = calculate_outlier_thresholds(adata.obs["percent_mito"])
+            
+            # A. Main complexity scatter (row 1, col 1)
             fig.add_trace(
-                go.Scatter(
+                go.Scattergl(
                     x=adata.obs["n_counts"],
                     y=adata.obs["n_genes"],
                     mode='markers',
                     marker=dict(
-                        size=2,
+                        size=3,
                         color=adata.obs["percent_mito"],
-                        colorscale=self.continuous_colors,
-                        showscale=True,
-                        colorbar=dict(title="% Mito", x=0.35, y=0.85, len=0.3)
+                        colorscale=color_mito,
+                        showscale=False,
+                        cmin=0,
+                        cmax=np.percentile(adata.obs["percent_mito"], 95),
+                        opacity=0.6
                     ),
-                    text=[f"Cell: {cell}<br>UMIs: {umi}<br>Genes: {gene}<br>% Mito: {mito:.1f}"
+                    text=[f"Cell: {cell}<br>UMIs: {umi:,}<br>Genes: {gene:,}<br>MT%: {mito:.1f}%"
                           for cell, umi, gene, mito in zip(
-                              adata.obs_names,
-                              adata.obs["n_counts"],
-                              adata.obs["n_genes"],
-                              adata.obs["percent_mito"]
+                              adata.obs_names[:1000] if len(adata.obs_names) > 1000 else adata.obs_names,
+                              adata.obs["n_counts"][:1000] if len(adata.obs["n_counts"]) > 1000 else adata.obs["n_counts"],
+                              adata.obs["n_genes"][:1000] if len(adata.obs["n_genes"]) > 1000 else adata.obs["n_genes"],
+                              adata.obs["percent_mito"][:1000] if len(adata.obs["percent_mito"]) > 1000 else adata.obs["percent_mito"]
                           )],
                     hovertemplate="%{text}<extra></extra>",
                     showlegend=False
@@ -900,100 +989,419 @@ class SingleCellVisualizationService:
                 row=1, col=1
             )
             
-            # 2. Mitochondrial % vs nUMIs
+            # Add threshold lines
+            fig.add_hline(y=genes_lower, line_dash="dash", line_color="red", opacity=0.5, row=1, col=1)
+            fig.add_hline(y=genes_upper, line_dash="dash", line_color="red", opacity=0.5, row=1, col=1)
+            
+            # B. Mitochondrial QC (row 1, col 2)
             fig.add_trace(
-                go.Scatter(
+                go.Scattergl(
                     x=adata.obs["n_counts"],
                     y=adata.obs["percent_mito"],
                     mode='markers',
-                    marker=dict(size=2, opacity=0.5),
+                    marker=dict(
+                        size=3,
+                        color=adata.obs["n_genes"],
+                        colorscale=color_quality,
+                        showscale=False,
+                        opacity=0.6
+                    ),
                     showlegend=False
                 ),
                 row=1, col=2
             )
             
-            # 3. nGenes histogram
+            # Add threshold line
+            fig.add_hline(y=mito_upper, line_dash="dash", line_color="red", opacity=0.5, row=1, col=2)
+            
+            # C. Ribosomal content (row 1, col 3)
             fig.add_trace(
-                go.Histogram(
-                    x=adata.obs["n_genes"],
-                    nbinsx=50,
-                    marker_color='steelblue',
+                go.Scattergl(
+                    x=adata.obs["n_counts"],
+                    y=adata.obs["percent_ribo"],
+                    mode='markers',
+                    marker=dict(
+                        size=3,
+                        color=adata.obs["percent_mito"],
+                        colorscale=color_mito,
+                        showscale=False,
+                        opacity=0.6
+                    ),
                     showlegend=False
                 ),
                 row=1, col=3
             )
             
-            # 4. nUMIs histogram
-            fig.add_trace(
-                go.Histogram(
-                    x=adata.obs["n_counts"],
-                    nbinsx=50,
-                    marker_color='indianred',
-                    showlegend=False
-                ),
-                row=2, col=1
-            )
-            
-            # 5. Mitochondrial % histogram
-            fig.add_trace(
-                go.Histogram(
-                    x=adata.obs["percent_mito"],
-                    nbinsx=50,
-                    marker_color='seagreen',
-                    showlegend=False
-                ),
-                row=2, col=2
-            )
-            
-            # 6. Cells per sample (if batch info available)
-            batch_cols = ["batch", "sample", "patient", "Patient_ID"]
-            batch_col = None
-            for col in batch_cols:
-                if col in adata.obs.columns:
-                    batch_col = col
-                    break
-            
-            if batch_col:
-                sample_counts = adata.obs[batch_col].value_counts()
+            # D-F. Distribution plots with violin + box (rows 1-2, col 4 and row 2, cols 1-2)
+            for idx, (metric, metric_name, row_pos, col_pos, color) in enumerate([
+                ("n_counts", "nUMIs", 1, 4, color_discrete[0]),
+                ("n_genes", "nGenes", 2, 1, color_discrete[1]),
+                ("percent_mito", "MT%", 2, 2, color_discrete[2])
+            ]):
+                # Add violin plot
                 fig.add_trace(
-                    go.Bar(
-                        x=sample_counts.index,
-                        y=sample_counts.values,
-                        marker_color='purple',
-                        showlegend=False
+                    go.Violin(
+                        y=adata.obs[metric],
+                        name=metric_name,
+                        box_visible=True,
+                        meanline_visible=True,
+                        fillcolor=color,
+                        opacity=0.6,
+                        showlegend=False,
+                        side='positive',
+                        points='outliers'
                     ),
-                    row=2, col=3
+                    row=row_pos, col=col_pos
                 )
             
-            # Update axes labels
-            fig.update_xaxes(title_text="nUMIs", row=1, col=1)
-            fig.update_yaxes(title_text="nGenes", row=1, col=1)
+            # G. Library saturation curve (row 2, col 3)
+            # Sample cells for performance
+            n_sample = min(1000, adata.n_obs)
+            sample_idx = np.random.choice(adata.n_obs, n_sample, replace=False)
             
-            fig.update_xaxes(title_text="nUMIs", row=1, col=2)
-            fig.update_yaxes(title_text="% Mitochondrial", row=1, col=2)
+            saturation_x = adata.obs["n_counts"].iloc[sample_idx]
+            saturation_y = adata.obs["gene_detection_rate"].iloc[sample_idx]
             
-            fig.update_xaxes(title_text="nGenes", row=1, col=3)
-            fig.update_yaxes(title_text="Count", row=1, col=3)
-            
-            fig.update_xaxes(title_text="nUMIs", row=2, col=1)
-            fig.update_yaxes(title_text="Count", row=2, col=1)
-            
-            fig.update_xaxes(title_text="% Mitochondrial", row=2, col=2)
-            fig.update_yaxes(title_text="Count", row=2, col=2)
-            
-            if batch_col:
-                fig.update_xaxes(title_text=batch_col, row=2, col=3)
-                fig.update_yaxes(title_text="Number of Cells", row=2, col=3)
-            
-            # Update layout
-            fig.update_layout(
-                title=title or "Single-cell QC Plots",
-                width=1200,
-                height=800,
-                showlegend=False,
-                plot_bgcolor='white'
+            fig.add_trace(
+                go.Scattergl(
+                    x=saturation_x,
+                    y=saturation_y,
+                    mode='markers',
+                    marker=dict(size=2, color='steelblue', opacity=0.5),
+                    showlegend=False
+                ),
+                row=2, col=3
             )
             
+            # H. Cell quality categories pie chart (row 2, col 4)
+            n_high_quality = np.sum(
+                (adata.obs["n_genes"] >= genes_lower) & 
+                (adata.obs["n_genes"] <= genes_upper) & 
+                (adata.obs["percent_mito"] <= mito_upper)
+            )
+            n_low_genes = np.sum(adata.obs["n_genes"] < genes_lower)
+            n_high_mito = np.sum(adata.obs["percent_mito"] > mito_upper)
+            n_other = adata.n_obs - n_high_quality - n_low_genes - n_high_mito
+            
+            fig.add_trace(
+                go.Pie(
+                    labels=["High Quality", "Low Genes", "High MT%", "Other"],
+                    values=[n_high_quality, n_low_genes, n_high_mito, n_other],
+                    hole=0.3,
+                    marker=dict(colors=color_discrete[:4]),
+                    textinfo='label+percent',
+                    showlegend=False
+                ),
+                row=2, col=4
+            )
+            
+            # I. Gene detection rate histogram (row 3, col 1)
+            fig.add_trace(
+                go.Histogram(
+                    x=adata.obs["gene_detection_rate"],
+                    nbinsx=50,
+                    marker_color='teal',
+                    opacity=0.7,
+                    showlegend=False
+                ),
+                row=3, col=1
+            )
+            
+            # J. Sample composition or top genes (row 3, col 2)
+            if batch_col:
+                sample_counts = adata.obs[batch_col].value_counts().head(10)
+                fig.add_trace(
+                    go.Bar(
+                        x=sample_counts.index.astype(str),
+                        y=sample_counts.values,
+                        marker_color=color_discrete[4],
+                        showlegend=False,
+                        text=sample_counts.values,
+                        textposition='outside'
+                    ),
+                    row=3, col=2
+                )
+            else:
+                # Show top expressed genes
+                if issparse(adata.X):
+                    gene_counts = np.array(adata.X.sum(axis=0)).flatten()
+                else:
+                    gene_counts = adata.X.sum(axis=0)
+                top_genes_idx = np.argsort(gene_counts)[-10:][::-1]
+                top_genes = adata.var_names[top_genes_idx]
+                top_counts = gene_counts[top_genes_idx]
+                
+                fig.add_trace(
+                    go.Bar(
+                        x=top_genes[:10],
+                        y=top_counts[:10],
+                        marker_color=color_discrete[5],
+                        showlegend=False
+                    ),
+                    row=3, col=2
+                )
+            
+            # K. Correlation heatmap of QC metrics (row 3, col 3)
+            qc_metrics = ["n_counts", "n_genes", "percent_mito", "percent_ribo", "gene_detection_rate"]
+            corr_data = adata.obs[qc_metrics].corr()
+            
+            fig.add_trace(
+                go.Heatmap(
+                    z=corr_data.values,
+                    x=[m.replace("_", " ").replace("percent", "%") for m in qc_metrics],
+                    y=[m.replace("_", " ").replace("percent", "%") for m in qc_metrics],
+                    colorscale='RdBu_r',
+                    zmid=0,
+                    showscale=False,
+                    text=np.round(corr_data.values, 2),
+                    texttemplate='%{text}',
+                    textfont={"size": 10},
+                    showlegend=False
+                ),
+                row=3, col=3
+            )
+            
+            # L. Statistical summary table (row 3, col 4)
+            summary_stats = pd.DataFrame({
+                'Metric': ['Cells', 'Genes', 'Mean UMIs', 'Mean Genes', 'Mean MT%', 'Mean Ribo%'],
+                'Value': [
+                    f'{adata.n_obs:,}',
+                    f'{adata.n_vars:,}',
+                    f'{adata.obs["n_counts"].mean():.0f}',
+                    f'{adata.obs["n_genes"].mean():.0f}',
+                    f'{adata.obs["percent_mito"].mean():.1f}%',
+                    f'{adata.obs["percent_ribo"].mean():.1f}%'
+                ]
+            })
+            
+            fig.add_trace(
+                go.Table(
+                    cells=dict(
+                        values=[summary_stats['Metric'], summary_stats['Value']],
+                        align='left',
+                        font=dict(size=11),
+                        height=25,
+                        fill_color=['lightgray', 'white']
+                    )
+                ),
+                row=3, col=4
+            )
+            
+            # M. Doublet detection or Ribo distribution (row 4, col 1)
+            if has_doublet:
+                fig.add_trace(
+                    go.Scattergl(
+                        x=adata.obs["n_counts"],
+                        y=adata.obs["doublet_score"],
+                        mode='markers',
+                        marker=dict(
+                            size=3,
+                            color=adata.obs["doublet_score"],
+                            colorscale='Hot',
+                            showscale=False,
+                            opacity=0.6
+                        ),
+                        showlegend=False
+                    ),
+                    row=4, col=1
+                )
+            else:
+                fig.add_trace(
+                    go.Histogram(
+                        x=adata.obs["percent_ribo"],
+                        nbinsx=50,
+                        marker_color='royalblue',
+                        opacity=0.7,
+                        showlegend=False
+                    ),
+                    row=4, col=1
+                )
+            
+            # N. QC thresholds visualization (row 4, col 2)
+            # Create a 2D density plot showing QC thresholds
+            fig.add_trace(
+                go.Histogram2d(
+                    x=adata.obs["n_genes"],
+                    y=adata.obs["percent_mito"],
+                    colorscale='Blues',
+                    showscale=False,
+                    opacity=0.8
+                ),
+                row=4, col=2
+            )
+            
+            # Add threshold rectangles
+            fig.add_shape(
+                type="rect",
+                x0=genes_lower, x1=genes_upper,
+                y0=0, y1=mito_upper,
+                line=dict(color="green", width=2),
+                fillcolor="green",
+                opacity=0.1,
+                row=4, col=2
+            )
+            
+            # O. Cell filtering impact (row 4, col 3)
+            filtering_data = pd.DataFrame({
+                'Stage': ['Raw', 'After QC'],
+                'Cells': [
+                    adata.n_obs,
+                    n_high_quality
+                ]
+            })
+            
+            fig.add_trace(
+                go.Bar(
+                    x=filtering_data['Stage'],
+                    y=filtering_data['Cells'],
+                    marker_color=['gray', 'green'],
+                    text=filtering_data['Cells'],
+                    textposition='outside',
+                    showlegend=False
+                ),
+                row=4, col=3
+            )
+            
+            # P. Batch effects or overall quality indicator (row 4, col 4)
+            if batch_col:
+                # Show batch variation in key metrics
+                batch_data = adata.obs.groupby(batch_col).agg({
+                    'n_counts': 'mean',
+                    'n_genes': 'mean',
+                    'percent_mito': 'mean'
+                }).reset_index()
+                
+                # Normalize for visualization
+                for col in ['n_counts', 'n_genes', 'percent_mito']:
+                    batch_data[col] = (batch_data[col] - batch_data[col].mean()) / batch_data[col].std()
+                
+                fig.add_trace(
+                    go.Scattergl(
+                        x=batch_data[batch_col].astype(str),
+                        y=batch_data['n_counts'],
+                        mode='lines+markers',
+                        name='nUMIs',
+                        marker=dict(size=8),
+                        showlegend=False
+                    ),
+                    row=4, col=4
+                )
+            else:
+                # Overall quality indicator
+                quality_score = (n_high_quality / adata.n_obs) * 100
+                fig.add_trace(
+                    go.Indicator(
+                        mode="gauge+number+delta",
+                        value=quality_score,
+                        title={'text': "Overall Quality"},
+                        delta={'reference': 80},
+                        gauge={
+                            'axis': {'range': [None, 100]},
+                            'bar': {'color': "darkgreen" if quality_score > 70 else "orange"},
+                            'steps': [
+                                {'range': [0, 50], 'color': "lightgray"},
+                                {'range': [50, 80], 'color': "gray"}
+                            ],
+                            'threshold': {
+                                'line': {'color': "red", 'width': 4},
+                                'thickness': 0.75,
+                                'value': 90
+                            }
+                        }
+                    ),
+                    row=4, col=4
+                )
+            
+            # Calculate data-driven axis ranges
+            counts_min, counts_max = adata.obs["n_counts"].min(), adata.obs["n_counts"].max()
+            genes_min, genes_max = adata.obs["n_genes"].min(), adata.obs["n_genes"].max()
+            mito_min, mito_max = adata.obs["percent_mito"].min(), adata.obs["percent_mito"].max()
+            ribo_min, ribo_max = adata.obs["percent_ribo"].min(), adata.obs["percent_ribo"].max()
+            
+            # Add small padding to ranges
+            counts_padding = (counts_max - counts_min) * 0.05
+            genes_padding = (genes_max - genes_min) * 0.05
+            mito_padding = max((mito_max - mito_min) * 0.05, 1)
+            ribo_padding = max((ribo_max - ribo_min) * 0.05, 1)
+            
+            # Update all axes labels with data-driven ranges
+            # Row 1
+            fig.update_xaxes(title_text="nUMIs", row=1, col=1, type='log', range=[np.log10(max(1, counts_min-counts_padding)), np.log10(counts_max+counts_padding)])
+            fig.update_yaxes(title_text="nGenes", row=1, col=1, type='log', range=[np.log10(max(1, genes_min-genes_padding)), np.log10(genes_max+genes_padding)])
+            fig.update_xaxes(title_text="nUMIs", row=1, col=2, type='log', range=[np.log10(max(1, counts_min-counts_padding)), np.log10(counts_max+counts_padding)])
+            fig.update_yaxes(title_text="MT%", row=1, col=2, range=[max(0, mito_min-mito_padding), mito_max+mito_padding])
+            fig.update_xaxes(title_text="nUMIs", row=1, col=3, type='log', range=[np.log10(max(1, counts_min-counts_padding)), np.log10(counts_max+counts_padding)])
+            fig.update_yaxes(title_text="Ribo%", row=1, col=3, range=[max(0, ribo_min-ribo_padding), ribo_max+ribo_padding])
+            fig.update_yaxes(title_text="nUMIs", row=1, col=4, range=[counts_min-counts_padding, counts_max+counts_padding])
+            
+            # Row 2
+            fig.update_yaxes(title_text="nGenes", row=2, col=1, range=[genes_min-genes_padding, genes_max+genes_padding])
+            fig.update_yaxes(title_text="MT%", row=2, col=2, range=[max(0, mito_min-mito_padding), mito_max+mito_padding])
+            fig.update_xaxes(title_text="nUMIs", row=2, col=3, type='log', range=[np.log10(max(1, counts_min-counts_padding)), np.log10(counts_max+counts_padding)])
+            fig.update_yaxes(title_text="Gene Detection %", row=2, col=3, range=[0, 100])
+            
+            # Row 3
+            fig.update_xaxes(title_text="Gene Detection %", row=3, col=1)
+            fig.update_yaxes(title_text="Frequency", row=3, col=1)
+            if batch_col:
+                fig.update_xaxes(title_text=batch_col, row=3, col=2, tickangle=45)
+                fig.update_yaxes(title_text="Cell Count", row=3, col=2)
+            else:
+                fig.update_xaxes(title_text="Gene", row=3, col=2, tickangle=45)
+                fig.update_yaxes(title_text="Total UMIs", row=3, col=2, type='log')
+            
+            # Row 4
+            if has_doublet:
+                doublet_min, doublet_max = adata.obs["doublet_score"].min(), adata.obs["doublet_score"].max()
+                doublet_padding = (doublet_max - doublet_min) * 0.05
+                fig.update_xaxes(title_text="nUMIs", row=4, col=1, type='log', range=[np.log10(max(1, counts_min-counts_padding)), np.log10(counts_max+counts_padding)])
+                fig.update_yaxes(title_text="Doublet Score", row=4, col=1, range=[max(0, doublet_min-doublet_padding), doublet_max+doublet_padding])
+            else:
+                fig.update_xaxes(title_text="Ribo%", row=4, col=1, range=[max(0, ribo_min-ribo_padding), ribo_max+ribo_padding])
+                fig.update_yaxes(title_text="Frequency", row=4, col=1)
+            fig.update_xaxes(title_text="nGenes", row=4, col=2, range=[genes_min-genes_padding, genes_max+genes_padding])
+            fig.update_yaxes(title_text="MT%", row=4, col=2, range=[max(0, mito_min-mito_padding), mito_max+mito_padding])
+            fig.update_xaxes(title_text="Stage", row=4, col=3)
+            fig.update_yaxes(title_text="Cell Count", row=4, col=3, range=[0, max(adata.n_obs, n_high_quality) * 1.1])
+            if batch_col:
+                fig.update_xaxes(title_text=batch_col, row=4, col=4, tickangle=45)
+                fig.update_yaxes(title_text="Normalized Metrics", row=4, col=4)
+            
+            # Update overall layout with better dimensions for web display
+            fig.update_layout(
+                title={
+                    'text': title or "Comprehensive Single-Cell RNA-seq Quality Control Report",
+                    'font': {'size': 18, 'family': 'Arial, sans-serif'},
+                    'x': 0.5,
+                    'xanchor': 'center'
+                },
+                width=1400,
+                height=1200,
+                showlegend=False,
+                plot_bgcolor='white',
+                paper_bgcolor='white',
+                font=dict(size=9),
+                margin=dict(l=50, r=50, t=80, b=60)
+            )
+            
+            # Add annotation with dataset info
+            dataset_info = (
+                f"Dataset: {adata.n_obs:,} cells × {adata.n_vars:,} genes | "
+                f"High Quality Cells: {n_high_quality:,} ({n_high_quality/adata.n_obs*100:.1f}%) | "
+                f"Mean MT%: {adata.obs['percent_mito'].mean():.1f}% | "
+                f"Mean UMIs/cell: {adata.obs['n_counts'].mean():.0f}"
+            )
+            
+            fig.add_annotation(
+                text=dataset_info,
+                xref="paper", yref="paper",
+                x=0.5, y=-0.02,
+                xanchor='center',
+                showarrow=False,
+                font=dict(size=11, color='gray')
+            )
+            
+            logger.info(f"Created comprehensive QC plot with {adata.n_obs:,} cells")
             return fig
             
         except Exception as e:
@@ -1130,7 +1538,7 @@ class SingleCellVisualizationService:
                 
                 if format in ["png", "both"]:
                     png_path = output_path / f"{name}.png"
-                    pio.write_image(fig, png_path, width=1200, height=800)
+                    pio.write_image(fig, png_path, width=3200, height=2400, scale=2)
                     saved_files.append(str(png_path))
                     logger.info(f"Saved PNG: {png_path}")
                     
