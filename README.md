@@ -18,7 +18,7 @@ While you can use Lobster AI locally today, we're actively developing a **cloud-
 - 🔧 **Managed Infrastructure** - No need to manage dependencies or API keys
 - 📊 **Enhanced Analytics** - Advanced monitoring and usage insights
 
-**Expected Launch: Q1 2025** | **[Join Early Access Waitlist →](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20Early%20Access)**
+**Expected Launch: Q1 2025** | **[Join Early Access Waitlist →](mailto:kevin.yar@omics-os.com?subject=Lobster%20Cloud%20Early%20Access)**
 
 For now, this local installation provides the complete Lobster AI experience on your own hardware.
 
@@ -79,7 +79,7 @@ lobster chat
 ### 🎯 **Quick Install (Recommended)**
 
 ```bash
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 make install
 ```
@@ -97,7 +97,7 @@ If you prefer manual control or the automated installer fails:
 
 ```bash
 # Clone repository
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 
 # Create virtual environment
@@ -390,9 +390,8 @@ export GENIE_PROFILE=cost-optimized
 ### 📞 **Getting Help**
 
 - 📚 **[Full Documentation](docs/)** - Comprehensive guides
-- 💬 **[Discord Community](https://discord.gg/homaraai)** - Real-time help
-- 🐛 **[GitHub Issues](https://github.com/homara-ai/lobster/issues)** - Bug reports
-- 📧 **[Email Support](mailto:support@homara.ai)** - Direct assistance
+- 🐛 **[GitHub Issues](https://github.com/the-omics-os/lobster/issues)** - Bug reports
+- 📧 **[Email Support](mailto:kevin.yar@omics-os.com)** - Direct assistance
 
 ## 🛣️ **Roadmap & Cloud Migration**
 
@@ -440,7 +439,7 @@ lobster chat --reasoning --debug
 - **License**: MIT License - see [LICENSE](LICENSE) for details
 - **Built with**: [LangGraph](https://github.com/langchain-ai/langgraph), [LangChain](https://github.com/langchain-ai/langchain)
 - **Bioinformatics**: [Scanpy](https://scanpy.readthedocs.io/), [BioPython](https://biopython.org/)
-- **Created by**: [Homara AI](https://homara.ai)
+- **Created by**: [Homara AI](https://omics-os.com)
 
 ---
 
@@ -448,7 +447,7 @@ lobster chat --reasoning --debug
 
 **🦞 Ready to Transform Your Bioinformatics Research?**
 
-[Get Started Now](https://github.com/homara-ai/lobster) • [Join Community](https://discord.gg/homaraai) • [Cloud Waitlist](mailto:cloud@homara.ai)
+[Get Started Now](https://github.com/the-omics-os/lobster) • [Join Community](https://discord.gg/homaraai) • [Cloud Waitlist](mailto:cloud@homara.ai)
 
 *Experience the future of bioinformatics analysis today, with cloud deployment coming soon.*
 
