@@ -18,7 +18,7 @@ While you can use Lobster AI locally today, we're actively developing a **cloud-
 - 🔧 **Managed Infrastructure** - No need to manage dependencies or API keys
 - 📊 **Enhanced Analytics** - Advanced monitoring and usage insights
 
-**Expected Launch: Q1 2025** | **[Join Early Access Waitlist →](mailto:kevin.yar@omics-os.com?subject=Lobster%20Cloud%20Early%20Access)**
+**Expected Launch: September 25, 2025** | **[Join Early Access Waitlist →](mailto:kevin.yar@omics-os.com?subject=Lobster%20Cloud%20Early%20Access)**
 
 For now, this local installation provides the complete Lobster AI experience on your own hardware.
 
@@ -79,7 +79,7 @@ lobster chat
 ### 🎯 **Quick Install (Recommended)**
 
 ```bash
-git clone https://github.com/the-omics-os/lobster.git
+git clone https://github.com/omics-os/lobster.git
 cd lobster
 make install
 ```
@@ -97,7 +97,7 @@ If you prefer manual control or the automated installer fails:
 
 ```bash
 # Clone repository
-git clone https://github.com/the-omics-os/lobster.git
+git clone https://github.com/omics-os/lobster.git
 cd lobster
 
 # Create virtual environment
@@ -390,20 +390,20 @@ export GENIE_PROFILE=cost-optimized
 ### 📞 **Getting Help**
 
 - 📚 **[Full Documentation](docs/)** - Comprehensive guides
-- 🐛 **[GitHub Issues](https://github.com/the-omics-os/lobster/issues)** - Bug reports
+- 🐛 **[GitHub Issues](https://github.com/omics-os/lobster/issues)** - Bug reports
 - 📧 **[Email Support](mailto:kevin.yar@omics-os.com)** - Direct assistance
 
 ## 🛣️ **Roadmap & Cloud Migration**
 
 ### 🚀 **Upcoming Cloud Features**
 
-**Q1 2025 - Cloud Beta Launch:**
+**September 2025 - Cloud Beta Launch:**
 - ☁️ Fully managed cloud infrastructure
 - 🔄 Seamless local-to-cloud migration tools
 - 📊 Enhanced web interface with real-time collaboration
 - 🔒 Enterprise security and compliance features
 
-**Q2 2025 - Advanced Features:**
+**Q4 2025 - Advanced Features:**
 - 🤖 Enhanced AI models with domain-specific training
 - 📈 Advanced analytics and experiment tracking
 - 🔗 Integration with popular data platforms
@@ -439,7 +439,7 @@ lobster chat --reasoning --debug
 - **License**: MIT License - see [LICENSE](LICENSE) for details
 - **Built with**: [LangGraph](https://github.com/langchain-ai/langgraph), [LangChain](https://github.com/langchain-ai/langchain)
 - **Bioinformatics**: [Scanpy](https://scanpy.readthedocs.io/), [BioPython](https://biopython.org/)
-- **Created by**: [Homara AI](https://omics-os.com)
+- **Created by**: [Omics-OS](https://www.omics-os.com) - Founded by Kevin Yar
 
 ---
 
@@ -447,7 +447,7 @@ lobster chat --reasoning --debug
 
 **🦞 Ready to Transform Your Bioinformatics Research?**
 
-[Get Started Now](https://github.com/the-omics-os/lobster) • [Join Community](https://discord.gg/homaraai) • [Cloud Waitlist](mailto:cloud@homara.ai)
+[Get Started Now](https://github.com/omics-os/lobster) • [Visit Website](https://www.omics-os.com) • [Cloud Waitlist](mailto:kevin.yar@omics-os.com)
 
 *Experience the future of bioinformatics analysis today, with cloud deployment coming soon.*
 
