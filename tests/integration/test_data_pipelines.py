@@ -27,7 +27,7 @@ from lobster.tools.geo_service import GEOService
 from lobster.tools.preprocessing_service import PreprocessingService
 from lobster.tools.clustering_service import ClusteringService
 from lobster.tools.quality_service import QualityService
-from lobster.tools.visualization_service import VisualizationService
+from lobster.tools.visualization_service import SingleCellVisualizationService
 
 from tests.mock_data.factories import SingleCellDataFactory, BulkRNASeqDataFactory, ProteomicsDataFactory
 from tests.mock_data.base import SMALL_DATASET_CONFIG, LARGE_DATASET_CONFIG
@@ -60,7 +60,7 @@ def mock_pipeline_services():
         'preprocessing_service': Mock(spec=PreprocessingService),
         'clustering_service': Mock(spec=ClusteringService),
         'quality_service': Mock(spec=QualityService),
-        'visualization_service': Mock(spec=VisualizationService)
+        'visualization_service': Mock(spec=SingleCellVisualizationService)
     }
 
 

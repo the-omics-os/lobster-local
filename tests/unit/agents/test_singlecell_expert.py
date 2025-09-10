@@ -14,7 +14,7 @@ from unittest.mock import Mock, MagicMock, patch
 import numpy as np
 import pandas as pd
 
-from lobster.agents.singlecell_expert import singlecell_expert_agent
+from lobster.agents.singlecell_expert import singlecell_expert
 from lobster.core.data_manager_v2 import DataManagerV2
 
 from tests.mock_data.factories import SingleCellDataFactory
@@ -63,7 +63,7 @@ def singlecell_state():
     return MockState(
         messages=[MockMessage("Perform single-cell clustering analysis")],
         data_manager=Mock(),
-        current_agent="singlecell_expert_agent"
+        current_agent="singlecell_expert"
     )
 
 
@@ -346,7 +346,7 @@ class TestSingleCellWorkflows:
         """Test standard single-cell analysis workflow."""
         singlecell_state.messages = [MockMessage("Run standard single-cell analysis pipeline")]
         
-        with patch('lobster.agents.singlecell_expert.singlecell_expert_agent') as mock_agent:
+        with patch('lobster.agents.singlecell_expert.singlecell_expert') as mock_agent:
             mock_agent.return_value = {
                 "messages": [MockMessage("Completed standard analysis pipeline", "assistant")],
                 "workflow_steps": ["qc", "normalization", "clustering", "markers", "annotation"],

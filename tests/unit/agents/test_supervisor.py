@@ -13,7 +13,7 @@ from typing import Dict, Any, List, Optional
 from unittest.mock import Mock, MagicMock, patch, call
 import json
 
-from lobster.agents.supervisor import supervisor_agent
+from lobster.agents.langgraph_supervisor import create_supervisor
 from lobster.core.data_manager_v2 import DataManagerV2
 
 from tests.mock_data.factories import SingleCellDataFactory
@@ -72,7 +72,7 @@ def supervisor_state():
     return MockState(
         messages=[MockMessage("Please analyze this single-cell RNA-seq dataset")],
         data_manager=Mock(),
-        current_agent="supervisor_agent"
+        current_agent="supervisor"
     )
 
 
@@ -87,7 +87,7 @@ class TestSupervisorAgentCore:
     def test_supervisor_initialization(self, mock_data_manager):
         """Test supervisor agent initialization."""
         # Mock the supervisor function
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Test initialization
             state = MockState(data_manager=mock_data_manager)
             mock_supervisor.return_value = {"messages": []}
@@ -101,7 +101,7 @@ class TestSupervisorAgentCore:
             MockMessage("Load the dataset from GEO GSE12345 and show me a summary")
         ]
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock decision to select data expert
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I'll help you load and analyze that dataset", "assistant")],
@@ -119,7 +119,7 @@ class TestSupervisorAgentCore:
             MockMessage("Perform single-cell clustering and find marker genes")
         ]
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock decision to select single-cell expert
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I'll perform single-cell analysis on your data", "assistant")],
@@ -137,7 +137,7 @@ class TestSupervisorAgentCore:
             MockMessage("Find papers about T cell exhaustion in cancer")
         ]
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock decision to select research agent
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I'll search for relevant literature on T cell exhaustion", "assistant")],
@@ -155,7 +155,7 @@ class TestSupervisorAgentCore:
             MockMessage("Load GEO data, perform quality control, and cluster cells")
         ]
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock multi-step coordination
             mock_supervisor.return_value = {
                 "messages": [MockMessage("This requires multiple steps. I'll start by loading the data", "assistant")],
@@ -244,18 +244,18 @@ class TestSupervisorHandoffCoordination:
     
     def test_invalid_handoff_handling(self):
         """Test handling of invalid handoff requests."""
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock supervisor handling invalid handoff
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I don't understand that request. Could you clarify?", "assistant")],
-                "next_agent": "supervisor_agent"  # Stay with supervisor
+                "next_agent": "supervisor"  # Stay with supervisor
             }
             
             state = MockState(messages=[MockMessage("Do something impossible")])
             result = mock_supervisor(state)
             
             # Should stay with supervisor for clarification
-            assert result["next_agent"] == "supervisor_agent"
+            assert result["next_agent"] == "supervisor"
 
 
 # ===============================================================================
@@ -280,7 +280,7 @@ class TestSupervisorDecisionMaking:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock routing decision
             mock_supervisor.return_value = {
                 "messages": [MockMessage(f"I'll handle this {task} request", "assistant")],
@@ -297,17 +297,17 @@ class TestSupervisorDecisionMaking:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock clarification request
             mock_supervisor.return_value = {
                 "messages": [MockMessage("Could you be more specific about what analysis you need?", "assistant")],
-                "next_agent": "supervisor_agent"
+                "next_agent": "supervisor"
             }
             
             result = mock_supervisor(state)
             
             # Should ask for clarification
-            assert result["next_agent"] == "supervisor_agent"
+            assert result["next_agent"] == "supervisor"
             assert "specific" in result["messages"][0].content.lower()
     
     def test_context_aware_decisions(self, mock_data_manager):
@@ -323,7 +323,7 @@ class TestSupervisorDecisionMaking:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock context-aware routing
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I see you have data loaded. I'll perform clustering", "assistant")],
@@ -342,7 +342,7 @@ class TestSupervisorDecisionMaking:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock sequential planning
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I'll coordinate this multi-step analysis", "assistant")],
@@ -378,7 +378,7 @@ class TestSupervisorWorkflowManagement:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock workflow initialization
             mock_supervisor.return_value = {
                 "messages": [MockMessage("Starting comprehensive analysis workflow", "assistant")],
@@ -401,7 +401,7 @@ class TestSupervisorWorkflowManagement:
             completed_steps=["data_loading"]
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock progress tracking
             mock_supervisor.return_value = {
                 "messages": [MockMessage("Continuing analysis - moving to quality control", "assistant")],
@@ -424,7 +424,7 @@ class TestSupervisorWorkflowManagement:
             last_error="Clustering failed due to insufficient cells"
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock error recovery
             mock_supervisor.return_value = {
                 "messages": [MockMessage("Let me help recover from that error", "assistant")],
@@ -446,11 +446,11 @@ class TestSupervisorWorkflowManagement:
             completed_steps=["data_loading", "quality_control", "clustering", "marker_finding"]
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock workflow completion
             mock_supervisor.return_value = {
                 "messages": [MockMessage("Analysis workflow completed successfully!", "assistant")],
-                "next_agent": "supervisor_agent",
+                "next_agent": "supervisor",
                 "workflow_status": "completed",
                 "workflow_summary": "Completed single-cell analysis with clustering and marker identification"
             }
@@ -476,7 +476,7 @@ class TestSupervisorStateManagement:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock state updates
             mock_supervisor.return_value = {
                 "messages": [MockMessage("Analysis started", "assistant")],
@@ -500,7 +500,7 @@ class TestSupervisorStateManagement:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock history-aware response
             mock_supervisor.return_value = {
                 "messages": state.messages + [MockMessage("Based on our conversation, here are the results", "assistant")]
@@ -521,7 +521,7 @@ class TestSupervisorStateManagement:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock data-aware response
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I see you have two datasets available for comparison", "assistant")],
@@ -552,7 +552,7 @@ class TestSupervisorErrorHandling:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock handling of empty input
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I didn't receive any instructions. How can I help you?", "assistant")]
@@ -569,7 +569,7 @@ class TestSupervisorErrorHandling:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock handling of malformed input
             mock_supervisor.return_value = {
                 "messages": [MockMessage("I didn't understand that. Could you rephrase your request?", "assistant")]
@@ -586,16 +586,16 @@ class TestSupervisorErrorHandling:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock fallback when agent unavailable
             mock_supervisor.return_value = {
                 "messages": [MockMessage("That agent isn't available. Let me handle this instead", "assistant")],
-                "next_agent": "supervisor_agent"
+                "next_agent": "supervisor"
             }
             
             result = mock_supervisor(state)
             
-            assert result["next_agent"] == "supervisor_agent"
+            assert result["next_agent"] == "supervisor"
     
     def test_concurrent_request_handling(self, mock_data_manager):
         """Test handling of concurrent requests."""
@@ -610,7 +610,7 @@ class TestSupervisorErrorHandling:
                     data_manager=mock_data_manager
                 )
                 
-                with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+                with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
                     mock_supervisor.return_value = {
                         "messages": [MockMessage(f"Handled task from worker {worker_id}", "assistant")],
                         "worker_id": worker_id
@@ -651,7 +651,7 @@ class TestSupervisorErrorHandling:
             data_manager=mock_data_manager
         )
         
-        with patch('lobster.agents.supervisor.supervisor_agent') as mock_supervisor:
+        with patch('lobster.agents.langgraph_supervisor.create_supervisor') as mock_supervisor:
             # Mock handling of large history
             mock_supervisor.return_value = {
                 "messages": large_history[-10:] + [MockMessage("Processed large history", "assistant")],  # Truncated

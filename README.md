@@ -23,13 +23,16 @@ Lobster AI is a revolutionary bioinformatics platform that combines the power of
 - **Data Expert**: Handles data loading, format conversion, and quality assessment
 - **Research Agent**: Discovers relevant datasets and literature for your analysis
 - **Transcriptomics Expert**: Specialized in single-cell and bulk RNA-seq analysis
-- **Proteomics Expert**: Mass spectrometry and protein analysis workflows
+- **MS Proteomics Expert**: Mass spectrometry proteomics with DDA/DIA workflows and missing value handling
+- **Affinity Proteomics Expert**: Targeted protein panels, Olink arrays, and antibody-based assays
 - **Method Expert**: Extracts optimal parameters from scientific literature
 
 ### 🧬 **Advanced Analysis Capabilities**
 - **Single-Cell RNA-seq**: Quality control, clustering, cell type annotation, trajectory analysis
 - **Bulk RNA-seq**: Differential expression, pathway analysis, batch correction
-- **Proteomics**: Missing value handling, statistical analysis, protein networks
+- **Mass Spectrometry Proteomics**: Missing value pattern analysis, intensity normalization, peptide-to-protein mapping
+- **Affinity Proteomics**: Targeted panels, coefficient of variation analysis, antibody validation workflows
+- **Proteomics Visualization**: Volcano plots, correlation networks, pathway enrichment, QC dashboards
 - **Multi-Omics Integration**: Cross-platform analysis using MuData framework
 - **Literature Mining**: Automated parameter optimization from publications
 
@@ -40,8 +43,9 @@ Lobster AI is a revolutionary bioinformatics platform that combines the power of
 - **Complete Provenance**: Reproducible analysis trails
 - **Format Flexibility**: CSV, Excel, H5AD, 10X MTX, and more
 
-## 🎬 **Quick Example**
+## 🎬 **Quick Examples**
 
+### Single-Cell RNA-seq Analysis
 ```bash
 # Install Lobster AI
 git clone https://github.com/homara-ai/lobster.git
@@ -62,6 +66,134 @@ lobster chat
 
 Analysis complete! Found 12 cell populations with distinct expression signatures.
 ```
+
+### Mass Spectrometry Proteomics Analysis
+```bash
+🦞 You: "Analyze my proteomics data with missing value assessment and differential analysis"
+
+🦞 Lobster: I'll analyze your mass spectrometry proteomics data...
+
+✓ Loaded proteomics data: 2,847 proteins × 24 samples
+✓ Missing value analysis: 42% missing (typical for MS data)
+✓ Applied log2 transformation and normalization
+✓ Identified 156 significantly regulated proteins (p < 0.05)
+✓ Generated volcano plot and pathway enrichment analysis
+
+Analysis complete! Found significant protein expression changes with comprehensive QC metrics.
+```
+
+### Affinity Proteomics (Olink) Analysis
+```bash
+🦞 You: "Process my Olink panel data and create QC dashboard"
+
+🦞 Lobster: I'll process your targeted proteomics panel...
+
+✓ Loaded Olink data: 384 proteins × 96 samples
+✓ QC assessment: 18% missing values (excellent for affinity)
+✓ Coefficient of variation analysis completed
+✓ Generated comprehensive QC dashboard
+✓ Created protein correlation network visualization
+
+Analysis complete! High-quality targeted proteomics data with professional QC metrics.
+```
+
+## 🔬 **Comprehensive Proteomics Platform**
+
+Lobster AI provides **industry-leading proteomics analysis** with specialized agents and professional-grade algorithms:
+
+### 🎯 **Proteomics-Specific Features**
+
+#### **🔬 Mass Spectrometry Support**
+- **DDA/DIA Workflows**: Complete data-dependent and data-independent acquisition pipelines
+- **Missing Value Intelligence**: Sophisticated handling of 30-70% missing values typical in MS data
+- **Peptide-to-Protein Mapping**: Professional aggregation algorithms with statistical validation
+- **Intensity Normalization**: Multiple normalization strategies (TMM, quantile, VSN)
+- **Database Search Artifact Removal**: Quality-based filtering of unreliable identifications
+
+#### **🎯 Affinity Proteomics Excellence**
+- **Olink Panel Support**: Specialized workflows for targeted protein panels
+- **Antibody Validation**: Quality assessment tools for antibody-based assays
+- **Coefficient of Variation Analysis**: Technical reproducibility assessment
+- **Low Missing Values**: Optimized for <30% missing values in affinity data
+- **Panel Comparison**: Cross-panel harmonization and batch effect correction
+
+#### **📊 Professional Visualization Suite**
+- **Missing Value Heatmaps**: Pattern analysis across samples and proteins
+- **Intensity Distribution Plots**: Platform-specific data quality assessment
+- **Volcano Plots**: Publication-ready differential expression visualization
+- **Protein Correlation Networks**: Interactive NetworkX-based protein interaction maps
+- **Pathway Enrichment Plots**: Functional analysis with statistical significance
+- **Comprehensive QC Dashboards**: Multi-metric quality control reports
+
+#### **🧬 Advanced Statistical Analysis**
+- **Differential Expression**: Multiple testing correction with FDR control
+- **Pathway Analysis**: Gene set enrichment with protein-specific databases
+- **Quality Control**: Multi-level assessment (PSM, peptide, protein levels)
+- **Batch Effect Detection**: Automated identification and correction strategies
+- **Statistical Modeling**: Linear mixed models for complex experimental designs
+
+### 🤖 **Specialized Proteomics AI Agents**
+
+#### **MS Proteomics Expert**
+- **DDA/DIA Pipeline Management**: Automated workflow selection and optimization
+- **Missing Value Pattern Analysis**: MNAR vs MCAR classification and handling
+- **Database Search Integration**: Support for MaxQuant, MSFragger, and other tools
+- **Quality Assessment**: Multi-level QC from spectrum to protein identification
+
+#### **Affinity Proteomics Expert**
+- **Panel-Specific Optimization**: Tailored analysis for Olink, SOMAscan, MSD platforms
+- **Antibody Performance Metrics**: Validation and quality scoring algorithms
+- **Cross-Platform Harmonization**: Integration across different affinity technologies
+- **Targeted Analysis Workflows**: Hypothesis-driven protein subset analysis
+
+### 🔧 **Professional Service Architecture**
+
+#### **ProteomicsPreprocessingService**
+- **Multi-Platform Support**: MS and affinity proteomics data loading
+- **Intelligent Filtering**: Protein and sample quality-based filtering
+- **Normalization Strategies**: Platform-appropriate normalization methods
+- **Missing Value Handling**: Imputation strategies with statistical validation
+
+#### **ProteomicsQualityService**
+- **Comprehensive QC Metrics**: Sample and protein-level quality assessment
+- **Missing Value Analysis**: Pattern detection and classification
+- **Technical Reproducibility**: CV analysis and batch effect detection
+- **Platform-Specific Thresholds**: Evidence-based quality criteria
+
+#### **ProteomicsAnalysisService**
+- **Statistical Testing**: Multiple hypothesis testing with appropriate corrections
+- **Dimensionality Reduction**: PCA, t-SNE optimized for proteomics data
+- **Clustering Analysis**: Protein and sample clustering with validation metrics
+- **Pathway Analysis**: Protein-centric functional enrichment
+
+#### **ProteomicsDifferentialService**
+- **Advanced Statistical Models**: Linear models with empirical Bayes moderation
+- **Multiple Comparisons**: FDR control across protein and contrast levels
+- **Effect Size Estimation**: Fold change calculations with confidence intervals
+- **Result Interpretation**: Automated significance assessment and reporting
+
+#### **ProteomicsVisualizationService**
+- **Publication-Quality Plots**: Plotly-based interactive visualizations
+- **Missing Value Visualizations**: Heatmaps and pattern analysis plots
+- **Statistical Result Plots**: Volcano plots, MA plots, p-value distributions
+- **Network Visualizations**: Protein interaction and correlation networks
+- **QC Dashboards**: Comprehensive multi-panel quality control reports
+
+### 📈 **Industry Integration**
+
+#### **File Format Support**
+- **MaxQuant Output**: proteinGroups.txt, peptides.txt processing
+- **Spectronaut Results**: DirectDIA and library-based workflows
+- **Olink Data**: NPX values with quality flags and metadata
+- **Generic Formats**: CSV, Excel, HDF5 with flexible schema detection
+
+#### **Database Integration**
+- **UniProt Mapping**: Automatic protein annotation and ID conversion
+- **Pathway Databases**: Reactome, KEGG, GO integration for functional analysis
+- **PPI Networks**: STRING, BioGRID protein interaction data
+- **Literature Mining**: Automated parameter extraction from proteomics publications
+
+This comprehensive proteomics platform ensures publication-ready results with professional-grade algorithms and industry-standard workflows.
 
 ## 📦 **Quick Installation**
 

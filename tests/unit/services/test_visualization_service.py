@@ -20,7 +20,7 @@ import seaborn as sns
 from pathlib import Path
 import tempfile
 
-from lobster.tools.visualization_service import VisualizationService
+from lobster.tools.visualization_service import SingleCellVisualizationService as VisualizationService #FIXME ensure that the different visualization services are dynamically tested
 from lobster.core.data_manager_v2 import DataManagerV2
 
 from tests.mock_data.factories import SingleCellDataFactory, BulkRNASeqDataFactory  

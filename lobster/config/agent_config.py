@@ -213,10 +213,11 @@ class LobsterAgentConfigurator:
         "supervisor",
         "singlecell_expert", 
         "bulk_rnaseq_expert",
-        "bulk_rnaseq_expert",
         "method_agent",
         "research_agent",
-        "data_expert"
+        "data_expert",
+        "ms_proteomics_expert",
+        "affinity_proteomics_expert"
     ]
     
     # Thinking configuration presets
@@ -238,6 +239,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-3-7-sonnet",
             "data_expert": "claude-3-7-sonnet",
             "research_agent": "claude-3-7-sonnet",
+            "ms_proteomics_expert": "claude-4-sonnet",
+            "affinity_proteomics_expert": "claude-4-sonnet",
             "thinking": {}  # No thinking in development mode for faster testing
         },
         
@@ -249,6 +252,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
             "research_agent": "claude-4-sonnet",
+            "ms_proteomics_expert": "claude-4-sonnet",
+            "affinity_proteomics_expert": "claude-4-sonnet",
             "thinking": {
                 # # Supervisor doesn't support thinking with langgraph_supervisor
                 # "singlecell_expert": "standard",
@@ -267,6 +272,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-5-haiku",
+            "ms_proteomics_expert": "claude-4-opus",
+            "affinity_proteomics_expert": "claude-4-sonnet",
             "thinking": { #FIXME
                 # "supervisor": "extended",
                 "singlecell_expert": "standard",
@@ -282,6 +289,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-sonnet",
             "data_expert": "claude-4-sonnet",
             "research_agent": "claude-4-sonnet",
+            "ms_proteomics_expert": "claude-4-sonnet",
+            "affinity_proteomics_expert": "claude-4-sonnet",
             "thinking": {}  # Most models don't support thinking yet #FIXME
         },
         
@@ -293,6 +302,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-3-haiku",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-haiku",
+            "ms_proteomics_expert": "claude-3-5-sonnet",
+            "affinity_proteomics_expert": "claude-3-5-haiku",
             "thinking": {}  # No thinking for cost optimization
         },
         
@@ -304,6 +315,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-opus",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-4-opus",
+            "ms_proteomics_expert": "claude-4-1-opus",
+            "affinity_proteomics_expert": "claude-4-opus",
             "thinking": {}  # Opus models don't support thinking yet
         },
         
@@ -315,6 +328,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-3-5-sonnet-eu",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-5-sonnet-eu",
+            "ms_proteomics_expert": "claude-4-1-opus-eu",
+            "affinity_proteomics_expert": "claude-3-5-sonnet-v2-eu",
             "thinking": {}  # EU models configuration
         },
         
@@ -326,6 +341,8 @@ class LobsterAgentConfigurator:
             "method_agent": "claude-4-opus-eu",
             "data_expert": "claude-3-5-haiku",
             "research_agent": "claude-3-5-sonnet-v2-eu",
+            "ms_proteomics_expert": "claude-3-7-sonnet-eu",
+            "affinity_proteomics_expert": "claude-4-opus-eu",
             "thinking": {
                 "supervisor": "deep",
                 "singlecell_expert": "extended"

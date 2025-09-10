@@ -221,8 +221,8 @@ graph TB
         RA[Research Agent<br/>🔍 Literature Discovery & Dataset ID]
         ME[Method Expert<br/>⚙️ Computational Parameter Extraction]
         TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]
-        MSPE[MS Proteomics Expert<br/>🔬 Mass Spectrometry Analysis]
-        APPE[Affinity Proteomics Expert<br/>🎯 Targeted Panel Analysis]
+        MSPE[MS Proteomics Expert<br/>🔬 Mass Spectrometry Analysis<br/>DDA/DIA Workflows & Missing Values]
+        APPE[Affinity Proteomics Expert<br/>🎯 Targeted Panel Analysis<br/>Olink & Antibody Arrays]
     end
 
     %% NEW: Analysis Services Layer (Stateless)
@@ -233,6 +233,14 @@ graph TB
         SCELL[EnhancedSingleCellService<br/>🔬 Doublets & Annotation]
         BULK[BulkRNASeqService<br/>📈 Bulk Analysis]
         GEO_SVC[GEOService<br/>💾 Data Download]
+        
+        subgraph "Proteomics Services - Professional Grade"
+            PPREP[ProteomicsPreprocessingService<br/>🧪 MS/Affinity Filtering & Normalization]
+            PQUAL[ProteomicsQualityService<br/>📊 Missing Value & CV Analysis]
+            PANAL[ProteomicsAnalysisService<br/>🔬 Statistical Testing & PCA]
+            PDIFF[ProteomicsDifferentialService<br/>📈 Differential Expression & Pathways]
+            PVIS[ProteomicsVisualizationService<br/>📊 Volcano Plots & Networks]
+        end
     end
     
     %% NEW: Publication Services Layer
@@ -308,10 +316,18 @@ graph TB
     TE --> QUAL
     TE --> CLUST
     TE --> SCELL
-    MSPE --> PREP
-    MSPE --> QUAL
-    APPE --> PREP
-    APPE --> QUAL
+    
+    %% Proteomics Agent to Service connections
+    MSPE --> PPREP
+    MSPE --> PQUAL
+    MSPE --> PANAL
+    MSPE --> PDIFF
+    MSPE --> PVIS
+    APPE --> PPREP
+    APPE --> PQUAL
+    APPE --> PANAL
+    APPE --> PDIFF
+    APPE --> PVIS
 
     %% Service to DataManager connections
     PREP --> |AnnData Processing| DM2
@@ -320,6 +336,13 @@ graph TB
     SCELL --> |Annotations| DM2
     GEO_SVC --> |Dataset Loading| DM2
     PUBSVC --> |Publication Metadata| DM2
+    
+    %% Proteomics Service to DataManager connections
+    PPREP --> |Proteomics Processing| DM2
+    PQUAL --> |Proteomics QC| DM2
+    PANAL --> |Statistical Analysis| DM2
+    PDIFF --> |Differential Results| DM2
+    PVIS --> |Visualization Data| DM2
 
     %% DataManager orchestration
     DM2 --> TRA
