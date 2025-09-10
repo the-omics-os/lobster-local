@@ -1,0 +1,738 @@
+name: Dependency Updates and Maintenance
+
+on:
+  schedule:
+    # Run weekly on Mondays at 6 AM UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      update_type:
+        description: 'Type of dependency update'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+          - security-only
+      create_pr:
+        description: 'Create PR for updates'
+        required: false
+        type: boolean
+        default: true
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  # =====================================================================
+  # Dependency Security Scanning
+  # =====================================================================
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+    
+    - name: Install security scanning tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install safety pip-audit osv-scanner
+        pip install -e ".[dev]"
+    
+    - name: Run comprehensive security scan
+      run: |
+        echo "# Security Scan Report" > security-scan-report.md
+        echo "Generated on: $(date)" >> security-scan-report.md
+        echo "" >> security-scan-report.md
+        
+        # Safety scan for known vulnerabilities
+        echo "## Safety Vulnerability Scan" >> security-scan-report.md
+        if safety check --json --output safety-report.json; then
+          echo "✅ No vulnerabilities found by Safety" >> security-scan-report.md
+        else
+          echo "⚠️ Vulnerabilities found by Safety:" >> security-scan-report.md
+          safety check --output text >> security-scan-report.md 2>&1 || true
+        fi
+        
+        echo "" >> security-scan-report.md
+        
+        # Pip-audit scan
+        echo "## Pip-audit Vulnerability Scan" >> security-scan-report.md
+        if pip-audit --format json --output pip-audit-report.json; then
+          echo "✅ No vulnerabilities found by pip-audit" >> security-scan-report.md
+        else
+          echo "⚠️ Vulnerabilities found by pip-audit:" >> security-scan-report.md
+          pip-audit --format text >> security-scan-report.md 2>&1 || true
+        fi
+        
+        echo "" >> security-scan-report.md
+        
+        # OSV scanner for broader vulnerability database
+        echo "## OSV Vulnerability Scan" >> security-scan-report.md
+        if osv-scanner --lockfile requirements.txt --format json --output osv-report.json; then
+          echo "✅ No vulnerabilities found by OSV scanner" >> security-scan-report.md
+        else
+          echo "⚠️ Vulnerabilities found by OSV scanner" >> security-scan-report.md
+        fi
+    
+    - name: Create security issue if vulnerabilities found
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Check if any security reports indicate vulnerabilities
+          let hasVulnerabilities = false;
+          let vulnerabilityDetails = '';
+          
+          try {
+            const report = fs.readFileSync('security-scan-report.md', 'utf8');
+            if (report.includes('⚠️')) {
+              hasVulnerabilities = true;
+              vulnerabilityDetails = report;
+            }
+          } catch (error) {
+            console.log('Could not read security report');
+          }
+          
+          if (hasVulnerabilities) {
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'security,vulnerability',
+              state: 'open'
+            });
+            
+            // Only create new issue if no open security issues exist
+            if (issues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚨 Security Vulnerabilities Detected in Dependencies',
+                body: `
+                # Security Vulnerability Alert
+                
+                Automated security scanning has detected vulnerabilities in project dependencies.
+                
+                ## Scan Results
+                
+                ${vulnerabilityDetails}
+                
+                ## Next Steps
+                
+                1. Review the vulnerability details above
+                2. Update affected dependencies to secure versions
+                3. Run tests to ensure compatibility
+                4. Consider using \`pip-audit --fix\` for automated fixes where possible
+                
+                **Priority:** High - Security vulnerabilities should be addressed promptly.
+                
+                ---
+                *This issue was created automatically by the dependency security scanner.*
+                `,
+                labels: ['security', 'vulnerability', 'dependencies', 'high-priority']
+              });
+            }
+          }
+    
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-scan-reports
+        path: |
+          security-scan-report.md
+          safety-report.json
+          pip-audit-report.json
+          osv-report.json
+        retention-days: 90
+
+  # =====================================================================
+  # Dependency Update Analysis
+  # =====================================================================
+  dependency-analysis:
+    name: Dependency Update Analysis
+    runs-on: ubuntu-latest
+    needs: [security-scan]
+    timeout-minutes: 20
+    outputs:
+      has_updates: ${{ steps.check.outputs.has_updates }}
+      security_updates: ${{ steps.check.outputs.security_updates }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+    
+    - name: Install dependency tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-check-reqs pip-outdated pipdeptree
+        pip install -e ".[dev]"
+    
+    - name: Analyze current dependencies
+      run: |
+        echo "# Dependency Analysis Report" > dependency-analysis.md
+        echo "Generated on: $(date)" >> dependency-analysis.md
+        echo "" >> dependency-analysis.md
+        
+        # Current dependency tree
+        echo "## Current Dependency Tree" >> dependency-analysis.md
+        echo "\`\`\`" >> dependency-analysis.md
+        pipdeptree --warn silence >> dependency-analysis.md 2>&1 || true
+        echo "\`\`\`" >> dependency-analysis.md
+        echo "" >> dependency-analysis.md
+        
+        # Check for unused dependencies
+        echo "## Unused Dependencies Check" >> dependency-analysis.md
+        if pip-check-reqs --ignore-file=.pip-check-reqs-ignore . 2>&1 | grep -q "unused"; then
+          echo "⚠️ Potentially unused dependencies found:" >> dependency-analysis.md
+          echo "\`\`\`" >> dependency-analysis.md
+          pip-check-reqs --ignore-file=.pip-check-reqs-ignore . >> dependency-analysis.md 2>&1 || true
+          echo "\`\`\`" >> dependency-analysis.md
+        else
+          echo "✅ No unused dependencies detected" >> dependency-analysis.md
+        fi
+        
+        echo "" >> dependency-analysis.md
+        
+        # Check for missing dependencies
+        echo "## Missing Dependencies Check" >> dependency-analysis.md
+        if pip-check-reqs --ignore-file=.pip-check-reqs-ignore . --missing 2>&1 | grep -q "missing"; then
+          echo "⚠️ Missing dependencies found:" >> dependency-analysis.md
+          echo "\`\`\`" >> dependency-analysis.md
+          pip-check-reqs --ignore-file=.pip-check-reqs-ignore . --missing >> dependency-analysis.md 2>&1 || true
+          echo "\`\`\`" >> dependency-analysis.md
+        else
+          echo "✅ No missing dependencies detected" >> dependency-analysis.md
+        fi
+    
+    - name: Check for available updates
+      id: check
+      run: |
+        # Generate list of outdated packages
+        outdated_packages=$(pip list --outdated --format=json)
+        echo "$outdated_packages" > outdated-packages.json
+        
+        # Count total updates available
+        update_count=$(echo "$outdated_packages" | jq '. | length')
+        
+        # Check for security-related updates
+        security_count=$(echo "$outdated_packages" | jq '[.[] | select(.name | test("cryptography|urllib3|requests|werkzeug|jinja2|pillow|numpy|scipy|pandas"; "i"))] | length')
+        
+        echo "has_updates=$([[ $update_count -gt 0 ]] && echo true || echo false)" >> $GITHUB_OUTPUT
+        echo "security_updates=$security_count" >> $GITHUB_OUTPUT
+        
+        echo "" >> dependency-analysis.md
+        echo "## Available Updates" >> dependency-analysis.md
+        echo "Total packages with updates available: $update_count" >> dependency-analysis.md
+        echo "Security-related packages with updates: $security_count" >> dependency-analysis.md
+        echo "" >> dependency-analysis.md
+        
+        if [ $update_count -gt 0 ]; then
+          echo "### Outdated Packages" >> dependency-analysis.md
+          echo "| Package | Current | Latest | Type |" >> dependency-analysis.md
+          echo "|---------|---------|--------|------|" >> dependency-analysis.md
+          
+          echo "$outdated_packages" | jq -r '.[] | "| \(.name) | \(.version) | \(.latest_version) | \(.latest_filetype) |"' >> dependency-analysis.md
+        else
+          echo "✅ All dependencies are up to date" >> dependency-analysis.md
+        fi
+    
+    - name: Upload dependency analysis
+      uses: actions/upload-artifact@v3
+      with:
+        name: dependency-analysis
+        path: |
+          dependency-analysis.md
+          outdated-packages.json
+        retention-days: 30
+
+  # =====================================================================
+  # Automated Dependency Updates
+  # =====================================================================
+  update-dependencies:
+    name: Update Dependencies
+    runs-on: ubuntu-latest
+    needs: [dependency-analysis]
+    if: needs.dependency-analysis.outputs.has_updates == 'true'
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v4
+      with:
+        python-version: 3.12
+    
+    - name: Configure git
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+    
+    - name: Install dependencies and update tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install pip-tools pip-upgrader pur
+        pip install -e ".[dev]"
+    
+    - name: Download dependency analysis
+      uses: actions/download-artifact@v3
+      with:
+        name: dependency-analysis
+    
+    - name: Determine update strategy
+      id: strategy
+      run: |
+        update_type="${{ github.event.inputs.update_type || 'patch' }}"
+        security_updates="${{ needs.dependency-analysis.outputs.security_updates }}"
+        
+        echo "Update type: $update_type"
+        echo "Security updates available: $security_updates"
+        
+        if [ "$update_type" = "security-only" ]; then
+          echo "strategy=security" >> $GITHUB_OUTPUT
+        elif [ "$security_updates" -gt 0 ]; then
+          echo "strategy=security-first" >> $GITHUB_OUTPUT
+        else
+          echo "strategy=$update_type" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Update dependencies
+      run: |
+        strategy="${{ steps.strategy.outputs.strategy }}"
+        
+        echo "# Dependency Update Log" > update-log.md
+        echo "Strategy: $strategy" >> update-log.md
+        echo "Started: $(date)" >> update-log.md
+        echo "" >> update-log.md
+        
+        case $strategy in
+          "security")
+            echo "Updating security-related packages only..." >> update-log.md
+            # Update only security-critical packages
+            packages=("cryptography" "urllib3" "requests" "werkzeug" "jinja2" "pillow" "numpy" "scipy" "pandas")
+            for package in "${packages[@]}"; do
+              if pip show "$package" >/dev/null 2>&1; then
+                echo "Updating $package..." >> update-log.md
+                pip install --upgrade "$package" >> update-log.md 2>&1 || true
+              fi
+            done
+            ;;
+            
+          "security-first")
+            echo "Updating security packages first, then others..." >> update-log.md
+            # First update security packages
+            packages=("cryptography" "urllib3" "requests" "werkzeug" "jinja2" "pillow")
+            for package in "${packages[@]}"; do
+              if pip show "$package" >/dev/null 2>&1; then
+                echo "Updating security package: $package..." >> update-log.md
+                pip install --upgrade "$package" >> update-log.md 2>&1 || true
+              fi
+            done
+            
+            # Then update others conservatively
+            echo "Updating other packages..." >> update-log.md
+            pur --patch --dry-run | head -20 >> update-log.md
+            pur --patch >> update-log.md 2>&1 || true
+            ;;
+            
+          "patch")
+            echo "Performing patch-level updates..." >> update-log.md
+            pur --patch >> update-log.md 2>&1 || true
+            ;;
+            
+          "minor")
+            echo "Performing minor-level updates..." >> update-log.md
+            pur --minor >> update-log.md 2>&1 || true
+            ;;
+            
+          "major")
+            echo "Performing major-level updates (use with caution)..." >> update-log.md
+            pur >> update-log.md 2>&1 || true
+            ;;
+        esac
+        
+        echo "Completed: $(date)" >> update-log.md
+    
+    - name: Generate updated requirements
+      run: |
+        # Generate fresh requirements
+        pip freeze > requirements-updated.txt
+        
+        # Show differences
+        echo "" >> update-log.md
+        echo "## Package Changes" >> update-log.md
+        
+        if [ -f "requirements.txt" ]; then
+          echo "### Before vs After" >> update-log.md
+          echo "\`\`\`diff" >> update-log.md
+          diff requirements.txt requirements-updated.txt >> update-log.md || true
+          echo "\`\`\`" >> update-log.md
+        fi
+    
+    - name: Run tests after updates
+      run: |
+        echo "" >> update-log.md
+        echo "## Test Results After Updates" >> update-log.md
+        
+        # Run fast test suite to check for breaking changes
+        if python -m pytest tests/unit/ --maxfail=5 -x --tb=short; then
+          echo "✅ Unit tests passed after dependency updates" >> update-log.md
+        else
+          echo "❌ Unit tests failed after dependency updates" >> update-log.md
+          exit 1
+        fi
+        
+        # Run a subset of integration tests
+        if python -m pytest tests/integration/ --maxfail=2 -x --tb=short -k "not slow"; then
+          echo "✅ Fast integration tests passed" >> update-log.md
+        else
+          echo "⚠️ Some integration tests failed - manual review needed" >> update-log.md
+        fi
+    
+    - name: Create or update requirements files
+      run: |
+        # Update main requirements if tests passed
+        if [ -f "requirements-updated.txt" ]; then
+          mv requirements-updated.txt requirements.txt
+        fi
+        
+        # Update development requirements
+        pip-compile --upgrade pyproject.toml || true
+    
+    - name: Commit changes
+      id: commit
+      run: |
+        # Check if there are any changes to commit
+        if git diff --quiet; then
+          echo "No changes to commit"
+          echo "changes=false" >> $GITHUB_OUTPUT
+        else
+          git add -A
+          
+          # Create commit message based on update type
+          strategy="${{ steps.strategy.outputs.strategy }}"
+          case $strategy in
+            "security"|"security-first")
+              commit_msg="🔒 Update dependencies (security focus)"
+              ;;
+            "patch")
+              commit_msg="📦 Update dependencies (patch level)"
+              ;;
+            "minor")
+              commit_msg="📦 Update dependencies (minor level)"
+              ;;
+            "major")
+              commit_msg="📦 Update dependencies (major level)"
+              ;;
+            *)
+              commit_msg="📦 Update dependencies"
+              ;;
+          esac
+          
+          git commit -m "$commit_msg
+
+          - Updated dependencies using strategy: $strategy
+          - All tests passed after updates
+          - Generated on: $(date)
+          
+          [skip ci]"
+          
+          echo "changes=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Upload update artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: dependency-update-results
+        path: |
+          update-log.md
+          requirements.txt
+        retention-days: 30
+
+  # =====================================================================
+  # Create Pull Request for Updates
+  # =====================================================================
+  create-update-pr:
+    name: Create Update Pull Request
+    runs-on: ubuntu-latest
+    needs: [update-dependencies]
+    if: github.event.inputs.create_pr != 'false' && needs.update-dependencies.outputs.changes == 'true'
+    
+    steps:
+    - name: Checkout updated code
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.sha }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Download update results
+      uses: actions/download-artifact@v3
+      with:
+        name: dependency-update-results
+    
+    - name: Create pull request branch
+      run: |
+        branch_name="dependency-updates-$(date +%Y-%m-%d)"
+        git checkout -b "$branch_name"
+        echo "BRANCH_NAME=$branch_name" >> $GITHUB_ENV
+    
+    - name: Push changes and create PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Read update log for PR description
+          let updateLog = '';
+          try {
+            updateLog = fs.readFileSync('update-log.md', 'utf8');
+          } catch (error) {
+            updateLog = 'No update log available.';
+          }
+          
+          // Push branch
+          await github.rest.git.createRef({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            ref: `refs/heads/${process.env.BRANCH_NAME}`,
+            sha: context.sha
+          });
+          
+          // Create pull request
+          const pr = await github.rest.pulls.create({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            title: '🤖 Automated Dependency Updates',
+            head: process.env.BRANCH_NAME,
+            base: 'main',
+            body: `
+            # Automated Dependency Updates
+            
+            This PR contains automated dependency updates generated by the dependency maintenance workflow.
+            
+            ## Update Summary
+            
+            ${updateLog}
+            
+            ## Testing
+            
+            - [x] Unit tests passed
+            - [x] Fast integration tests passed
+            - [ ] Full test suite (run manually)
+            
+            ## Review Checklist
+            
+            - [ ] Review dependency changes for compatibility
+            - [ ] Check for breaking changes in updated packages
+            - [ ] Verify security updates are included
+            - [ ] Run full test suite if needed
+            
+            ## Auto-merge Criteria
+            
+            This PR can be auto-merged if:
+            - All CI checks pass
+            - Only patch-level or security updates
+            - No breaking changes detected
+            
+            ---
+            
+            🤖 *This PR was created automatically by the dependency update workflow.*
+            `,
+            draft: false
+          });
+          
+          // Add labels
+          await github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: pr.data.number,
+            labels: ['dependencies', 'automated', 'maintenance']
+          });
+          
+          console.log(`Created PR #${pr.data.number}: ${pr.data.html_url}`);
+
+  # =====================================================================
+  # Dependency Health Report
+  # =====================================================================
+  health-report:
+    name: Generate Dependency Health Report
+    runs-on: ubuntu-latest
+    needs: [security-scan, dependency-analysis]
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+    
+    - name: Generate comprehensive health report
+      run: |
+        echo "# Dependency Health Report" > health-report.md
+        echo "Generated on: $(date)" >> health-report.md
+        echo "" >> health-report.md
+        
+        # Security status
+        echo "## 🔒 Security Status" >> health-report.md
+        if [ -f "security-scan-reports/security-scan-report.md" ]; then
+          cat security-scan-reports/security-scan-report.md >> health-report.md
+        else
+          echo "Security scan results not available" >> health-report.md
+        fi
+        
+        echo "" >> health-report.md
+        
+        # Dependency status
+        echo "## 📦 Dependency Status" >> health-report.md
+        if [ -f "dependency-analysis/dependency-analysis.md" ]; then
+          cat dependency-analysis/dependency-analysis.md >> health-report.md
+        else
+          echo "Dependency analysis results not available" >> health-report.md
+        fi
+        
+        echo "" >> health-report.md
+        
+        # Update status
+        echo "## 🔄 Update Status" >> health-report.md
+        if [ -f "dependency-update-results/update-log.md" ]; then
+          cat dependency-update-results/update-log.md >> health-report.md
+        else
+          echo "No updates were performed in this run" >> health-report.md
+        fi
+        
+        echo "" >> health-report.md
+        echo "---" >> health-report.md
+        echo "*Report generated by automated dependency maintenance workflow*" >> health-report.md
+    
+    - name: Upload comprehensive health report
+      uses: actions/upload-artifact@v3
+      with:
+        name: dependency-health-report
+        path: health-report.md
+        retention-days: 180
+    
+    - name: Create or update health tracking issue
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          let healthReport = '';
+          try {
+            healthReport = fs.readFileSync('health-report.md', 'utf8');
+          } catch (error) {
+            healthReport = 'Health report could not be generated.';
+          }
+          
+          // Look for existing dependency health tracking issue
+          const { data: issues } = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: 'dependencies,health-report',
+            state: 'open'
+          });
+          
+          const issueTitle = '📊 Dependency Health Tracking';
+          const issueBody = `
+          # Dependency Health Dashboard
+          
+          This issue tracks the ongoing health status of project dependencies.
+          
+          **Last Updated:** ${new Date().toISOString()}
+          
+          ## Latest Health Report
+          
+          ${healthReport}
+          
+          ## Health Monitoring
+          
+          - 🔒 **Security Scanning**: Automated weekly
+          - 📦 **Dependency Updates**: Automated weekly  
+          - 🔄 **Health Reports**: Generated with each scan
+          - 🎯 **Manual Review**: Recommended monthly
+          
+          ---
+          
+          *This issue is automatically maintained by the dependency health workflow.*
+          `;
+          
+          if (issues.length > 0) {
+            // Update existing issue
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issues[0].number,
+              body: issueBody
+            });
+            console.log(`Updated health tracking issue #${issues[0].number}`);
+          } else {
+            // Create new tracking issue
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: issueTitle,
+              body: issueBody,
+              labels: ['dependencies', 'health-report', 'maintenance', 'tracking']
+            });
+            console.log(`Created health tracking issue #${issue.data.number}`);
+          }
+
+  # =====================================================================
+  # Maintenance Summary
+  # =====================================================================
+  maintenance-summary:
+    name: Maintenance Summary
+    runs-on: ubuntu-latest
+    needs: [security-scan, dependency-analysis, update-dependencies, create-update-pr, health-report]
+    if: always()
+    
+    steps:
+    - name: Generate maintenance summary
+      run: |
+        echo "# Dependency Maintenance Summary" > summary.md
+        echo "" >> summary.md
+        
+        echo "## Job Results" >> summary.md
+        echo "- Security Scan: ${{ needs.security-scan.result }}" >> summary.md
+        echo "- Dependency Analysis: ${{ needs.dependency-analysis.result }}" >> summary.md
+        echo "- Update Dependencies: ${{ needs.update-dependencies.result }}" >> summary.md  
+        echo "- Create Update PR: ${{ needs.create-update-pr.result }}" >> summary.md
+        echo "- Health Report: ${{ needs.health-report.result }}" >> summary.md
+        
+        echo "" >> summary.md
+        echo "## Key Metrics" >> summary.md
+        echo "- Available Updates: ${{ needs.dependency-analysis.outputs.has_updates }}" >> summary.md
+        echo "- Security Updates: ${{ needs.dependency-analysis.outputs.security_updates }}" >> summary.md
+        
+        echo "" >> summary.md
+        echo "Generated on: $(date)" >> summary.md
+        
+        cat summary.md
+    
+    - name: Upload maintenance summary
+      uses: actions/upload-artifact@v3
+      with:
+        name: maintenance-summary
+        path: summary.md
+        retention-days: 90

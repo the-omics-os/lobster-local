@@ -62,6 +62,22 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         handoff_tool_name='handoff_to_method_expert',
         handoff_tool_description='Assign computational parameter extraction tasks to the method expert'
     ),
+    'ms_proteomics_expert_agent': AgentRegistryConfig(
+        name='ms_proteomics_expert_agent',
+        display_name='MS Proteomics Expert',
+        description='Handles mass spectrometry proteomics data analysis including DDA/DIA workflows with database search artifact removal',
+        factory_function='lobster.agents.ms_proteomics_expert.ms_proteomics_expert',
+        handoff_tool_name='handoff_to_ms_proteomics_expert',
+        handoff_tool_description='Assign mass spectrometry proteomics analysis tasks to the MS proteomics expert'
+    ),
+    'affinity_proteomics_expert_agent': AgentRegistryConfig(
+        name='affinity_proteomics_expert_agent',
+        display_name='Affinity Proteomics Expert',
+        description='Handles affinity proteomics data analysis including Olink and targeted protein panels with antibody validation',
+        factory_function='lobster.agents.affinity_proteomics_expert.affinity_proteomics_expert',
+        handoff_tool_name='handoff_to_affinity_proteomics_expert',
+        handoff_tool_description='Assign affinity proteomics and targeted panel analysis tasks to the affinity proteomics expert'
+    ),
     # 'machine_learning_expert_agent': AgentConfig(
     #     name='machine_learning_expert_agent',
     #     display_name='ML Expert',

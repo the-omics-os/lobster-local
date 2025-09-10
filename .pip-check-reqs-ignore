@@ -1,0 +1,78 @@
+# Ignore file for pip-check-reqs dependency checker
+# ==================================================
+# 
+# This file lists dependencies that should be ignored during
+# pip-check-reqs analysis for unused or missing dependencies
+
+# Development and testing dependencies (not directly imported in code)
+pytest
+pytest-cov
+pytest-xdist
+pytest-benchmark
+pytest-timeout
+pytest-mock
+pytest-asyncio
+pre-commit
+black
+isort
+flake8
+mypy
+bandit
+safety
+pip-audit
+
+# Build and packaging tools
+build
+twine
+wheel
+setuptools
+setuptools-scm
+bump2version
+
+# Documentation tools
+sphinx
+sphinx-rtd-theme
+myst-parser
+
+# CI/CD and automation
+coverage
+codecov
+tox
+
+# Development utilities
+ipython
+jupyter
+notebook
+
+# Type stubs (not directly imported)
+types-requests
+types-PyYAML
+types-setuptools
+pandas-stubs
+
+# Transitive dependencies (may not be directly imported)
+certifi
+charset-normalizer
+urllib3
+idna
+six
+python-dateutil
+
+# Platform-specific dependencies
+psutil  # May not be imported on all platforms
+
+# Optional dependencies (imported conditionally)
+boto3  # Only imported when using S3 backend
+botocore
+
+# Development environment specific
+python-dotenv  # May not be imported in production
+
+# Plugin and extension dependencies
+flake8-bugbear
+flake8-comprehensions
+flake8-simplify
+flake8-docstrings
+
+# Temporary ignores (remove when cleaned up)
+# None currently

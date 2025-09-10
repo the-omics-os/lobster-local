@@ -1,0 +1,388 @@
+# Lobster AI Testing Configuration
+# =================================
+# 
+# This file contains centralized configuration for all testing environments,
+# test parameters, and testing infrastructure settings.
+
+# Global Test Configuration
+global:
+  version: "2.0"
+  test_framework_version: "1.0.0"
+  default_timeout: 300  # seconds
+  max_retry_attempts: 2
+  enable_performance_monitoring: true
+  enable_detailed_logging: true
+  cleanup_workspaces: true
+  
+  # Test data configuration
+  test_data:
+    use_mock_data: true
+    mock_data_seed: 42
+    cache_test_data: true
+    max_dataset_size_mb: 100
+    
+  # Resource limits
+  resource_limits:
+    max_memory_mb: 8192
+    max_cpu_percent: 80
+    max_execution_time: 1800  # 30 minutes
+    max_concurrent_tests: 4
+
+# Test Environments
+environments:
+  development:
+    description: "Local development testing environment"
+    workspace_base_path: "/tmp/lobster_test_workspaces"
+    log_level: "DEBUG"
+    enable_langfuse: false
+    enable_reasoning: false
+    model_config:
+      model_id: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      temperature: 0.7
+      region_name: "us-east-1"
+    performance_monitoring:
+      sampling_interval: 1.0
+      track_memory: true
+      track_cpu: true
+      track_disk_io: true
+    
+  ci:
+    description: "Continuous integration testing environment"
+    workspace_base_path: "/github/workspace/test_workspaces"
+    log_level: "INFO"
+    enable_langfuse: false
+    enable_reasoning: false
+    timeout_multiplier: 2.0  # Allow longer timeouts in CI
+    model_config:
+      model_id: "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+      temperature: 0.5  # More deterministic for CI
+      region_name: "us-east-1"
+    resource_limits:
+      max_memory_mb: 4096  # Lower for CI runners
+      max_concurrent_tests: 2
+    
+  staging:
+    description: "Staging environment testing"
+    workspace_base_path: "/opt/lobster/test_workspaces"
+    log_level: "INFO"
+    enable_langfuse: true
+    enable_reasoning: true
+    model_config:
+      model_id: "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      temperature: 0.7
+      region_name: "us-east-1"
+    
+  production:
+    description: "Production environment smoke tests"
+    workspace_base_path: "/var/lobster/test_workspaces"
+    log_level: "WARNING"
+    enable_langfuse: true
+    enable_reasoning: true
+    timeout_multiplier: 0.5  # Faster timeouts for production
+    model_config:
+      model_id: "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+      temperature: 0.5
+      region_name: "us-east-1"
+
+# Test Categories Configuration
+test_categories:
+  basic:
+    description: "Basic functionality tests"
+    default_timeout: 180
+    priority_range: [1, 3]
+    parallel_safe: true
+    required_for_ci: true
+    
+  advanced:
+    description: "Advanced feature tests"
+    default_timeout: 600
+    priority_range: [3, 5]
+    parallel_safe: true
+    required_for_ci: false
+    
+  performance:
+    description: "Performance and load tests"
+    default_timeout: 1800
+    priority_range: [2, 4]
+    parallel_safe: false
+    required_for_ci: false
+    resource_intensive: true
+    
+  error_handling:
+    description: "Error handling and edge case tests"
+    default_timeout: 300
+    priority_range: [1, 3]
+    parallel_safe: true
+    required_for_ci: true
+    
+  data_access:
+    description: "Data access and integration tests"
+    default_timeout: 900
+    priority_range: [2, 4]
+    parallel_safe: false  # May conflict with external APIs
+    required_for_ci: true
+    external_dependencies: ["GEO", "NCBI"]
+
+# Test Data Sources
+test_data_sources:
+  geo_datasets:
+    mock_mode: true
+    real_datasets:
+      - accession: "GSE109564"
+        type: "single_cell"
+        size: "medium"
+        description: "Human PBMC single-cell RNA-seq"
+        recommended_for: ["basic", "advanced"]
+        
+      - accession: "GSE291670"
+        type: "single_cell"
+        size: "large"
+        description: "Mouse brain single-cell RNA-seq"
+        recommended_for: ["performance", "advanced"]
+        
+      - accession: "GSE12345"  # Mock dataset
+        type: "bulk_rna_seq"
+        size: "small"
+        description: "Mock bulk RNA-seq dataset"
+        recommended_for: ["basic", "error_handling"]
+    
+    mock_datasets:
+      small_single_cell:
+        n_obs: 1000
+        n_vars: 2000
+        modalities: ["rna"]
+        
+      medium_single_cell:
+        n_obs: 5000
+        n_vars: 3000
+        modalities: ["rna"]
+        
+      large_single_cell:
+        n_obs: 20000
+        n_vars: 10000
+        modalities: ["rna"]
+        
+      multi_omics:
+        n_obs: 2000
+        n_vars: 2500
+        modalities: ["rna", "protein"]
+        
+      spatial_transcriptomics:
+        n_obs: 3000
+        n_vars: 2000
+        spatial_coordinates: true
+        modalities: ["rna"]
+
+# Pytest Configuration
+pytest:
+  markers:
+    unit: "Unit tests"
+    integration: "Integration tests" 
+    system: "System tests"
+    performance: "Performance tests"
+    slow: "Slow running tests"
+    external: "Tests requiring external services"
+    gpu: "Tests requiring GPU"
+    
+  collection:
+    testpaths: ["tests/unit", "tests/integration", "tests/system", "tests/performance"]
+    python_files: ["test_*.py", "*_test.py"]
+    python_classes: ["Test*", "*Test"]
+    python_functions: ["test_*"]
+    
+  execution:
+    addopts: [
+      "-v",
+      "--tb=short", 
+      "--strict-markers",
+      "--disable-warnings",
+      "--color=yes"
+    ]
+    timeout: 300
+    
+  reporting:
+    junit_family: "xunit2"
+    html_report: true
+    coverage_report: true
+    coverage_min: 80
+    
+  parallel:
+    workers: "auto"
+    distribute_mode: "loadscope"
+    
+# Performance Testing Configuration
+performance:
+  benchmarks:
+    data_loading:
+      file_sizes: [1, 10, 50, 100]  # MB
+      formats: ["h5ad", "csv", "mtx", "hdf5"]
+      concurrent_loads: [1, 2, 4, 8]
+      
+    analysis_workflows:
+      dataset_sizes: ["small", "medium", "large"]
+      workflow_types: ["basic", "advanced", "comprehensive"]
+      
+    memory_usage:
+      track_peak_memory: true
+      track_memory_leaks: true
+      gc_stress_test: true
+      
+    concurrent_execution:
+      max_workers: [2, 4, 6, 8]
+      test_duration: 300  # seconds
+      
+  thresholds:
+    max_memory_mb: 2048
+    max_cpu_percent: 80
+    max_load_time: 60  # seconds
+    max_analysis_time: 300  # seconds
+
+# Mock Services Configuration
+mock_services:
+  geo_service:
+    enabled: true
+    response_delay: 0.1  # seconds
+    failure_rate: 0.0  # 0% failure rate for stable tests
+    mock_datasets_available: true
+    
+  ncbi_service:
+    enabled: true
+    response_delay: 0.05
+    failure_rate: 0.0
+    
+  external_apis:
+    simulate_network_issues: false
+    simulate_rate_limiting: false
+    simulate_service_downtime: false
+
+# Error Injection Configuration  
+error_injection:
+  enabled: false  # Enable for chaos testing
+  scenarios:
+    network_errors:
+      probability: 0.1
+      error_types: ["timeout", "connection_refused", "dns_failure"]
+      
+    disk_errors:
+      probability: 0.05
+      error_types: ["disk_full", "permission_denied", "io_error"]
+      
+    memory_errors:
+      probability: 0.02
+      error_types: ["out_of_memory", "memory_corruption"]
+      
+    service_errors:
+      probability: 0.1
+      error_types: ["service_unavailable", "rate_limited", "authentication_failed"]
+
+# Test Reporting Configuration
+reporting:
+  formats: ["json", "html", "junit"]
+  include_performance_metrics: true
+  include_resource_usage: true
+  include_error_details: true
+  generate_test_summary: true
+  
+  output_paths:
+    json: "test_results.json"
+    html: "test_report.html"
+    junit: "junit.xml"
+    coverage: "coverage.xml"
+    
+  notifications:
+    on_failure: true
+    on_success: false
+    channels: ["console", "file"]
+    
+# Cleanup Configuration
+cleanup:
+  workspaces:
+    auto_cleanup: true
+    cleanup_on_success: true
+    cleanup_on_failure: false  # Keep for debugging
+    max_workspace_age_hours: 24
+    
+  test_data:
+    cleanup_generated_data: true
+    cleanup_downloaded_data: false
+    cleanup_cache: true
+    
+  logs:
+    max_log_files: 10
+    max_log_age_days: 7
+    compress_old_logs: true
+
+# Security Configuration
+security:
+  sandbox_tests: true
+  restrict_network_access: false  # Some tests need external access
+  restrict_file_access: true
+  mask_sensitive_data: true
+  
+  allowed_domains:
+    - "ftp.ncbi.nlm.nih.gov"
+    - "www.ncbi.nlm.nih.gov"
+    - "api.anthropic.com"
+    
+  blocked_operations:
+    - "system_shutdown"
+    - "file_deletion_outside_workspace" 
+    - "network_admin_operations"
+
+# Integration Test Configuration
+integration:
+  agent_workflows:
+    test_all_agent_combinations: true
+    test_agent_handoffs: true
+    test_workflow_recovery: true
+    
+  data_pipelines:
+    test_pipeline_orchestration: true
+    test_data_validation: true
+    test_error_propagation: true
+    
+  external_services:
+    test_service_integration: true
+    test_fallback_mechanisms: true
+    test_rate_limiting: true
+
+# System Test Configuration  
+system:
+  full_workflows:
+    test_end_to_end_scenarios: true
+    test_real_world_use_cases: true
+    test_user_journey_paths: true
+    
+  error_recovery:
+    test_graceful_degradation: true
+    test_automatic_recovery: true
+    test_data_integrity: true
+    
+  workspace_management:
+    test_workspace_lifecycle: true
+    test_concurrent_workspaces: true
+    test_workspace_migration: true
+
+# Development and Debugging
+debug:
+  verbose_logging: false
+  save_intermediate_results: false
+  pause_on_failure: false
+  interactive_debugging: false
+  
+  profiling:
+    enabled: false
+    profile_type: "cProfile"
+    output_file: "test_profile.prof"
+    
+# Maintenance Configuration
+maintenance:
+  test_data_refresh_interval_days: 30
+  mock_data_regeneration_interval_days: 7
+  performance_baseline_update_interval_days: 14
+  
+  health_checks:
+    run_before_tests: true
+    check_dependencies: true
+    check_external_services: true
+    check_resource_availability: true

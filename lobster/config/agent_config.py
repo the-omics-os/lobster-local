@@ -213,6 +213,7 @@ class LobsterAgentConfigurator:
         "supervisor",
         "singlecell_expert", 
         "bulk_rnaseq_expert",
+        "bulk_rnaseq_expert",
         "method_agent",
         "research_agent",
         "data_expert"

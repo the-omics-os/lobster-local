@@ -221,7 +221,8 @@ graph TB
         RA[Research Agent<br/>🔍 Literature Discovery & Dataset ID]
         ME[Method Expert<br/>⚙️ Computational Parameter Extraction]
         TE[Transcriptomics Expert<br/>🧬 RNA-seq Analysis]
-        PE[Proteomics Expert<br/>🧪 Protein Analysis]
+        MSPE[MS Proteomics Expert<br/>🔬 Mass Spectrometry Analysis]
+        APPE[Affinity Proteomics Expert<br/>🎯 Targeted Panel Analysis]
     end
 
     %% NEW: Analysis Services Layer (Stateless)
@@ -307,8 +308,10 @@ graph TB
     TE --> QUAL
     TE --> CLUST
     TE --> SCELL
-    PE --> PREP
-    PE --> QUAL
+    MSPE --> PREP
+    MSPE --> QUAL
+    APPE --> PREP
+    APPE --> QUAL
 
     %% Service to DataManager connections
     PREP --> |AnnData Processing| DM2
@@ -350,7 +353,7 @@ graph TB
     classDef interface fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px,stroke-dasharray: 5 5
     classDef source fill:#f5f5f5,stroke:#616161,stroke-width:1px
 
-    class DE,RA,ME,TE,PE agent
+    class DE,RA,ME,TE,MSPE,APPE agent
     class PREP,QUAL,CLUST,SCELL,BULK,PUBSVC,PUBMED,GEOPROV,GEOQB service
     class DM2,MODALITIES,PROV,ERROR orchestrator
     class TRA,PRA,TRSC,TRBL,PRMS,PRAF adapter
@@ -574,6 +577,22 @@ AGENT_REGISTRY: Dict[str, AgentConfig] = {
         factory_function='lobster.agents.method_expert.method_expert',
         handoff_tool_name='handoff_to_method_expert',
         handoff_tool_description='Assign computational parameter extraction tasks to the method expert'
+    ),
+    'ms_proteomics_expert_agent': AgentConfig(
+        name='ms_proteomics_expert_agent',
+        display_name='MS Proteomics Expert',
+        description='Handles mass spectrometry proteomics data analysis including DDA/DIA workflows with database search artifact removal',
+        factory_function='lobster.agents.ms_proteomics_expert.ms_proteomics_expert',
+        handoff_tool_name='handoff_to_ms_proteomics_expert',
+        handoff_tool_description='Assign mass spectrometry proteomics analysis tasks to the MS proteomics expert'
+    ),
+    'affinity_proteomics_expert_agent': AgentConfig(
+        name='affinity_proteomics_expert_agent',
+        display_name='Affinity Proteomics Expert',
+        description='Handles affinity proteomics data analysis including Olink and targeted protein panels with antibody validation',
+        factory_function='lobster.agents.affinity_proteomics_expert.affinity_proteomics_expert',
+        handoff_tool_name='handoff_to_affinity_proteomics_expert',
+        handoff_tool_description='Assign affinity proteomics and targeted panel analysis tasks to the affinity proteomics expert'
     ),
 }
 ```

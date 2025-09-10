@@ -1,0 +1,229 @@
+# GitHub PR Labeler Configuration
+# Automatically assigns labels to pull requests based on changed files
+
+# Core system changes
+core:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/core/**'
+      - 'lobster/core/data_manager_v2.py'
+      - 'lobster/core/client.py'
+      - 'lobster/core/api_client.py'
+
+# Agent system changes
+agents:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/agents/**'
+
+# Tool and service changes
+tools:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/tools/**'
+      - 'lobster/services/**'
+
+# Configuration changes
+config:
+  - changed-files:
+    - any-glob-to-any-file:
+      - 'lobster/config/**'
+      - 'pyproject.toml'
+      - 'setup.py'
+      - 'requirements*.txt'
+      - '.github/**'
+      - 'Makefile'
+
+# Test changes
+tests:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/**'
+      - 'test_*.py'
+      - '*_test.py'
+      - 'conftest.py'
+
+# Unit tests specifically  
+unit-tests:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/unit/**'
+
+# Integration tests
+integration-tests:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/integration/**'
+
+# System tests
+system-tests:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/system/**'
+
+# Performance tests
+performance-tests:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/performance/**'
+
+# Mock data changes
+mock-data:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/mock_data/**'
+
+# Documentation changes
+documentation:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'docs/**'
+      - '*.md'
+      - '*.rst'
+      - 'CHANGELOG.md'
+      - 'README.md'
+      - 'CLAUDE.md'
+
+# Docker and containerization
+docker:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'Dockerfile'
+      - 'docker-compose*.yml'
+      - '.dockerignore'
+      - 'docker/**'
+
+# CI/CD and automation
+ci-cd:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - '.github/workflows/**'
+      - '.github/actions/**'
+      - 'Makefile'
+
+# Dependencies
+dependencies:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'pyproject.toml'
+      - 'requirements*.txt'
+      - 'setup.py'
+      - 'Pipfile*'
+      - 'poetry.lock'
+
+# Security related
+security:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - '.github/workflows/security.yml'
+      - 'security/**'
+      - '**/*security*'
+
+# Performance related
+performance:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/performance/**'
+      - '**/*benchmark*'
+      - '**/*performance*'
+
+# Bioinformatics specific
+bioinformatics:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/agents/singlecell_expert.py'
+      - 'lobster/agents/bulk_rnaseq_expert.py'  
+      - 'lobster/agents/proteomics_expert.py'
+      - 'lobster/tools/geo_service.py'
+      - 'lobster/tools/preprocessing_service.py'
+      - 'lobster/tools/clustering_service.py'
+
+# Data management
+data-management:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/core/data_manager_v2.py'
+      - 'lobster/core/adapters/**'
+      - 'lobster/core/backends/**'
+      - 'lobster/core/schemas/**'
+
+# API changes
+api:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/core/api_client.py'
+      - 'lobster/core/interfaces/**'
+      - '**/*api*'
+
+# Breaking changes (based on file patterns that typically indicate breaking changes)
+breaking-change:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/core/interfaces/**'
+      - 'lobster/core/schemas/**'
+      - 'lobster/core/data_manager_v2.py'
+      - 'pyproject.toml'
+    - all-globs-to-all-files: 
+      - '!tests/**'
+      - '!docs/**'
+
+# Bug fixes (based on commit patterns and file changes)
+bug:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'tests/**'
+    - all-globs-to-all-files:
+      - 'lobster/**'
+
+# Enhancement/feature
+enhancement:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/agents/**'
+      - 'lobster/tools/**'
+    - all-globs-to-all-files:
+      - '!tests/**'
+
+# Refactoring (typically involves changes to existing code without new features)
+refactoring:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/**'
+    - all-globs-to-all-files:
+      - '!tests/unit/**'
+      - '!docs/**'
+
+# Size-based labels
+size/small:
+  - changed-files:
+    - any-glob-to-any-file: '*'
+
+size/medium:
+  - changed-files:
+    - any-glob-to-any-file: '*'
+
+size/large:
+  - changed-files:
+    - any-glob-to-any-file: '*'
+
+# Priority labels based on file importance
+priority/high:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/core/**'
+      - 'pyproject.toml'
+      - '.github/workflows/**'
+
+priority/medium:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'lobster/agents/**'
+      - 'lobster/tools/**'
+      - 'tests/system/**'
+
+priority/low:
+  - changed-files:
+    - any-glob-to-any-file: 
+      - 'docs/**'
+      - '*.md'
+      - 'tests/unit/**'

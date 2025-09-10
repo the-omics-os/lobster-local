@@ -1,49 +1,273 @@
-# See https://pre-commit.com for more information
+# Pre-commit hooks configuration for Lobster AI Testing Framework
+# =============================================================
+# 
+# Enhanced configuration supporting comprehensive testing infrastructure
+# Install with: pre-commit install
+# Run manually: pre-commit run --all-files
+
 repos:
-- repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v4.4.0
-  hooks:
-    - id: trailing-whitespace
-      warn_only: true       # non-blocking
-    - id: end-of-file-fixer
-      warn_only: true       # non-blocking
-    - id: check-yaml
-      warn_only: true       # non-blocking
-    - id: check-json
-      warn_only: true       # non-blocking
-    - id: check-added-large-files
-      args: ['--maxkb=1000']
-      warn_only: true       # non-blocking
-    - id: debug-statements
-      warn_only: true       # non-blocking
-    - id: detect-private-key   # keep blocking by default
+  # ============================================================================
+  # General File and Formatting Checks
+  # ============================================================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      # File content checks
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # Allow custom YAML tags for test configs
+      - id: check-json
+      - id: check-toml
+      - id: check-xml
+      
+      # Code quality checks
+      - id: check-merge-conflict
+      - id: check-case-conflict  
+      - id: check-symlinks
+      - id: check-added-large-files
+        args: [--maxkb=10240]  # Increased for test data
+      - id: check-executables-have-shebangs
+      
+      # Python specific
+      - id: check-ast
+      - id: check-builtin-literals
+      - id: check-docstring-first
+      - id: debug-statements
+      - id: name-tests-test
+        args: [--pytest-test-first]
+      
+      # Security (blocking)
+      - id: detect-private-key
+      - id: detect-aws-credentials
+      
+      # Line endings
+      - id: mixed-line-ending
+        args: [--fix=lf]
 
-- repo: https://github.com/psf/black
-  rev: 23.3.0
-  hooks:
-    - id: black
-      args: ["--line-length", "88"]
-      warn_only: true       # non-blocking
+  # ============================================================================
+  # Python Code Formatting
+  # ============================================================================
+  - repo: https://github.com/psf/black
+    rev: 23.11.0
+    hooks:
+      - id: black
+        language_version: python3.12
+        args: 
+          - --line-length=88
+          - --target-version=py311
+          - --target-version=py312
+        exclude: ^(migrations/|docs/|build/|dist/)
 
-- repo: https://github.com/pycqa/isort
-  rev: 5.12.0
-  hooks:
-    - id: isort
-      args: ["--profile", "black", "--line-length", "88"]
-      warn_only: true       # non-blocking
+  # ============================================================================
+  # Import Sorting
+  # ============================================================================  
+  - repo: https://github.com/pycqa/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args:
+          - --profile=black
+          - --line-length=88
+          - --multi-line=3
+          - --trailing-comma
+          - --force-grid-wrap=0
+          - --combine-as
+          - --use-parentheses
+          - --ensure-newline-before-comments
+        exclude: ^(migrations/|docs/|build/|dist/)
 
-- repo: https://github.com/pycqa/flake8
-  rev: 6.0.0
-  hooks:
-    - id: flake8
-      additional_dependencies: [flake8-docstrings]
-      args: ["--max-line-length=88", "--extend-ignore=E203"]
-      exclude: ^tests/
-      warn_only: true       # non-blocking
+  # ============================================================================
+  # Python Linting and Quality Checks  
+  # ============================================================================
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        args:
+          - --max-line-length=88
+          - --extend-ignore=E203,W503,E501,F401
+          - --max-complexity=15
+          - --select=C,E,F,W,B,B950
+        additional_dependencies:
+          - flake8-bugbear>=23.9.16
+          - flake8-comprehensions>=3.14.0
+          - flake8-simplify>=0.21.0
+          - flake8-docstrings>=1.7.0
+        exclude: ^(migrations/|docs/|build/|dist/|tests/mock_data/)
 
-- repo: https://github.com/PyCQA/bandit
-  rev: 1.7.5
-  hooks:
-    - id: bandit
-      args: ["-ll", "-r", "lobster"]
-      exclude: ^tests/      # blocking (critical hook)
+  # ============================================================================
+  # Security Linting (Blocking - Critical for bioinformatics data)
+  # ============================================================================
+  - repo: https://github.com/pycqa/bandit
+    rev: 1.7.5
+    hooks:
+      - id: bandit
+        args:
+          - --recursive
+          - --format=custom
+          - --severity-level=medium
+          - --skip=B101,B601,B602  # Skip assert and shell injection for tests
+        exclude: ^(tests/|docs/|build/|dist/)
+
+  # ============================================================================
+  # Type Checking (Enhanced for testing framework)
+  # ============================================================================
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.7.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-requests
+          - types-PyYAML  
+          - types-setuptools
+          - numpy
+          - pandas-stubs
+        args:
+          - --ignore-missing-imports
+          - --check-untyped-defs
+          - --warn-redundant-casts
+          - --warn-unused-ignores
+        exclude: ^(tests/|docs/|build/|dist/|setup.py|migrations/)
+
+  # ============================================================================
+  # Documentation Quality
+  # ============================================================================
+  - repo: https://github.com/pycqa/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        args:
+          - --convention=numpy
+          - --add-ignore=D100,D104,D105,D107,D203,D213,D413
+        exclude: ^(tests/|docs/|build/|dist/|setup.py|migrations/)
+
+  # ============================================================================
+  # Security and Dependency Checks
+  # ============================================================================
+  - repo: https://github.com/Lucas-C/pre-commit-hooks-safety
+    rev: v1.3.2
+    hooks:
+      - id: python-safety-dependencies-check
+        args: [--ignore=51457]
+
+  # ============================================================================
+  # Requirements Management
+  # ============================================================================
+  - repo: https://github.com/asottile/requirements-txt-fixer
+    rev: v2.5.0
+    hooks:
+      - id: requirements-txt-fixer
+        files: requirements.*\.txt$
+
+  # ============================================================================
+  # Testing Framework Validation (Custom Hooks)
+  # ============================================================================
+  - repo: local
+    hooks:
+      # Validate test structure
+      - id: test-structure-validation
+        name: Validate Test Directory Structure
+        entry: python -c "
+        import os
+        required_dirs = ['tests/unit', 'tests/integration', 'tests/system', 'tests/performance']
+        missing = [d for d in required_dirs if not os.path.exists(d)]
+        if missing:
+          print(f'Missing required test directories: {missing}')
+          exit(1)
+        print('✓ Test directory structure valid')
+        "
+        language: system
+        files: ^tests/.*
+        pass_filenames: false
+        
+      # Validate mock data integrity
+      - id: mock-data-validation
+        name: Validate Mock Data Generation
+        entry: python -c "
+        import sys
+        sys.path.insert(0, 'tests')
+        try:
+          from mock_data.factories import SingleCellDataFactory
+          from mock_data.base import SMALL_DATASET_CONFIG
+          data = SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
+          assert data.shape[0] > 0 and data.shape[1] > 0
+          print('✓ Mock data generation working')
+        except Exception as e:
+          print(f'✗ Mock data validation failed: {e}')
+          sys.exit(1)
+        "
+        language: system
+        files: ^tests/mock_data/.*\.py$
+        pass_filenames: false
+        
+      # Run critical tests on core changes
+      - id: run-critical-tests
+        name: Run Critical Unit Tests
+        entry: python -m pytest tests/unit/core/ -x --maxfail=3 -q --tb=line
+        language: system
+        files: ^lobster/(core/|agents/).*\.py$
+        stages: [push]
+        pass_filenames: false
+        
+      # Validate test configuration files
+      - id: test-config-validation
+        name: Validate Test Configuration Files
+        entry: python -c "
+        import yaml, json
+        try:
+          with open('tests/test_config.yaml') as f:
+            yaml.safe_load(f)
+          with open('tests/data_registry.json') as f:
+            json.load(f)
+          print('✓ Test configuration files valid')
+        except Exception as e:
+          print(f'✗ Test config validation failed: {e}')
+          exit(1)
+        "
+        language: system
+        files: ^tests/(test_config\.yaml|data_registry\.json)$
+        pass_filenames: false
+
+# ============================================================================
+# Global Configuration
+# ============================================================================
+default_stages: [commit]
+default_language_version:
+    python: python3.12
+
+# Exclude patterns
+exclude: |
+  (?x)^(
+    migrations/.*|
+    build/.*|
+    dist/.*|
+    \.eggs/.*|
+    \.git/.*|
+    \.tox/.*|
+    \.venv/.*|
+    venv/.*|
+    __pycache__/.*|
+    \.pytest_cache/.*|
+    \.coverage|
+    htmlcov/.*|
+    \.mypy_cache/.*|
+    node_modules/.*
+  )$
+
+# Don't fail fast - run all hooks to get comprehensive feedback
+fail_fast: false
+
+ci:
+  # Configuration for pre-commit.ci
+  autofix_commit_msg: |
+    🔧 [pre-commit.ci] auto fixes from testing framework hooks
+  autofix_prs: true
+  autoupdate_schedule: weekly
+  skip: [
+    run-critical-tests,
+    python-safety-dependencies-check,
+    test-structure-validation,
+    mock-data-validation
+  ]

@@ -106,12 +106,98 @@ Experience the power of cloud computing with **automatic cloud detection**:
 
 **[Request Cloud Access →](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)**
 
+## 🧪 **Testing Framework**
+
+Lobster AI includes a **comprehensive testing framework** with 95%+ code coverage targeting, ensuring reliability across all bioinformatics workflows.
+
+### 🎯 **Test Categories**
+
+| **Test Type** | **Purpose** | **Coverage** | **Runtime** |
+|---------------|-------------|--------------|-------------|
+| **Unit Tests** | Core component validation | Individual functions/classes | < 2 minutes |
+| **Integration Tests** | Multi-component workflows | Agent interactions, data pipelines | < 15 minutes |
+| **System Tests** | End-to-end scenarios | Complete analysis workflows | < 30 minutes |
+| **Performance Tests** | Benchmarking & scalability | Large datasets, concurrent execution | < 45 minutes |
+
+### 🚀 **Quick Testing Commands**
+
+```bash
+# Run all tests (recommended for development)
+make test
+
+# Fast parallel execution
+make test-fast
+
+# Run specific test categories
+pytest tests/unit/          # Unit tests only
+pytest tests/integration/   # Integration tests
+pytest tests/system/        # System tests
+pytest tests/performance/   # Performance benchmarks
+
+# Run tests with coverage reporting
+pytest --cov=lobster --cov-report=html
+
+# Run enhanced integration test runner
+python tests/run_integration_tests.py --categories basic,advanced
+```
+
+### 📊 **Test Infrastructure**
+
+- **🧬 Biological Data Mocking**: Realistic synthetic datasets (single-cell, proteomics, multi-omics)
+- **⚡ Performance Monitoring**: Memory, CPU, and execution time tracking
+- **🔄 CI/CD Automation**: GitHub Actions with multi-environment testing
+- **📈 Coverage Reporting**: Detailed HTML reports with branch coverage
+- **🛡️ Security Scanning**: Automated dependency and vulnerability checks
+
+### 🎛️ **Advanced Testing Features**
+
+```bash
+# Test with specific biological scenarios
+pytest -m "singlecell and geo"        # Single-cell + GEO integration
+pytest -m "performance and large_data" # Performance with large datasets
+pytest -m "multiomics"                 # Multi-omics integration tests
+
+# Run tests by priority
+pytest tests/ --maxfail=5 -v          # Fail fast development mode
+pytest tests/ -x                      # Stop on first failure
+
+# Generate performance benchmarks
+pytest tests/performance/ --benchmark-only --benchmark-json=results.json
+```
+
+### 🔧 **Test Configuration**
+
+The testing framework uses centralized configuration:
+
+- **`tests/test_config.yaml`** - Environment settings, test parameters, performance thresholds
+- **`tests/data_registry.json`** - Test dataset registry with metadata and availability
+- **`pytest.ini`** - Pytest configuration with markers and coverage settings
+- **`.pre-commit-config.yaml`** - Code quality gates and validation hooks
+
+### 🚦 **CI/CD Pipeline**
+
+Automated testing runs on every pull request with:
+
+- **✅ Code Quality**: Black formatting, linting, type checking
+- **🧪 Multi-Platform**: Ubuntu, macOS, Windows (Python 3.11, 3.12)
+- **🔒 Security**: Bandit, Safety, vulnerability scanning
+- **📊 Performance**: Benchmark comparisons and regression detection
+- **📈 Coverage**: Automated coverage reporting to Codecov
+
+### 🎯 **Quality Standards**
+
+- **Minimum Coverage**: 80% (targeting 95%+)
+- **Test Execution Time**: < 2 minutes for unit tests, < 45 minutes total
+- **Biological Accuracy**: Scientifically validated mock data and algorithms
+- **Error Recovery**: Comprehensive fault tolerance and graceful degradation testing
+
 ## 📚 **Learn More**
 
 - 📖 **[Full Documentation](docs/)** - Complete guides and tutorials
 - 🏗️ **[Architecture Overview](docs/architecture_diagram.md)** - Technical deep-dive
 - 🧪 **[Example Analyses](examples/)** - Real-world use cases
 - 🎓 **[Video Tutorials](https://youtube.com/@homaraai)** - Step-by-step walkthroughs
+- ⚗️ **[Testing Guide](tests/README.md)** - Comprehensive testing documentation
 
 ## 🔍 **Data Quality & Compliance**
 

@@ -1,156 +1,603 @@
 {
-  "test_geo_download": [
-    "Download GEO dataset GSE291670"
-  ],
+  "test_geo_download": {
+    "inputs": ["Download GEO dataset GSE291670"],
+    "category": "data_access",
+    "description": "Test basic GEO dataset download functionality",
+    "expected_duration": 45.0,
+    "timeout": 180.0,
+    "tags": ["geo", "download", "basic"],
+    "priority": 2,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["downloaded", "GSE291670"],
+        "no_errors": true,
+        "min_length": 50
+      }
+    }
+  },
   
-  "test_geo_download_with_qc": [
-    "Download GEO dataset GSE291670 and do the quality control"
-  ],
+  "test_geo_download_with_qc": {
+    "inputs": ["Download GEO dataset GSE291670 and do the quality control"],
+    "category": "basic",
+    "description": "Test GEO download followed by quality control",
+    "expected_duration": 75.0,
+    "timeout": 300.0,
+    "tags": ["geo", "qc", "basic"],
+    "priority": 2,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["quality control", "downloaded"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_geo_download_with_qc_umap": [
-    "Download GEO dataset GSE291670 and do the quality control",
-    "Generate the UMAP with resolution 0.7"
-  ],
+  "test_geo_download_with_qc_umap": {
+    "inputs": [
+      "Download GEO dataset GSE291670 and do the quality control",
+      "Generate the UMAP with resolution 0.7"
+    ],
+    "category": "basic",
+    "description": "Test complete workflow from download to UMAP visualization",
+    "expected_duration": 120.0,
+    "timeout": 400.0,
+    "dependencies": [],
+    "tags": ["geo", "qc", "umap", "visualization"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["quality control", "downloaded"],
+        "no_errors": true
+      },
+      "input_1": {
+        "required_keywords": ["UMAP", "resolution"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_random_question_geo_download_with_qc": [
-    "Hi how are you?",
-    "Download GEO dataset GSE291670 and do the quality control",
-    "Generate the UMAP with resolution 0.7"
-  ],
+  "test_conversational_workflow": {
+    "inputs": [
+      "Hi how are you?",
+      "Download GEO dataset GSE291670 and do the quality control",
+      "Generate the UMAP with resolution 0.7"
+    ],
+    "category": "advanced",
+    "description": "Test conversational interface mixed with analysis tasks",
+    "expected_duration": 130.0,
+    "timeout": 450.0,
+    "tags": ["conversational", "geo", "workflow"],
+    "priority": 1
+  },
   
-  "test_simple_geo_query": [
-    "Download GSE109564 from GEO"
-  ],
+  "test_simple_geo_query": {
+    "inputs": ["Download GSE109564 from GEO"],
+    "category": "basic",
+    "description": "Simple GEO dataset download test",
+    "expected_duration": 40.0,
+    "timeout": 150.0,
+    "tags": ["geo", "download", "simple"],
+    "priority": 1,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["GSE109564", "downloaded"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_full_analysis_workflow": [
-    "Download GSE109564 from GEO and perform quality control",
-    "Perform clustering using Leiden algorithm",
-    "Create UMAP visualization",
-    "Identify cell type markers"
-  ],
+  "test_full_analysis_workflow": {
+    "inputs": [
+      "Download GSE109564 from GEO and perform quality control",
+      "Perform clustering using Leiden algorithm", 
+      "Create UMAP visualization",
+      "Identify cell type markers"
+    ],
+    "category": "advanced",
+    "description": "Comprehensive single-cell analysis workflow",
+    "expected_duration": 180.0,
+    "timeout": 600.0,
+    "tags": ["workflow", "clustering", "markers", "comprehensive"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["quality control", "GSE109564"],
+        "no_errors": true
+      },
+      "input_1": {
+        "required_keywords": ["clustering", "leiden"],
+        "no_errors": true
+      },
+      "input_2": {
+        "required_keywords": ["UMAP", "visualization"],
+        "no_errors": true
+      },
+      "input_3": {
+        "required_keywords": ["markers", "cell type"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_specific_qc_parameters": [
-    "Download GEO dataset GSE291670",
-    "Perform quality control with mitochondrial gene threshold of 20% and minimum genes per cell of 200"
-  ],
+  "test_specific_qc_parameters": {
+    "inputs": [
+      "Download GEO dataset GSE291670",
+      "Perform quality control with mitochondrial gene threshold of 20% and minimum genes per cell of 200"
+    ],
+    "category": "advanced",
+    "description": "Test quality control with specific parameter customization",
+    "expected_duration": 90.0,
+    "timeout": 350.0,
+    "tags": ["qc", "parameters", "customization"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["mitochondrial", "20%", "200"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_clustering_parameters": [
-    "Download GSE109564 and do quality control",
-    "Perform Leiden clustering with resolution 0.5",
-    "Generate UMAP with 15 neighbors and minimum distance 0.3"
-  ],
+  "test_clustering_parameters": {
+    "inputs": [
+      "Download GSE109564 and do quality control",
+      "Perform Leiden clustering with resolution 0.5",
+      "Generate UMAP with 15 neighbors and minimum distance 0.3"
+    ],
+    "category": "advanced",
+    "description": "Test clustering with specific parameter settings",
+    "expected_duration": 140.0,
+    "timeout": 450.0,
+    "tags": ["clustering", "parameters", "umap"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["leiden", "resolution", "0.5"],
+        "no_errors": true
+      },
+      "input_2": {
+        "required_keywords": ["UMAP", "neighbors", "15"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_differential_expression": [
-    "Download GSE109564 from GEO",
-    "Perform quality control and clustering",  
-    "Find differentially expressed genes between clusters 0 and 1"
-  ],
+  "test_differential_expression": {
+    "inputs": [
+      "Download GSE109564 from GEO",
+      "Perform quality control and clustering",
+      "Find differentially expressed genes between clusters 0 and 1"
+    ],
+    "category": "advanced",
+    "description": "Test differential expression analysis workflow",
+    "expected_duration": 160.0,
+    "timeout": 500.0,
+    "tags": ["differential", "expression", "clusters"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_2": {
+        "required_keywords": ["differential", "genes", "clusters"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_pathway_analysis": [
-    "Download GSE291670 and perform complete analysis",
-    "Perform GO enrichment analysis on the top differentially expressed genes"
-  ],
+  "test_pathway_analysis": {
+    "inputs": [
+      "Download GSE291670 and perform complete analysis",
+      "Perform GO enrichment analysis on the top differentially expressed genes"
+    ],
+    "category": "advanced",
+    "description": "Test pathway enrichment analysis capabilities",
+    "expected_duration": 200.0,
+    "timeout": 600.0,
+    "tags": ["pathway", "enrichment", "go"],
+    "priority": 5,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["enrichment", "GO"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_cell_annotation": [
-    "Download GSE109564 from GEO",
-    "Perform quality control and clustering",
-    "Annotate cell types using marker genes"
-  ],
+  "test_cell_annotation": {
+    "inputs": [
+      "Download GSE109564 from GEO",
+      "Perform quality control and clustering",
+      "Annotate cell types using marker genes"
+    ],
+    "category": "advanced",
+    "description": "Test automated cell type annotation",
+    "expected_duration": 150.0,
+    "timeout": 480.0,
+    "tags": ["annotation", "cell_types", "markers"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_2": {
+        "required_keywords": ["annotate", "cell types", "markers"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_literature_integration": [
-    "Find optimal parameters for single-cell RNA-seq quality control from recent literature",
-    "Download GSE291670 and apply those parameters"
-  ],
+  "test_literature_integration": {
+    "inputs": [
+      "Find optimal parameters for single-cell RNA-seq quality control from recent literature",
+      "Download GSE291670 and apply those parameters"
+    ],
+    "category": "advanced",
+    "description": "Test literature-based parameter optimization",
+    "expected_duration": 180.0,
+    "timeout": 550.0,
+    "tags": ["literature", "parameters", "optimization"],
+    "priority": 5,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["parameters", "literature"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_multiple_datasets": [
-    "Download GSE109564 from GEO",
-    "Also download GSE291670",
-    "Compare the quality metrics between these two datasets"
-  ],
+  "test_multiple_datasets": {
+    "inputs": [
+      "Download GSE109564 from GEO",
+      "Also download GSE291670", 
+      "Compare the quality metrics between these two datasets"
+    ],
+    "category": "advanced",
+    "description": "Test multi-dataset comparison and analysis",
+    "expected_duration": 200.0,
+    "timeout": 650.0,
+    "tags": ["multi_dataset", "comparison", "metrics"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_2": {
+        "required_keywords": ["compare", "quality metrics", "datasets"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_error_handling_invalid_geo": [
-    "Download GEO dataset GSE999999999"
-  ],
+  "test_error_handling_invalid_geo": {
+    "inputs": ["Download GEO dataset GSE999999999"],
+    "category": "error_handling",
+    "description": "Test error handling for invalid GEO accession",
+    "expected_duration": 30.0,
+    "timeout": 120.0,
+    "tags": ["error", "invalid", "geo"],
+    "priority": 2,
+    "validation_criteria": {
+      "input_0": {
+        "forbidden_keywords": ["successfully downloaded"],
+        "required_keywords": ["error", "not found"]
+      }
+    }
+  },
   
-  "test_conversational_with_analysis": [
-    "Hello, I need help with single-cell analysis",
-    "I want to analyze GSE109564",
-    "Please download it and show me the basic statistics",
-    "Now perform quality control",
-    "What cell types might be present based on the clustering?"
-  ],
+  "test_conversational_analysis": {
+    "inputs": [
+      "Hello, I need help with single-cell analysis",
+      "I want to analyze GSE109564",
+      "Please download it and show me the basic statistics",
+      "Now perform quality control",
+      "What cell types might be present based on the clustering?"
+    ],
+    "category": "advanced",
+    "description": "Test extended conversational analysis workflow",
+    "expected_duration": 240.0,
+    "timeout": 700.0,
+    "tags": ["conversational", "extended", "workflow"],
+    "priority": 3
+  },
   
-  "test_advanced_visualization": [
-    "Download GSE291670 and perform quality control",
-    "Create violin plots for QC metrics",
-    "Generate feature plots for top variable genes",
-    "Create a heatmap of marker genes for each cluster"
-  ],
+  "test_advanced_visualization": {
+    "inputs": [
+      "Download GSE291670 and perform quality control",
+      "Create violin plots for QC metrics",
+      "Generate feature plots for top variable genes",
+      "Create a heatmap of marker genes for each cluster"
+    ],
+    "category": "advanced",
+    "description": "Test advanced visualization capabilities",
+    "expected_duration": 180.0,
+    "timeout": 550.0,
+    "tags": ["visualization", "plots", "advanced"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["violin plots", "QC"],
+        "no_errors": true
+      },
+      "input_2": {
+        "required_keywords": ["feature plots", "variable genes"],
+        "no_errors": true
+      },
+      "input_3": {
+        "required_keywords": ["heatmap", "markers"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_batch_effect_analysis": [
-    "Download GSE109564 from GEO",
-    "Check for batch effects in the data",
-    "If present, suggest correction methods"
-  ],
+  "test_batch_effect_analysis": {
+    "inputs": [
+      "Download GSE109564 from GEO",
+      "Check for batch effects in the data",
+      "If present, suggest correction methods"
+    ],
+    "category": "advanced",
+    "description": "Test batch effect detection and correction",
+    "expected_duration": 120.0,
+    "timeout": 400.0,
+    "tags": ["batch_effects", "correction", "analysis"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["batch effects"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_doublet_detection": [
-    "Download GSE291670",
-    "Perform doublet detection using scrublet",
-    "Remove doublets and proceed with quality control"
-  ],
+  "test_doublet_detection": {
+    "inputs": [
+      "Download GSE291670",
+      "Perform doublet detection using scrublet",
+      "Remove doublets and proceed with quality control"
+    ],
+    "category": "advanced",
+    "description": "Test doublet detection and removal workflow",
+    "expected_duration": 140.0,
+    "timeout": 450.0,
+    "tags": ["doublets", "scrublet", "qc"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["doublet", "scrublet"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_custom_gene_sets": [
-    "Download GSE109564 and perform basic analysis",
-    "Calculate scores for T cell markers: CD3D, CD3E, CD4, CD8A",
-    "Identify which clusters express these markers"
-  ],
+  "test_custom_gene_sets": {
+    "inputs": [
+      "Download GSE109564 and perform basic analysis",
+      "Calculate scores for T cell markers: CD3D, CD3E, CD4, CD8A",
+      "Identify which clusters express these markers"
+    ],
+    "category": "advanced",
+    "description": "Test custom gene set scoring and analysis",
+    "expected_duration": 160.0,
+    "timeout": 500.0,
+    "tags": ["gene_sets", "markers", "scoring"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["CD3D", "CD3E", "CD4", "CD8A"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_trajectory_analysis": [
-    "Download GSE291670 from GEO",
-    "Perform quality control and clustering",
-    "Suggest trajectory analysis methods for this dataset"
-  ],
+  "test_trajectory_analysis": {
+    "inputs": [
+      "Download GSE291670 from GEO",
+      "Perform quality control and clustering",
+      "Suggest trajectory analysis methods for this dataset"
+    ],
+    "category": "advanced",
+    "description": "Test trajectory analysis method suggestions",
+    "expected_duration": 140.0,
+    "timeout": 450.0,
+    "tags": ["trajectory", "pseudotime", "methods"],
+    "priority": 5,
+    "validation_criteria": {
+      "input_2": {
+        "required_keywords": ["trajectory", "methods"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_integration_methods": [
-    "I have multiple single-cell datasets that need integration",
-    "What are the best methods for batch correction?",
-    "Download GSE109564 as an example and show preprocessing steps"
-  ],
+  "test_integration_methods": {
+    "inputs": [
+      "I have multiple single-cell datasets that need integration",
+      "What are the best methods for batch correction?",
+      "Download GSE109564 as an example and show preprocessing steps"
+    ],
+    "category": "advanced",
+    "description": "Test data integration method recommendations",
+    "expected_duration": 160.0,
+    "timeout": 500.0,
+    "tags": ["integration", "batch_correction", "methods"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["batch correction", "methods"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_export_functionality": [
-    "Download GSE291670 and perform complete analysis",
-    "Export all results including plots and processed data"
-  ],
+  "test_export_functionality": {
+    "inputs": [
+      "Download GSE291670 and perform complete analysis",
+      "Export all results including plots and processed data"
+    ],
+    "category": "basic",
+    "description": "Test data export and result saving functionality",
+    "expected_duration": 200.0,
+    "timeout": 600.0,
+    "tags": ["export", "results", "plots"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["export", "results", "plots"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_parameter_optimization": [
-    "Download GSE109564",
-    "Test different clustering resolutions: 0.3, 0.5, 0.8",
-    "Which resolution gives the most biologically meaningful clusters?"
-  ],
+  "test_parameter_optimization": {
+    "inputs": [
+      "Download GSE109564",
+      "Test different clustering resolutions: 0.3, 0.5, 0.8",
+      "Which resolution gives the most biologically meaningful clusters?"
+    ],
+    "category": "advanced",
+    "description": "Test parameter optimization and comparison",
+    "expected_duration": 180.0,
+    "timeout": 550.0,
+    "tags": ["optimization", "parameters", "clustering"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["resolution", "0.3", "0.5", "0.8"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_statistical_analysis": [
-    "Download GSE291670 and perform quality control",
-    "Calculate statistical significance of differentially expressed genes",
-    "Apply multiple testing correction"
-  ],
+  "test_statistical_analysis": {
+    "inputs": [
+      "Download GSE291670 and perform quality control",
+      "Calculate statistical significance of differentially expressed genes",
+      "Apply multiple testing correction"
+    ],
+    "category": "advanced",
+    "description": "Test statistical analysis and multiple testing correction",
+    "expected_duration": 160.0,
+    "timeout": 500.0,
+    "tags": ["statistics", "significance", "correction"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_2": {
+        "required_keywords": ["multiple testing", "correction"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_data_interpretation": [
-    "Download GSE109564 from GEO",
-    "Perform complete analysis",
-    "Interpret the biological significance of the findings",
-    "Suggest follow-up experiments"
-  ],
+  "test_data_interpretation": {
+    "inputs": [
+      "Download GSE109564 from GEO",
+      "Perform complete analysis",
+      "Interpret the biological significance of the findings",
+      "Suggest follow-up experiments"
+    ],
+    "category": "advanced",
+    "description": "Test biological interpretation and experimental suggestions",
+    "expected_duration": 220.0,
+    "timeout": 650.0,
+    "tags": ["interpretation", "biology", "experiments"],
+    "priority": 5,
+    "validation_criteria": {
+      "input_2": {
+        "required_keywords": ["biological", "significance"],
+        "no_errors": true
+      },
+      "input_3": {
+        "required_keywords": ["experiments", "follow-up"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_troubleshooting": [
-    "Download GSE291670",
-    "The quality control shows many low-quality cells, what should I do?",
-    "Apply stricter filtering and re-analyze"
-  ],
+  "test_troubleshooting": {
+    "inputs": [
+      "Download GSE291670",
+      "The quality control shows many low-quality cells, what should I do?",
+      "Apply stricter filtering and re-analyze"
+    ],
+    "category": "advanced",
+    "description": "Test troubleshooting and adaptive analysis",
+    "expected_duration": 140.0,
+    "timeout": 450.0,
+    "tags": ["troubleshooting", "adaptive", "filtering"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["quality", "low-quality", "cells"],
+        "no_errors": true
+      }
+    }
+  },
   
-  "test_comparison_analysis": [
-    "Download GSE109564",
-    "Perform analysis with default parameters",
-    "Now repeat with more stringent quality control",
-    "Compare the results and explain differences"
-  ]
+  "test_comparison_analysis": {
+    "inputs": [
+      "Download GSE109564",
+      "Perform analysis with default parameters",
+      "Now repeat with more stringent quality control",
+      "Compare the results and explain differences"
+    ],
+    "category": "advanced",
+    "description": "Test comparative analysis with different parameters",
+    "expected_duration": 200.0,
+    "timeout": 600.0,
+    "tags": ["comparison", "parameters", "analysis"],
+    "priority": 4,
+    "validation_criteria": {
+      "input_3": {
+        "required_keywords": ["compare", "differences", "results"],
+        "no_errors": true
+      }
+    }
+  },
+
+  "test_performance_large_dataset": {
+    "inputs": [
+      "Download GSE109564 from GEO",
+      "Process this large dataset efficiently",
+      "Monitor memory usage during analysis"
+    ],
+    "category": "performance",
+    "description": "Test performance with large datasets",
+    "expected_duration": 300.0,
+    "timeout": 900.0,
+    "tags": ["performance", "large_dataset", "memory"],
+    "priority": 3,
+    "retry_count": 1
+  },
+
+  "test_multi_omics_integration": {
+    "inputs": [
+      "I have both RNA-seq and proteomics data from the same samples",
+      "How should I integrate these multi-omics datasets?",
+      "Show me the integration workflow step by step"
+    ],
+    "category": "advanced",
+    "description": "Test multi-omics data integration capabilities",
+    "expected_duration": 180.0,
+    "timeout": 550.0,
+    "tags": ["multi_omics", "integration", "workflow"],
+    "priority": 5,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["integrate", "multi-omics"],
+        "no_errors": true
+      }
+    }
+  },
+
+  "test_spatial_transcriptomics": {
+    "inputs": [
+      "I have spatial transcriptomics data",
+      "What preprocessing steps are specific to spatial data?",
+      "Show me how to analyze spatial patterns"
+    ],
+    "category": "advanced", 
+    "description": "Test spatial transcriptomics analysis capabilities",
+    "expected_duration": 160.0,
+    "timeout": 500.0,
+    "tags": ["spatial", "transcriptomics", "patterns"],
+    "priority": 5,
+    "validation_criteria": {
+      "input_1": {
+        "required_keywords": ["spatial", "preprocessing"],
+        "no_errors": true
+      }
+    }
+  }
 }
