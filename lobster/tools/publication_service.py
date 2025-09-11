@@ -515,7 +515,7 @@ class PublicationService:
         if not supporting_providers:
             return f"No providers available for {data_type.value} dataset search."
         
-        # Use the first supporting provider
+        # Use the first supporting provider #FIXME must change for multui-provider
         provider = supporting_providers[0]
         
         # Route to appropriate provider method

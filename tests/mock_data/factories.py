@@ -27,7 +27,7 @@ class BaseDataFactory(Factory):
     class Meta:
         abstract = True
     
-    config = factory.SubFactory(lambda: MEDIUM_DATASET_CONFIG)
+    config = factory.LazyFunction(lambda: MEDIUM_DATASET_CONFIG)
     
     @classmethod
     def _setup_numpy_seed(cls, config: MockDataConfig) -> None:
