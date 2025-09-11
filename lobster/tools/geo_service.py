@@ -13,6 +13,7 @@ import os
 import re
 import tarfile
 import urllib.request
+import urllib.parse
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -161,48 +162,201 @@ class GEOService:
         """
         Fetch and validate GEO metadata with fallback mechanisms (Scenario 1).
         
-        This function first tries GEOparse, then falls back to helper services
-        if needed, storing the metadata in data_manager for user review.
+        This function handles both GSE and GDS identifiers, converting GDS to GSE
+        when needed, and stores the metadata in data_manager for user review.
         
         Args:
-            geo_id: GEO accession ID (e.g., GSE194247)
+            geo_id: GEO accession ID (e.g., GSE194247 or GDS5826)
             
         Returns:
-            str: Formatted metadata summary for user review
+            Tuple[Dict, Dict]: metadata and validation_result
         """
         try:
             logger.info(f"Fetching metadata for GEO ID: {geo_id}")
             
             # Clean the GEO ID
             clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
-                return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession (e.g., GSE194247)."
             
-            # Primary approach: GEOparse
-            metadata = None
-            validation_result = None
+            # Check if it's a GDS identifier
+            if clean_geo_id.startswith('GDS'):
+                logger.info(f"Detected GDS identifier: {clean_geo_id}")
+                return self._fetch_gds_metadata_and_convert(clean_geo_id)
+            elif not clean_geo_id.startswith('GSE'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE or GDS accession (e.g., GSE194247 or GDS5826)."
             
-            try:
-                logger.debug(f"Downloading SOFT metadata for {clean_geo_id} using GEOparse...")
-                gse = GEOparse.get_GEO(geo=clean_geo_id, destdir=str(self.cache_dir))
-                metadata = self._extract_metadata(gse)
-                logger.debug(f"Successfully extracted metadata using GEOparse for {clean_geo_id}")
-                
-            except Exception as geoparse_error:
-                logger.error(f"Helper metadata fetch failed:")
-                return f"Failed to fetch metadata for {clean_geo_id}. GEOparse ({geoparse_error}) failed."                
+            # Handle GSE identifiers (existing logic)
+            return self._fetch_gse_metadata(clean_geo_id)
+            
+        except Exception as e:
+            logger.exception(f"Error fetching metadata for {geo_id}: {e}")
+            return f"Error fetching metadata for {geo_id}: {str(e)}"
+
+    def _fetch_gse_metadata(self, gse_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Fetch GSE metadata using GEOparse.
+        
+        Args:
+            gse_id: GSE accession ID
+            
+        Returns:
+            Tuple[Dict, Dict]: metadata and validation_result
+        """
+        try:
+            logger.debug(f"Downloading SOFT metadata for {gse_id} using GEOparse...")
+            gse = GEOparse.get_GEO(geo=gse_id, destdir=str(self.cache_dir))
+            metadata = self._extract_metadata(gse)
+            logger.debug(f"Successfully extracted metadata using GEOparse for {gse_id}")
             
             if not metadata:
-                return f"No metadata could be extracted for {clean_geo_id}"
+                return f"No metadata could be extracted for {gse_id}"
             
             # Validate metadata against transcriptomics schema
             validation_result = self._validate_geo_metadata(metadata)
             
             return metadata, validation_result
             
+        except Exception as geoparse_error:
+            logger.error(f"GEOparse metadata fetch failed: {geoparse_error}")
+            return f"Failed to fetch metadata for {gse_id}. GEOparse ({geoparse_error}) failed."
+
+    def _fetch_gds_metadata_and_convert(self, gds_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Fetch GDS metadata using NCBI E-utilities and convert to GSE for downstream processing.
+        
+        Args:
+            gds_id: GDS accession ID (e.g., GDS5826)
+            
+        Returns:
+            Tuple[Dict, Dict]: Combined metadata and validation_result
+        """
+        try:
+            logger.info(f"Fetching GDS metadata for {gds_id} using NCBI E-utilities...")
+            
+            # Extract GDS number from ID
+            gds_number = gds_id.replace('GDS', '')
+            
+            # Build NCBI E-utilities URL for GDS metadata
+            base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+            params = {
+                'db': 'gds',
+                'id': gds_number,
+                'retmode': 'json'
+            }
+            
+            # Construct URL with parameters
+            url_params = urllib.parse.urlencode(params)
+            url = f"{base_url}?{url_params}"
+            
+            logger.debug(f"Fetching GDS metadata from: {url}")
+            
+            # Make the request
+            response = urllib.request.urlopen(url, timeout=30)
+            response_data = response.read().decode('utf-8')
+            
+            # Parse JSON response
+            gds_data = json.loads(response_data)
+            
+            # Extract the GDS record
+            if 'result' not in gds_data or gds_number not in gds_data['result']:
+                return f"No GDS record found for {gds_id}"
+            
+            gds_record = gds_data['result'][gds_number]
+            logger.info(f"Successfully retrieved GDS metadata for {gds_id}")
+            
+            # Extract GSE ID from GDS record
+            gse_id = gds_record.get('gse', '')
+            if not gse_id:
+                return f"No associated GSE found for GDS {gds_id}"
+            
+            # Ensure GSE has proper format
+            if not gse_id.startswith('GSE'):
+                gse_id = f"GSE{gse_id}"
+            
+            logger.info(f"Found associated GSE: {gse_id} for GDS {gds_id}")
+            
+            # Fetch the GSE metadata using existing method
+            gse_metadata, validation_result = self._fetch_gse_metadata(gse_id)
+            
+            if isinstance(gse_metadata, str):  # Error occurred
+                return gse_metadata
+            
+            # Enhance metadata with GDS information
+            enhanced_metadata = self._combine_gds_gse_metadata(gds_record, gse_metadata, gds_id, gse_id)
+            
+            return enhanced_metadata, validation_result
+            
+        except urllib.error.URLError as e:
+            logger.error(f"Network error fetching GDS metadata: {e}")
+            return f"Network error fetching GDS metadata for {gds_id}: {str(e)}"
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing GDS JSON response: {e}")
+            return f"Error parsing GDS metadata response for {gds_id}: {str(e)}"
         except Exception as e:
-            logger.exception(f"Error fetching metadata for {geo_id}: {e}")
-            return f"Error fetching metadata for {geo_id}: {str(e)}"
+            logger.error(f"Error fetching GDS metadata for {gds_id}: {e}")
+            return f"Error fetching GDS metadata for {gds_id}: {str(e)}"
+
+    def _combine_gds_gse_metadata(
+        self, 
+        gds_record: Dict[str, Any], 
+        gse_metadata: Dict[str, Any], 
+        gds_id: str, 
+        gse_id: str
+    ) -> Dict[str, Any]:
+        """
+        Combine GDS and GSE metadata into a unified metadata structure.
+        
+        Args:
+            gds_record: GDS record from NCBI E-utilities
+            gse_metadata: GSE metadata from GEOparse
+            gds_id: Original GDS identifier
+            gse_id: Associated GSE identifier
+            
+        Returns:
+            Dict: Combined metadata with both GDS and GSE information
+        """
+        try:
+            # Start with GSE metadata as base
+            combined_metadata = gse_metadata.copy()
+            
+            # Add GDS-specific information
+            combined_metadata['gds_info'] = {
+                'gds_id': gds_id,
+                'gds_title': gds_record.get('title', ''),
+                'gds_summary': gds_record.get('summary', ''),
+                'gds_type': gds_record.get('gdstype', ''),
+                'platform_technology': gds_record.get('ptechtype', ''),
+                'value_type': gds_record.get('valtype', ''),
+                'sample_info': gds_record.get('ssinfo', ''),
+                'subset_info': gds_record.get('subsetinfo', ''),
+                'n_samples': gds_record.get('n_samples', 0),
+                'platform_taxa': gds_record.get('platformtaxa', ''),
+                'samples_taxa': gds_record.get('samplestaxa', ''),
+                'ftp_link': gds_record.get('ftplink', ''),
+                'associated_gse': gse_id
+            }
+            
+            # Update title and summary to include GDS information if different
+            gds_title = gds_record.get('title', '')
+            if gds_title and gds_title != combined_metadata.get('title', ''):
+                combined_metadata['title'] = f"{gds_title} (GDS: {gds_id}, GSE: {gse_id})"
+            else:
+                combined_metadata['title'] = f"{combined_metadata.get('title', '')} (GDS: {gds_id}, GSE: {gse_id})"
+            
+            # Add cross-reference information
+            combined_metadata['cross_references'] = {
+                'original_request': gds_id,
+                'gds_accession': gds_id,
+                'gse_accession': gse_id,
+                'data_source': 'GDS_to_GSE_conversion'
+            }
+            
+            logger.info(f"Successfully combined GDS and GSE metadata for {gds_id} -> {gse_id}")
+            return combined_metadata
+            
+        except Exception as e:
+            logger.error(f"Error combining GDS and GSE metadata: {e}")
+            # Return GSE metadata if combination fails
+            return gse_metadata
 
     def download_dataset(self, geo_id: str, adapter: str = None, **kwargs) -> str:
         """

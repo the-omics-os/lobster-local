@@ -56,7 +56,7 @@ def data_expert(
         Use this FIRST before download_geo_dataset to preview dataset information.
         
         Args:
-            geo_id: GEO accession number (e.g., GSE12345)
+            geo_id: GEO accession number (e.g., GSE12345 or GDS5826)
             
         Returns:
             str: Formatted metadata summary with validation results and recommendation
@@ -64,8 +64,8 @@ def data_expert(
         try:
             # Clean the GEO ID
             clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
-                return f"Invalid GEO ID format: {geo_id}. Expected format: GSE12345"
+            if not clean_geo_id.startswith('GSE') and not clean_geo_id.startswith('GDS'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE or GDS accession (e.g., GSE194247 or GDS5826)"
             
             logger.info(f"Fetching metadata for GEO dataset: {clean_geo_id}")
             
@@ -178,7 +178,7 @@ def data_expert(
         IMPORTANT: Use fetch_geo_metadata_and_strategy_config FIRST to preview dataset before downloading.
         
         Args:
-            geo_id: GEO accession number (e.g., GSE12345)
+            geo_id: GEO accession number (e.g., GSE12345 or GDS5826)
             modality_type: Type of data modality ('single_cell', 'bulk', or 'auto_detect')
             manual_strategy_override: Optional manual override for download strategy
             
@@ -188,8 +188,8 @@ def data_expert(
         try:
             # Clean the GEO ID
             clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
-                return f"Invalid GEO ID format: {geo_id}. Expected format: GSE12345"
+            if not clean_geo_id.startswith('GSE') and not clean_geo_id.startswith('GDS'):
+                return f"Invalid GEO ID format: {geo_id}. Must be a GSE or GDS accession (e.g., GSE194247 or GDS5826)"
             
             logger.info(f"Processing GEO dataset request: {clean_geo_id} (modality: {modality_type})")
             
@@ -736,6 +736,8 @@ get_data_summary()
 
 # Step 2: REQUIRED - Fetch metadata first to preview dataset
 fetch_geo_metadata_and_strategy_config("GSE67310")
+# OR for GDS identifiers (automatically converted to corresponding GSE):
+fetch_geo_metadata_and_strategy_config("GDS5826")
 
 # Step 3: Review metadata summary, then download with appropriate modality type
 download_geo_dataset("GSE67310", modality_type="<adapter>")

@@ -62,7 +62,8 @@ The codebase follows a modular, agent-based architecture:
 - **`lobster/agents/`** - Specialized AI agents for different analysis types
   - `singlecell_expert.py` - Single-cell RNA-seq analysis
   - `bulk_rnaseq_expert.py` - Bulk RNA-seq analysis  
-  - `proteomics_expert.py` - Proteomics and mass spectrometry
+  - `ms_proteomics_expert.py` - Mass spectrometry proteomics with DDA/DIA workflows and missing value handling
+  - `affinity_proteomics_expert.py` - Affinity proteomics including Olink panels and antibody arrays
   - `data_expert.py` - Data loading, format conversion, quality assessment
   - `research_agent.py` - Literature mining and dataset discovery
   - `method_expert.py` - Parameter optimization from publications
@@ -93,19 +94,32 @@ The codebase follows a modular, agent-based architecture:
   - `clustering_service.py` - Clustering algorithms and cell type annotation
   - `visualization_service.py` - Publication-ready plot generation
   - `quality_service.py` - Quality control metrics and filtering
+  - **Proteomics Services** - Professional-grade proteomics analysis
+    - `proteomics_preprocessing_service.py` - MS/Affinity filtering & normalization
+    - `proteomics_quality_service.py` - Missing value & CV analysis
+    - `proteomics_analysis_service.py` - Statistical testing & PCA
+    - `proteomics_differential_service.py` - Differential expression & pathways
+    - `proteomics_visualization_service.py` - Volcano plots & networks
+  - **Publication Services** - Literature mining and dataset discovery
+    - `publication_service.py` - Multi-provider orchestrator
+    - `providers/pubmed_provider.py` - PubMed literature search
+    - `providers/geo_provider.py` - Direct GEO DataSets search with advanced filtering
 
 - **`lobster/config/`** - Configuration management
   - `agent_config.py` - Agent configuration and LLM settings
+  - `agent_registry.py` - Centralized agent registry system (single source of truth)
   - `settings.py` - Global application settings
   - `config_manager.py` - Environment and API key management
 
 ### Key Design Principles
 
-1. **Agent-Based Architecture** - Each specialist agent handles specific analysis domains
-2. **Unified Data Management** - Single data manager coordinates all modalities (AnnData, MuData)
-3. **Natural Language Interface** - Users describe analyses in plain English
-4. **Reproducibility** - Complete provenance tracking of all operations
-5. **Cloud Integration** - Seamless local/cloud execution with automatic detection
+1. **Agent-Based Architecture** - Each specialist agent handles specific analysis domains with centralized registry
+2. **Modular Service Architecture** - Stateless analysis services for professional-grade bioinformatics workflows
+3. **Unified Data Management** - Single data manager coordinates all modalities (AnnData, MuData)
+4. **Professional Proteomics Support** - Specialized MS and affinity proteomics with missing value handling
+5. **Natural Language Interface** - Users describe analyses in plain English
+6. **Reproducibility** - Complete provenance tracking of all operations
+7. **Cloud Integration** - Seamless local/cloud execution with automatic detection and fallback
 
 ## Core Architecture Deep Dive
 
@@ -168,8 +182,8 @@ class BaseClient(ABC):
     "adapter_registry": {
       "transcriptomics_single_cell": "Single-cell RNA-seq processing",
       "transcriptomics_bulk": "Bulk RNA-seq processing", 
-      "proteomics_mass_spec": "Mass spectrometry proteomics",
-      "proteomics_affinity": "Antibody array proteomics"
+      "proteomics_mass_spec": "Mass spectrometry proteomics with missing value handling",
+      "proteomics_affinity": "Antibody array proteomics (Olink panels, targeted assays)"
     },
     "workspace_structure": {
       "data/": "Persistent modality storage",
@@ -191,6 +205,121 @@ geo_gse12345                           # Raw downloaded data
 ├── geo_gse12345_clustered           # Clustering results
 ├── geo_gse12345_markers            # Marker genes
 └── geo_gse12345_annotated         # Cell type annotations
+```
+
+### Modular Service Architecture
+
+The system employs a clean separation between agent orchestration and analysis implementation:
+
+#### Stateless Analysis Services
+
+**Transcriptomics Services:**
+- `PreprocessingService` - Quality-based filtering and normalization
+- `QualityService` - Comprehensive QC assessment with statistical metrics
+- `ClusteringService` - Leiden clustering, PCA, UMAP visualization
+- `EnhancedSingleCellService` - Doublet detection and cell type annotation
+
+**Proteomics Services (Professional Grade):**
+- `ProteomicsPreprocessingService` - MS/Affinity filtering with platform-appropriate normalization
+- `ProteomicsQualityService` - Missing value analysis and coefficient of variation assessment
+- `ProteomicsAnalysisService` - Statistical testing and dimensionality reduction
+- `ProteomicsDifferentialService` - Advanced differential expression with FDR control
+- `ProteomicsVisualizationService` - Publication-ready volcano plots and protein networks
+
+**Publication Services:**
+- `PublicationService` - Multi-provider orchestrator for literature mining
+- `PubMedProvider` - PubMed literature search and method extraction
+- `GEOProvider` - Direct GEO DataSets search with advanced filtering capabilities
+
+#### Agent-Service Integration Pattern
+
+Agents focus on orchestration and user interaction while delegating analysis to specialized services:
+
+```python
+# Standard agent tool pattern
+@tool
+def analyze_modality(modality_name: str, **params) -> str:
+    # 1. Validate modality exists and get data
+    adata = data_manager.get_modality(modality_name)
+    
+    # 2. Call stateless service for analysis
+    result_adata, stats = service.analyze_method(adata, **params)
+    
+    # 3. Store results with descriptive naming
+    new_modality = f"{modality_name}_analyzed"
+    data_manager.modalities[new_modality] = result_adata
+    
+    # 4. Log operation for provenance
+    data_manager.log_tool_usage("analyze_modality", params, stats)
+    
+    return formatted_response(stats, new_modality)
+```
+
+### Centralized Agent Registry System
+
+The system features a centralized agent registry that serves as the single source of truth for all agent configurations, eliminating redundancy and reducing errors.
+
+#### Agent Registry Architecture
+
+```python
+# lobster/config/agent_registry.py
+@dataclass
+class AgentConfig:
+    name: str                              # Unique agent identifier
+    display_name: str                     # Human-readable name
+    description: str                      # Agent's purpose/capability
+    factory_function: str                 # Module path to factory function
+    handoff_tool_name: Optional[str]     # Name of handoff tool
+    handoff_tool_description: Optional[str]  # Tool description
+```
+
+#### Current Agent Registry
+
+```python
+AGENT_REGISTRY: Dict[str, AgentConfig] = {
+    'data_expert_agent': AgentConfig(...),
+    'singlecell_expert_agent': AgentConfig(...),
+    'bulk_rnaseq_expert_agent': AgentConfig(...),
+    'research_agent': AgentConfig(...),
+    'method_expert_agent': AgentConfig(...),
+    'ms_proteomics_expert_agent': AgentConfig(
+        name='ms_proteomics_expert_agent',
+        display_name='MS Proteomics Expert',
+        description='Handles mass spectrometry proteomics data analysis including DDA/DIA workflows',
+        factory_function='lobster.agents.ms_proteomics_expert.ms_proteomics_expert'
+    ),
+    'affinity_proteomics_expert_agent': AgentConfig(
+        name='affinity_proteomics_expert_agent',
+        display_name='Affinity Proteomics Expert',
+        description='Handles affinity proteomics including Olink and targeted protein panels',
+        factory_function='lobster.agents.affinity_proteomics_expert.affinity_proteomics_expert'
+    ),
+}
+```
+
+#### Benefits of Centralized Registry
+
+**Before (Legacy System):**
+```
+Adding new agents required updating:
+├── lobster/agents/graph.py          # Import statements
+├── lobster/agents/graph.py          # Agent creation code
+├── lobster/agents/graph.py          # Handoff tool definitions
+├── lobster/utils/callbacks.py       # Agent name hardcoded list
+└── Multiple imports throughout codebase
+```
+
+**After (Registry System):**
+```
+Adding new agents only requires:
+└── lobster/config/agent_registry.py  # Single registry entry
+
+Everything else is handled automatically:
+├── ✅ Dynamic agent loading
+├── ✅ Automatic handoff tool creation
+├── ✅ Callback system integration
+├── ✅ Type-safe configuration
+└── ✅ Professional error handling
 ```
 
 ### Interface-Driven Modular Architecture
@@ -558,27 +687,250 @@ LOBSTER_CLOUD_KEY=your-cloud-api-key
 - `data/` - Input datasets and cached files  
 - `exports/` - Generated outputs and visualizations
 
-## Testing Strategy
+## Comprehensive Testing Framework
 
-### Test Organization
-```bash
-# Run specific test categories
-pytest tests/test_lobster.py -v                    # Core functionality
-pytest tests/integration/ -v -m integration        # Integration tests
-pytest tests/ -n auto -v                          # Parallel execution
+Lobster AI includes a robust testing infrastructure targeting 95%+ code coverage with scientifically accurate testing scenarios.
+
+### Test Structure
+
+```
+tests/
+├── 📁 unit/                    # Unit tests (13 files)
+│   ├── core/                  # Core system components
+│   ├── agents/                # AI agent functionality
+│   └── tools/                 # Analysis services
+├── 📁 integration/            # Integration tests (5 files)
+│   ├── test_agent_workflows.py
+│   ├── test_data_pipelines.py
+│   ├── test_cloud_local_switching.py
+│   ├── test_geo_download_workflows.py
+│   └── test_multi_omics_integration.py
+├── 📁 system/                 # System tests (3 files)
+├── 📁 performance/            # Performance tests (3 files)
+├── 🚀 run_integration_tests.py # Enhanced test runner
+└── 📋 test_cases.json         # Test case definitions
 ```
 
+### Test Categories & Runtime
+
+| **Test Type** | **Purpose** | **Coverage** | **Runtime** |
+|---------------|-------------|--------------|-------------|
+| **Unit Tests** | Core component validation | Individual functions/classes | < 2 minutes |
+| **Integration Tests** | Multi-component workflows | Agent interactions, data pipelines | < 15 minutes |
+| **System Tests** | End-to-end scenarios | Complete analysis workflows | < 30 minutes |
+| **Performance Tests** | Benchmarking & scalability | Large datasets, concurrent execution | < 45 minutes |
+
+### Quick Testing Commands
+
+```bash
+# Run all tests with coverage
+make test
+
+# Fast parallel execution
+make test-fast
+
+# Run specific categories
+pytest tests/unit/          # Unit tests
+pytest tests/integration/   # Integration tests
+pytest tests/system/        # System tests
+pytest tests/performance/   # Performance tests
+
+# Run by biological focus
+pytest -m "singlecell"      # Single-cell RNA-seq tests
+pytest -m "proteomics"      # Proteomics analysis tests
+pytest -m "multiomics"      # Multi-omics integration tests
+pytest -m "geo"             # GEO database integration tests
+
+# Enhanced test runner with performance monitoring
+python tests/run_integration_tests.py --categories basic,advanced --performance-monitoring
+```
+
+### Mock Data Framework
+
+Sophisticated synthetic data generation with realistic biological features:
+
+```python
+from tests.mock_data.factories import SingleCellDataFactory, ProteomicsDataFactory
+from tests.mock_data.base import SMALL_DATASET_CONFIG
+
+# Generate single-cell RNA-seq data
+sc_data = SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
+
+# Generate proteomics data with missing values
+proteomics_data = ProteomicsDataFactory(config={
+    'n_samples': 48,
+    'n_proteins': 2000,
+    'missing_value_rate': 0.15
+})
+```
+
+**Realistic Biological Features:**
+- Cell type labels and gene categorization
+- Mitochondrial/ribosomal gene patterns
+- Batch effects and technical variation
+- Proteomics-appropriate missingness patterns
+- Spatial and temporal data structures
+
+### CI/CD Integration
+
+**Quality Gates (every PR must pass):**
+- ✅ Code Formatting (Black, isort)
+- ✅ Linting (Flake8 with bioinformatics-specific rules)
+- ✅ Type Checking (MyPy static analysis)
+- ✅ Security (Bandit security linting)
+- ✅ Unit Tests (>80% coverage required)
+- ✅ Integration Tests (critical workflow validation)
+- ✅ Performance (no significant regressions)
+
+**Multi-Platform Testing:**
+- Ubuntu, macOS, Windows
+- Python 3.11, 3.12
+- Automated dependency updates and vulnerability scanning
+
 ### Coverage Requirements
-- Maintain test coverage reports with `--cov=lobster`
-- Generate HTML coverage reports for detailed analysis
-- Focus on critical analysis pathways and data handling
+- **Minimum Coverage**: 80% (targeting 95%+)
+- **Test Execution Time**: < 2 minutes for unit tests, < 45 minutes total
+- **Biological Accuracy**: Scientifically validated mock data and algorithms
+- **Error Recovery**: Comprehensive fault tolerance testing
 
-## Cloud Integration
+## Cloud Integration Architecture
 
-The system supports automatic cloud/local mode switching:
-- **Cloud Mode** - Activated when `LOBSTER_CLOUD_KEY` is set
-- **Local Mode** - Fallback when cloud is unavailable
-- **Seamless Switching** - Same interface regardless of execution mode
+Lobster AI features sophisticated cloud/local architecture with seamless mode switching and automatic fallback capabilities.
+
+### Smart Client Detection
+
+The system automatically detects your configuration and routes requests appropriately:
+
+```python
+# Automatic client initialization
+def init_client():
+    if os.getenv('LOBSTER_CLOUD_KEY'):
+        try:
+            # Attempt cloud client initialization
+            cloud_client = CloudLobsterClient(api_key=cloud_key)
+            if cloud_client.test_connection():
+                return cloud_client  # ☁️ Cloud mode active
+        except ConnectionError:
+            pass  # Fallback to local
+    
+    # 💻 Local mode (default or fallback)
+    return AgentClient()
+```
+
+### Execution Modes
+
+#### ☁️ **Cloud Mode** (when `LOBSTER_CLOUD_KEY` is set)
+- **CloudLobsterClient**: HTTP REST API communication with cloud services
+- **Scalable Computing**: Handle large datasets without local hardware limits
+- **Automatic Fallback**: Falls back to local mode if cloud unavailable
+- **Same Interface**: Identical user experience through BaseClient abstraction
+
+#### 💻 **Local Mode** (default or fallback)
+- **AgentClient**: Complete local LangGraph processing
+- **Full Functionality**: All analysis capabilities included
+- **Privacy**: Data never leaves your computer
+- **Offline Capable**: Works without internet connection
+
+### BaseClient Interface Pattern
+
+All clients implement a unified interface ensuring consistency:
+
+```python
+class BaseClient(ABC):
+    @abstractmethod
+    def query(self, user_input: str, stream: bool = False) -> Dict[str, Any]
+    @abstractmethod
+    def get_status(self) -> Dict[str, Any]
+    @abstractmethod
+    def export_session(self, export_path: Optional[Path] = None) -> Path
+```
+
+### Seamless Mode Switching Flow
+
+```bash
+# User runs same command regardless of mode
+lobster chat
+
+# System automatically:
+1. Checks for LOBSTER_CLOUD_KEY
+2. Tests cloud connection if key present
+3. Falls back to local if cloud unavailable
+4. Provides identical interface in both modes
+```
+
+### Configuration
+
+```bash
+# Cloud mode activation
+export LOBSTER_CLOUD_KEY=your-api-key
+
+# System status indicators
+🌩️ "Cloud mode active"           # Cloud connection successful
+💻 "Using local mode"            # No cloud key set
+💻 "Using local mode (cloud unavailable)"  # Fallback occurred
+```
+
+This architecture ensures users have a consistent, reliable experience whether running locally or in the cloud.
+
+## Advanced Dataset Discovery
+
+### GEO Provider with Direct Database Search
+
+The system includes a sophisticated GEO provider that enables direct search of NCBI's Gene Expression Omnibus (GEO) DataSets database with advanced filtering capabilities.
+
+#### Key Features
+
+- **Direct GEO DataSets Search**: Search the GEO database directly without going through PubMed
+- **Advanced Filtering**: Support for organisms, platforms, entry types, date ranges, and supplementary file types
+- **Official API Compliance**: Implements all query patterns from NCBI documentation
+- **WebEnv/QueryKey Support**: Efficient result pagination using NCBI's history server
+
+#### Usage Examples
+
+```python
+# Simple search
+results = service.search_datasets_directly(
+    query="single-cell RNA-seq",
+    data_type="geo",
+    max_results=10
+)
+
+# Advanced filtering
+filters = {
+    "organisms": ["human", "mouse"],
+    "entry_types": ["gse"],  # Series only
+    "published_last_n_months": 6,
+    "supplementary_file_types": ["h5", "h5ad"],
+    "max_results": 20
+}
+
+results = service.search_datasets_directly(
+    query="ATAC-seq chromatin accessibility",
+    data_type="geo",
+    filters=filters
+)
+```
+
+#### Research Agent Integration
+
+```bash
+# Natural language dataset discovery
+🦞 You: "Find recent human single-cell datasets with H5 files"
+
+🦞 Lobster: Searching GEO database with advanced filters...
+✓ Found 15 datasets matching criteria
+✓ Filtered by: human organism, GSE series, H5 supplementary files
+✓ Published in last 3 months
+```
+
+### Publication Service Architecture
+
+Multi-provider orchestrator for comprehensive literature mining:
+
+- **PubMedProvider**: Traditional literature search and method extraction
+- **GEOProvider**: Direct dataset discovery with biological context
+- **Unified Interface**: Consistent API across all providers
+- **Extensible Design**: Easy addition of new data sources
 
 ## Docker Support
 

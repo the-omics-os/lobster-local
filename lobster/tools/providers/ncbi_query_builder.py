@@ -15,7 +15,8 @@ from datetime import datetime
 class NCBIDatabase(Enum):
     """NCBI database identifiers."""
     PUBMED = "pubmed"
-    GEO = "gse"  # GEO DataSets #TODO ensure that this is what you alwats want as a behavior for the single cell database. what about gds?
+    GEO = "gse"  # GEO Series
+    GDS = "gds"  # GEO DataSets
     SRA = "sra"
     BIOPROJECT = "bioproject"
     BIOSAMPLE = "biosample"
