@@ -69,6 +69,10 @@ The codebase follows a modular, agent-based architecture:
   - `method_expert.py` - Parameter optimization from publications
   - `machine_learning_expert.py` - Advanced ML workflows
   - `supervisor.py` - Agent coordination and workflow management
+  - `langgraph_supervisor/` - LangGraph supervisor implementation
+    - `supervisor.py` - Core supervisor orchestration logic
+    - `handoff.py` - Agent handoff coordination
+    - `agent_name.py` - Agent identification and naming
 
 - **`lobster/core/`** - Data management and client infrastructure
   - **Client Architecture**:
@@ -92,7 +96,18 @@ The codebase follows a modular, agent-based architecture:
   - `geo_service.py` - GEO database integration and downloading
   - `preprocessing_service.py` - Data preprocessing and normalization
   - `clustering_service.py` - Clustering algorithms and cell type annotation
-  - `visualization_service.py` - Publication-ready plot generation
+  - **Visualization Services** - Comprehensive interactive visualization suite
+    - `visualization_service.py` - SingleCellVisualizationService with publication-quality plotting:
+      - `create_umap_plot()` - Interactive UMAP with customizable coloring, auto-scaling, and hover data
+      - `create_pca_plot()` - PCA plots with variance explained and component selection
+      - `create_elbow_plot()` - PCA variance elbow plots with dual y-axes
+      - `create_violin_plot()` - Gene expression violin plots across groups with statistical overlays
+      - `create_feature_plot()` - Gene expression feature plots on UMAP with multi-gene support
+      - `create_dot_plot()` - Marker gene dot plots with expression intensity and percentage
+      - `create_heatmap()` - Gene expression heatmaps with hierarchical clustering and z-score normalization
+      - `create_qc_plots()` - Comprehensive 16-panel QC report with statistical thresholds and quality metrics
+      - `create_cluster_composition_plot()` - Cluster composition analysis with batch effect visualization
+      - `save_all_plots()` - Batch export to HTML/PNG with high-resolution options
   - `quality_service.py` - Quality control metrics and filtering
   - **Proteomics Services** - Professional-grade proteomics analysis
     - `proteomics_preprocessing_service.py` - MS/Affinity filtering & normalization
@@ -117,9 +132,10 @@ The codebase follows a modular, agent-based architecture:
 2. **Modular Service Architecture** - Stateless analysis services for professional-grade bioinformatics workflows
 3. **Unified Data Management** - Single data manager coordinates all modalities (AnnData, MuData)
 4. **Professional Proteomics Support** - Specialized MS and affinity proteomics with missing value handling
-5. **Natural Language Interface** - Users describe analyses in plain English
-6. **Reproducibility** - Complete provenance tracking of all operations
-7. **Cloud Integration** - Seamless local/cloud execution with automatic detection and fallback
+5. **Publication-Quality Visualization** - Interactive Plotly-based plots with scientific accuracy and statistical rigor
+6. **Natural Language Interface** - Users describe analyses in plain English
+7. **Reproducibility** - Complete provenance tracking of all operations
+8. **Cloud Integration** - Seamless local/cloud execution with automatic detection and fallback
 
 ## Core Architecture Deep Dive
 
@@ -219,6 +235,14 @@ The system employs a clean separation between agent orchestration and analysis i
 - `ClusteringService` - Leiden clustering, PCA, UMAP visualization
 - `EnhancedSingleCellService` - Doublet detection and cell type annotation
 
+**Visualization Services (Publication-Grade):**
+- `SingleCellVisualizationService` - Interactive Plotly-based visualization suite
+  - Multi-panel QC reports with statistical thresholds and automated outlier detection
+  - Dimensionality reduction plots (UMAP/PCA) with intelligent scaling and coloring
+  - Gene expression visualizations (violin, feature, dot plots, heatmaps)
+  - Cluster analysis and composition plots with batch effect detection
+  - Professional export pipeline for publication-quality figures (HTML/PNG)
+
 **Proteomics Services (Professional Grade):**
 - `ProteomicsPreprocessingService` - MS/Affinity filtering with platform-appropriate normalization
 - `ProteomicsQualityService` - Missing value analysis and coefficient of variation assessment
@@ -254,6 +278,184 @@ def analyze_modality(modality_name: str, **params) -> str:
     
     return formatted_response(stats, new_modality)
 ```
+
+### Advanced Visualization Architecture
+
+Lobster AI features a sophisticated visualization system built on Plotly for interactive, publication-quality scientific visualizations with professional color schemes and statistical accuracy.
+
+#### SingleCellVisualizationService
+
+The core visualization service provides comprehensive plotting capabilities for single-cell RNA-seq analysis with scientific rigor and publication standards.
+
+```python
+# lobster/tools/visualization_service.py
+class SingleCellVisualizationService:
+    """Professional visualization service for single-cell RNA-seq data."""
+
+    # Sophisticated color palettes for different data types
+    cluster_colors = px.colors.qualitative.Set1          # Categorical data
+    continuous_colors = px.colors.sequential.Viridis     # Gene expression
+    diverging_colors = px.colors.diverging.RdBu_r       # Differential expression
+    expression_colorscale = [                            # Scientific gene expression
+        [0, 'lightgray'], [0.01, 'lightblue'], [0.1, 'blue'],
+        [0.5, 'red'], [0.8, 'darkred'], [1.0, 'black']
+    ]
+```
+
+#### Interactive Dimensionality Reduction Visualizations
+
+**UMAP and PCA Plots** with advanced features:
+- Automatic point size scaling based on dataset size
+- Multi-modal coloring (categorical clusters, continuous gene expression)
+- Interactive hover data with cell metadata
+- Logarithmic scaling for count data
+- Professional axis styling and legends
+
+```python
+# Dynamic visualization with intelligent defaults
+fig = service.create_umap_plot(
+    adata,
+    color_by="leiden",           # Cluster coloring
+    point_size=None,             # Auto-scaled: 8→5→3→2 based on cell count
+    alpha=0.8,                   # Optimal transparency
+    show_legend=True             # Professional legend positioning
+)
+
+# Gene expression overlay with scientific color mapping
+fig = service.create_umap_plot(adata, color_by="CD4", alpha=0.6)
+```
+
+#### Comprehensive Quality Control Suite
+
+**16-Panel Professional QC Report** with statistical rigor:
+
+```python
+# Creates publication-ready multi-panel QC figure
+qc_fig = service.create_qc_plots(adata)
+
+# Comprehensive panels include:
+# A. Transcriptional Complexity (UMI vs Genes with MT% coloring)
+# B. Mitochondrial QC (UMI vs MT% with outlier detection)
+# C. Ribosomal Content Analysis
+# D-F. Statistical Distribution Analysis (violin + box plots)
+# G. Library Saturation Curves
+# H. Cell Quality Classification (pie chart)
+# I-L. Advanced Metrics (detection rates, correlations, summaries)
+# M-P. Specialized Analysis (doublets, thresholds, filtering impact)
+```
+
+**Automated Statistical Thresholds**:
+- MAD-based outlier detection (Median Absolute Deviation)
+- Data-driven axis scaling with intelligent padding
+- Batch effect detection and visualization
+- Quality score computation with traffic light indicators
+
+#### Gene Expression Visualizations
+
+**Multi-Modal Expression Analysis**:
+
+```python
+# Violin plots with statistical overlays
+violin_fig = service.create_violin_plot(
+    adata,
+    genes=["CD4", "CD8A", "IL2RA"],
+    groupby="leiden",
+    log_scale=True,              # Automatic log transformation
+    use_raw=True                 # Raw vs normalized data selection
+)
+
+# Feature plots with multi-gene support
+feature_fig = service.create_feature_plot(
+    adata,
+    genes=["FOXP3", "IL2RA", "CTLA4", "CD25"],
+    ncols=2,                     # Automatic subplot layout
+    vmin=0, vmax=5              # Custom expression ranges
+)
+
+# Professional dot plots with dual encoding
+dot_fig = service.create_dot_plot(
+    adata,
+    genes=marker_genes,
+    groupby="leiden",
+    standard_scale="var"         # Statistical normalization options
+)
+```
+
+#### Publication-Quality Heatmaps
+
+**Hierarchical Expression Analysis**:
+- Automatic marker gene selection from scanpy results
+- Z-score normalization with statistical validation
+- Professional color schemes (diverging for normalized, sequential for raw)
+- Intelligent gene filtering and duplicate removal
+
+```python
+# Auto-generated from marker gene analysis
+heatmap_fig = service.create_heatmap(
+    adata,
+    genes=None,                  # Auto-selects top markers per cluster
+    n_top_genes=5,              # Configurable marker count
+    standard_scale=True,         # Z-score normalization
+    use_raw=True                # Data source selection
+)
+```
+
+#### Advanced Cluster Analysis
+
+**Composition and Batch Effect Analysis**:
+
+```python
+# Sophisticated cluster composition with batch correction
+composition_fig = service.create_cluster_composition_plot(
+    adata,
+    cluster_col="leiden",
+    sample_col=None,             # Auto-detects batch columns
+    normalize=True               # Percentage vs absolute counts
+)
+```
+
+#### Professional Export System
+
+**Multi-Format Publication Pipeline**:
+
+```python
+# Batch export with publication settings
+plots_dict = {
+    "umap_clusters": umap_fig,
+    "qc_comprehensive": qc_fig,
+    "marker_heatmap": heatmap_fig,
+    "expression_violins": violin_fig
+}
+
+saved_files = service.save_all_plots(
+    plots_dict,
+    output_dir="publication_figures/",
+    format="both"                # HTML (interactive) + PNG (high-res)
+)
+
+# PNG exports: 3200x2400px, scale=2 for publication quality
+# HTML exports: Full interactivity with hover data and zoom
+```
+
+#### Visualization Design Principles
+
+**Scientific Accuracy**:
+- Color-blind friendly palettes with sufficient contrast
+- Statistically appropriate scaling (log for count data, linear for percentages)
+- Professional typography and axis labeling
+- Consistent styling across all plot types
+
+**Performance Optimization**:
+- Intelligent point sampling for large datasets (>50K cells)
+- ScatterGL for high-performance rendering
+- Automatic memory management for sparse matrices
+- Progressive loading for complex multi-panel figures
+
+**Interactive Features**:
+- Rich hover tooltips with cell metadata
+- Zoom and pan capabilities maintained across all plots
+- Legend positioning optimized for different screen sizes
+- Export-ready formatting for both web and print media
 
 ### Centralized Agent Registry System
 

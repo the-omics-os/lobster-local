@@ -8,6 +8,9 @@ workspaces/*
 cdk.out/
 cdk.out/*
 
+#kevin notes
+kevin_notes/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
