@@ -16,6 +16,8 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from lobster.core import PseudobulkError, FormulaError, DesignMatrixError
+from lobster.tools.differential_formula_service import DifferentialFormulaService
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -23,6 +25,11 @@ logger = get_logger(__name__)
 
 class BulkRNASeqError(Exception):
     """Base exception for bulk RNA-seq operations."""
+    pass
+
+
+class PyDESeq2Error(BulkRNASeqError):
+    """Exception for pyDESeq2-related operations."""
     pass
 
 
@@ -52,6 +59,10 @@ class BulkRNASeqService:
             self.results_dir = Path(results_dir)
             
         self.results_dir.mkdir(exist_ok=True)
+        
+        # Initialize formula service
+        self.formula_service = DifferentialFormulaService()
+        
         logger.info(f"BulkRNASeqService initialized with results_dir: {self.results_dir}")
 
     def run_fastqc(self, fastq_files: List[str]) -> str:
@@ -335,18 +346,6 @@ Next suggested step: Proceed with quantification if quality looks good, or inves
                 combined_data = self._combine_salmon_results(salmon_dir, results)
                 logger.info(f"Combined expression matrix shape: {combined_data.shape}")
 
-                self.data_manager.set_data(
-                    combined_data,
-                    {
-                        "analysis_type": "salmon_quantification",
-                        "samples": results,
-                        "n_samples": len(results),
-                        "failed_samples": failed_samples,
-                        "index_path": index_path,
-                    },
-                )
-                logger.info("Expression data stored in data manager")
-
             if failed_samples:
                 logger.warning(
                     f"Failed to process {len(failed_samples)} samples: {failed_samples}"
@@ -357,7 +356,7 @@ Next suggested step: Proceed with quantification if quality looks good, or inves
 **Samples Processed:** {len(results)}/{len(valid_files)}
 **Failed Samples:** {len(failed_samples)} ({failed_samples if failed_samples else 'None'})
 **Output Directory:** {salmon_dir}
-**Combined Expression Matrix:** Loaded into data manager ({combined_data.shape if results else 'N/A'})
+**Combined Expression Matrix:** {combined_data.shape if results else 'N/A'}
 
 Next suggested step: Import quantification data with tximport for differential expression analysis."""
 
@@ -481,6 +480,9 @@ Next suggested step: Import quantification data with tximport for differential e
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Run pathway enrichment analysis on a gene list.
+        
+        NOTE: This is a placeholder implementation. For production use, integrate with
+        libraries like GSEApy, gprofiler-python, or enrichr-python for real enrichment analysis.
 
         Args:
             gene_list: List of genes for enrichment analysis
@@ -493,36 +495,11 @@ Next suggested step: Import quantification data with tximport for differential e
         Raises:
             BulkRNASeqError: If enrichment analysis fails
         """
-        try:
-            logger.info(f"Running {analysis_type} enrichment analysis on {len(gene_list)} genes")
-
-            if len(gene_list) == 0:
-                raise BulkRNASeqError("Gene list is empty. Cannot perform enrichment analysis.")
-
-            # Run enrichment analysis
-            enrichment_df = self._run_enrichment_analysis(gene_list, analysis_type, background_genes)
-            
-            # Calculate enrichment statistics
-            significant_terms = enrichment_df[enrichment_df["p.adjust"] < 0.05]
-            
-            enrichment_stats = {
-                "analysis_type": f"{analysis_type.lower()}_enrichment",
-                "enrichment_database": analysis_type,
-                "n_genes_input": len(gene_list),
-                "n_terms_total": len(enrichment_df),
-                "n_significant_terms": len(significant_terms),
-                "significance_threshold": 0.05,
-                "top_terms": significant_terms.head(10)['Description'].tolist() if not significant_terms.empty else [],
-                "enrichment_results": enrichment_df.to_dict('records')[:20]  # Top 20 terms
-            }
-            
-            logger.info(f"Pathway enrichment completed: {len(significant_terms)} significant terms found")
-            
-            return enrichment_df, enrichment_stats
-
-        except Exception as e:
-            logger.exception(f"Error in pathway enrichment analysis: {e}")
-            raise BulkRNASeqError(f"Pathway enrichment analysis failed: {str(e)}")
+        logger.warning("Pathway enrichment analysis not yet implemented. This is a placeholder.")
+        raise BulkRNASeqError(
+            "Pathway enrichment analysis not yet implemented. "
+            "Please integrate with GSEApy, gprofiler-python, or enrichr-python for real functionality."
+        )
 
     def _run_deseq2_like_analysis(
         self, 
@@ -693,18 +670,6 @@ Next suggested step: Import quantification data with tximport for differential e
         
         return results_df.dropna()
 
-    def _run_enrichment_analysis(
-        self, 
-        gene_list: List[str], 
-        analysis_type: str,
-        background_genes: Optional[List[str]] = None
-    ) -> pd.DataFrame:
-        """Run enrichment analysis (mock implementation)."""
-        logger.info(f"Running {analysis_type} enrichment analysis")
-        
-        # For now, use mock results - in production, this would use actual GO/KEGG databases
-        return self._create_mock_enrichment_results(gene_list, analysis_type)
-
     def _parse_fastqc_results(self, qc_dir: Path) -> str:
         """Parse FastQC results and create summary."""
         html_files = list(qc_dir.glob("*.html"))
@@ -729,274 +694,369 @@ Next suggested step: Import quantification data with tximport for differential e
         else:
             raise ValueError("No valid Salmon results found")
 
-    def _run_deseq2_r(
-        self, count_matrix: pd.DataFrame, sample_info: pd.DataFrame, design_formula: str
+    def run_pydeseq2_analysis(
+        self,
+        count_matrix: pd.DataFrame,
+        metadata: pd.DataFrame,
+        formula: str,
+        contrast: List[str],
+        alpha: float = 0.05,
+        shrink_lfc: bool = True,
+        n_cpus: int = 1
     ) -> pd.DataFrame:
-        """Run DESeq2 analysis using R interface."""
-        try:
-            # Use mock DESeq2 results for testing since we don't need actual R integration for tests
-            return self._create_mock_deseq2_results(count_matrix)
+        """
+        Run pyDESeq2 differential expression analysis.
 
-            # The following code is kept but commented out for reference
-            """
-            import rpy2.robjects as robjects
-            from rpy2.robjects import pandas2ri
-            from rpy2.robjects.packages import importr
-            from rpy2.robjects.conversion import localconverter
+        Args:
+            count_matrix: Count matrix (genes x samples)
+            metadata: Sample metadata DataFrame
+            formula: R-style formula string (e.g., "~condition + batch")
+            contrast: Contrast specification [factor, level1, level2]
+            alpha: Significance threshold for multiple testing
+            shrink_lfc: Whether to apply log fold change shrinkage
+            n_cpus: Number of CPUs for parallel processing
 
-            # Import R packages
-            deseq2 = importr('DESeq2')
-            base = importr('base')
+        Returns:
+            pd.DataFrame: Differential expression results
 
-            # Convert pandas to R using the context manager approach
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                r_counts = robjects.conversion.py2rpy(count_matrix.astype(int))
-                r_coldata = robjects.conversion.py2rpy(sample_info)
-
-            # Create DESeq2 dataset
-            robjects.r.assign("counts", r_counts)
-            robjects.r.assign("coldata", r_coldata)
-            robjects.r.assign("design", design_formula)
-
-            # Run DESeq2
-            robjects.r('''
-            dds <- DESeqDataSetFromMatrix(countData = counts,
-                                        colData = coldata,
-                                        design = as.formula(design))
-            dds <- DESeq(dds)
-            res <- results(dds)
-            res_df <- as.data.frame(res)
-            ''')
-
-            # Get results back to Python
-            with localconverter(robjects.default_converter + pandas2ri.converter):
-                results_df = robjects.conversion.rpy2py(robjects.r['res_df'])
-            results_df.index = count_matrix.index
-
-            return results_df.dropna()
-            """
-
-        except ImportError:
-            logger.warning("rpy2 not available, creating mock DESeq2 results")
-            return self._create_mock_deseq2_results(count_matrix)
-
-    def _create_mock_deseq2_results(self, count_matrix: pd.DataFrame) -> pd.DataFrame:
-        """Create mock DESeq2 results for demonstration."""
-        n_genes = len(count_matrix)
-
-        # Generate realistic-looking results
-        results_df = pd.DataFrame(
-            {
-                "baseMean": np.random.lognormal(5, 2, n_genes),
-                "log2FoldChange": np.random.normal(0, 1.5, n_genes),
-                "lfcSE": np.random.gamma(2, 0.2, n_genes),
-                "stat": np.random.normal(0, 2, n_genes),
-                "pvalue": np.random.beta(0.5, 3, n_genes),
-                "padj": np.random.beta(0.3, 5, n_genes),
-            },
-            index=count_matrix.index,
-        )
-
-        return results_df
-
-    def _run_enrichment_r(
-        self, gene_list: List[str], analysis_type: str
-    ) -> pd.DataFrame:
-        """Run enrichment analysis using R interface."""
-        # Use mock enrichment results for testing since we don't need actual R integration for tests
-        return self._create_mock_enrichment_results(gene_list, analysis_type)
-
-        # The following code is kept but commented out for reference
+        Raises:
+            PyDESeq2Error: If pyDESeq2 analysis fails
         """
         try:
-            import rpy2.robjects as robjects
-            from rpy2.robjects import pandas2ri
-            from rpy2.robjects.packages import importr
-            from rpy2.robjects.conversion import localconverter
-
-            # Import required packages
-            clusterprofiler = importr('clusterProfiler')
-            org_hs_eg_db = importr('org.Hs.eg.db')
-
-            # Convert gene list to R
-            r_genes = robjects.StrVector(gene_list)
-
-            # Run enrichment
-            if analysis_type == "GO":
-                robjects.r.assign("genes", r_genes)
-                robjects.r('''
-                ego <- enrichGO(gene = genes,
-                               OrgDb = org.Hs.eg.db,
-                               keyType = 'SYMBOL',
-                               ont = 'BP',
-                               pAdjustMethod = 'BH',
-                               pvalueCutoff = 0.05,
-                               qvalueCutoff = 0.2)
-                ego_df <- as.data.frame(ego)
-                ''')
-                with localconverter(robjects.default_converter + pandas2ri.converter):
-                    results_df = robjects.conversion.rpy2py(robjects.r['ego_df'])
-            else:  # KEGG
-                robjects.r.assign("genes", r_genes)
-                robjects.r('''
-                kk <- enrichKEGG(gene = genes,
-                                organism = 'hsa',
-                                pvalueCutoff = 0.05)
-                kk_df <- as.data.frame(kk)
-                ''')
-                with localconverter(robjects.default_converter + pandas2ri.converter):
-                    results_df = robjects.conversion.rpy2py(robjects.r['kk_df'])
-
+            logger.info(f"Running pyDESeq2 analysis with formula: {formula}")
+            
+            # Validate pyDESeq2 installation
+            installation_status = self.validate_pydeseq2_setup()
+            if not all(installation_status.values()):
+                missing_deps = [k for k, v in installation_status.items() if not v]
+                raise PyDESeq2Error(f"Missing pyDESeq2 dependencies: {missing_deps}")
+            
+            # Import pyDESeq2 components
+            from pydeseq2.dds import DeseqDataSet
+            from pydeseq2.ds import DeseqStats
+            from pydeseq2.default_inference import DefaultInference
+            
+            # Validate inputs
+            self._validate_deseq2_inputs(count_matrix, metadata, formula, contrast)
+            
+            # Parse formula and validate design
+            design_info = self.formula_service.parse_formula(formula, metadata)
+            design_result = self.formula_service.construct_design_matrix(
+                design_info, metadata, contrast
+            )
+            
+            # Ensure count matrix is integer and properly oriented (samples x genes for pyDESeq2)
+            count_matrix_int = count_matrix.T.astype(int)  # Transpose to samples x genes
+            
+            # Align metadata with count matrix
+            aligned_metadata = metadata.loc[count_matrix_int.index].copy()
+            
+            # Create inference object with parallel processing
+            inference = DefaultInference(n_cpus=n_cpus)
+            
+            # Initialize DESeq2 dataset
+            logger.info("Initializing DESeq2 dataset...")
+            dds = DeseqDataSet(
+                counts=count_matrix_int,
+                metadata=aligned_metadata,
+                design=formula,
+                inference=inference
+            )
+            
+            # Fit dispersion and log fold changes
+            logger.info("Fitting DESeq2 model...")
+            dds.deseq2()
+            
+            # Perform statistical testing
+            logger.info(f"Running statistical tests for contrast: {contrast}")
+            ds = DeseqStats(
+                dds, 
+                contrast=contrast, 
+                alpha=alpha, 
+                inference=inference
+            )
+            ds.summary()
+            
+            # Optional LFC shrinkage for better estimates
+            if shrink_lfc:
+                logger.info("Applying log fold change shrinkage...")
+                try:
+                    # Construct coefficient name for shrinkage
+                    factor, level1, level2 = contrast
+                    coeff_name = f"{factor}_{level1}_vs_{level2}"
+                    ds.lfc_shrink(coeff=coeff_name)
+                except Exception as e:
+                    logger.warning(f"LFC shrinkage failed, continuing without: {e}")
+            
+            # Extract results
+            results_df = ds.results_df.copy()
+            
+            # Add additional statistics
+            results_df = self._enhance_deseq2_results(results_df, dds, contrast)
+            
+            logger.info(f"pyDESeq2 analysis completed: {len(results_df)} genes tested")
+            
             return results_df
-        except ImportError:
-            logger.warning("rpy2 not available, creating mock enrichment results")
-            return self._create_mock_enrichment_results(gene_list, analysis_type)
+
+        except Exception as e:
+            if isinstance(e, PyDESeq2Error):
+                raise
+            else:
+                logger.exception(f"Error in pyDESeq2 analysis: {e}")
+                raise PyDESeq2Error(f"pyDESeq2 analysis failed: {e}")
+
+    def run_pydeseq2_from_pseudobulk(
+        self,
+        pseudobulk_adata: anndata.AnnData,
+        formula: str,
+        contrast: List[str],
+        count_layer: str = None,
+        **kwargs
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
+        Run pyDESeq2 analysis on pseudobulk data.
 
-    def _create_mock_enrichment_results(
-        self, gene_list: List[str], analysis_type: str
-    ) -> pd.DataFrame:
-        """Create mock enrichment results for demonstration."""
-        if analysis_type == "GO":
-            terms = [
-                "regulation of transcription",
-                "cell cycle process",
-                "apoptotic process",
-                "immune response",
-                "metabolic process",
-            ]
-        else:  # KEGG
-            terms = [
-                "MAPK signaling pathway",
-                "Cell cycle",
-                "Apoptosis",
-                "TNF signaling pathway",
-                "PI3K-Akt signaling pathway",
-            ]
+        Args:
+            pseudobulk_adata: Pseudobulk AnnData object
+            formula: R-style formula string
+            contrast: Contrast specification [factor, level1, level2]
+            count_layer: Layer containing count data (default: X)
+            **kwargs: Additional arguments for run_pydeseq2_analysis
 
-        n_terms = len(terms)
-        results_df = pd.DataFrame(
-            {
-                "ID": [f"{analysis_type}:{i:07d}" for i in range(n_terms)],
-                "Description": terms,
-                "GeneRatio": [
-                    f"{np.random.randint(5, 50)}/{len(gene_list)}"
-                    for _ in range(n_terms)
-                ],
-                "BgRatio": [
-                    f"{np.random.randint(100, 1000)}/20000" for _ in range(n_terms)
-                ],
-                "pvalue": np.random.beta(0.1, 10, n_terms),
-                "p.adjust": np.random.beta(0.05, 15, n_terms),
-                "qvalue": np.random.beta(0.05, 15, n_terms),
-                "Count": np.random.randint(5, 50, n_terms),
+        Returns:
+            Tuple[pd.DataFrame, Dict[str, Any]]: Results DataFrame and analysis stats
+
+        Raises:
+            PyDESeq2Error: If analysis fails
+        """
+        try:
+            logger.info("Running pyDESeq2 analysis on pseudobulk data")
+            
+            # Extract count matrix
+            if count_layer and count_layer in pseudobulk_adata.layers:
+                count_matrix = pd.DataFrame(
+                    pseudobulk_adata.layers[count_layer].T,
+                    index=pseudobulk_adata.var_names,
+                    columns=pseudobulk_adata.obs_names
+                )
+            else:
+                count_matrix = pd.DataFrame(
+                    pseudobulk_adata.X.T,
+                    index=pseudobulk_adata.var_names,
+                    columns=pseudobulk_adata.obs_names
+                )
+            
+            # Extract metadata
+            metadata = pseudobulk_adata.obs.copy()
+            
+            # Run pyDESeq2 analysis
+            results_df = self.run_pydeseq2_analysis(
+                count_matrix, metadata, formula, contrast, **kwargs
+            )
+            
+            # Create analysis statistics
+            significant_genes = results_df[results_df['padj'] < kwargs.get('alpha', 0.05)]
+            upregulated = significant_genes[significant_genes['log2FoldChange'] > 0]
+            downregulated = significant_genes[significant_genes['log2FoldChange'] < 0]
+            
+            analysis_stats = {
+                "analysis_type": "pydeseq2_pseudobulk",
+                "formula": formula,
+                "contrast": contrast,
+                "n_pseudobulk_samples": pseudobulk_adata.n_obs,
+                "n_genes_tested": len(results_df),
+                "n_significant_genes": len(significant_genes),
+                "n_upregulated": len(upregulated),
+                "n_downregulated": len(downregulated),
+                "significance_threshold": kwargs.get('alpha', 0.05),
+                "top_upregulated": upregulated.nlargest(10, 'log2FoldChange').index.tolist(),
+                "top_downregulated": downregulated.nsmallest(10, 'log2FoldChange').index.tolist()
             }
-        )
+            
+            logger.info(f"pyDESeq2 pseudobulk analysis completed: {len(significant_genes)} significant genes")
+            
+            return results_df, analysis_stats
 
-        return results_df.sort_values("p.adjust")
+        except Exception as e:
+            logger.exception(f"Error in pyDESeq2 pseudobulk analysis: {e}")
+            raise PyDESeq2Error(f"pyDESeq2 pseudobulk analysis failed: {e}")
 
-    def _create_volcano_plot(self, results_df: pd.DataFrame) -> go.Figure:
-        """Create volcano plot from DESeq2 results."""
+    def validate_pydeseq2_setup(self) -> Dict[str, bool]:
+        """
+        Validate pyDESeq2 installation and dependencies.
+
+        Returns:
+            Dict[str, bool]: Installation status for each component
+        """
+        status = {}
+        
+        try:
+            from pydeseq2.dds import DeseqDataSet
+            from pydeseq2.ds import DeseqStats
+            status['pydeseq2'] = True
+            logger.debug("pyDESeq2 core components available")
+        except ImportError as e:
+            logger.warning(f"pyDESeq2 not available: {e}")
+            status['pydeseq2'] = False
+
+        try:
+            from pydeseq2.default_inference import DefaultInference
+            status['pydeseq2_inference'] = True
+            logger.debug("pyDESeq2 inference components available")
+        except ImportError as e:
+            logger.warning(f"pyDESeq2 inference not available: {e}")
+            status['pydeseq2_inference'] = False
+
+        try:
+            import numba
+            status['numba'] = True
+            logger.debug(f"numba version {numba.__version__} available")
+        except ImportError:
+            logger.warning("numba not available - pyDESeq2 performance may be reduced")
+            status['numba'] = False
+
+        try:
+            import statsmodels
+            status['statsmodels'] = True
+            logger.debug(f"statsmodels version {statsmodels.__version__} available")
+        except ImportError:
+            logger.warning("statsmodels not available")
+            status['statsmodels'] = False
+
+        return status
+
+    def create_formula_design(
+        self,
+        metadata: pd.DataFrame,
+        condition_col: str,
+        batch_col: Optional[str] = None,
+        reference_condition: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Create design matrix for common experimental designs.
+
+        Args:
+            metadata: Sample metadata DataFrame
+            condition_col: Main condition column name
+            batch_col: Optional batch effect column name
+            reference_condition: Reference level for condition
+
+        Returns:
+            Dict[str, Any]: Design matrix information
+
+        Raises:
+            FormulaError: If design construction fails
+        """
+        try:
+            return self.formula_service.create_simple_design(
+                metadata, condition_col, batch_col, reference_condition
+            )
+        except Exception as e:
+            raise FormulaError(f"Failed to create design matrix: {e}")
+
+    def validate_experimental_design(
+        self,
+        metadata: pd.DataFrame,
+        formula: str,
+        min_replicates: int = 2
+    ) -> Dict[str, Any]:
+        """
+        Validate experimental design for statistical analysis.
+
+        Args:
+            metadata: Sample metadata DataFrame
+            formula: R-style formula string
+            min_replicates: Minimum replicates per group
+
+        Returns:
+            Dict[str, Any]: Validation results
+        """
+        try:
+            return self.formula_service.validate_experimental_design(
+                metadata, formula, min_replicates
+            )
+        except Exception as e:
+            return {
+                'valid': False,
+                'errors': [str(e)],
+                'warnings': [],
+                'design_summary': {}
+            }
+
+    def _validate_deseq2_inputs(
+        self,
+        count_matrix: pd.DataFrame,
+        metadata: pd.DataFrame,
+        formula: str,
+        contrast: List[str]
+    ) -> None:
+        """Validate inputs for pyDESeq2 analysis."""
+        
+        # Check count matrix
+        if count_matrix.empty:
+            raise PyDESeq2Error("Count matrix is empty")
+        
+        if not count_matrix.dtypes.apply(lambda x: np.issubdtype(x, np.number)).all():
+            raise PyDESeq2Error("Count matrix contains non-numeric data")
+        
+        if (count_matrix < 0).any().any():
+            raise PyDESeq2Error("Count matrix contains negative values")
+        
+        # Check metadata
+        if metadata.empty:
+            raise PyDESeq2Error("Metadata is empty")
+        
+        # Check sample alignment
+        count_samples = set(count_matrix.columns)
+        metadata_samples = set(metadata.index)
+        
+        if not count_samples.issubset(metadata_samples):
+            missing = count_samples - metadata_samples
+            raise PyDESeq2Error(f"Samples in count matrix missing from metadata: {missing}")
+        
+        # Validate contrast
+        if len(contrast) != 3:
+            raise PyDESeq2Error("Contrast must be [factor, level1, level2]")
+        
+        factor, level1, level2 = contrast
+        
+        if factor not in metadata.columns:
+            raise PyDESeq2Error(f"Contrast factor '{factor}' not found in metadata")
+        
+        factor_levels = metadata[factor].unique()
+        if level1 not in factor_levels:
+            raise PyDESeq2Error(f"Contrast level '{level1}' not found in factor '{factor}'")
+        
+        if level2 not in factor_levels:
+            raise PyDESeq2Error(f"Contrast level '{level2}' not found in factor '{factor}'")
+
+    def _enhance_deseq2_results(
+        self,
+        results_df: pd.DataFrame,
+        dds,
+        contrast: List[str]
+    ) -> pd.DataFrame:
+        """Enhance pyDESeq2 results with additional statistics."""
+        
+        # Add contrast information
+        results_df['contrast'] = f"{contrast[0]}_{contrast[1]}_vs_{contrast[2]}"
+        
         # Add significance categories
-        results_df["significance"] = "Not Significant"
+        alpha = 0.05  # Default significance threshold
+        results_df['significant'] = (results_df['padj'] < alpha) & (~results_df['padj'].isna())
+        
+        # Add regulation direction
+        results_df['regulation'] = 'unchanged'
         results_df.loc[
-            (results_df["padj"] < 0.05) & (results_df["log2FoldChange"] > 1),
-            "significance",
-        ] = "Upregulated"
+            (results_df['significant']) & (results_df['log2FoldChange'] > 0),
+            'regulation'
+        ] = 'upregulated'
         results_df.loc[
-            (results_df["padj"] < 0.05) & (results_df["log2FoldChange"] < -1),
-            "significance",
-        ] = "Downregulated"
-
-        fig = px.scatter(
-            results_df,
-            x="log2FoldChange",
-            y=-np.log10(results_df["padj"]),
-            color="significance",
-            title="Volcano Plot - Differential Expression Results",
-            labels={"x": "Log2 Fold Change", "y": "-Log10 Adjusted P-value"},
-            color_discrete_map={
-                "Not Significant": "gray",
-                "Upregulated": "red",
-                "Downregulated": "blue",
-            },
-            height=500,
-            width=700,
-        )
-
-        # Add significance threshold lines
-        fig.add_hline(
-            y=-np.log10(0.05), line_dash="dash", line_color="black", opacity=0.5
-        )
-        fig.add_vline(x=1, line_dash="dash", line_color="black", opacity=0.5)
-        fig.add_vline(x=-1, line_dash="dash", line_color="black", opacity=0.5)
-
-        return fig
-
-    def _create_enrichment_plot(
-        self, enrichment_df: pd.DataFrame, analysis_type: str
-    ) -> go.Figure:
-        """Create enrichment analysis plot."""
-        top_terms = enrichment_df.head(10)
-
-        fig = go.Figure(
-            data=go.Bar(
-                x=-np.log10(top_terms["p.adjust"]),
-                y=top_terms["Description"],
-                orientation="h",
-                marker=dict(
-                    color=-np.log10(top_terms["p.adjust"]),
-                    colorscale="Viridis",
-                    colorbar=dict(title="-Log10 Adjusted P-value"),
-                ),
-            )
-        )
-
-        fig.update_layout(
-            title=f"Top {analysis_type} Enriched Terms",
-            xaxis_title="-Log10 Adjusted P-value",
-            yaxis_title="Terms",
-            height=500,
-            margin=dict(l=300),
-        )
-
-        return fig
-
-    def _format_top_genes(
-        self, results_df: pd.DataFrame, direction: str = "up", n: int = 5
-    ) -> str:
-        """Format top differential genes for display."""
-        if direction == "up":
-            top_genes = results_df[results_df["log2FoldChange"] > 0].nlargest(
-                n, "log2FoldChange"
-            )
-        else:
-            top_genes = results_df[results_df["log2FoldChange"] < 0].nsmallest(
-                n, "log2FoldChange"
-            )
-
-        formatted_genes = []
-        for gene, row in top_genes.iterrows():
-            formatted_genes.append(
-                f"- {gene}: FC={row['log2FoldChange']:.2f}, padj={row['padj']:.2e}"
-            )
-
-        return "\n".join(formatted_genes) if formatted_genes else "None found"
-
-    def _format_enrichment_results(
-        self, enrichment_df: pd.DataFrame, n: int = 5
-    ) -> str:
-        """Format enrichment results for display."""
-        top_terms = enrichment_df.head(n)
-
-        formatted_terms = []
-        for _, row in top_terms.iterrows():
-            formatted_terms.append(
-                f"- {row['Description']}: p.adj={row['p.adjust']:.2e}"
-            )
-
-        return (
-            "\n".join(formatted_terms)
-            if formatted_terms
-            else "No significant terms found"
-        )
+            (results_df['significant']) & (results_df['log2FoldChange'] < 0),
+            'regulation'
+        ] = 'downregulated'
+        
+        # Add rank based on adjusted p-value
+        results_df['rank'] = results_df['padj'].rank(method='min', na_option='bottom')
+        
+        return results_df

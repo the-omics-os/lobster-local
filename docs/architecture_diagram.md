@@ -231,8 +231,14 @@ graph TB
         QUAL[QualityService<br/>📊 QC Assessment]
         CLUST[ClusteringService<br/>🎯 Leiden & UMAP]
         SCELL[EnhancedSingleCellService<br/>🔬 Doublets & Annotation]
-        BULK[BulkRNASeqService<br/>📈 Bulk Analysis]
+        BULK[BulkRNASeqService<br/>📈 Bulk Analysis & pyDESeq2]
         GEO_SVC[GEOService<br/>💾 Data Download]
+        
+        subgraph "Pseudobulk & Differential Expression Services"
+            PBULK[PseudobulkService<br/>🧬 Single-cell to Pseudobulk Aggregation]
+            FORMULA[DifferentialFormulaService<br/>📊 R-style Formula Parsing & Design Matrix]
+            PBADAP[PseudobulkAdapter<br/>🔄 Schema Validation & QC]
+        end
         
         subgraph "Proteomics Services - Professional Grade"
             PPREP[ProteomicsPreprocessingService<br/>🧪 MS/Affinity Filtering & Normalization]
@@ -316,6 +322,9 @@ graph TB
     TE --> QUAL
     TE --> CLUST
     TE --> SCELL
+    TE --> PBULK
+    TE --> FORMULA
+    TE --> BULK
     
     %% Proteomics Agent to Service connections
     MSPE --> PPREP
@@ -336,6 +345,9 @@ graph TB
     SCELL --> |Annotations| DM2
     GEO_SVC --> |Dataset Loading| DM2
     PUBSVC --> |Publication Metadata| DM2
+    PBULK --> |Pseudobulk Matrices| DM2
+    FORMULA --> |Design Matrices| DM2
+    BULK --> |DE Results| DM2
     
     %% Proteomics Service to DataManager connections
     PPREP --> |Proteomics Processing| DM2
@@ -377,7 +389,7 @@ graph TB
     classDef source fill:#f5f5f5,stroke:#616161,stroke-width:1px
 
     class DE,RA,ME,TE,MSPE,APPE agent
-    class PREP,QUAL,CLUST,SCELL,BULK,PUBSVC,PUBMED,GEOPROV,GEOQB service
+    class PREP,QUAL,CLUST,SCELL,BULK,PBULK,FORMULA,PBADAP,PUBSVC,PUBMED,GEOPROV,GEOQB service
     class DM2,MODALITIES,PROV,ERROR orchestrator
     class TRA,PRA,TRSC,TRBL,PRMS,PRAF adapter
     class H5BE,MUBE backend

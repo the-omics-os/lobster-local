@@ -22,6 +22,9 @@ from lobster.tools.quality_service import QualityService, QualityError
 from lobster.tools.clustering_service import ClusteringService, ClusteringError
 from lobster.tools.enhanced_singlecell_service import EnhancedSingleCellService, SingleCellError as ServiceSingleCellError
 from lobster.tools.visualization_service import SingleCellVisualizationService, VisualizationError
+from lobster.tools.pseudobulk_service import PseudobulkService
+from lobster.tools.bulk_rnaseq_service import BulkRNASeqService
+from lobster.core import PseudobulkError, AggregationError, InsufficientCellsError
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -58,6 +61,8 @@ def singlecell_expert(
     clustering_service = ClusteringService()
     singlecell_service = EnhancedSingleCellService()
     visualization_service = SingleCellVisualizationService()
+    pseudobulk_service = PseudobulkService()
+    bulk_rnaseq_service = BulkRNASeqService()
     
     analysis_results = {"summary": "", "details": {}}
     
@@ -1407,6 +1412,340 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             logger.error(f"Unexpected error in composition plot creation: {e}")
             return f"Unexpected error: {str(e)}"
 
+    # -------------------------
+    # PSEUDOBULK ANALYSIS TOOLS
+    # -------------------------
+    @tool
+    def create_pseudobulk_matrix(
+        modality_name: str,
+        sample_col: str,
+        celltype_col: str,
+        layer: str = None,
+        min_cells: int = 10,
+        aggregation_method: str = 'sum',
+        min_genes: int = 200,
+        filter_zeros: bool = True,
+        save_result: bool = True
+    ) -> str:
+        """
+        Aggregate single-cell data to pseudobulk matrix for differential expression analysis.
+        
+        Args:
+            modality_name: Name of single-cell modality to aggregate
+            sample_col: Column containing sample identifiers
+            celltype_col: Column containing cell type identifiers
+            layer: Layer to use for aggregation (default: X)
+            min_cells: Minimum cells per sample-celltype combination
+            aggregation_method: Aggregation method ('sum', 'mean', 'median')
+            min_genes: Minimum genes detected per pseudobulk sample
+            filter_zeros: Remove genes with all zeros after aggregation
+            save_result: Whether to save the pseudobulk modality
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the single-cell modality
+            adata = data_manager.get_modality(modality_name)
+            logger.info(f"Creating pseudobulk matrix from single-cell modality '{modality_name}': {adata.shape[0]} cells × {adata.shape[1]} genes")
+            
+            # Validate required columns exist
+            if sample_col not in adata.obs.columns:
+                available_cols = list(adata.obs.columns)[:10]
+                raise PseudobulkError(f"Sample column '{sample_col}' not found. Available columns: {available_cols}...")
+            
+            if celltype_col not in adata.obs.columns:
+                available_cols = list(adata.obs.columns)[:10]
+                raise PseudobulkError(f"Cell type column '{celltype_col}' not found. Available columns: {available_cols}...")
+            
+            # Use pseudobulk service with provenance tracking
+            pseudobulk_adata = pseudobulk_service.aggregate_to_pseudobulk(
+                adata=adata,
+                sample_col=sample_col,
+                celltype_col=celltype_col,
+                layer=layer,
+                min_cells=min_cells,
+                aggregation_method=aggregation_method,
+                min_genes=min_genes,
+                filter_zeros=filter_zeros
+            )
+            
+            # Save as new modality
+            pseudobulk_modality_name = f"{modality_name}_pseudobulk"
+            data_manager.modalities[pseudobulk_modality_name] = pseudobulk_adata
+            
+            # Save to file if requested
+            if save_result:
+                save_path = f"{modality_name}_pseudobulk.h5ad"
+                data_manager.save_modality(pseudobulk_modality_name, save_path)
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="create_pseudobulk_matrix",
+                parameters={
+                    "modality_name": modality_name,
+                    "sample_col": sample_col,
+                    "celltype_col": celltype_col,
+                    "aggregation_method": aggregation_method,
+                    "min_cells": min_cells
+                },
+                description=f"Created pseudobulk matrix: {pseudobulk_adata.n_obs} samples × {pseudobulk_adata.n_vars} genes"
+            )
+            
+            # Get aggregation statistics
+            agg_stats = pseudobulk_adata.uns.get('aggregation_stats', {})
+            
+            # Format professional response
+            response = f"""Successfully created pseudobulk matrix from single-cell data '{modality_name}'!
+
+📊 **Pseudobulk Aggregation Results:**
+- Original: {adata.n_obs:,} single cells → {pseudobulk_adata.n_obs} pseudobulk samples
+- Genes retained: {pseudobulk_adata.n_vars:,} / {adata.n_vars:,} ({pseudobulk_adata.n_vars/adata.n_vars*100:.1f}%)
+- Aggregation method: {aggregation_method}
+- Min cells threshold: {min_cells}
+
+📈 **Sample & Cell Type Distribution:**
+- Unique samples: {agg_stats.get('n_samples', 'N/A')}
+- Cell types: {agg_stats.get('n_cell_types', 'N/A')}
+- Total cells aggregated: {agg_stats.get('total_cells_aggregated', 'N/A'):,}
+- Mean cells per pseudobulk: {agg_stats.get('mean_cells_per_pseudobulk', 0):.1f}
+
+💾 **New modality created**: '{pseudobulk_modality_name}'"""
+
+            if save_result:
+                response += f"\n💾 **Saved to**: {save_path}"
+            
+            response += f"\n\nNext step: Use 'prepare_differential_expression_design' to set up statistical design for DE analysis."
+            
+            analysis_results["details"]["pseudobulk_aggregation"] = response
+            return response
+            
+        except (PseudobulkError, AggregationError, InsufficientCellsError, ModalityNotFoundError) as e:
+            logger.error(f"Error creating pseudobulk matrix: {e}")
+            return f"Error creating pseudobulk matrix: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in pseudobulk creation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def prepare_differential_expression_design(
+        modality_name: str,
+        formula: str,
+        contrast: List[str],
+        reference_condition: str = None
+    ) -> str:
+        """
+        Prepare design matrix and validate experimental design for differential expression analysis.
+        
+        Args:
+            modality_name: Name of pseudobulk modality
+            formula: R-style formula (e.g., "~condition + batch")
+            contrast: Contrast specification [factor, level1, level2]
+            reference_condition: Reference level for main condition
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the pseudobulk modality
+            adata = data_manager.get_modality(modality_name)
+            logger.info(f"Preparing DE design for pseudobulk modality '{modality_name}': {adata.shape[0]} samples × {adata.shape[1]} genes")
+            
+            # Validate design using bulk RNA-seq service
+            design_validation = bulk_rnaseq_service.validate_experimental_design(
+                metadata=adata.obs,
+                formula=formula,
+                min_replicates=2
+            )
+            
+            if not design_validation['valid']:
+                error_msg = "; ".join(design_validation['errors'])
+                raise DesignMatrixError(f"Invalid experimental design: {error_msg}")
+            
+            # Create design matrix
+            design_result = bulk_rnaseq_service.create_formula_design(
+                metadata=adata.obs,
+                condition_col=contrast[0],
+                reference_condition=reference_condition
+            )
+            
+            # Store design information in modality
+            adata.uns['formula_design'] = {
+                'formula': formula,
+                'contrast': contrast,
+                'design_matrix_info': design_result,
+                'validation_results': design_validation
+            }
+            
+            # Update modality with design info
+            data_manager.modalities[modality_name] = adata
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="prepare_differential_expression_design",
+                parameters={
+                    "modality_name": modality_name,
+                    "formula": formula,
+                    "contrast": contrast
+                },
+                description=f"Prepared DE design for {adata.n_obs} pseudobulk samples"
+            )
+            
+            # Format response
+            response = f"""Successfully prepared differential expression design for '{modality_name}'!
+
+📊 **Experimental Design:**
+- Formula: {formula}
+- Contrast: {contrast[1]} vs {contrast[2]} in {contrast[0]}
+- Design matrix: {design_result['design_matrix'].shape[0]} samples × {design_result['design_matrix'].shape[1]} coefficients
+- Matrix rank: {design_result['rank']} (full rank: {'✓' if design_result['rank'] == design_result['n_coefficients'] else '✗'})
+
+📈 **Design Validation:**
+- Valid: {'✓' if design_validation['valid'] else '✗'}
+- Warnings: {len(design_validation['warnings'])} ({', '.join(design_validation['warnings'][:2]) if design_validation['warnings'] else 'None'})
+
+🔬 **Sample Distribution:**"""
+            
+            for factor, counts in design_validation.get('design_summary', {}).items():
+                response += f"\n- {factor}: {dict(list(counts.items())[:5])}"
+            
+            response += f"\n\n💾 **Design information stored in**: adata.uns['formula_design']"
+            response += f"\n\nNext step: Run 'run_pseudobulk_differential_expression' to perform pyDESeq2 analysis."
+            
+            analysis_results["details"]["de_design"] = response
+            return response
+            
+        except (DesignMatrixError, FormulaError, ModalityNotFoundError) as e:
+            logger.error(f"Error preparing DE design: {e}")
+            return f"Error preparing differential expression design: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in DE design preparation: {e}")
+            return f"Unexpected error: {str(e)}"
+
+    @tool
+    def run_pseudobulk_differential_expression(
+        modality_name: str,
+        alpha: float = 0.05,
+        shrink_lfc: bool = True,
+        n_cpus: int = 1,
+        save_result: bool = True
+    ) -> str:
+        """
+        Run pyDESeq2 differential expression analysis on pseudobulk data.
+        
+        Args:
+            modality_name: Name of pseudobulk modality with design prepared
+            alpha: Significance threshold for multiple testing
+            shrink_lfc: Whether to apply log fold change shrinkage
+            n_cpus: Number of CPUs for parallel processing
+            save_result: Whether to save results
+        """
+        try:
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
+            
+            # Get the pseudobulk modality
+            adata = data_manager.get_modality(modality_name)
+            logger.info(f"Running pyDESeq2 DE analysis on pseudobulk modality '{modality_name}': {adata.shape[0]} samples × {adata.shape[1]} genes")
+            
+            # Validate design exists
+            if 'formula_design' not in adata.uns:
+                raise PseudobulkError("No design matrix prepared. Run 'prepare_differential_expression_design' first.")
+            
+            design_info = adata.uns['formula_design']
+            formula = design_info['formula']
+            contrast = design_info['contrast']
+            
+            # Run pyDESeq2 analysis using bulk RNA-seq service
+            results_df, analysis_stats = bulk_rnaseq_service.run_pydeseq2_from_pseudobulk(
+                pseudobulk_adata=adata,
+                formula=formula,
+                contrast=contrast,
+                alpha=alpha,
+                shrink_lfc=shrink_lfc,
+                n_cpus=n_cpus
+            )
+            
+            # Store results in modality
+            contrast_name = f"{contrast[0]}_{contrast[1]}_vs_{contrast[2]}"
+            adata.uns[f'de_results_{contrast_name}'] = {
+                'results_df': results_df,
+                'analysis_stats': analysis_stats,
+                'parameters': {
+                    'alpha': alpha,
+                    'shrink_lfc': shrink_lfc,
+                    'formula': formula,
+                    'contrast': contrast
+                }
+            }
+            
+            # Update modality with results
+            data_manager.modalities[modality_name] = adata
+            
+            # Save results if requested
+            if save_result:
+                results_path = f"{modality_name}_de_results.csv"
+                results_df.to_csv(results_path)
+                
+                save_path = f"{modality_name}_with_de_results.h5ad"
+                data_manager.save_modality(modality_name, save_path)
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="run_pseudobulk_differential_expression",
+                parameters={
+                    "modality_name": modality_name,
+                    "formula": formula,
+                    "contrast": contrast,
+                    "alpha": alpha,
+                    "shrink_lfc": shrink_lfc
+                },
+                description=f"pyDESeq2 analysis: {analysis_stats['n_significant_genes']} significant genes found"
+            )
+            
+            # Format response
+            response = f"""Successfully completed pyDESeq2 differential expression analysis on '{modality_name}'!
+
+📊 **pyDESeq2 Analysis Results:**
+- Contrast: {contrast[1]} vs {contrast[2]} in {contrast[0]}
+- Genes tested: {analysis_stats['n_genes_tested']:,}
+- Significant genes: {analysis_stats['n_significant_genes']:,} (α={alpha})
+- Upregulated: {analysis_stats['n_upregulated']:,}
+- Downregulated: {analysis_stats['n_downregulated']:,}
+
+🧬 **Top Differentially Expressed Genes:**
+**Upregulated ({contrast[1]} > {contrast[2]}):**
+{chr(10).join([f"- {gene}" for gene in analysis_stats['top_upregulated'][:5]])}
+
+**Downregulated ({contrast[1]} < {contrast[2]}):**
+{chr(10).join([f"- {gene}" for gene in analysis_stats['top_downregulated'][:5]])}
+
+📈 **Analysis Parameters:**
+- Formula: {formula}
+- LFC shrinkage: {'✓' if shrink_lfc else '✗'}
+- Parallel CPUs: {n_cpus}
+- Significance threshold: {alpha}
+
+💾 **Results stored in**: adata.uns['de_results_{contrast_name}']"""
+
+            if save_result:
+                response += f"\n💾 **Saved to**: {results_path} & {save_path}"
+            
+            response += f"\n\nNext steps: Visualize results with volcano plots or run pathway enrichment analysis."
+            
+            analysis_results["details"]["differential_expression"] = response
+            return response
+            
+        except (PseudobulkError, ModalityNotFoundError) as e:
+            logger.error(f"Error in pseudobulk DE analysis: {e}")
+            return f"Error in pseudobulk differential expression analysis: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in pseudobulk DE analysis: {e}")
+            return f"Unexpected error: {str(e)}"
+
     @tool
     def create_analysis_summary() -> str:
         """Create a comprehensive summary of all single-cell analysis steps performed."""
@@ -1428,8 +1767,14 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                                'single_cell' in mod.lower() or 'sc' in mod.lower() or
                                data_manager._detect_modality_type(mod) == 'single_cell_rna_seq']
                 
+                # Filter for pseudobulk modalities
+                pb_modalities = [mod for mod in modalities if 'pseudobulk' in mod.lower()]
+                
                 summary += f"## Current Single-cell Modalities\n"
-                summary += f"Single-cell modalities ({len(sc_modalities)}): {', '.join(sc_modalities)}\n\n"
+                summary += f"Single-cell modalities ({len(sc_modalities)}): {', '.join(sc_modalities)}\n"
+                if pb_modalities:
+                    summary += f"Pseudobulk modalities ({len(pb_modalities)}): {', '.join(pb_modalities)}\n"
+                summary += "\n"
                 
                 # Add modality details
                 summary += "### Single-cell Modality Details:\n"
@@ -1444,6 +1789,21 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                             summary += f"  - Single-cell annotations: {', '.join(key_cols)}\n"
                     except Exception as e:
                         summary += f"- **{mod_name}**: Error accessing modality\n"
+                
+                # Add pseudobulk modality details
+                if pb_modalities:
+                    summary += "\n### Pseudobulk Modality Details:\n"
+                    for mod_name in pb_modalities:
+                        try:
+                            adata = data_manager.get_modality(mod_name)
+                            summary += f"- **{mod_name}**: {adata.n_obs} pseudobulk samples × {adata.n_vars} genes\n"
+                            
+                            # Add DE results if available
+                            de_keys = [key for key in adata.uns.keys() if key.startswith('de_results_')]
+                            if de_keys:
+                                summary += f"  - DE analyses: {', '.join([key.replace('de_results_', '') for key in de_keys])}\n"
+                        except Exception as e:
+                            summary += f"- **{mod_name}**: Error accessing modality\n"
             
             analysis_results["summary"] = summary
             logger.info(f"Created single-cell analysis summary with {len(analysis_results['details'])} analysis steps")
@@ -1464,6 +1824,10 @@ Proceed with filtering and normalization, then doublet detection before clusteri
         cluster_modality,
         find_marker_genes_for_clusters,
         annotate_cell_types,
+        # Pseudobulk analysis tools
+        create_pseudobulk_matrix,
+        prepare_differential_expression_design,
+        run_pseudobulk_differential_expression,
         # Visualization tools
         create_umap_plot,
         create_qc_plots,

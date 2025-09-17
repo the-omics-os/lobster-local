@@ -1162,6 +1162,9 @@ make docker-push
 - For Ubuntu/Debian: Install `python3.12-venv` package
 - Use `make clean-install` for fresh environment
 
+## Critical Rule
+- DONT TOUCH THE pyproject.tml file, all the installations are being requested through the user
+
 ### Runtime Issues
 - Check API key configuration in `.env`
 - Verify virtual environment activation

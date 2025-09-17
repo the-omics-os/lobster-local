@@ -29,7 +29,9 @@ Lobster AI is a revolutionary bioinformatics platform that combines the power of
 
 ### 🧬 **Advanced Analysis Capabilities**
 - **Single-Cell RNA-seq**: Quality control, clustering, cell type annotation, trajectory analysis
-- **Bulk RNA-seq**: Differential expression, pathway analysis, batch correction
+- **Pseudobulk Aggregation**: Convert single-cell to sample-level matrices for statistical analysis
+- **Bulk RNA-seq & pyDESeq2**: Pure Python differential expression with complex experimental designs
+- **Formula-Based Statistics**: R-style formulas (`~condition + batch`) with design matrix construction
 - **Mass Spectrometry Proteomics**: Missing value pattern analysis, intensity normalization, peptide-to-protein mapping
 - **Affinity Proteomics**: Targeted panels, coefficient of variation analysis, antibody validation workflows
 - **Proteomics Visualization**: Volcano plots, correlation networks, pathway enrichment, QC dashboards
