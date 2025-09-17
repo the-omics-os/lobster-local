@@ -82,7 +82,7 @@ def create_bioinformatics_graph(
             )
             handoff_tools.append(handoff_tool)
         
-        logger.info(f"Created agent: {agent_config.display_name} ({agent_config.name})")
+        logger.debug(f"Created agent: {agent_config.display_name} ({agent_config.name})")
 
 
     # Supervisor only tools

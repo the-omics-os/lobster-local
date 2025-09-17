@@ -57,7 +57,7 @@ class GEOParser:
         """Log current system memory status."""
         try:
             vm = psutil.virtual_memory()
-            logger.info(f"System memory: Total={self._format_bytes(vm.total)}, "
+            logger.debug(f"System memory: Total={self._format_bytes(vm.total)}, "
                        f"Available={self._format_bytes(vm.available)}, "
                        f"Used={vm.percent}%")
         except Exception as e:
@@ -180,7 +180,7 @@ class GEOParser:
             # Ensure reasonable bounds
             chunk_size = max(1000, min(chunk_size, 50000))
             
-            logger.info(
+            logger.debug(
                 f"Adaptive chunk size for {file_path.name}: {chunk_size:,} rows "
                 f"(~{self._format_bytes(int(chunk_size * memory_per_row))} per chunk)"
             )
@@ -252,7 +252,7 @@ class GEOParser:
                 if df.shape[1] > 1 and df.iloc[:, 0].dtype == 'object':
                     df = df.set_index(df.columns[0])
                 
-                logger.info(f"Successfully parsed with Polars: {df.shape}")
+                logger.debug(f"Successfully parsed with Polars: {df.shape}")
                 self._log_system_memory()  # Log memory after parsing
                 return df
                 
@@ -287,7 +287,7 @@ class GEOParser:
                         dtype_backend='pyarrow'  # Use PyArrow backend if available
                     )
                     
-                    logger.info(f"Successfully parsed with pandas: {df.shape}")
+                    logger.debug(f"Successfully parsed with pandas: {df.shape}")
                     self._log_system_memory()  # Log memory after parsing
                     return df
                     
@@ -414,9 +414,9 @@ class GEOParser:
             
             # Combine all chunks
             if chunks:
-                logger.info(f"Combining {len(chunks)} chunks with {total_rows:,} total rows")
+                logger.debug(f"Combining {len(chunks)} chunks with {total_rows:,} total rows")
                 df = pd.concat(chunks, axis=0)
-                logger.info(f"Successfully parsed large file in chunks: {df.shape}")
+                logger.debug(f"Successfully parsed large file in chunks: {df.shape}")
                 self._log_system_memory()  # Log final memory status
                 return df
             
@@ -445,7 +445,7 @@ class GEOParser:
             DataFrame: Parsed expression matrix or None
         """
         try:
-            logger.info(f"Using basic pandas parsing as final fallback: {file_path.name}")
+            logger.debug(f"Using basic pandas parsing as final fallback: {file_path.name}")
             
             # Very basic pandas parsing
             df = pd.read_csv(
@@ -459,7 +459,7 @@ class GEOParser:
             )
             
             if df.shape[0] > 0 and df.shape[1] > 0:
-                logger.info(f"Successfully parsed with basic pandas: {df.shape}")
+                logger.debug(f"Successfully parsed with basic pandas: {df.shape}")
                 return df
             
             return None
@@ -499,7 +499,7 @@ class GEOParser:
 
             # For very large matrices, consider keeping as sparse
             if matrix.shape[0] * matrix.shape[1] > 10_000_000:  # > 10M elements
-                logger.info(f"Large sparse matrix detected, using sparse DataFrame: {matrix.shape}")
+                logger.debug(f"Large sparse matrix detected, using sparse DataFrame: {matrix.shape}")
                 
                 # Transpose sparse matrix (genes x cells -> cells x genes)
                 matrix_transposed = matrix.T
@@ -511,7 +511,7 @@ class GEOParser:
                     columns=[f"gene_{i}" for i in range(matrix_transposed.shape[1])]
                 )
                 
-                logger.info(f"Successfully created sparse DataFrame: {df.shape}")
+                logger.debug(f"Successfully created sparse DataFrame: {df.shape}")
                 return df
             
             else:
@@ -532,7 +532,7 @@ class GEOParser:
                     columns=[f"gene_{i}" for i in range(matrix_dense.shape[1])]
                 )
 
-                logger.info(f"Successfully created dense DataFrame: {df.shape}")
+                logger.debug(f"Successfully created dense DataFrame: {df.shape}")
                 return df
 
         except Exception as e:
@@ -591,7 +591,7 @@ class GEOParser:
                 if not sample_id:
                     sample_id = matrix_dir.name
 
-            logger.info(f"Looking for barcodes/features files for sample: {sample_id}")
+            logger.debug(f"Looking for barcodes/features files for sample: {sample_id}")
 
             # Find barcodes and features files
             barcodes_file = None
@@ -617,7 +617,7 @@ class GEOParser:
                     elif any(pattern.lower() in name_lower for pattern in feature_patterns):
                         features_file = file_path
 
-            logger.info(f"Found files - Barcodes: {barcodes_file.name if barcodes_file else 'None'}, "
+            logger.debug(f"Found files - Barcodes: {barcodes_file.name if barcodes_file else 'None'}, "
                        f"Features: {features_file.name if features_file else 'None'}")
 
             # Read barcodes (cell identifiers)
@@ -630,7 +630,7 @@ class GEOParser:
                     else:
                         with open(barcodes_file, "r") as f:
                             cell_ids = [line.strip() for line in f]
-                    logger.info(f"Read {len(cell_ids)} cell barcodes")
+                    logger.debug(f"Read {len(cell_ids)} cell barcodes")
                 except Exception as e:
                     logger.warning(f"Error reading barcodes file: {e}")
 
@@ -655,7 +655,7 @@ class GEOParser:
                             gene_ids.append(parts[0])
                             gene_names.append(parts[0])
 
-                    logger.info(f"Read {len(gene_ids)} gene features")
+                    logger.debug(f"Read {len(gene_ids)} gene features")
                 except Exception as e:
                     logger.warning(f"Error reading features file: {e}")
 
@@ -683,7 +683,7 @@ class GEOParser:
 
             # Create DataFrame
             df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
-            logger.info(f"Successfully created Matrix Market DataFrame for {sample_id}: {df.shape}")
+            logger.debug(f"Successfully created Matrix Market DataFrame for {sample_id}: {df.shape}")
             return df
 
         except Exception as e:
@@ -724,7 +724,7 @@ class GEOParser:
                 logger.warning(f"No matrix.mtx file found for {sample_id}")
                 return None
 
-            logger.info(f"Found 10X files - Matrix: {matrix_file.name}, "
+            logger.debug(f"Found 10X files - Matrix: {matrix_file.name}, "
                        f"Barcodes: {barcodes_file.name if barcodes_file else 'None'}, "
                        f"Features: {features_file.name if features_file else 'None'}")
 
@@ -737,7 +737,7 @@ class GEOParser:
                 return None
 
             # Read the sparse matrix
-            logger.info(f"Reading sparse matrix from {matrix_file}")
+            logger.debug(f"Reading sparse matrix from {matrix_file}")
             if matrix_file.name.endswith(".gz"):
                 with gzip.open(matrix_file, "rt") as f:
                     matrix = sio.mmread(f)
@@ -764,7 +764,7 @@ class GEOParser:
                     else:
                         with open(barcodes_file, "r") as f:
                             cell_ids = [line.strip() for line in f]
-                    logger.info(f"Read {len(cell_ids)} cell barcodes")
+                    logger.debug(f"Read {len(cell_ids)} cell barcodes")
                 except Exception as e:
                     logger.warning(f"Error reading barcodes file: {e}")
 
@@ -789,7 +789,7 @@ class GEOParser:
                             gene_ids.append(parts[0])
                             gene_names.append(parts[0])
 
-                    logger.info(f"Read {len(gene_ids)} gene features")
+                    logger.debug(f"Read {len(gene_ids)} gene features")
                 except Exception as e:
                     logger.warning(f"Error reading features file: {e}")
 
@@ -817,7 +817,7 @@ class GEOParser:
 
             # Create DataFrame
             df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
-            logger.info(f"Successfully created 10X DataFrame for {sample_id}: {df.shape}")
+            logger.debug(f"Successfully created 10X DataFrame for {sample_id}: {df.shape}")
             return df
 
         except Exception as e:
@@ -850,7 +850,7 @@ class GEOParser:
                 try:
                     import anndata
                     adata = anndata.read_h5ad(file_path)
-                    logger.info(f"Parsed h5ad file: {file_path}")
+                    logger.debug(f"Parsed h5ad file: {file_path}")
                     # Convert AnnData to DataFrame (X contains expression matrix)
                     return pd.DataFrame(adata.X, index=adata.obs_names, columns=adata.var_names)
                 except ImportError:
@@ -864,7 +864,7 @@ class GEOParser:
                 try:
                     import pyreadr
                     result = pyreadr.read_r(str(file_path))
-                    logger.info(f"Parsed RDS file: {file_path}")
+                    logger.debug(f"Parsed RDS file: {file_path}")
                     # Get the first dataframe in the result
                     if result and result[list(result.keys())[0]] is not None:
                         return result[list(result.keys())[0]]
@@ -1225,7 +1225,7 @@ class GEOParser:
                     with open(local_file, 'wb') as out_file:
                         out_file.write(response.read())
             
-            logger.info(f"Downloaded to: {local_file}")
+            logger.debug(f"Downloaded to: {local_file}")
             
             # Determine file type and read accordingly
             suffix = local_file.suffix.lower()
@@ -1265,7 +1265,7 @@ class GEOParser:
             if df.shape[1] > cols:
                 df = df.iloc[:, :cols]
             
-            logger.info(f"Preview shape: {df.shape}")
+            logger.debug(f"Preview shape: {df.shape}")
             return df
             
         except Exception as e:

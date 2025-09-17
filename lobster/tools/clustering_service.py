@@ -38,12 +38,12 @@ class ClusteringService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless ClusteringService")
+        logger.debug("Initializing stateless ClusteringService")
         self.default_cluster_resolution = 0.7
         self.progress_callback = None
         self.current_progress = 0
         self.total_steps = 0
-        logger.info("ClusteringService initialized successfully")
+        logger.debug("ClusteringService initialized successfully")
 
     def set_progress_callback(self, callback: Callable[[int, str], None]) -> None:
         """

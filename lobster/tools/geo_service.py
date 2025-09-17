@@ -261,7 +261,7 @@ class GEOService:
                 return f"No GDS record found for {gds_id}"
             
             gds_record = gds_data['result'][gds_number]
-            logger.info(f"Successfully retrieved GDS metadata for {gds_id}")
+            logger.debug(f"Successfully retrieved GDS metadata for {gds_id}")
             
             # Extract GSE ID from GDS record
             gse_id = gds_record.get('gse', '')
@@ -350,7 +350,7 @@ class GEOService:
                 'data_source': 'GDS_to_GSE_conversion'
             }
             
-            logger.info(f"Successfully combined GDS and GSE metadata for {gds_id} -> {gse_id}")
+            logger.debug(f"Successfully combined GDS and GSE metadata for {gds_id} -> {gse_id}")
             return combined_metadata
             
         except Exception as e:
@@ -378,7 +378,7 @@ class GEOService:
 
             # Check if metadata already exists (should be fetched first)
             if clean_geo_id not in self.data_manager.metadata_store:
-                logger.info(f"Metadata not found, fetching first for {clean_geo_id}")
+                logger.debug(f"Metadata not found, fetching first for {clean_geo_id}")
                 metadata_result = self.fetch_metadata_only(clean_geo_id)
                 if "Error" in metadata_result:
                     return f"Failed to fetch metadata: {metadata_result}"
@@ -605,7 +605,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_processed_matrix_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Try to directly download and use processed matrix files based on LLM strategy config."""
         try:
-            logger.info(f"Attempting to use processed matrix for {geo_id}")
+            logger.debug(f"Attempting to use processed matrix for {geo_id}")
             
             # Get strategy config from stored metadata
             stored_metadata = self.data_manager.metadata_store[geo_id]
@@ -630,7 +630,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     break
             
             if target_file:
-                logger.info(f"Found processed matrix file: {target_file}")
+                logger.debug(f"Found processed matrix file: {target_file}")
                 matrix = self._download_and_parse_file(target_file, geo_id)
                 
                 if matrix is not None and not matrix.empty:
@@ -655,7 +655,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_raw_matrix_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Try to directly download and use raw UMI/count matrix files based on LLM strategy config."""
         try:
-            logger.info(f"Attempting to use raw matrix for {geo_id}")
+            logger.debug(f"Attempting to use raw matrix for {geo_id}")
             
             # Get strategy config from stored metadata
             stored_metadata = self.data_manager.metadata_store[geo_id]
@@ -679,7 +679,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     break
             
             if target_file:
-                logger.info(f"Found raw matrix file: {target_file}")
+                logger.debug(f"Found raw matrix file: {target_file}")
                 matrix = self._download_and_parse_file(target_file, geo_id)
                 
                 if matrix is not None and not matrix.empty:
@@ -704,7 +704,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_h5_format_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Try to prioritize H5/H5AD format files for efficient loading."""
         try:
-            logger.info(f"Attempting to use H5 format files for {geo_id}")
+            logger.debug(f"Attempting to use H5 format files for {geo_id}")
             
             # Check both processed and raw for H5 formats
             stored_metadata = self.data_manager.metadata_store[geo_id]
@@ -740,7 +740,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                         break
                 
                 if target_file:
-                    logger.info(f"Found H5 {file_category} file: {target_file}")
+                    logger.debug(f"Found H5 {file_category} file: {target_file}")
                     # For H5 files, try parsing with geo_parser directly
                     filename = target_file.split('/')[-1]
                     local_path = self.cache_dir / f"{geo_id}_h5_{filename}"
@@ -772,7 +772,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_supplementary_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Try supplementary files as primary approach when no direct matrices available."""
         try:
-            logger.info(f"Attempting supplementary files first for {geo_id}")
+            logger.debug(f"Attempting supplementary files first for {geo_id}")
             
             # Get GEO object for supplementary file processing
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
@@ -801,7 +801,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_archive_extraction_first(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Try extracting from archive files (TAR, ZIP) as primary approach."""
         try:
-            logger.info(f"Attempting archive extraction first for {geo_id}")
+            logger.debug(f"Attempting archive extraction first for {geo_id}")
             
             suppl_files = metadata.get('supplementary_file', [])
             if not isinstance(suppl_files, list):
@@ -839,7 +839,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_supplementary_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
         """Fallback method using supplementary files when primary approaches fail."""
         try:
-            logger.info(f"Trying supplementary fallback for {geo_id}")
+            logger.debug(f"Trying supplementary fallback for {geo_id}")
             
             # This is essentially the same as _try_supplementary_first but with different logging
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
@@ -908,7 +908,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_geoparse_download(self, geo_id: str, metadata: Dict[str, Any], use_intersecting_genes_only: bool = True) -> GEOResult:
         """Pipeline step: Try standard GEOparse download with proper single-cell/bulk handling."""
         try:
-            logger.info(f"Trying GEOparse download for {geo_id}")
+            logger.debug(f"Trying GEOparse download for {geo_id}")
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
             
             # Determine data type from metadata
@@ -1165,7 +1165,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 'validation_status': 'PASS' if len(schema_aligned) > len(schema_missing) else 'WARNING'
             }
             
-            logger.info(f"Metadata validation: {validation_result['alignment_percentage']:.1f}% schema alignment")
+            logger.debug(f"Metadata validation: {validation_result['alignment_percentage']:.1f}% schema alignment")
             return validation_result
             
         except Exception as e:
@@ -1496,7 +1496,7 @@ The actual expression data download will be much faster now that metadata is pre
                     safe_members = [m for m in tar.getmembers() if is_safe_member(m)]
                     tar.extractall(path=extract_dir, members=safe_members)
 
-                logger.info(f"Extracted {len(safe_members)} files from TAR")
+                logger.debug(f"Extracted {len(safe_members)} files from TAR")
 
             # Process nested archives and find expression data
             nested_extract_dir = self.cache_dir / f"{gse_id}_nested_extracted"
@@ -1505,7 +1505,7 @@ The actual expression data download will be much faster now that metadata is pre
             # Extract any nested TAR.GZ files
             nested_archives = list(extract_dir.glob("*.tar.gz"))
             if nested_archives:
-                logger.info(f"Found {len(nested_archives)} nested TAR.GZ files")
+                logger.debug(f"Found {len(nested_archives)} nested TAR.GZ files")
 
                 all_matrices = []
                 for archive_path in nested_archives:
@@ -1516,7 +1516,7 @@ The actual expression data download will be much faster now that metadata is pre
                         sample_extract_dir = nested_extract_dir / sample_id
                         sample_extract_dir.mkdir(exist_ok=True)
 
-                        logger.info(f"Extracting nested archive: {archive_path.name}")
+                        logger.debug(f"Extracting nested archive: {archive_path.name}")
                         with tarfile.open(archive_path, "r:gz") as nested_tar:
                             nested_tar.extractall(path=sample_extract_dir)
 
@@ -1524,7 +1524,7 @@ The actual expression data download will be much faster now that metadata is pre
                         matrix = self.geo_parser.parse_10x_data(sample_extract_dir, sample_id)
                         if matrix is not None:
                             all_matrices.append(matrix)
-                            logger.info(
+                            logger.debug(
                                 f"Successfully parsed 10X data for {sample_id}: {matrix.shape}"
                             )
 
@@ -1553,21 +1553,21 @@ The actual expression data download will be much faster now that metadata is pre
                         expression_files.append(file_path)
 
             if expression_files:
-                logger.info(f"Found {len(expression_files)} potential expression files")
+                logger.debug(f"Found {len(expression_files)} potential expression files")
 
                 # Try to parse the largest file first (likely the main expression matrix)
                 expression_files.sort(key=lambda x: x.stat().st_size, reverse=True)
 
                 for file_path in expression_files[:3]:  # Try top 3 largest files
                     try:
-                        logger.info(f"Attempting to parse: {file_path.name}")
+                        logger.debug(f"Attempting to parse: {file_path.name}")
                         matrix = self.geo_parser.parse_expression_file(file_path)
                         if (
                             matrix is not None
                             and matrix.shape[0] > 0
                             and matrix.shape[1] > 0
                         ):
-                            logger.info(
+                            logger.debug(
                                 f"Successfully parsed expression matrix: {matrix.shape}"
                             )
                             return matrix
@@ -1607,9 +1607,9 @@ The actual expression data download will be much faster now that metadata is pre
                 if not self.geo_downloader.download_file(file_url, local_file):
                     logger.error(f"Failed to download file: {file_url}")
                     return None
-                logger.info(f"Successfully downloaded: {local_file}")
+                logger.debug(f"Successfully downloaded: {local_file}")
             else:
-                logger.info(f"Using cached file: {local_file}")
+                logger.debug(f"Using cached file: {local_file}")
 
             return self.geo_parser.parse_expression_file(local_file)
 
@@ -1656,12 +1656,12 @@ The actual expression data download will be much faster now that metadata is pre
                 # Filter matrices to common genes
                 filtered_matrices = [matrix[list(common_genes)] for matrix in matrices_list]
                 combined_matrix = pd.concat(filtered_matrices, axis=0, sort=False)
-                logger.info(f"Concatenated with {len(common_genes)} common genes")
+                logger.debug(f"Concatenated with {len(common_genes)} common genes")
                 
             else:
                 # Use all genes, filling missing with zeros
                 combined_matrix = pd.concat(matrices_list, axis=0, sort=False).fillna(0)
-                logger.info(f"Concatenated with all genes, filled missing with zeros")
+                logger.debug(f"Concatenated with all genes, filled missing with zeros")
             
             logger.info(f"Final combined matrix shape: {combined_matrix.shape}")
             return combined_matrix
@@ -1705,7 +1705,7 @@ The actual expression data download will be much faster now that metadata is pre
                         "download_url": f"https://ftp.ncbi.nlm.nih.gov/geo/samples/{gsm_id[:6]}nnn/{gsm_id}/suppl/",
                     }
 
-            logger.info(f"Collected information for {len(sample_info)} samples")
+            logger.debug(f"Collected information for {len(sample_info)} samples")
             return sample_info
 
         except Exception as e:
@@ -1744,7 +1744,7 @@ The actual expression data download will be much faster now that metadata is pre
                     matrix = future.result()
                     sample_matrices[gsm_id] = matrix
                     if matrix is not None:
-                        logger.info(
+                        logger.debug(
                             f"Successfully downloaded matrix for {gsm_id}: {matrix.shape}"
                         )
                     else:
@@ -1835,11 +1835,11 @@ The actual expression data download will be much faster now that metadata is pre
                             logger.debug(f"Updated {file_type}: {filename} (score: {score:.2f})")
             
             # Report final classifications
-            logger.info(f"Final classification for {gsm_id}:")
+            logger.debug(f"Final classification for {gsm_id}:")
             for file_type, url in classified_files.items():
                 filename = url.split('/')[-1]
                 score = file_scores[file_type]
-                logger.info(f"  {file_type}: {filename} (confidence: {score:.2f})")
+                logger.debug(f"  {file_type}: {filename} (confidence: {score:.2f})")
             
             # Validate 10X trio completeness if matrix found
             if 'matrix' in classified_files:
@@ -2078,17 +2078,17 @@ The actual expression data download will be much faster now that metadata is pre
         missing_10x_files = required_10x_files - found_10x_files
         
         if len(found_10x_files) == 3:
-            logger.info(f"Complete 10X trio found for {gsm_id} ✓")
+            logger.debug(f"Complete 10X trio found for {gsm_id} ✓")
         elif len(found_10x_files) >= 1:
             logger.warning(f"Incomplete 10X trio for {gsm_id}. Found: {list(found_10x_files)}, Missing: {list(missing_10x_files)}")
             
             # Suggest alternatives
             if 'h5_data' in classified_files:
-                logger.info(f"H5 format available as alternative for {gsm_id}")
+                logger.debug(f"H5 format available as alternative for {gsm_id}")
             elif 'expression' in classified_files:
-                logger.info(f"Generic expression file available as fallback for {gsm_id}")
+                logger.debug(f"Generic expression file available as fallback for {gsm_id}")
         else:
-            logger.info(f"No 10X format files detected for {gsm_id}")
+            logger.debug(f"No 10X format files detected for {gsm_id}")
 
     def _download_and_combine_single_cell_files(self, supplementary_files_info: Dict[str, str], gsm_id: str) -> Optional[pd.DataFrame]:
         """
@@ -2102,26 +2102,26 @@ The actual expression data download will be much faster now that metadata is pre
             DataFrame: Combined single-cell expression matrix or None
         """
         try:
-            logger.info(f"Downloading and combining single-cell files for {gsm_id}")
+            logger.debug(f"Downloading and combining single-cell files for {gsm_id}")
             
             # Check if we have the trio of 10X files (matrix, barcodes, features)
             if all(key in supplementary_files_info for key in ['matrix', 'barcodes', 'features']):
-                logger.info(f"Found complete 10X trio for {gsm_id}")
+                logger.debug(f"Found complete 10X trio for {gsm_id}")
                 return self._download_10x_trio(supplementary_files_info, gsm_id)
             
             # Check for H5 format (contains everything in one file)
             elif 'h5_data' in supplementary_files_info:
-                logger.info(f"Found H5 data for {gsm_id}")
+                logger.debug(f"Found H5 data for {gsm_id}")
                 return self._download_h5_file(supplementary_files_info['h5_data'], gsm_id)
             
             # Check for single expression matrix file
             elif 'expression' in supplementary_files_info:
-                logger.info(f"Found expression file for {gsm_id}")
+                logger.debug(f"Found expression file for {gsm_id}")
                 return self._download_single_expression_file(supplementary_files_info['expression'], gsm_id)
             
             # Try individual files
             elif 'matrix' in supplementary_files_info:
-                logger.info(f"Found matrix file only for {gsm_id}")
+                logger.debug(f"Found matrix file only for {gsm_id}")
                 return self._download_single_expression_file(supplementary_files_info['matrix'], gsm_id)
             
             else:
@@ -2144,7 +2144,7 @@ The actual expression data download will be much faster now that metadata is pre
             DataFrame: Combined 10X expression matrix or None
         """
         try:
-            logger.info(f"Processing 10X trio for {gsm_id}")
+            logger.debug(f"Processing 10X trio for {gsm_id}")
             
             # Download all three files
             local_files = {}
@@ -2154,14 +2154,14 @@ The actual expression data download will be much faster now that metadata is pre
                     local_path = self.cache_dir / f"{gsm_id}_{file_type}_{filename}"
                     
                     if not local_path.exists():
-                        logger.info(f"Downloading {file_type} file: {url}")
+                        logger.debug(f"Downloading {file_type} file: {url}")
                         if self.geo_downloader.download_file(url, local_path):
                             local_files[file_type] = local_path
                         else:
                             logger.error(f"Failed to download {file_type} file")
                             return None
                     else:
-                        logger.info(f"Using cached {file_type} file: {local_path}")
+                        logger.debug(f"Using cached {file_type} file: {local_path}")
                         local_files[file_type] = local_path
             
             if len(local_files) != 3:

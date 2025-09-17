@@ -45,7 +45,7 @@ class EnhancedSingleCellService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless EnhancedSingleCellService")
+        logger.debug("Initializing stateless EnhancedSingleCellService")
 
         # Cell type markers database (simplified version)
         self.cell_type_markers = {
@@ -63,7 +63,7 @@ class EnhancedSingleCellService:
 
         logger.info(f"Loaded {len(self.cell_type_markers)} cell type marker sets")
         logger.debug(f"Available cell types: {list(self.cell_type_markers.keys())}")
-        logger.info("EnhancedSingleCellService initialized successfully")
+        logger.debug("EnhancedSingleCellService initialized successfully")
 
     def detect_doublets(
         self, 

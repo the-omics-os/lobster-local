@@ -37,8 +37,8 @@ class QualityService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless QualityService")
-        logger.info("QualityService initialized successfully")
+        logger.debug("Initializing stateless QualityService")
+        logger.debug("QualityService initialized successfully")
 
     def assess_quality(
         self,

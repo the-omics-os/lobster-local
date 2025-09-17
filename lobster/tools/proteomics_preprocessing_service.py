@@ -43,8 +43,8 @@ class ProteomicsPreprocessingService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless ProteomicsPreprocessingService")
-        logger.info("ProteomicsPreprocessingService initialized successfully")
+        logger.debug("Initializing stateless ProteomicsPreprocessingService")
+        logger.debug("ProteomicsPreprocessingService initialized successfully")
 
     def impute_missing_values(
         self,

@@ -45,7 +45,7 @@ class ProteomicsAnalysisService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless ProteomicsAnalysisService")
+        logger.debug("Initializing stateless ProteomicsAnalysisService")
         
         # Define common pathway databases (simplified for demonstration)
         self.pathway_databases = {
@@ -57,7 +57,7 @@ class ProteomicsAnalysisService:
             'string_db': 'STRING Database'
         }
         
-        logger.info("ProteomicsAnalysisService initialized successfully")
+        logger.debug("ProteomicsAnalysisService initialized successfully")
 
     def perform_statistical_testing(
         self,

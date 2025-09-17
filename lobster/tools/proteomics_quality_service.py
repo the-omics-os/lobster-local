@@ -44,7 +44,7 @@ class ProteomicsQualityService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless ProteomicsQualityService")
+        logger.debug("Initializing stateless ProteomicsQualityService")
         
         # Define common contaminant patterns
         self.contaminant_patterns = {
@@ -56,7 +56,7 @@ class ProteomicsQualityService:
             'immunoglobulin': ['IGG_', 'IGH_', 'IGL_', 'IGK_']
         }
         
-        logger.info("ProteomicsQualityService initialized successfully")
+        logger.debug("ProteomicsQualityService initialized successfully")
 
     def assess_missing_value_patterns(
         self,

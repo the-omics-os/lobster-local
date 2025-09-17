@@ -42,7 +42,7 @@ class ProteomicsDifferentialService:
         
         This service is stateless and doesn't require a data manager instance.
         """
-        logger.info("Initializing stateless ProteomicsDifferentialService")
+        logger.debug("Initializing stateless ProteomicsDifferentialService")
         
         # Define statistical test methods
         self.test_methods = {
@@ -55,7 +55,7 @@ class ProteomicsDifferentialService:
             'kruskal_wallis': 'Kruskal-Wallis test'
         }
         
-        logger.info("ProteomicsDifferentialService initialized successfully")
+        logger.debug("ProteomicsDifferentialService initialized successfully")
 
     def perform_differential_expression(
         self,

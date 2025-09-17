@@ -88,6 +88,7 @@ dependencies = [
     "psutil>=7.0.0",
     "scanpy>=1.11.4",
     "pydeseq2>=0.5.2",
+    "prompt-toolkit>=3.0.52",
 ]
 
 [project.optional-dependencies]

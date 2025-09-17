@@ -11,6 +11,8 @@ Transform your bioinformatics research with intelligent AI agents that understan
 
 Lobster AI is a revolutionary bioinformatics platform that combines the power of **specialized AI agents** with proven scientific tools to analyze complex multi-omics data. Instead of wrestling with command-line tools and scripts, simply describe your analysis needs in natural language.
 
+**✨ Now featuring a stunning Rich CLI interface with professional orange branding, multi-panel dashboards, and real-time progress monitoring!**
+
 ### 🎯 **Perfect For**
 - **Bioinformatics Researchers** analyzing RNA-seq, proteomics, and multi-omics data
 - **Computational Biologists** seeking intelligent analysis workflows  
@@ -38,9 +40,14 @@ Lobster AI is a revolutionary bioinformatics platform that combines the power of
 - **Multi-Omics Integration**: Cross-platform analysis using MuData framework
 - **Literature Mining**: Automated parameter optimization from publications
 
-### 🎨 **User-Friendly Experience**
+### 🎨 **Enhanced User Experience**
 - **Natural Language Interface**: Describe analyses in plain English
-- **Interactive Chat Mode**: Conversational analysis workflow
+- **Rich CLI with Orange Branding**: Professional terminal interface with #e45c47 theming
+- **Interactive Chat Mode**: Conversational analysis workflow with real-time feedback
+- **Multi-Panel Dashboards**: System health, workspace overview, and analysis monitoring
+- **Advanced Navigation**: File tree browsing with status indicators and hierarchical views
+- **Live Progress Tracking**: Multi-task progress monitoring with concurrent operation support
+- **Intelligent Error Handling**: Context-aware suggestions with Rich traceback integration
 - **Automatic Visualization**: Publication-ready plots and reports
 - **Complete Provenance**: Reproducible analysis trails
 - **Format Flexibility**: CSV, Excel, H5AD, 10X MTX, and more
@@ -98,6 +105,109 @@ Analysis complete! Found significant protein expression changes with comprehensi
 
 Analysis complete! High-quality targeted proteomics data with professional QC metrics.
 ```
+
+## 🎨 **Enhanced CLI Experience**
+
+Lobster AI features a **stunning Rich CLI interface** with professional orange branding (#e45c47) and advanced terminal capabilities:
+
+### 🚀 **Professional Interface Features**
+
+#### **Multi-Panel Dashboards**
+```bash
+🦞 You: "/dashboard"
+# Shows comprehensive system health with CPU, memory, and agent status
+
+🦞 You: "/workspace-info"
+# Detailed workspace overview with file status and data summary
+
+🦞 You: "/analysis-dash"
+# Real-time analysis monitoring with operation history
+```
+
+#### **Advanced Navigation**
+```bash
+🦞 You: "/tree"
+# Hierarchical directory tree with orange highlights and file type icons
+📁 Current Directory: project_data
+├── 🧬 single_cell_data.h5ad (2.1MB)
+├── 📊 metadata.csv (45KB) ✓
+├── 📈 results/
+│   ├── 📈 umap_plot.html ✓
+│   └── 📊 de_genes.csv ✓
+└── 🦞 Lobster Workspace/
+    ├── 📊 Data Files/
+    └── 📈 Visualizations/
+```
+
+#### **Enhanced Input & Command History**
+```bash
+# Professional text input with full navigation support
+🦞 ~/project ▸ analyze my single-cell data
+                ↑ ← → Use arrow keys to navigate and edit
+                ↑ ↓ Browse command history
+                Ctrl+R Reverse search through history
+
+🦞 You: "/input-features"
+# Shows current input capabilities and navigation features
+✨ Enhanced input: Arrow navigation, command history, and reverse search enabled
+```
+
+**New Features (v2.1+):**
+- **← → Arrow keys** - Navigate within text naturally
+- **↑ ↓ Arrow keys** - Browse persistent command history
+- **Ctrl+R** - Reverse search through previous commands
+- **Auto-disappearing progress bars** - Clean interface without clutter
+- **Optimized startup** - Reduced log noise for faster initialization
+
+#### **Live Progress Monitoring**
+```bash
+🦞 You: "/progress"
+# Multi-task progress tracking with real-time updates
+
+🔄 Operations Overview
+┌─────────────────────┬──────────────────┬──────────┬──────────┐
+│ Operation           │ Progress         │ Status   │ Duration │
+├─────────────────────┼──────────────────┼──────────┼──────────┤
+│ GEO Download        │ ████████████ 85% │ Running  │ 00:02:34 │
+│ Quality Control     │ ██████░░░░░░ 50%  │ Running  │ 00:01:15 │
+│ Clustering Analysis │ ░░░░░░░░░░░░  0%  │ Pending  │ 00:00:00 │
+└─────────────────────┴──────────────────┴──────────┴──────────┘
+```
+
+#### **Intelligent Error Handling**
+```bash
+🦞 You: "/read nonexistent_file.h5ad"
+
+❌ Error Panel
+┌─ Command Failed ─────────────────────────────┐
+│ FileNotFoundError: File not found           │
+│                                              │
+│ 💡 Suggestion: Check if the file exists     │
+│    and you have read permissions            │
+└──────────────────────────────────────────────┘
+```
+
+### 🎯 **Enhanced Command Suite**
+
+| Command | Description | Visual Enhancement |
+|---------|-------------|-------------------|
+| `/dashboard` | System health dashboard | Multi-panel layout with orange progress bars |
+| `/workspace-info` | Detailed workspace overview | File status indicators and data summaries |
+| `/analysis-dash` | Analysis monitoring | Real-time operation tracking |
+| `/tree` | Directory tree navigation | Hierarchical view with file type icons |
+| `/progress` | Multi-task progress monitor | Live concurrent operation tracking |
+| `/files` | Enhanced file listing | Orange-themed tables with metadata |
+| `/help` | Comprehensive help system | Professional styling with orange highlights |
+
+### 🔥 **Professional Features**
+
+- **🎨 Orange Brand Theming**: Consistent #e45c47 branding throughout
+- **📊 Rich Layout System**: Multi-panel displays with professional styling
+- **⚡ Real-time Updates**: Live dashboard monitoring and progress tracking
+- **🌳 File Tree Navigation**: Hierarchical browsing with status indicators
+- **🔍 Enhanced Error Messages**: Context-aware suggestions with Rich tracebacks
+- **📈 Progress Visualization**: Advanced multi-task operation monitoring
+- **💫 Interactive Elements**: Sophisticated prompts and selection interfaces
 
 ## 🔬 **Comprehensive Proteomics Platform**
 
@@ -204,12 +314,38 @@ This comprehensive proteomics platform ensures publication-ready results with pr
 git clone https://github.com/homara-ai/lobster.git
 cd lobster
 make install
-lobster chat  # Start analyzing immediately!
+lobster chat  # Start with enhanced Rich CLI experience!
+```
+
+### First Launch Experience
+When you start Lobster AI, you'll be greeted with a professional orange-branded interface:
+
+```bash
+🦞 lobster chat
+
+┌─ Welcome ────────────────────────────────────────────────────────────┐
+│  🦞 LOBSTER by homara AI                                             │
+│  Multi-Agent Bioinformatics Analysis System v2.0                    │
+│                                                                      │
+│  🧬 Key Tasks:                                                       │
+│  • Analyze RNA-seq & genomics data                                  │
+│  • Generate visualizations and plots                                │
+│  • Extract insights from bioinformatics datasets                    │
+│  • Access GEO & literature databases                               │
+│                                                                      │
+│  📋 Essential Commands:                                              │
+│  /dashboard    - System health dashboard                            │
+│  /tree         - Directory tree navigation                          │
+│  /help         - Complete command reference                         │
+└──────────────────────────────────────────────────────────────────────┘
+
+🦞 ~/projects ▸
 ```
 
 ### Requirements
 - Python 3.12+
 - 4GB+ RAM recommended
+- Modern terminal with Unicode support (for Rich CLI features)
 - API keys for LLM providers (OpenAI, AWS Bedrock)
 
 ## ☁️ **Lobster Cloud: Seamless Cloud Integration**
@@ -330,8 +466,9 @@ Automated testing runs on every pull request with:
 - 📖 **[Full Documentation](docs/)** - Complete guides and tutorials
 - 🏗️ **[Architecture Overview](docs/architecture_diagram.md)** - Technical deep-dive
 - 🧪 **[Example Analyses](examples/)** - Real-world use cases
-- 🎓 **[Video Tutorials](https://youtube.com/@homaraai)** - Step-by-step walkthroughs
+- 🎓 **[Video Tutorials](https://youtube.com/@homaraai)** - Step-by-step walkthroughs including new Rich CLI features
 - ⚗️ **[Testing Guide](tests/README.md)** - Comprehensive testing documentation
+- 🎨 **[CLI Enhancement Guide](CLAUDE.md)** - Rich CLI features and orange theming details
 
 ## 🔍 **Data Quality & Compliance**
 

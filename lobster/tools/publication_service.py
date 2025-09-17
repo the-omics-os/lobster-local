@@ -85,7 +85,7 @@ class ProviderRegistry:
         if set_as_default or self.default_provider is None:
             self.default_provider = source
         
-        logger.info(f"Registered {source.value} provider")
+        logger.debug(f"Registered {source.value} provider")
     
     def get_provider(self, source: PublicationSource) -> Optional[BasePublicationProvider]:
         """Get provider by source."""

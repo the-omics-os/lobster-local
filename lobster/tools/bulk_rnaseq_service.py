@@ -48,7 +48,7 @@ class BulkRNASeqService:
         Args:
             results_dir: Optional directory for storing analysis results
         """
-        logger.info("Initializing stateless BulkRNASeqService")
+        logger.debug("Initializing stateless BulkRNASeqService")
 
         # Set up results directory
         if results_dir is None:

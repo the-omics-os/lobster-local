@@ -10,7 +10,7 @@ import os
 os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = '900000'
 import subprocess
 import shutil
- 
+
 import typer
 import tabulate
 from tabulate import tabulate
@@ -21,14 +21,336 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.prompt import Prompt, Confirm
+from rich import get_console as rich_get_console
 from rich import box
 from rich import console
 
 from lobster.core.client import AgentClient
+# Import new UI system
+from lobster.ui import LobsterTheme, get_console, setup_logging, get_progress_manager
+from lobster.ui.console_manager import get_console_manager
+from lobster.ui.live_dashboard import get_dashboard
+from lobster.ui.components import (
+    create_file_tree, create_workspace_tree,
+    create_system_dashboard, create_workspace_dashboard, create_analysis_dashboard,
+    create_multi_progress_layout, get_multi_progress_manager
+)
 # Implobsterort the proper callback handler
 from lobster.utils import TerminalCallbackHandler, SimpleTerminalCallback
 from lobster.config.agent_config import get_agent_configurator, initialize_configurator, LobsterAgentConfigurator
 import json
+import time
+import ast
+import inspect
+from typing import Dict, List, Any, Iterable
+
+# Import prompt_toolkit for autocomplete functionality (optional dependency)
+try:
+    from prompt_toolkit import prompt
+    from prompt_toolkit.completion import Completer, Completion, ThreadedCompleter
+    from prompt_toolkit.document import Document
+    from prompt_toolkit.completion import CompleteEvent
+    from prompt_toolkit.formatted_text import HTML
+    from prompt_toolkit.styles import Style
+    PROMPT_TOOLKIT_AVAILABLE = True
+except ImportError:
+    PROMPT_TOOLKIT_AVAILABLE = False
+
+
+# ============================================================================
+# Autocomplete Infrastructure
+# ============================================================================
+
+class LobsterClientAdapter:
+    """Adapter to handle both local and cloud clients uniformly for autocomplete."""
+
+    def __init__(self, client):
+        self.client = client
+        # Detect client type
+        self.is_cloud = hasattr(client, 'list_workspace_files') and hasattr(client, 'session')
+        self.is_local = hasattr(client, 'data_manager')
+
+    def get_workspace_files(self) -> List[Dict[str, Any]]:
+        """Get workspace files from either local or cloud client."""
+        try:
+            if self.is_cloud:
+                # Cloud client has direct list_workspace_files method
+                cloud_files = self.client.list_workspace_files()
+                # Ensure consistent format
+                return [self._normalize_file_info(f) for f in cloud_files]
+            elif self.is_local and hasattr(self.client, 'data_manager'):
+                # Local client uses data_manager
+                workspace_files = self.client.data_manager.list_workspace_files()
+                return self._format_local_files(workspace_files)
+            else:
+                return []
+        except Exception as e:
+            # Graceful fallback for any errors
+            console.print(f"[dim red]Error getting workspace files: {e}[/dim red]")
+            return []
+
+    def _normalize_file_info(self, file_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize file info to consistent format."""
+        return {
+            'name': file_info.get('name', ''),
+            'path': file_info.get('path', ''),
+            'size': file_info.get('size', 0),
+            'type': file_info.get('type', 'unknown'),
+            'modified': file_info.get('modified', 0)
+        }
+
+    def _format_local_files(self, workspace_files: Dict[str, List]) -> List[Dict[str, Any]]:
+        """Format local workspace files to consistent format."""
+        files = []
+        for category, file_list in workspace_files.items():
+            for file_info in file_list:
+                files.append({
+                    'name': file_info.get('name', ''),
+                    'path': file_info.get('path', ''),
+                    'size': file_info.get('size', 0),
+                    'type': category,
+                    'modified': file_info.get('modified', 0)
+                })
+        return files
+
+    def can_read_files(self) -> bool:
+        """Check if client supports file reading."""
+        return (self.is_cloud or
+                (self.is_local and hasattr(self.client, 'read_file')))
+
+
+class CloudAwareCache:
+    """Smart caching that adapts to client type."""
+
+    def __init__(self, client):
+        self.is_cloud = hasattr(client, 'list_workspace_files') and hasattr(client, 'session')
+        self.cache = {}
+        self.timeouts = {
+            'commands': float('inf'),  # Commands never change
+            'files': 60 if self.is_cloud else 10,  # Longer cache for cloud
+            'workspace': 30 if self.is_cloud else 5
+        }
+
+    def get_or_fetch(self, key: str, fetch_func, category: str = 'default'):
+        """Get cached value or fetch if expired."""
+        current_time = time.time()
+        timeout = self.timeouts.get(category, 10)
+
+        if (key not in self.cache or
+            current_time - self.cache[key]['timestamp'] > timeout):
+            try:
+                self.cache[key] = {
+                    'data': fetch_func(),
+                    'timestamp': current_time
+                }
+            except Exception as e:
+                if self.is_cloud and ('connection' in str(e).lower() or 'timeout' in str(e).lower()):
+                    # For cloud connection errors, return stale cache if available
+                    if key in self.cache:
+                        console.print(f"[dim yellow]Using cached data due to connection issue[/dim yellow]")
+                        return self.cache[key]['data']
+                raise e
+
+        return self.cache[key]['data']
+
+
+def extract_available_commands() -> Dict[str, str]:
+    """Extract commands dynamically from _execute_command implementation."""
+    commands = {}
+
+    # Static command definitions with descriptions (extracted from help text)
+    command_descriptions = {
+        '/help': 'Show this help message',
+        '/status': 'Show system status',
+        '/input-features': 'Show input capabilities and navigation features',
+        '/dashboard': 'Show comprehensive system dashboard',
+        '/workspace-info': 'Show detailed workspace overview',
+        '/analysis-dash': 'Show analysis monitoring dashboard',
+        '/progress': 'Show multi-task progress monitor',
+        '/files': 'List workspace files',
+        '/tree': 'Show directory tree view',
+        '/data': 'Show current data summary',
+        '/metadata': 'Show detailed metadata information',
+        '/workspace': 'Show workspace status and information',
+        '/modalities': 'Show detailed modality information',
+        '/plots': 'List all generated plots',
+        '/plot': 'Open plots directory or specific plot',
+        '/save': 'Save current state to workspace',
+        '/read': 'Read a file from workspace (supports glob patterns)',
+        '/export': 'Export session data',
+        '/reset': 'Reset conversation',
+        '/mode': 'Change operation mode',
+        '/modes': 'List available modes',
+        '/clear': 'Clear screen',
+        '/exit': 'Exit the chat'
+    }
+
+    # Try to extract dynamically as fallback, but use static definitions as primary
+    try:
+        # Get the source code of _execute_command
+        source = inspect.getsource(_execute_command)
+        tree = ast.parse(source)
+
+        # Walk through AST to find command comparisons
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Compare):
+                # Look for patterns like: cmd == "/something"
+                if (isinstance(node.left, ast.Name) and
+                    node.left.id == 'cmd' and
+                    len(node.ops) == 1 and
+                    isinstance(node.ops[0], ast.Eq) and
+                    len(node.comparators) == 1 and
+                    isinstance(node.comparators[0], ast.Constant)):
+
+                    cmd = node.comparators[0].value
+                    if isinstance(cmd, str) and cmd.startswith('/'):
+                        # If not in our static definitions, add with generic description
+                        if cmd not in command_descriptions:
+                            command_descriptions[cmd] = f"Execute {cmd} command"
+
+    except Exception as e:
+        # Fallback to static definitions if AST parsing fails
+        console.print(f"[dim yellow]Command extraction fallback: {e}[/dim yellow]")
+
+    return command_descriptions
+
+
+if PROMPT_TOOLKIT_AVAILABLE:
+    class LobsterCommandCompleter(Completer):
+        """Completer for Lobster slash commands with rich metadata."""
+
+        def __init__(self):
+            self.commands_cache = None
+            self.cache_time = 0
+
+        def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+            """Generate command completions."""
+            # Get current word being typed
+            word = document.get_word_before_cursor()
+
+            # Only complete if we're typing a command (starts with /)
+            if not document.text_before_cursor.lstrip().startswith('/'):
+                return
+
+            # Get available commands (cached)
+            commands = self._get_cached_commands()
+
+            # Generate completions
+            for cmd, description in commands.items():
+                if cmd.lower().startswith(word.lower()):
+                    yield Completion(
+                        text=cmd,
+                        start_position=-len(word),
+                        display=HTML(f'<ansired>{cmd}</ansired>'),
+                        display_meta=HTML(f'<dim>{description}</dim>'),
+                        style='class:completion.command'
+                    )
+
+        def _get_cached_commands(self) -> Dict[str, str]:
+            """Get commands with caching."""
+            current_time = time.time()
+            # Cache commands for 5 minutes
+            if self.commands_cache is None or current_time - self.cache_time > 300:
+                self.commands_cache = extract_available_commands()
+                self.cache_time = current_time
+            return self.commands_cache
+
+
+    class LobsterFileCompleter(Completer):
+        """Completer for workspace files with cloud-aware caching."""
+
+        def __init__(self, client):
+            self.adapter = LobsterClientAdapter(client)
+            self.cache = CloudAwareCache(client)
+
+        def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+            """Generate file completions."""
+            word = document.get_word_before_cursor()
+
+            # Get files with caching
+            try:
+                files = self.cache.get_or_fetch(
+                    'workspace_files',
+                    lambda: self.adapter.get_workspace_files(),
+                    'files'
+                )
+            except Exception as e:
+                # Graceful fallback
+                console.print(f"[dim red]File completion error: {e}[/dim red]")
+                files = []
+
+            # Generate completions
+            for file_info in files:
+                file_name = file_info.get('name', '')
+                if file_name.lower().startswith(word.lower()):
+                    # Format file metadata
+                    file_size = file_info.get('size', 0)
+                    file_type = file_info.get('type', 'unknown')
+
+                    # Format size
+                    if file_size < 1024:
+                        size_str = f"{file_size}B"
+                    elif file_size < 1024 ** 2:
+                        size_str = f"{file_size / 1024:.1f}KB"
+                    elif file_size < 1024 ** 3:
+                        size_str = f"{file_size / 1024 ** 2:.1f}MB"
+                    else:
+                        size_str = f"{file_size / 1024 ** 3:.1f}GB"
+
+                    meta = f"{file_type} • {size_str}"
+
+                    yield Completion(
+                        text=file_name,
+                        start_position=-len(word),
+                        display=HTML(f'<ansicyan>{file_name}</ansicyan>'),
+                        display_meta=HTML(f'<dim>{meta}</dim>'),
+                        style='class:completion.file'
+                    )
+
+
+    class LobsterContextualCompleter(Completer):
+        """Smart contextual completer that switches between commands and files."""
+
+        def __init__(self, client):
+            self.client = client
+            self.adapter = LobsterClientAdapter(client)
+            self.command_completer = LobsterCommandCompleter()
+            self.file_completer = LobsterFileCompleter(client)
+
+            # Commands that expect file arguments
+            self.file_commands = {'/read', '/plot'}
+
+        def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
+            """Generate context-aware completions."""
+            text = document.text_before_cursor.strip()
+
+            if not text:
+                # Empty input - show all commands
+                yield from self.command_completer.get_completions(document, complete_event)
+
+            elif text.startswith('/') and ' ' not in text:
+                # Command completion (typing a command)
+                yield from self.command_completer.get_completions(document, complete_event)
+
+            elif any(text.startswith(cmd + ' ') for cmd in self.file_commands):
+                # File completion for file-accepting commands
+                if self.adapter.can_read_files():
+                    # Create a modified document that only includes the file part
+                    # Find where the file argument starts
+                    parts = text.split(' ', 1)
+                    if len(parts) > 1:
+                        file_part = parts[1]
+                        # Create new document for file completion
+                        from prompt_toolkit.document import Document
+                        file_document = Document(
+                            text=file_part,
+                            cursor_position=len(file_part)
+                        )
+                        yield from self.file_completer.get_completions(file_document, complete_event)
+
+            elif text.startswith('/') and ' ' in text:
+                # Other commands with arguments - could be extended for more specific completions
+                pass
 
 
 def change_mode(new_mode: str, current_client: AgentClient) -> AgentClient:
@@ -60,8 +382,10 @@ def change_mode(new_mode: str, current_client: AgentClient) -> AgentClient:
     return client
 
 
-# Initialize Rich console and Typer app
-console = Console()
+# Initialize Rich console with orange theming and Typer app
+console_manager = get_console_manager()
+console = console_manager.console
+
 app = typer.Typer(
     name="lobster",
     help="🦞 Lobster by homara AI - Multi-Agent Bioinformatics Analysis System",
@@ -220,6 +544,89 @@ def init_client(
     )
     
     return client
+
+
+def get_user_input_with_editing(prompt_text: str, client=None) -> str:
+    """
+    Get user input with advanced arrow key navigation, command history, and autocomplete.
+
+    Features:
+    - Left/Right arrows for cursor movement
+    - Up/Down arrows for command history navigation
+    - Ctrl+R for reverse search through history
+    - Home/End for line navigation
+    - Backspace/Delete for editing
+    - Tab completion for commands and files
+    - Cloud-aware file completion
+    - Full command history persistence
+    """
+    try:
+        # Try to use prompt_toolkit with autocomplete if available
+        if PROMPT_TOOLKIT_AVAILABLE and client:
+            # Clean prompt text - remove Rich markup and emoji, keep it simple
+            clean_prompt = prompt_text.replace('[bold red]', '').replace('[/bold red]', '').replace('🦞 ', '')
+
+            # Create client-aware completer
+            main_completer = ThreadedCompleter(
+                LobsterContextualCompleter(client)
+            )
+
+            # Custom style to match Rich orange theme
+            style = Style.from_dict({
+                'completion-menu.completion': 'bg:#2d2d2d #ffffff',
+                'completion-menu.completion.current': 'bg:#ff6600 #ffffff bold',
+                'completion-menu.meta': 'bg:#2d2d2d #888888',
+                'completion-menu.meta.current': 'bg:#ff6600 #ffffff',
+                'completion.command': '#ff6600',
+                'completion.file': '#00aa00',
+            })
+
+            # Use prompt_toolkit with autocomplete - simple grey prompt
+            user_input = prompt(
+                HTML(f'<ansibrightblack>{clean_prompt}</ansibrightblack>'),
+                completer=main_completer,
+                complete_while_typing=True,
+                mouse_support=True,
+                style=style,
+                complete_style='multi-column'
+            )
+            return user_input.strip()
+
+        elif PROMPT_TOOLKIT_AVAILABLE:
+            # Clean prompt text for non-autocomplete mode too
+            clean_prompt = prompt_text.replace('[bold red]', '').replace('[/bold red]', '').replace('🦞 ', '')
+
+            # Use prompt_toolkit without autocomplete (no client provided)
+            user_input = prompt(
+                HTML(f'<ansibrightblack>{clean_prompt}</ansibrightblack>'),
+                mouse_support=True
+            )
+            return user_input.strip()
+
+        else:
+            # Graceful fallback to current Rich input
+            user_input = console_manager.console.input(
+                prompt=prompt_text,
+                markup=True,
+                emoji=True
+            )
+            return user_input.strip()
+
+    except (KeyboardInterrupt, EOFError):
+        # Handle Ctrl+C or Ctrl+D gracefully
+        raise KeyboardInterrupt
+    except Exception as e:
+        # Fallback on any other error (e.g., prompt_toolkit issues)
+        console.print(f"[dim red]Input error, using fallback: {e}[/dim red]")
+        try:
+            user_input = console_manager.console.input(
+                prompt=prompt_text,
+                markup=True,
+                emoji=True
+            )
+            return user_input.strip()
+        except (KeyboardInterrupt, EOFError):
+            raise KeyboardInterrupt
 
 
 def execute_shell_command(command: str) -> bool:
@@ -447,92 +854,124 @@ def get_current_agent_name() -> str:
 
 
 def display_welcome():
-    """Display welcome message with ASCII art."""
-    welcome_text = """
-    [bold black on white]                                                                      [/bold black on white]
-    [bold black on white]  🦞  [bold red on white]LOBSTER[/bold red on white]  by  [bold black on white]homara AI[/bold black on white]  🦞  [/bold black on white]
-    [bold black on white]                                                                      [/bold black on white]
-    
-    [bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]
-    [grey50]         Multi-Agent Bioinformatics Analysis System v2.0         [/grey50]
-    [bold red]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold red]
-    
-    [bold white]Key Tasks:[/bold white]
-    • Analyze RNA-seq & genomics data
-    • Generate visualizations and plots
-    • Extract insights from bioinformatics datasets
-    • Access GEO & literature databases
-    
-    [bold white]Essential Commands:[/bold white]
-    [red]/help[/red]         - Show all available commands
-    [red]/status[/red]       - Show system status  
-    [red]/files[/red]        - List all workspace files
-    [red]/data[/red]         - Show current dataset information
-    [red]/metadata[/red]     - Show detailed metadata information
-    [red]/workspace[/red]    - Show workspace status and configuration
-    [red]/plots[/red]        - List all generated visualizations
-    [red]/plot[/red]         - Open plots directory in file manager
-    [red]/plot[/red] <ID>    - Open a specific plot by ID or name
-    [red]/read[/red] <file>  - Read file from workspace (supports subdirectories)
-    [red]/modes[/red]        - List available operation modes
-    
-    [bold white]Additional Features:[/bold white]
-    • Configuration management via [red]lobster config[/red] subcommands
-    • Single query mode via [red]lobster query[/red] command  
-    • API server mode via [red]lobster serve[/red] command
-    
-    [dim grey50]Powered by LangGraph | © 2025 homara AI[/dim grey50]
-    """
-    console.print(welcome_text)
+    """Display welcome message with enhanced orange branding."""
+    # Create branded header
+    header_text = LobsterTheme.create_title_text("LOBSTER by homara AI", "🦞")
+
+    # Check for enhanced input capabilities
+    input_features = console_manager.get_input_features()
+    input_status = ""
+    if PROMPT_TOOLKIT_AVAILABLE and input_features["arrow_navigation"]:
+        input_status = f"[dim {LobsterTheme.PRIMARY_ORANGE}]✨ Enhanced input: Arrow navigation, command history, reverse search, and Tab autocomplete enabled[/dim {LobsterTheme.PRIMARY_ORANGE}]"
+    elif PROMPT_TOOLKIT_AVAILABLE:
+        input_status = f"[dim {LobsterTheme.PRIMARY_ORANGE}]✨ Enhanced input: Tab autocomplete enabled[/dim {LobsterTheme.PRIMARY_ORANGE}]"
+    else:
+        input_status = f"[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
+
+    welcome_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
+
+{input_status}
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Key Tasks:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• Analyze RNA-seq & genomics data
+• Generate visualizations and plots
+• Extract insights from bioinformatics datasets
+• Access GEO & literature databases
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Essential Commands:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+[{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}]         - Show all available commands
+[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       - Show system status
+[{LobsterTheme.PRIMARY_ORANGE}]/files[/{LobsterTheme.PRIMARY_ORANGE}]        - List all workspace files
+[{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         - Show current dataset information
+[{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     - Show detailed metadata information
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    - Show workspace status and configuration
+[{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        - List all generated visualizations
+[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         - Open plots directory in file manager
+[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    - Open a specific plot by ID or name
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  - Read file from workspace (supports subdirectories)
+[{LobsterTheme.PRIMARY_ORANGE}]/modes[/{LobsterTheme.PRIMARY_ORANGE}]        - List available operation modes
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Additional Features:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• Configuration management via [{LobsterTheme.PRIMARY_ORANGE}]lobster config[/{LobsterTheme.PRIMARY_ORANGE}] subcommands
+• Single query mode via [{LobsterTheme.PRIMARY_ORANGE}]lobster query[/{LobsterTheme.PRIMARY_ORANGE}] command
+• API server mode via [{LobsterTheme.PRIMARY_ORANGE}]lobster serve[/{LobsterTheme.PRIMARY_ORANGE}] command
+
+[dim grey50]Powered by LangGraph | © 2025 homara AI[/dim grey50]"""
+
+    # Create branded welcome panel
+    welcome_panel = LobsterTheme.create_panel(
+        welcome_content,
+        title=str(header_text)
+    )
+
+    console_manager.print(welcome_panel)
 
 
 def display_status(client: AgentClient):
-    """Display current system status."""
+    """Display current system status with enhanced orange theming."""
     status = client.get_status()
-    
+
     # Get current mode/profile
     configurator = get_agent_configurator()
     current_mode = configurator.get_current_profile()
-    
-    # Create status table
-    table = Table(
-        title="🦞 System Status", 
-        box=box.ROUNDED,
-        border_style="red",
-        title_style="bold red on white"
-    )
-    table.add_column("Property", style="bold grey93")
-    table.add_column("Value", style="white")
-    
-    table.add_row("Session ID", status["session_id"])
-    table.add_row("Mode", current_mode)
-    table.add_row("Messages", str(status["message_count"]))
-    table.add_row("Workspace", status["workspace"])
-    table.add_row("Data Loaded", "✓" if status["has_data"] else "✗")
-    
+
+    # Prepare status data for the themed status panel
+    status_data = {
+        "session_id": status["session_id"],
+        "mode": current_mode,
+        "messages": str(status["message_count"]),
+        "workspace": status["workspace"],
+        "data_loaded": status["has_data"]
+    }
+
+    # Add data summary if available
     if status["has_data"] and status["data_summary"]:
         summary = status["data_summary"]
-        table.add_row("Data Shape", str(summary.get("shape", "N/A")))
-        table.add_row("Memory Usage", summary.get("memory_usage", "N/A"))
-    
-    console.print(table)
+        status_data["data_shape"] = str(summary.get("shape", "N/A"))
+        status_data["memory_usage"] = summary.get("memory_usage", "N/A")
+
+    # Use the themed status panel
+    console_manager.print_status_panel(status_data, "System Status")
 
 
 @app.command()
 def chat(
     workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     reasoning: bool = typer.Option(False, "--reasoning", is_flag=True, help="Show agent reasoning"),
-    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with Langfuse")
+    debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with enhanced error reporting")
 ):
     """
     Start an interactive chat session with the multi-agent system.
     """
+    # Enhanced error handling setup
+    if debug:
+        # Enable more detailed tracebacks in debug mode
+        import rich.traceback
+        rich.traceback.install(
+            console=console_manager.error_console,
+            width=None,
+            extra_lines=5,
+            theme="monokai",
+            word_wrap=True,
+            show_locals=True,  # Show local variables in debug mode
+            suppress=[],
+            max_frames=30
+        )
+
     display_welcome()
-    
-    # Initialize client
-    console.print("\n[red]🦞 Initializing Lobster agents...[/red]")
-    client = init_client(workspace, reasoning, debug)
-    console.print("[bold red]✓[/bold red] [white]System ready![/white]\n")
+
+    # Initialize client with enhanced status reporting
+    console_manager.print(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Initializing Lobster agents...[/{LobsterTheme.PRIMARY_ORANGE}]")
+
+    try:
+        client = init_client(workspace, reasoning, debug)
+        console_manager.print_success_panel("System ready!", "All agents initialized successfully")
+    except Exception as e:
+        console_manager.print_error_panel(
+            f"Failed to initialize Lobster: {str(e)}",
+            "Check your configuration and try again"
+        )
+        raise
     
     # Show initial status
     display_status(client)
@@ -542,11 +981,11 @@ def chat(
     
     while True:
         try:
-            # Get user input with rich prompt - show current directory
+            # Get user input with arrow key navigation support
             current_path = str(current_directory.name) if current_directory != Path.home() else "~"
             if current_directory == Path.cwd():
                 current_path = str(current_directory.name)
-            user_input = Prompt.ask(f"\n[bold red]🦞 {current_path}[/bold red]")
+            user_input = get_user_input_with_editing(f"\n[bold red]🦞 {current_path}[/bold red] ", client)
             
             # Handle commands
             if user_input.startswith("/"):
@@ -557,142 +996,390 @@ def chat(
             if execute_shell_command(user_input):
                 continue
             
-            # Process query
+            # Process query with transient progress tracking
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console,
                 transient=True
             ) as progress:
-                task = progress.add_task("Processing...", total=None)
-                
+                task = progress.add_task(
+                    f"🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}",
+                    total=None
+                )
+
                 # Run query
                 result = client.query(user_input, stream=False)
-                
-                progress.stop()
             
-            # Display response
+            # Display response with enhanced theming
             if result["success"]:
                 # Show which agent provided the response if available
                 agent_name = result.get("last_agent", "supervisor")
                 if agent_name and agent_name != '__end__':
                     agent_display = agent_name.replace('_', ' ').title()
-                    title = f"[bold white on red] 🦞 {agent_display} Response [/bold white on red]"
+                    title = f"🦞 {agent_display} Response"
                 else:
-                    title = "[bold white on red] 🦞 Lobster Response [/bold white on red]"
-                
-                response_panel = Panel(
+                    title = "🦞 Lobster Response"
+
+                response_panel = LobsterTheme.create_panel(
                     Markdown(result["response"]),
-                    title=title,
-                    border_style="red",
-                    padding=(1, 2),
-                    box=box.DOUBLE
+                    title=title
                 )
-                console.print(response_panel)
-                
-                # Show any generated plots
+                console_manager.print(response_panel)
+
+                # Show any generated plots with orange styling
                 if result.get("plots"):
-                    console.print(f"\n[red]📊 Generated {len(result['plots'])} visualization(s)[/red]")
+                    plot_text = f"📊 Generated {len(result['plots'])} visualization(s)"
+                    console_manager.print(f"[{LobsterTheme.PRIMARY_ORANGE}]{plot_text}[/{LobsterTheme.PRIMARY_ORANGE}]")
             else:
-                console.print(f"[red]Error: {result['error']}[/red]")
+                console_manager.print_error_panel(result['error'])
         
         except KeyboardInterrupt:
-            if Confirm.ask("\n[red]🦞 Exit Lobster?[/red]"):
-                console.print("\n[bold white on red] 👋 Thank you for using Lobster by homara AI [/bold white on red]\n")
+            if Confirm.ask(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Exit Lobster?[/{LobsterTheme.PRIMARY_ORANGE}]"):
+                exit_panel = LobsterTheme.create_panel(
+                    "👋 Thank you for using Lobster by homara AI",
+                    title="Goodbye"
+                )
+                console_manager.print(exit_panel)
                 break
             continue
         except Exception as e:
-            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]{e}[/red]")
+            # Enhanced error reporting with context
+            error_message = str(e)
+            error_type = type(e).__name__
+
+            # Provide context-aware suggestions
+            suggestions = {
+                "FileNotFoundError": "Check if the file path is correct and the file exists",
+                "PermissionError": "Check file permissions or run with appropriate privileges",
+                "ConnectionError": "Check your internet connection and API keys",
+                "TimeoutError": "The operation timed out. Try again or check your connection",
+                "ImportError": "Required dependency missing. Try reinstalling the package",
+                "ValueError": "Invalid input provided. Check your command syntax",
+                "KeyError": "Missing configuration or data. Check your setup"
+            }
+
+            suggestion = suggestions.get(error_type, "Check the error details and try again")
+
+            console_manager.print_error_panel(
+                f"{error_type}: {error_message}",
+                suggestion
+            )
+
+            # In debug mode, also print the full traceback
+            if debug:
+                console_manager.error_console.print_exception(
+                    width=None,
+                    extra_lines=3,
+                    theme="monokai",
+                    word_wrap=True,
+                    show_locals=True
+                )
 
 
 def handle_command(command: str, client: AgentClient):
-    """Handle slash commands."""
+    """Handle slash commands with enhanced error handling."""
     cmd = command.lower().strip()
+
+    try:
+        _execute_command(cmd, client)
+    except Exception as e:
+        # Enhanced command error handling
+        error_message = str(e)
+        error_type = type(e).__name__
+
+        # Command-specific error suggestions
+        if cmd.startswith("/read"):
+            suggestion = "Check if the file exists and you have read permissions"
+        elif cmd.startswith("/plot"):
+            suggestion = "Ensure plots have been generated and saved to workspace"
+        elif cmd in ["/files", "/data", "/metadata"]:
+            suggestion = "Check if workspace is properly initialized"
+        else:
+            suggestion = "Check command syntax with /help"
+
+        console_manager.print_error_panel(
+            f"Command failed ({error_type}): {error_message}",
+            suggestion
+        )
+
+
+def _execute_command(cmd: str, client: AgentClient):
+    """Execute individual slash commands."""
     
     if cmd == "/help":
-        help_text = """
-        [bold white]Available Commands:[/bold white]
-        
-        [red]/help[/red]         [grey50]-[/grey50] Show this help message
-        [red]/status[/red]       [grey50]-[/grey50] Show system status
-        [red]/files[/red]        [grey50]-[/grey50] List workspace files
-        [red]/data[/red]         [grey50]-[/grey50] Show current data summary
-        [red]/metadata[/red]     [grey50]-[/grey50] Show detailed metadata information
-        [red]/workspace[/red]    [grey50]-[/grey50] Show workspace status and information
-        [red]/modalities[/red]   [grey50]-[/grey50] Show detailed modality information
-        [red]/plots[/red]        [grey50]-[/grey50] List all generated plots
-        [red]/plot[/red]         [grey50]-[/grey50] Open plots directory in file manager
-        [red]/plot[/red] <ID>    [grey50]-[/grey50] Open specific plot by ID or name
-        [red]/save[/red]         [grey50]-[/grey50] Save current state to workspace
-        [red]/read[/red] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
-        [red]/export[/red]       [grey50]-[/grey50] Export session data
-        [red]/reset[/red]        [grey50]-[/grey50] Reset conversation
-        [red]/mode[/red] <name>  [grey50]-[/grey50] Change operation mode
-        [red]/modes[/red]        [grey50]-[/grey50] List available modes
-        [red]/clear[/red]        [grey50]-[/grey50] Clear screen
-        [red]/exit[/red]         [grey50]-[/grey50] Exit the chat
-        
-        [bold white]File Loading Examples:[/bold white]
-        
-        [red]/read[/red] data.h5ad      [grey50]-[/grey50] Load single file
-        [red]/read[/red] *.h5ad         [grey50]-[/grey50] Load all .h5ad files in current directory
-        [red]/read[/red] data/*.csv     [grey50]-[/grey50] Load all .csv files in data/ directory
-        [red]/read[/red] sample_*.h5ad  [grey50]-[/grey50] Load files matching pattern
-        
-        [bold white]Shell Commands:[/bold white] [grey50](execute directly without /)[/grey50]
-        
-        [yellow]cd[/yellow] <path>      [grey50]-[/grey50] Change directory
-        [yellow]pwd[/yellow]            [grey50]-[/grey50] Print current directory
-        [yellow]ls[/yellow] [path]      [grey50]-[/grey50] List directory contents
-        [yellow]mkdir[/yellow] <dir>    [grey50]-[/grey50] Create directory
-        [yellow]touch[/yellow] <file>   [grey50]-[/grey50] Create file
-        [yellow]cp[/yellow] <src> <dst> [grey50]-[/grey50] Copy file/directory
-        [yellow]mv[/yellow] <src> <dst> [grey50]-[/grey50] Move/rename file/directory
-        [yellow]rm[/yellow] <file>      [grey50]-[/grey50] Remove file
-        [yellow]cat[/yellow] <file>     [grey50]-[/grey50] Display file contents
-        """
-        console.print(Panel(
-            help_text, 
-            title="[bold white on red] 🦞 Help Menu [/bold white on red]", 
-            border_style="red",
-            box=box.DOUBLE
-        ))
+        help_text = f"""[bold white]Available Commands:[/bold white]
+
+[{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show this help message
+[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Show system status
+[{LobsterTheme.PRIMARY_ORANGE}]/input-features[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show input capabilities and navigation features
+[{LobsterTheme.PRIMARY_ORANGE}]/dashboard[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show comprehensive system dashboard
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace-info[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show detailed workspace overview
+[{LobsterTheme.PRIMARY_ORANGE}]/analysis-dash[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show analysis monitoring dashboard
+[{LobsterTheme.PRIMARY_ORANGE}]/progress[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Show multi-task progress monitor
+[{LobsterTheme.PRIMARY_ORANGE}]/files[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List workspace files
+[{LobsterTheme.PRIMARY_ORANGE}]/tree[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show directory tree view
+[{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show current data summary
+[{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Show detailed metadata information
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show workspace status and information
+[{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
+[{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List all generated plots
+[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Open plots directory in file manager
+[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    [grey50]-[/grey50] Open specific plot by ID or name
+[{LobsterTheme.PRIMARY_ORANGE}]/save[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Save current state to workspace
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
+[{LobsterTheme.PRIMARY_ORANGE}]/export[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Export session data
+[{LobsterTheme.PRIMARY_ORANGE}]/reset[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Reset conversation
+[{LobsterTheme.PRIMARY_ORANGE}]/mode[/{LobsterTheme.PRIMARY_ORANGE}] <name>  [grey50]-[/grey50] Change operation mode
+[{LobsterTheme.PRIMARY_ORANGE}]/modes[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List available modes
+[{LobsterTheme.PRIMARY_ORANGE}]/clear[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Clear screen
+[{LobsterTheme.PRIMARY_ORANGE}]/exit[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Exit the chat
+
+[bold white]File Loading Examples:[/bold white]
+
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] data.h5ad      [grey50]-[/grey50] Load single file
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] *.h5ad         [grey50]-[/grey50] Load all .h5ad files in current directory
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] data/*.csv     [grey50]-[/grey50] Load all .csv files in data/ directory
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] sample_*.h5ad  [grey50]-[/grey50] Load files matching pattern
+
+[bold white]Shell Commands:[/bold white] [grey50](execute directly without /)[/grey50]
+
+[{LobsterTheme.PRIMARY_ORANGE}]cd[/{LobsterTheme.PRIMARY_ORANGE}] <path>      [grey50]-[/grey50] Change directory
+[{LobsterTheme.PRIMARY_ORANGE}]pwd[/{LobsterTheme.PRIMARY_ORANGE}]            [grey50]-[/grey50] Print current directory
+[{LobsterTheme.PRIMARY_ORANGE}]ls[/{LobsterTheme.PRIMARY_ORANGE}] [path]      [grey50]-[/grey50] List directory contents
+[{LobsterTheme.PRIMARY_ORANGE}]mkdir[/{LobsterTheme.PRIMARY_ORANGE}] <dir>    [grey50]-[/grey50] Create directory
+[{LobsterTheme.PRIMARY_ORANGE}]touch[/{LobsterTheme.PRIMARY_ORANGE}] <file>   [grey50]-[/grey50] Create file
+[{LobsterTheme.PRIMARY_ORANGE}]cp[/{LobsterTheme.PRIMARY_ORANGE}] <src> <dst> [grey50]-[/grey50] Copy file/directory
+[{LobsterTheme.PRIMARY_ORANGE}]mv[/{LobsterTheme.PRIMARY_ORANGE}] <src> <dst> [grey50]-[/grey50] Move/rename file/directory
+[{LobsterTheme.PRIMARY_ORANGE}]rm[/{LobsterTheme.PRIMARY_ORANGE}] <file>      [grey50]-[/grey50] Remove file
+[{LobsterTheme.PRIMARY_ORANGE}]cat[/{LobsterTheme.PRIMARY_ORANGE}] <file>     [grey50]-[/grey50] Display file contents"""
+
+        help_panel = LobsterTheme.create_panel(
+            help_text,
+            title="🦞 Help Menu"
+        )
+        console_manager.print(help_panel)
     
     elif cmd == "/status":
         display_status(client)
+
+    elif cmd == "/input-features":
+        # Show input capabilities and navigation features
+        input_features = console_manager.get_input_features()
+
+        if PROMPT_TOOLKIT_AVAILABLE and input_features["arrow_navigation"]:
+            features_text = f"""[bold white]✨ Enhanced Input Features Active[/bold white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Available Navigation:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [green]←/→ Arrow keys[/green] - Navigate within your input text
+• [green]↑/↓ Arrow keys[/green] - Browse command history
+• [green]Ctrl+R[/green] - Reverse search through history
+• [green]Home/End[/green] - Jump to beginning/end of line
+• [green]Backspace/Delete[/green] - Edit text naturally
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Autocomplete Features:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [green]Tab completion[/green] - Complete commands and file names
+• [green]Smart context[/green] - Commands when typing /, files after /read
+• [green]Live preview[/green] - See completions as you type
+• [green]Rich metadata[/green] - File sizes, types, and descriptions
+• [green]Cloud aware[/green] - Works with both local and cloud clients
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]History Features:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [green]Persistent history[/green] - Commands saved between sessions
+• [green]History file[/green] - {input_features['history_file']}
+• [green]Reverse search[/green] - Ctrl+R to find previous commands
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Tips:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• Use ↑/↓ to recall previous commands and questions
+• Use Ctrl+R followed by typing to search command history
+• Press Tab to see available commands or files
+• Edit recalled commands with arrow keys before pressing Enter"""
+        elif PROMPT_TOOLKIT_AVAILABLE:
+            features_text = f"""[bold white]✨ Autocomplete Features Active[/bold white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Autocomplete Features:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [green]Tab completion[/green] - Complete commands and file names
+• [green]Smart context[/green] - Commands when typing /, files after /read
+• [green]Live preview[/green] - See completions as you type
+• [green]Rich metadata[/green] - File sizes, types, and descriptions
+• [green]Cloud aware[/green] - Works with both local and cloud clients
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Available Input:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [yellow]Basic arrow navigation[/yellow] - Limited cursor control
+• [yellow]Backspace/Delete[/yellow] - Edit text
+• [yellow]Enter[/yellow] - Submit commands
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Tips:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• Press Tab to see available commands or files
+• Type / to see all available commands
+• Type /read followed by Tab to see workspace files"""
+        else:
+            features_text = f"""[bold white]📝 Basic Input Mode[/bold white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Current Capabilities:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [yellow]Basic text input[/yellow] - Standard terminal input
+• [yellow]Backspace[/yellow] - Delete characters
+• [yellow]Enter[/yellow] - Submit commands
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]Upgrade Available:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+🚀 [bold white]Get Enhanced Input Features & Autocomplete![/bold white]
+Install prompt-toolkit for arrow key navigation, command history, and Tab completion:
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]pip install prompt-toolkit[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+[bold white]After installation, you'll get:[/bold white]
+• ←/→ Arrow keys for text navigation
+• ↑/↓ Arrow keys for command history
+• Ctrl+R for reverse search
+• [green]Tab completion[/green] for commands and files
+• [green]Smart autocomplete[/green] with file metadata
+• [green]Cloud-aware completion[/green] for remote files
+• Persistent command history between sessions"""
+
+        features_panel = LobsterTheme.create_panel(
+            features_text,
+            title="🔤 Input Features & Navigation"
+        )
+        console_manager.print(features_panel)
+
+    elif cmd == "/dashboard":
+        # Show comprehensive system health dashboard
+        try:
+            dashboard_layout = create_system_dashboard(client)
+            console_manager.print(dashboard_layout)
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to create system dashboard: {e}",
+                "Check system permissions and try again"
+            )
+
+    elif cmd == "/workspace-info":
+        # Show detailed workspace overview
+        try:
+            workspace_layout = create_workspace_dashboard(client)
+            console_manager.print(workspace_layout)
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to create workspace overview: {e}",
+                "Check if workspace is properly initialized"
+            )
+
+    elif cmd == "/analysis-dash":
+        # Show analysis monitoring dashboard
+        try:
+            analysis_layout = create_analysis_dashboard(client)
+            console_manager.print(analysis_layout)
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to create analysis dashboard: {e}",
+                "Check if analysis operations have been performed"
+            )
+
+    elif cmd == "/progress":
+        # Show multi-task progress monitor
+        try:
+            progress_manager = get_multi_progress_manager()
+            active_count = progress_manager.get_active_operations_count()
+
+            if active_count > 0:
+                progress_layout = create_multi_progress_layout()
+                console_manager.print(progress_layout)
+            else:
+                # Show information about the progress system
+                info_text = f"""[bold white]Multi-Task Progress Monitor[/bold white]
+
+[{LobsterTheme.PRIMARY_ORANGE}]Status:[/{LobsterTheme.PRIMARY_ORANGE}] No active multi-task operations
+
+[bold white]Features:[/bold white]
+• Real-time progress tracking for concurrent operations
+• Subtask progress monitoring with detailed status
+• Live updates with orange-themed progress bars
+• Operation duration and completion tracking
+
+[bold white]Usage:[/bold white]
+The progress monitor automatically tracks multi-task operations
+when they are started by agents or analysis workflows.
+
+[grey50]Multi-task operations will appear here when active.[/grey50]"""
+
+                info_panel = LobsterTheme.create_panel(
+                    info_text,
+                    title="🔄 Progress Monitor"
+                )
+                console_manager.print(info_panel)
+
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to create progress monitor: {e}",
+                "Check system status and try again"
+            )
     
     elif cmd == "/files":
         # Get categorized workspace files from data_manager
         workspace_files = client.data_manager.list_workspace_files()
-        
+
         if any(workspace_files.values()):
             for category, files in workspace_files.items():
                 if files:
                     # Sort files by modified date (descending: newest first)
                     files_sorted = sorted(files, key=lambda f: f["modified"], reverse=True)
-                    
+
+                    # Create themed table
                     table = Table(
                         title=f"🦞 {category.title()} Files",
-                        box=box.ROUNDED,
-                        border_style="red",
-                        title_style="bold red on white"
+                        **LobsterTheme.get_table_style()
                     )
                     table.add_column("Name", style="bold white")
                     table.add_column("Size", style="grey74")
                     table.add_column("Modified", style="grey50")
                     table.add_column("Path", style="dim grey50")
-                    
+
                     for f in files_sorted:
                         from datetime import datetime
                         size_kb = f["size"] / 1024
                         mod_time = datetime.fromtimestamp(f["modified"]).strftime("%Y-%m-%d %H:%M")
                         table.add_row(f["name"], f"{size_kb:.1f} KB", mod_time, Path(f["path"]).parent.name)
-                    
-                    console.print(table)
-                    console.print()  # Add spacing between categories
+
+                    console_manager.print(table)
+                    console_manager.print()  # Add spacing between categories
         else:
-            console.print("[grey50]No files in workspace[/grey50]")
-    
+            console_manager.print("[grey50]No files in workspace[/grey50]")
+
+    elif cmd == "/tree":
+        # Show directory tree view
+        try:
+            # Show current directory tree
+            current_tree = create_file_tree(
+                root_path=current_directory,
+                title=f"Current Directory: {current_directory.name}",
+                show_hidden=False,
+                max_depth=3
+            )
+
+            tree_panel = LobsterTheme.create_panel(
+                current_tree,
+                title="📁 Directory Tree"
+            )
+            console_manager.print(tree_panel)
+
+            # Also show workspace tree if it exists
+            workspace_path = Path(".lobster_workspace")
+            if workspace_path.exists():
+                console_manager.print()  # Add spacing
+                workspace_tree = create_workspace_tree(workspace_path)
+
+                workspace_panel = LobsterTheme.create_panel(
+                    workspace_tree,
+                    title="🦞 Workspace Tree"
+                )
+                console_manager.print(workspace_panel)
+
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to create tree view: {e}",
+                "Check directory permissions and try again"
+            )
+
     elif cmd.startswith("/read "):
         filename = cmd[6:].strip()
         
@@ -715,8 +1402,10 @@ def handle_command(command: str, client: AgentClient):
             matching_files = glob_module.glob(search_pattern)
             
             if not matching_files:
-                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]No files found matching pattern: {filename}[/red]")
-                console.print(f"[grey50]Searched in: {current_directory}[/grey50]")
+                console_manager.print_error_panel(
+                    f"No files found matching pattern: {filename}",
+                    f"Searched in: {current_directory}"
+                )
                 return
             
             # Sort files for consistent output
@@ -770,7 +1459,6 @@ def handle_command(command: str, client: AgentClient):
                         ) as progress:
                             progress.add_task(f"Loading {file_name}...", total=None)
                             load_result = client.load_data_file(file_name)
-                            progress.stop()
                         
                         if load_result['success']:
                             loaded_files.append({
@@ -779,27 +1467,26 @@ def handle_command(command: str, client: AgentClient):
                                 'shape': load_result['data_shape'],
                                 'size_bytes': load_result['size_bytes']
                             })
-                            console.print(f"[green]   ✅ Loaded as: {load_result['modality_name']}[/green]")
+                            console_manager.print(f"[green]   ✅ Loaded as: {load_result['modality_name']}[/green]")
                         else:
                             failed_files.append(file_name)
-                            console.print(f"[red]   ❌ Loading failed: {load_result.get('error', 'Unknown error')}[/red]")
+                            console_manager.print(f"[red]   ❌ Loading failed: {load_result.get('error', 'Unknown error')}[/red]")
                     
                     else:
                         # For non-data files, just acknowledge them
-                        console.print(f"[yellow]   ⚠️  Skipped: {file_description} (not a data file)[/yellow]")
-                        
+                        console_manager.print(f"[yellow]   ⚠️  Skipped: {file_description} (not a data file)[/yellow]")
+
                 except Exception as e:
                     failed_files.append(file_name)
-                    console.print(f"[red]   ❌ Error processing {file_name}: {e}[/red]")
+                    console_manager.print(f"[red]   ❌ Error processing {file_name}: {e}[/red]")
             
             # Show summary
-            console.print(f"\n[bold cyan]📊 Bulk Loading Summary[/bold cyan]")
+            console_manager.print(f"\n[bold {LobsterTheme.PRIMARY_ORANGE}]📊 Bulk Loading Summary[/bold {LobsterTheme.PRIMARY_ORANGE}]")
             
             if loaded_files:
                 summary_table = Table(
                     title="✅ Successfully Loaded Files",
-                    box=box.ROUNDED,
-                    border_style="green",
+                    **LobsterTheme.get_table_style(),
                     title_style="bold green"
                 )
                 summary_table.add_column("File", style="white")
@@ -879,7 +1566,6 @@ def handle_command(command: str, client: AgentClient):
             ) as progress:
                 progress.add_task("Loading data...", total=None)
                 load_result = client.load_data_file(filename)
-                progress.stop()
             
             if load_result['success']:
                 console.print(f"[bold green]✅ {load_result['message']}[/bold green]")

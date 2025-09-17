@@ -165,7 +165,7 @@ class GEODownloadManager:
                     
                     # Extract only safe members with progress tracking
                     safe_members = [m for m in tar.getmembers() if is_safe_member(m)]
-                    logger.info(f"Extracting {len(safe_members)} validated members from TAR")
+                    logger.debug(f"Extracting {len(safe_members)} validated members from TAR")
                     
                     # Setup progress tracking for extraction
                     total_size = sum(member.size for member in safe_members)
@@ -218,16 +218,16 @@ class GEODownloadManager:
                 return None
                 
             # Log the contents of the TAR directory to help with debugging
-            logger.info(f"Listing contents of TAR directory: {tar_dir}")
+            logger.debug(f"Listing contents of TAR directory: {tar_dir}")
             for item in tar_dir.iterdir():
                 if item.is_file():
-                    logger.info(f"File: {item.name} ({item.stat().st_size} bytes)")
+                    logger.debug(f"File: {item.name} ({item.stat().st_size} bytes)")
                 elif item.is_dir():
-                    logger.info(f"Directory: {item.name}")
+                    logger.debug(f"Directory: {item.name}")
                 
             # Recursively find all files
             all_files = list(tar_dir.glob('**/*'))
-            logger.info(f"Found {len(all_files)} total files in TAR extraction")
+            logger.debug(f"Found {len(all_files)} total files in TAR extraction")
             
             # Define priority keywords and extensions
             # Include specific filename patterns seen in datasets like GSE111672
@@ -302,10 +302,10 @@ class GEODownloadManager:
             suppl_files = self.get_supplementary_files(gse_id)
             
             # Log all available supplementary files for debugging
-            logger.info(f"Available supplementary files for {gse_id}:")
+            logger.debug(f"Available supplementary files for {gse_id}:")
             for file_url in suppl_files:
                 file_name = file_url.split('/')[-1]
-                logger.info(f" - {file_name}")
+                logger.debug(f" - {file_name}")
 
             # Enhanced keywords for expression matrices
             keyword_priority = [
@@ -427,7 +427,7 @@ class GEODownloadManager:
             bool: True if download succeeded, False otherwise
         """
         try:
-            logger.info(f"Downloading from: {url}")
+            logger.debug(f"Downloading from: {url}")
             
             # Parse the URL to determine protocol
             parsed_url = urlparse(url)

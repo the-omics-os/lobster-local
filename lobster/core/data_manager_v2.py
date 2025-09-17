@@ -180,7 +180,7 @@ class DataManagerV2:
             raise ValueError(f"Backend '{name}' already registered")
         
         self.backends[name] = backend
-        logger.info(f"Registered backend: {name} ({backend.__class__.__name__})")
+        logger.debug(f"Registered backend: {name} ({backend.__class__.__name__})")
 
     def register_adapter(self, name: str, adapter: IModalityAdapter) -> None:
         """
@@ -197,7 +197,7 @@ class DataManagerV2:
             raise ValueError(f"Adapter '{name}' already registered")
         
         self.adapters[name] = adapter
-        logger.info(f"Registered adapter: {name} ({adapter.__class__.__name__})")
+        logger.debug(f"Registered adapter: {name} ({adapter.__class__.__name__})")
 
     def load_modality(
         self,

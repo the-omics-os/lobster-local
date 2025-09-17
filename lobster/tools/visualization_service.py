@@ -41,7 +41,7 @@ class SingleCellVisualizationService:
 
     def __init__(self):
         """Initialize the visualization service."""
-        logger.info("Initializing SingleCellVisualizationService")
+        logger.debug("Initializing SingleCellVisualizationService")
         
         # Color palettes for consistency
         self.cluster_colors = px.colors.qualitative.Set1
@@ -64,7 +64,7 @@ class SingleCellVisualizationService:
             [1.0, 'black']
         ]
         
-        logger.info("SingleCellVisualizationService initialized successfully")
+        logger.debug("SingleCellVisualizationService initialized successfully")
 
     def create_umap_plot(
         self,
@@ -1546,3 +1546,245 @@ class SingleCellVisualizationService:
                 logger.error(f"Failed to save plot '{name}': {e}")
         
         return saved_files
+
+    def extract_plotly_color_palette(self, fig: go.Figure) -> Dict[str, str]:
+        """
+        Extract cluster colors from Plotly figure for Rich terminal sync.
+        
+        Args:
+            fig: Plotly figure with colored clusters
+            
+        Returns:
+            Dict mapping cluster IDs to hex color codes
+        """
+        try:
+            color_palette = {}
+            
+            # Extract colors from scatter plot traces
+            for trace in fig.data:
+                if hasattr(trace, 'marker') and hasattr(trace.marker, 'color'):
+                    # Handle discrete colors (categorical data)
+                    if hasattr(trace, 'name') and trace.name:
+                        # Get color from marker
+                        if hasattr(trace.marker, 'color') and isinstance(trace.marker.color, str):
+                            color_palette[trace.name] = trace.marker.color
+                        elif hasattr(trace.marker, 'colorscale'):
+                            # For continuous color scales, use a representative color
+                            color_palette[trace.name] = "#1f77b4"  # Default blue
+                
+                # Handle text annotations or hover data that might contain cluster IDs
+                if hasattr(trace, 'customdata') and trace.customdata:
+                    # Extract cluster information from custom data
+                    # This would need to be customized based on how the plot was created
+                    pass
+            
+            # If no colors found, generate default colors
+            if not color_palette:
+                import plotly.express as px
+                default_colors = px.colors.qualitative.Set1
+                color_palette = {f"cluster_{i}": default_colors[i % len(default_colors)] 
+                               for i in range(10)}
+            
+            return color_palette
+            
+        except Exception as e:
+            logger.error(f"Error extracting color palette: {e}")
+            return {}
+
+    def create_annotation_umap_with_palette(self, 
+                                          adata: anndata.AnnData,
+                                          cluster_col: str = "leiden") -> Tuple[go.Figure, Dict[str, str]]:
+        """
+        Generate UMAP plot and extract color palette for Rich terminal sync.
+        
+        Args:
+            adata: AnnData object with UMAP coordinates
+            cluster_col: Column name for clustering
+            
+        Returns:
+            Tuple of (plotly figure, color palette dict)
+        """
+        try:
+            # Create standard UMAP plot
+            fig = self.create_umap_plot(
+                adata=adata,
+                color_by=cluster_col,
+                title=f"UMAP - {cluster_col} (Color Synchronized)"
+            )
+            
+            # Extract color mapping from the plot
+            color_palette = {}
+            unique_clusters = adata.obs[cluster_col].unique()
+            
+            # Get colors from plot traces
+            for i, trace in enumerate(fig.data):
+                if hasattr(trace, 'marker') and hasattr(trace.marker, 'color'):
+                    if isinstance(trace.marker.color, str):
+                        # Single color for this trace
+                        cluster_id = str(unique_clusters[i]) if i < len(unique_clusters) else f"cluster_{i}"
+                        color_palette[cluster_id] = trace.marker.color
+                    elif hasattr(trace.marker, 'colorscale'):
+                        # Continuous color scale - extract discrete colors
+                        colors = self._extract_discrete_colors_from_continuous(
+                            trace.marker.color, 
+                            len(unique_clusters)
+                        )
+                        for j, cluster_id in enumerate(unique_clusters):
+                            if j < len(colors):
+                                color_palette[str(cluster_id)] = colors[j]
+            
+            # Fallback: generate colors if extraction failed
+            if not color_palette:
+                color_palette = self._generate_cluster_colors(unique_clusters)
+            
+            # Add color information to figure metadata
+            fig.update_layout(
+                annotations=[
+                    dict(
+                        text=f"Colors synchronized with Rich terminal interface",
+                        showarrow=False,
+                        xref="paper", yref="paper",
+                        x=0.02, y=0.98,
+                        xanchor="left", yanchor="top",
+                        font=dict(size=10, color="gray")
+                    )
+                ]
+            )
+            
+            return fig, color_palette
+            
+        except Exception as e:
+            logger.error(f"Error creating annotation UMAP with palette: {e}")
+            # Return basic plot without color sync
+            fig = self.create_umap_plot(adata, color_by=cluster_col)
+            fallback_colors = self._generate_cluster_colors(adata.obs[cluster_col].unique())
+            return fig, fallback_colors
+
+    def _extract_discrete_colors_from_continuous(self, 
+                                               color_data: List, 
+                                               n_colors: int) -> List[str]:
+        """
+        Extract discrete colors from continuous color data.
+        
+        Args:
+            color_data: Continuous color data from plotly trace
+            n_colors: Number of discrete colors needed
+            
+        Returns:
+            List of hex color codes
+        """
+        try:
+            import numpy as np
+            
+            # Convert color data to numpy array
+            color_array = np.array(color_data)
+            
+            # Get unique values and map to discrete colors
+            unique_values = np.unique(color_array)
+            
+            # Use plotly's default color scale
+            import plotly.express as px
+            colors = px.colors.sample_colorscale(
+                'viridis', 
+                [i/(len(unique_values)-1) for i in range(len(unique_values))]
+            )
+            
+            return colors[:n_colors]
+            
+        except Exception as e:
+            logger.error(f"Error extracting discrete colors: {e}")
+            return self._generate_cluster_colors(list(range(n_colors)))
+
+    def _generate_cluster_colors(self, cluster_ids: List) -> Dict[str, str]:
+        """
+        Generate colors for clusters using plotly's default palette.
+        
+        Args:
+            cluster_ids: List of cluster identifiers
+            
+        Returns:
+            Dict mapping cluster IDs to hex colors
+        """
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Use matplotlib's tab20 colormap for consistency with scanpy
+            n_clusters = len(cluster_ids)
+            colors = plt.cm.tab20(np.linspace(0, 1, n_clusters))
+            
+            color_palette = {}
+            for i, cluster_id in enumerate(cluster_ids):
+                hex_color = f"#{int(colors[i][0]*255):02x}{int(colors[i][1]*255):02x}{int(colors[i][2]*255):02x}"
+                color_palette[str(cluster_id)] = hex_color
+            
+            return color_palette
+            
+        except Exception as e:
+            logger.error(f"Error generating cluster colors: {e}")
+            # Fallback to simple colors
+            simple_colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", 
+                           "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+            return {str(cluster_id): simple_colors[i % len(simple_colors)] 
+                   for i, cluster_id in enumerate(cluster_ids)}
+
+    def rich_color_from_hex(self, hex_color: str) -> str:
+        """
+        Convert hex color to Rich terminal color format.
+        
+        Args:
+            hex_color: Hex color code (e.g., "#1f77b4")
+            
+        Returns:
+            Rich-compatible color string
+        """
+        try:
+            # Remove # if present
+            hex_color = hex_color.lstrip('#')
+            
+            # Rich supports hex colors directly
+            return f"#{hex_color}"
+            
+        except Exception as e:
+            logger.error(f"Error converting hex color {hex_color}: {e}")
+            return "white"  # Fallback color
+
+    def update_plot_with_annotations(self, 
+                                   fig: go.Figure,
+                                   adata: anndata.AnnData,
+                                   annotation_col: str = "cell_type_manual") -> go.Figure:
+        """
+        Update existing plot with new annotation colors.
+        
+        Args:
+            fig: Existing plotly figure
+            adata: AnnData object with annotations
+            annotation_col: Column containing cell type annotations
+            
+        Returns:
+            Updated plotly figure
+        """
+        try:
+            if annotation_col not in adata.obs.columns:
+                logger.warning(f"Annotation column {annotation_col} not found")
+                return fig
+            
+            # Create new UMAP plot with annotations
+            updated_fig = self.create_umap_plot(
+                adata=adata,
+                color_by=annotation_col,
+                title=f"UMAP - Manual Annotations ({annotation_col})"
+            )
+            
+            # Preserve original layout settings
+            updated_fig.update_layout(
+                width=fig.layout.width,
+                height=fig.layout.height,
+                showlegend=True
+            )
+            
+            return updated_fig
+            
+        except Exception as e:
+            logger.error(f"Error updating plot with annotations: {e}")
+            return fig

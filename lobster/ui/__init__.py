@@ -11,12 +11,13 @@ This module provides advanced Rich-based UI components including:
 from .themes import LobsterTheme
 from .console_manager import get_console, setup_logging
 from .live_dashboard import LiveDashboard
-from .progress_manager import ProgressManager
+from .progress_manager import ProgressManager, get_progress_manager
 
 __all__ = [
     'LobsterTheme',
     'get_console',
     'setup_logging',
     'LiveDashboard',
-    'ProgressManager'
+    'ProgressManager',
+    'get_progress_manager'
 ]

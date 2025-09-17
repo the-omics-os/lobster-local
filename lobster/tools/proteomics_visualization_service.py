@@ -47,7 +47,7 @@ class ProteomicsVisualizationService:
 
     def __init__(self):
         """Initialize the proteomics visualization service."""
-        logger.info("Initializing ProteomicsVisualizationService")
+        logger.debug("Initializing ProteomicsVisualizationService")
         
         # Color palettes optimized for proteomics data
         self.intensity_colors = px.colors.sequential.Viridis
@@ -77,7 +77,7 @@ class ProteomicsVisualizationService:
         self.default_pvalue_threshold = 0.05
         self.default_fc_threshold = 1.5  # Fold change threshold
         
-        logger.info("ProteomicsVisualizationService initialized successfully")
+        logger.debug("ProteomicsVisualizationService initialized successfully")
 
     def create_missing_value_heatmap(
         self,
