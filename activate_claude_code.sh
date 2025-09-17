@@ -16,5 +16,5 @@ export ANTHROPIC_SMALL_FAST_MODEL='us.anthropic.claude-sonnet-4-20250514-v1:0'
 #export DISABLE_PROMPT_CACHING=1
 
 # Recommended output token settings for Bedrock
-export CLAUDE_CODE_MAX_OUTPUT_TOKENS=10024
+export CLAUDE_CODE_MAX_OUTPUT_TOKENS=60024
 export MAX_THINKING_TOKENS=2024
