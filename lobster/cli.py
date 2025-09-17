@@ -225,22 +225,24 @@ if PROMPT_TOOLKIT_AVAILABLE:
 
         def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
             """Generate command completions."""
-            # Get current word being typed
-            word = document.get_word_before_cursor()
+            text_before_cursor = document.text_before_cursor.lstrip()
 
             # Only complete if we're typing a command (starts with /)
-            if not document.text_before_cursor.lstrip().startswith('/'):
+            if not text_before_cursor.startswith('/'):
                 return
+
+            # Extract the command being typed (from / until space or end)
+            command_part = text_before_cursor.split()[0] if ' ' in text_before_cursor else text_before_cursor
 
             # Get available commands (cached)
             commands = self._get_cached_commands()
 
             # Generate completions
             for cmd, description in commands.items():
-                if cmd.lower().startswith(word.lower()):
+                if cmd.lower().startswith(command_part.lower()):
                     yield Completion(
                         text=cmd,
-                        start_position=-len(word),
+                        start_position=-len(command_part),
                         display=HTML(f'<ansired>{cmd}</ansired>'),
                         display_meta=HTML(f'<dim>{description}</dim>'),
                         style='class:completion.command'
