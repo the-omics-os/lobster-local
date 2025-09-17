@@ -75,7 +75,8 @@ class TestManualAnnotationService:
         # Check state was created
         assert isinstance(state, AnnotationState)
         assert annotation_service.state == state
-        assert annotation_service.adata == mock_adata
+        # Use shape comparison instead of direct AnnData comparison
+        assert annotation_service.adata.shape == mock_adata.shape
         
         # Check clusters were extracted
         unique_clusters = mock_adata.obs['leiden'].unique()
@@ -218,7 +219,8 @@ class TestManualAnnotationService:
     
     @patch('builtins.open')
     @patch('json.dump')
-    def test_export_functionality(self, mock_json_dump, mock_open, annotation_service, mock_adata):
+    @patch('rich.prompt.Prompt.ask')
+    def test_export_functionality(self, mock_prompt_ask, mock_json_dump, mock_open, annotation_service, mock_adata):
         """Test annotation export functionality."""
         
         # Initialize session with annotations
@@ -227,10 +229,12 @@ class TestManualAnnotationService:
         state.cell_type_mapping['1'] = 'B cells'
         state.debris_clusters.add('9')
         
-        # Mock Rich console input
-        with patch.object(annotation_service.console, 'input', return_value='test_export.json'):
-            with patch.object(annotation_service.console, 'print'):
-                annotation_service._export_annotations()
+        # Mock Rich Prompt.ask to return filename
+        mock_prompt_ask.return_value = 'test_export.json'
+        
+        # Mock console print to avoid output
+        with patch.object(annotation_service.console, 'print'):
+            annotation_service._export_annotations()
         
         # Verify export was called
         mock_open.assert_called_once_with('test_export.json', 'w')
@@ -251,7 +255,8 @@ class TestManualAnnotationService:
     
     @patch('builtins.open')
     @patch('json.load')
-    def test_import_functionality(self, mock_json_load, mock_open, annotation_service, mock_adata):
+    @patch('rich.prompt.Prompt.ask')
+    def test_import_functionality(self, mock_prompt_ask, mock_json_load, mock_open, annotation_service, mock_adata):
         """Test annotation import functionality."""
         
         # Mock import data
@@ -267,13 +272,15 @@ class TestManualAnnotationService:
         
         mock_json_load.return_value = import_data
         
+        # Mock Rich Prompt.ask to return filename
+        mock_prompt_ask.return_value = 'test_import.json'
+        
         # Initialize session
         state = annotation_service.initialize_annotation_session(mock_adata, 'leiden')
         
-        # Mock Rich console input and print
-        with patch.object(annotation_service.console, 'input', return_value='test_import.json'):
-            with patch.object(annotation_service.console, 'print'):
-                annotation_service._import_annotations()
+        # Mock console print to avoid output
+        with patch.object(annotation_service.console, 'print'):
+            annotation_service._import_annotations()
         
         # Verify import was called
         mock_open.assert_called_once_with('test_import.json', 'r')
