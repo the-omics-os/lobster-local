@@ -592,3 +592,307 @@ class DifferentialFormulaService:
                 'warnings': [],
                 'design_summary': {}
             }
+
+    def suggest_formulas(
+        self,
+        metadata: pd.DataFrame,
+        analysis_goal: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Suggest appropriate formulas based on metadata structure.
+        
+        Analyzes available columns, their types, and distributions to suggest
+        statistically appropriate formulas for differential expression analysis.
+        
+        Args:
+            metadata: Sample metadata DataFrame
+            analysis_goal: Optional analysis goal description
+            
+        Returns:
+            List[Dict[str, Any]]: List of formula suggestions with details
+        """
+        self.logger.info("Analyzing metadata to suggest appropriate formulas")
+        
+        try:
+            n_samples = len(metadata)
+            suggestions = []
+            
+            # Analyze variables
+            variable_info = {}
+            for col in metadata.columns:
+                if col.startswith('_') or col in ['n_cells', 'total_counts']:
+                    continue
+                
+                series = metadata[col]
+                if pd.api.types.is_numeric_dtype(series):
+                    var_type = 'continuous'
+                    unique_vals = len(series.unique())
+                    missing = series.isna().sum()
+                else:
+                    var_type = 'categorical' 
+                    unique_vals = len(series.unique())
+                    missing = series.isna().sum()
+                
+                # Only consider useful variables
+                if missing < n_samples/2 and unique_vals > 1:
+                    variable_info[col] = {
+                        'type': var_type,
+                        'unique_values': unique_vals,
+                        'missing_count': missing,
+                        'levels': list(series.unique()) if var_type == 'categorical' else None
+                    }
+            
+            # Categorize variables
+            categorical_vars = [col for col, info in variable_info.items() 
+                              if info['type'] == 'categorical' and info['unique_values'] < n_samples/2]
+            continuous_vars = [col for col, info in variable_info.items() 
+                             if info['type'] == 'continuous']
+            
+            # Identify main condition (binary categorical)
+            main_conditions = [col for col in categorical_vars 
+                             if variable_info[col]['unique_values'] == 2]
+            
+            # Identify batch variables
+            batch_vars = []
+            for col in categorical_vars:
+                if col.lower() in ['batch', 'sample', 'donor', 'patient', 'subject']:
+                    batch_vars.append(col)
+                elif variable_info[col]['unique_values'] > 2 and variable_info[col]['unique_values'] <= 6:
+                    batch_vars.append(col)
+            
+            if main_conditions:
+                main_condition = main_conditions[0]
+                
+                # Simple formula
+                suggestions.append({
+                    'formula': f'~{main_condition}',
+                    'complexity': 'simple',
+                    'description': f'Direct comparison between {main_condition} groups',
+                    'pros': ['Maximum statistical power', 'Clear interpretation'],
+                    'cons': ['Ignores confounders', 'May have batch effects'],
+                    'recommended_for': 'Initial exploratory analysis',
+                    'min_samples_needed': 6,
+                    'variables_used': [main_condition]
+                })
+                
+                # Batch-corrected formula
+                if batch_vars:
+                    primary_batch = batch_vars[0]
+                    suggestions.append({
+                        'formula': f'~{main_condition} + {primary_batch}',
+                        'complexity': 'batch_corrected',
+                        'description': f'Compare {main_condition} accounting for {primary_batch} effects',
+                        'pros': ['Controls batch effects', 'More robust estimates'],
+                        'cons': ['Reduced power', 'Requires balanced design'],
+                        'recommended_for': 'Multi-batch experiments',
+                        'min_samples_needed': 8,
+                        'variables_used': [main_condition, primary_batch]
+                    })
+                
+                # Multi-factor formula
+                if len(batch_vars) > 1 or continuous_vars:
+                    covariates = batch_vars[:2] + continuous_vars[:1]
+                    all_vars = [main_condition] + covariates
+                    suggestions.append({
+                        'formula': f'~{" + ".join(all_vars)}',
+                        'complexity': 'multifactor',
+                        'description': f'Comprehensive model with {len(covariates)} covariates',
+                        'pros': ['Controls multiple confounders', 'Publication ready'],
+                        'cons': ['Requires larger sample size', 'Complex interpretation'],
+                        'recommended_for': 'Final analysis with adequate samples',
+                        'min_samples_needed': max(12, len(all_vars) * 3),
+                        'variables_used': all_vars
+                    })
+                
+                # Interaction formula if justified
+                if batch_vars and n_samples >= 16:
+                    interaction_vars = [main_condition, batch_vars[0]]
+                    suggestions.append({
+                        'formula': f'~{main_condition}*{batch_vars[0]}',
+                        'complexity': 'interaction',
+                        'description': f'Interaction between {main_condition} and {batch_vars[0]}',
+                        'pros': ['Captures interaction effects', 'Flexible modeling'],
+                        'cons': ['High sample requirement', 'Complex interpretation'],
+                        'recommended_for': 'When condition effects vary by batch',
+                        'min_samples_needed': 16,
+                        'variables_used': interaction_vars
+                    })
+            
+            self.logger.info(f"Generated {len(suggestions)} formula suggestions")
+            return suggestions
+            
+        except Exception as e:
+            self.logger.error(f"Error suggesting formulas: {e}")
+            return []
+
+    def preview_design_matrix(
+        self,
+        formula: str,
+        metadata: pd.DataFrame,
+        max_rows: int = 5
+    ) -> str:
+        """
+        Generate human-readable preview of design matrix.
+        
+        Shows first few rows of design matrix with column explanations,
+        useful for agent to show users what their formula produces.
+        
+        Args:
+            formula: R-style formula
+            metadata: Sample metadata
+            max_rows: Maximum rows to show in preview
+            
+        Returns:
+            str: Formatted design matrix preview
+        """
+        try:
+            # Parse formula and construct design matrix
+            formula_components = self.parse_formula(formula, metadata)
+            design_result = self.construct_design_matrix(formula_components, metadata)
+            
+            design_df = design_result['design_df']
+            
+            # Create preview text
+            preview = f"Design Matrix Preview ({design_df.shape[0]} × {design_df.shape[1]}):\n\n"
+            
+            # Show first few rows
+            preview_df = design_df.head(max_rows)
+            preview += preview_df.to_string(max_cols=8, float_format=lambda x: f'{x:.2f}')
+            
+            if len(design_df) > max_rows:
+                preview += f"\n... and {len(design_df) - max_rows} more rows"
+            
+            preview += "\n\nColumn Explanations:\n"
+            
+            # Explain each column
+            for col in design_df.columns:
+                if col == '(Intercept)':
+                    preview += f"• {col}: Baseline/intercept term\n"
+                elif '[T.' in col:
+                    # Categorical variable level
+                    var_name = col.split('[T.')[0]
+                    level_name = col.split('[T.')[1].rstrip(']')
+                    preview += f"• {col}: Effect of {var_name}={level_name} vs reference\n"
+                elif ':' in col:
+                    # Interaction term
+                    vars_in_interaction = col.split(':')
+                    preview += f"• {col}: Interaction between {' and '.join(vars_in_interaction)}\n"
+                else:
+                    # Continuous variable
+                    preview += f"• {col}: Continuous variable effect\n"
+            
+            # Add design properties
+            rank = np.linalg.matrix_rank(design_result['design_matrix'])
+            n_cols = design_result['design_matrix'].shape[1]
+            
+            preview += f"\nDesign Properties:\n"
+            preview += f"• Matrix rank: {rank}/{n_cols} ({'full rank' if rank == n_cols else 'rank deficient'})\n"
+            preview += f"• Degrees of freedom: {len(metadata) - n_cols}\n"
+            
+            return preview
+            
+        except Exception as e:
+            return f"Error creating design matrix preview: {str(e)}"
+
+    def estimate_statistical_power(
+        self,
+        design_matrix: np.ndarray,
+        effect_size: float = 0.5,
+        alpha: float = 0.05
+    ) -> Dict[str, float]:
+        """
+        Quick power estimation for the experimental design.
+        
+        Provides rough power estimate to help users understand if their
+        design has sufficient samples for detecting effects.
+        
+        Args:
+            design_matrix: Design matrix from construct_design_matrix
+            effect_size: Expected effect size (Cohen's d)
+            alpha: Significance level
+            
+        Returns:
+            Dict[str, float]: Power estimates and recommendations
+        """
+        try:
+            n_samples = design_matrix.shape[0]
+            n_params = design_matrix.shape[1]
+            df_residual = n_samples - n_params
+            
+            # Simple power approximation based on sample size and effect size
+            # This is a rough estimate, not exact power calculation
+            
+            # Standard effect size interpretations
+            if effect_size >= 0.8:
+                effect_category = "large"
+            elif effect_size >= 0.5:
+                effect_category = "medium"
+            elif effect_size >= 0.2:
+                effect_category = "small"
+            else:
+                effect_category = "very small"
+            
+            # Rough power estimates based on sample size and effect size
+            # These are approximations for guidance only
+            if df_residual < 4:
+                estimated_power = 0.1
+                power_category = "very low"
+            elif df_residual < 10:
+                if effect_size >= 0.8:
+                    estimated_power = 0.6
+                elif effect_size >= 0.5:
+                    estimated_power = 0.4
+                else:
+                    estimated_power = 0.2
+                power_category = "low"
+            elif df_residual < 20:
+                if effect_size >= 0.8:
+                    estimated_power = 0.85
+                elif effect_size >= 0.5:
+                    estimated_power = 0.65
+                else:
+                    estimated_power = 0.35
+                power_category = "moderate"
+            else:
+                if effect_size >= 0.8:
+                    estimated_power = 0.95
+                elif effect_size >= 0.5:
+                    estimated_power = 0.80
+                else:
+                    estimated_power = 0.50
+                power_category = "good" if estimated_power >= 0.8 else "moderate"
+            
+            # Recommendations
+            recommendations = []
+            if estimated_power < 0.5:
+                recommendations.append("Consider increasing sample size")
+                if n_params > 5:
+                    recommendations.append("Consider simplifying the model")
+            elif estimated_power < 0.8:
+                recommendations.append("Power is moderate - consider more samples for robust results")
+            else:
+                recommendations.append("Good power for detecting medium to large effects")
+            
+            if df_residual < 6:
+                recommendations.append("Very few degrees of freedom - results may be unreliable")
+            
+            return {
+                'estimated_power': estimated_power,
+                'power_category': power_category,
+                'effect_size': effect_size,
+                'effect_category': effect_category,
+                'sample_size': n_samples,
+                'parameters': n_params,
+                'df_residual': df_residual,
+                'alpha': alpha,
+                'recommendations': recommendations
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error estimating statistical power: {e}")
+            return {
+                'estimated_power': 0.0,
+                'power_category': 'unknown',
+                'error': str(e),
+                'recommendations': ['Unable to estimate power - check design matrix']
+            }

@@ -26,7 +26,8 @@ from lobster.tools.pseudobulk_service import PseudobulkService
 from lobster.tools.bulk_rnaseq_service import BulkRNASeqService
 from lobster.tools.manual_annotation_service import ManualAnnotationService
 from lobster.tools.annotation_templates import AnnotationTemplateService, TissueType
-from lobster.core import PseudobulkError, AggregationError, InsufficientCellsError
+from lobster.tools.differential_formula_service import DifferentialFormulaService
+from lobster.core import PseudobulkError, AggregationError, InsufficientCellsError, FormulaError, DesignMatrixError
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -69,6 +70,9 @@ def singlecell_expert(
     # Initialize manual annotation services
     manual_annotation_service = ManualAnnotationService()
     template_service = AnnotationTemplateService()
+    
+    # Initialize formula service for agent-guided DE analysis
+    formula_service = DifferentialFormulaService()
     
     analysis_results = {"summary": "", "details": {}}
     
@@ -2679,6 +2683,913 @@ Use this mapping to apply consistent annotations to similar datasets."""
             return f"Error importing annotation mapping: {str(e)}"
 
     # -------------------------
+    # AGENT-GUIDED FORMULA CONSTRUCTION TOOLS
+    # -------------------------
+    @tool
+    def suggest_formula_for_design(
+        pseudobulk_modality: str,
+        analysis_goal: Optional[str] = None,
+        show_metadata_summary: bool = True
+    ) -> str:
+        """
+        Analyze metadata and suggest appropriate formulas for differential expression analysis.
+        
+        The agent examines the pseudobulk metadata structure and suggests 2-3 formula options
+        based on available variables, explaining each in plain language with pros/cons.
+        
+        Args:
+            pseudobulk_modality: Name of pseudobulk modality to analyze
+            analysis_goal: Optional description of analysis goals
+            show_metadata_summary: Whether to show detailed metadata summary
+        """
+        try:
+            # Validate modality exists
+            if pseudobulk_modality not in data_manager.list_modalities():
+                return f"Modality '{pseudobulk_modality}' not found. Available: {data_manager.list_modalities()}"
+            
+            # Get the pseudobulk data
+            adata = data_manager.get_modality(pseudobulk_modality)
+            logger.info(f"Analyzing formula design for pseudobulk modality '{pseudobulk_modality}': {adata.shape[0]} samples × {adata.shape[1]} genes")
+            
+            # Analyze metadata structure
+            metadata = adata.obs
+            n_samples = len(metadata)
+            
+            # Identify variable types and characteristics
+            variable_analysis = {}
+            for col in metadata.columns:
+                if col.startswith('_') or col in ['n_cells', 'total_counts']:
+                    continue  # Skip internal columns
+                    
+                series = metadata[col]
+                if pd.api.types.is_numeric_dtype(series):
+                    var_type = 'continuous'
+                    unique_vals = len(series.unique())
+                    missing = series.isna().sum()
+                else:
+                    var_type = 'categorical'
+                    unique_vals = len(series.unique())
+                    missing = series.isna().sum()
+                
+                variable_analysis[col] = {
+                    'type': var_type,
+                    'unique_values': unique_vals,
+                    'missing_count': missing,
+                    'sample_values': list(series.unique())[:5]
+                }
+            
+            # Generate formula suggestions
+            suggestions = []
+            categorical_vars = [col for col, info in variable_analysis.items() 
+                              if info['type'] == 'categorical' and info['unique_values'] > 1 and info['unique_values'] < n_samples/2]
+            continuous_vars = [col for col, info in variable_analysis.items() 
+                             if info['type'] == 'continuous' and info['missing_count'] < n_samples/2]
+            
+            # Identify potential main condition and batch variables
+            main_condition = None
+            batch_vars = []
+            
+            for col in categorical_vars:
+                unique_count = variable_analysis[col]['unique_values']
+                if unique_count == 2 and not main_condition:
+                    main_condition = col
+                elif col.lower() in ['batch', 'sample', 'donor', 'patient', 'subject']:
+                    batch_vars.append(col)
+                elif unique_count > 2 and unique_count <= 6:
+                    batch_vars.append(col)
+            
+            if main_condition:
+                # Simple comparison
+                suggestions.append({
+                    'formula': f'~{main_condition}',
+                    'complexity': 'Simple',
+                    'description': f'Compare {main_condition} groups directly',
+                    'pros': ['Maximum statistical power', 'Straightforward interpretation', 'Robust with small sample sizes'],
+                    'cons': ['Ignores potential confounders', 'May miss batch effects'],
+                    'recommended_for': 'Initial exploratory analysis or when confounders are minimal',
+                    'min_samples': 6
+                })
+                
+                # Batch-corrected if batch variables available
+                if batch_vars:
+                    primary_batch = batch_vars[0]
+                    suggestions.append({
+                        'formula': f'~{main_condition} + {primary_batch}',
+                        'complexity': 'Batch-corrected',
+                        'description': f'Compare {main_condition} while accounting for {primary_batch} effects',
+                        'pros': ['Controls for technical/batch variation', 'More reliable effect estimates'],
+                        'cons': ['Reduces degrees of freedom', 'Requires balanced design'],
+                        'recommended_for': 'Multi-batch experiments or when batch effects are suspected',
+                        'min_samples': 8
+                    })
+                
+                # Full model with multiple covariates
+                if len(batch_vars) > 1 or continuous_vars:
+                    covariates = batch_vars[:2] + continuous_vars[:1]  # Limit to avoid overfitting
+                    formula_terms = [main_condition] + covariates
+                    suggestions.append({
+                        'formula': f'~{" + ".join(formula_terms)}',
+                        'complexity': 'Multi-factor',
+                        'description': f'Comprehensive model accounting for {main_condition} and {len(covariates)} covariates',
+                        'pros': ['Controls for multiple confounders', 'Publication-ready analysis', 'Robust effect estimates'],
+                        'cons': ['Requires larger sample size', 'More complex interpretation', 'Risk of overfitting'],
+                        'recommended_for': 'Final analysis with adequate sample size and multiple known confounders',
+                        'min_samples': max(12, len(formula_terms) * 3)
+                    })
+            
+            # Build response
+            response = f"📊 **Formula Design Analysis for '{pseudobulk_modality}'**\n\n"
+            
+            if show_metadata_summary:
+                response += f"**Metadata Summary:**\n"
+                response += f"• Samples: {n_samples}\n"
+                response += f"• Variables analyzed: {len(variable_analysis)}\n"
+                response += f"• Categorical variables: {len(categorical_vars)}\n"
+                response += f"• Continuous variables: {len(continuous_vars)}\n\n"
+                
+                response += f"**Key Variables:**\n"
+                for col, info in list(variable_analysis.items())[:6]:
+                    if col in categorical_vars + continuous_vars:
+                        response += f"• **{col}**: {info['type']}, {info['unique_values']} levels"
+                        if info['type'] == 'categorical':
+                            response += f" ({', '.join(map(str, info['sample_values']))})"
+                        response += f"\n"
+                response += "\n"
+            
+            if analysis_goal:
+                response += f"**Analysis Goal**: {analysis_goal}\n\n"
+            
+            if suggestions:
+                response += f"📝 **Recommended Formula Options:**\n\n"
+                for i, suggestion in enumerate(suggestions, 1):
+                    response += f"**{i}. {suggestion['complexity']} Model** *(recommended for {suggestion['recommended_for']})*\n"
+                    response += f"   Formula: `{suggestion['formula']}`\n"
+                    response += f"   Description: {suggestion['description']}\n"
+                    response += f"   ✅ Pros: {', '.join(suggestion['pros'][:2])}\n"
+                    response += f"   ⚠️ Cons: {', '.join(suggestion['cons'][:2])}\n"
+                    response += f"   Min samples needed: {suggestion['min_samples']}\n\n"
+                
+                response += f"💡 **Recommendation**: Start with the simple model for exploration, then use the batch-corrected model if you see batch effects.\n\n"
+                response += f"**Next step**: Use `construct_de_formula_interactive` to build and validate your chosen formula."
+                
+            else:
+                response += f"⚠️ **No suitable variables found for standard DE analysis.**\n"
+                response += f"Please ensure your pseudobulk data has:\n"
+                response += f"• At least one categorical variable with 2+ levels (main condition)\n"
+                response += f"• Sufficient samples per group (minimum 3-4 replicates)\n"
+                response += f"• Proper metadata annotation\n\n"
+                response += f"Available variables: {list(variable_analysis.keys())}"
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="suggest_formula_for_design",
+                parameters={
+                    "pseudobulk_modality": pseudobulk_modality,
+                    "analysis_goal": analysis_goal,
+                    "n_suggestions": len(suggestions)
+                },
+                description=f"Generated {len(suggestions)} formula suggestions for {pseudobulk_modality}"
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error suggesting formulas: {e}")
+            return f"Error analyzing design for formula suggestions: {str(e)}"
+
+    @tool
+    def construct_de_formula_interactive(
+        pseudobulk_modality: str,
+        main_variable: str,
+        covariates: Optional[List[str]] = None,
+        include_interactions: bool = False,
+        validate_design: bool = True
+    ) -> str:
+        """
+        Build DE formula step-by-step with validation and preview.
+        
+        Constructs R-style formula, validates against metadata, shows design matrix preview,
+        and provides warnings about potential statistical issues.
+        
+        Args:
+            pseudobulk_modality: Name of pseudobulk modality
+            main_variable: Primary variable of interest (main comparison)
+            covariates: List of covariate variables to include
+            include_interactions: Whether to include interaction terms
+            validate_design: Whether to validate the experimental design
+        """
+        try:
+            # Validate modality exists
+            if pseudobulk_modality not in data_manager.list_modalities():
+                return f"Modality '{pseudobulk_modality}' not found. Available: {data_manager.list_modalities()}"
+            
+            # Get the pseudobulk data
+            adata = data_manager.get_modality(pseudobulk_modality)
+            metadata = adata.obs
+            
+            # Validate main variable
+            if main_variable not in metadata.columns:
+                available_vars = [col for col in metadata.columns if not col.startswith('_')]
+                return f"Main variable '{main_variable}' not found. Available: {available_vars}"
+            
+            # Build formula
+            formula_terms = [main_variable]
+            if covariates:
+                # Validate covariates
+                missing_covariates = [c for c in covariates if c not in metadata.columns]
+                if missing_covariates:
+                    return f"Covariates not found: {missing_covariates}"
+                formula_terms.extend(covariates)
+            
+            # Construct basic formula
+            if include_interactions and covariates:
+                # Add interaction between main variable and first covariate
+                interaction_term = f"{main_variable}*{covariates[0]}"
+                formula = f"~{interaction_term}"
+                if len(covariates) > 1:
+                    formula += f" + {' + '.join(covariates[1:])}"
+            else:
+                formula = f"~{' + '.join(formula_terms)}"
+            
+            # Parse and validate formula using formula service
+            try:
+                formula_components = formula_service.parse_formula(formula, metadata)
+                design_result = formula_service.construct_design_matrix(formula_components, metadata)
+                
+                # Format response
+                response = f"📊 **Formula Construction Complete for '{pseudobulk_modality}'**\n\n"
+                response += f"🔧 **Constructed Formula**: `{formula}`\n\n"
+                
+                response += f"**Formula Components:**\n"
+                response += f"• Main variable: {main_variable} ({formula_components['variable_info'][main_variable]['type']})\n"
+                if covariates:
+                    response += f"• Covariates: {', '.join(covariates)}\n"
+                if include_interactions:
+                    response += f"• Interactions: Yes (between {main_variable} and {covariates[0] if covariates else 'none'})\n"
+                response += f"• Total terms: {len(formula_components['predictor_terms'])}\n\n"
+                
+                # Design matrix preview
+                response += f"📈 **Design Matrix Preview**:\n"
+                response += f"• Dimensions: {design_result['design_matrix'].shape[0]} samples × {design_result['design_matrix'].shape[1]} coefficients\n"
+                response += f"• Matrix rank: {design_result['rank']} (full rank: {'✓' if design_result['rank'] == design_result['n_coefficients'] else '⚠️'})\n"
+                response += f"• Coefficient names: {', '.join(design_result['coefficient_names'][:5])}{'...' if len(design_result['coefficient_names']) > 5 else ''}\n\n"
+                
+                # Variable information
+                response += f"**Variable Details:**\n"
+                for var, info in formula_components['variable_info'].items():
+                    if info['type'] == 'categorical':
+                        response += f"• **{var}**: {info['n_levels']} levels, reference = '{info['reference_level']}'\n"
+                    else:
+                        response += f"• **{var}**: continuous variable\n"
+                response += "\n"
+                
+                if validate_design:
+                    # Validate experimental design
+                    validation = formula_service.validate_experimental_design(
+                        metadata, formula, min_replicates=2
+                    )
+                    
+                    response += f"✅ **Design Validation**:\n"
+                    response += f"• Valid design: {'✓' if validation['valid'] else '✗'}\n"
+                    
+                    if validation['warnings']:
+                        response += f"• Warnings ({len(validation['warnings'])}):\n"
+                        for warning in validation['warnings'][:3]:
+                            response += f"  - {warning}\n"
+                    
+                    if validation['errors']:
+                        response += f"• Errors ({len(validation['errors'])}):\n"
+                        for error in validation['errors']:
+                            response += f"  - {error}\n"
+                    
+                    response += f"\n**Sample Distribution:**\n"
+                    for var, counts in validation.get('design_summary', {}).items():
+                        response += f"• **{var}**: {dict(list(counts.items())[:4])}\n"
+                
+                response += f"\n💡 **Recommendations**:\n"
+                if design_result['rank'] < design_result['n_coefficients']:
+                    response += f"⚠️ Design matrix is rank deficient - consider removing correlated variables\n"
+                if validation.get('warnings'):
+                    response += f"⚠️ Review warnings above before proceeding\n"
+                else:
+                    response += f"✅ Design looks good! Ready for differential expression analysis\n"
+                
+                response += f"\n**Next step**: Use `run_differential_expression_with_formula` to execute the analysis."
+                
+                # Store formula in modality for later use
+                adata.uns['constructed_formula'] = {
+                    'formula': formula,
+                    'main_variable': main_variable,
+                    'covariates': covariates,
+                    'include_interactions': include_interactions,
+                    'formula_components': formula_components,
+                    'design_result': design_result,
+                    'validation': validation if validate_design else None
+                }
+                data_manager.modalities[pseudobulk_modality] = adata
+                
+            except (FormulaError, DesignMatrixError) as e:
+                response = f"❌ **Formula Construction Failed**\n\n"
+                response += f"**Formula**: `{formula}`\n"
+                response += f"**Error**: {str(e)}\n\n"
+                response += f"💡 **Suggestions**:\n"
+                response += f"• Check variable names are spelled correctly\n"
+                response += f"• Ensure variables have multiple levels (for categorical) or variation (for continuous)\n"
+                response += f"• Reduce model complexity if you have limited samples\n"
+                response += f"• Available variables: {list(metadata.columns)[:10]}"
+                return response
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="construct_de_formula_interactive",
+                parameters={
+                    "pseudobulk_modality": pseudobulk_modality,
+                    "formula": formula,
+                    "main_variable": main_variable,
+                    "covariates": covariates,
+                    "include_interactions": include_interactions
+                },
+                description=f"Constructed and validated formula: {formula}"
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error constructing formula: {e}")
+            return f"Error in formula construction: {str(e)}"
+
+    @tool
+    def run_differential_expression_with_formula(
+        pseudobulk_modality: str,
+        formula: Optional[str] = None,
+        contrast: Optional[List[str]] = None,
+        reference_levels: Optional[dict] = None,
+        alpha: float = 0.05,
+        lfc_threshold: float = 0.0,
+        save_results: bool = True
+    ) -> str:
+        """
+        Execute differential expression analysis with agent-guided formula.
+        
+        Uses pyDESeq2 for analysis, returns formatted results summary, and stores
+        results as new modality for downstream analysis.
+        
+        Args:
+            pseudobulk_modality: Name of pseudobulk modality
+            formula: R-style formula (uses stored formula if None)
+            contrast: Contrast specification [factor, level1, level2]
+            reference_levels: Reference levels for categorical variables
+            alpha: Significance threshold for adjusted p-values
+            lfc_threshold: Log fold change threshold
+            save_results: Whether to save results to files
+        """
+        try:
+            # Validate modality exists
+            if pseudobulk_modality not in data_manager.list_modalities():
+                return f"Modality '{pseudobulk_modality}' not found. Available: {data_manager.list_modalities()}"
+            
+            # Get the pseudobulk data
+            adata = data_manager.get_modality(pseudobulk_modality)
+            
+            # Use stored formula if none provided
+            if formula is None:
+                if 'constructed_formula' in adata.uns:
+                    formula = adata.uns['constructed_formula']['formula']
+                    stored_info = adata.uns['constructed_formula']
+                    response_prefix = f"Using stored formula from interactive construction:\n"
+                else:
+                    return "No formula provided and no stored formula found. Use `construct_de_formula_interactive` first or provide a formula."
+            else:
+                response_prefix = f"Using provided formula:\n"
+                stored_info = None
+            
+            # Auto-detect contrast if not provided
+            if contrast is None and stored_info:
+                main_var = stored_info['main_variable']
+                levels = list(adata.obs[main_var].unique())
+                if len(levels) == 2:
+                    contrast = [main_var, str(levels[1]), str(levels[0])]  # Compare second vs first
+                    response_prefix += f"Auto-detected contrast: {contrast[1]} vs {contrast[2]}\n"
+                else:
+                    return f"Multiple levels found for {main_var}: {levels}. Please specify contrast as [factor, level1, level2]."
+            elif contrast is None:
+                return "No contrast specified. Please provide contrast as [factor, level1, level2]."
+            
+            logger.info(f"Running DE analysis on '{pseudobulk_modality}' with formula: {formula}")
+            
+            # Prepare design matrix using bulk RNA-seq service
+            design_validation = bulk_rnaseq_service.validate_experimental_design(
+                metadata=adata.obs,
+                formula=formula,
+                min_replicates=2
+            )
+            
+            if not design_validation['valid']:
+                error_msgs = "; ".join(design_validation['errors'])
+                return f"❌ **Invalid experimental design**: {error_msgs}\n\nUse `construct_de_formula_interactive` to debug the design."
+            
+            # Create design matrix
+            condition_col = contrast[0]
+            reference_condition = reference_levels.get(condition_col) if reference_levels else None
+            
+            design_result = bulk_rnaseq_service.create_formula_design(
+                metadata=adata.obs,
+                condition_col=condition_col,
+                reference_condition=reference_condition
+            )
+            
+            # Store design information
+            adata.uns['de_formula_design'] = {
+                'formula': formula,
+                'contrast': contrast,
+                'design_matrix_info': design_result,
+                'validation_results': design_validation,
+                'reference_levels': reference_levels
+            }
+            
+            # Run pyDESeq2 analysis
+            results_df, analysis_stats = bulk_rnaseq_service.run_pydeseq2_from_pseudobulk(
+                pseudobulk_adata=adata,
+                formula=formula,
+                contrast=contrast,
+                alpha=alpha,
+                shrink_lfc=True,
+                n_cpus=1
+            )
+            
+            # Filter by LFC threshold if specified
+            if lfc_threshold > 0:
+                significant_mask = (results_df['padj'] < alpha) & (abs(results_df['log2FoldChange']) >= lfc_threshold)
+                n_lfc_filtered = significant_mask.sum()
+            else:
+                n_lfc_filtered = analysis_stats['n_significant_genes']
+            
+            # Store results in modality
+            contrast_name = f"{contrast[0]}_{contrast[1]}_vs_{contrast[2]}"
+            adata.uns[f'de_results_formula_{contrast_name}'] = {
+                'results_df': results_df,
+                'analysis_stats': analysis_stats,
+                'parameters': {
+                    'formula': formula,
+                    'contrast': contrast,
+                    'alpha': alpha,
+                    'lfc_threshold': lfc_threshold,
+                    'reference_levels': reference_levels
+                }
+            }
+            
+            # Update modality
+            data_manager.modalities[pseudobulk_modality] = adata
+            
+            # Save results if requested
+            if save_results:
+                results_path = f"{pseudobulk_modality}_formula_de_results.csv"
+                results_df.to_csv(results_path)
+                
+                modality_path = f"{pseudobulk_modality}_with_formula_results.h5ad"
+                data_manager.save_modality(pseudobulk_modality, modality_path)
+            
+            # Format response
+            response = f"🧬 **Differential Expression Analysis Complete**\n\n"
+            response += response_prefix
+            response += f"**Formula**: `{formula}`\n"
+            response += f"**Contrast**: {contrast[1]} vs {contrast[2]} (in {contrast[0]})\n\n"
+            
+            response += f"📊 **Results Summary**:\n"
+            response += f"• Genes tested: {analysis_stats['n_genes_tested']:,}\n"
+            response += f"• Significant genes (FDR < {alpha}): {analysis_stats['n_significant_genes']:,}\n"
+            if lfc_threshold > 0:
+                response += f"• Significant + |LFC| ≥ {lfc_threshold}: {n_lfc_filtered:,}\n"
+            response += f"• Upregulated ({contrast[1]} > {contrast[2]}): {analysis_stats['n_upregulated']:,}\n"
+            response += f"• Downregulated ({contrast[1]} < {contrast[2]}): {analysis_stats['n_downregulated']:,}\n\n"
+            
+            response += f"🏆 **Top Differentially Expressed Genes**:\n"
+            response += f"**Most Upregulated**:\n"
+            for gene in analysis_stats['top_upregulated'][:5]:
+                gene_data = results_df.loc[gene]
+                response += f"• {gene}: LFC = {gene_data['log2FoldChange']:.2f}, FDR = {gene_data['padj']:.2e}\n"
+            
+            response += f"\n**Most Downregulated**:\n"
+            for gene in analysis_stats['top_downregulated'][:5]:
+                gene_data = results_df.loc[gene]
+                response += f"• {gene}: LFC = {gene_data['log2FoldChange']:.2f}, FDR = {gene_data['padj']:.2e}\n"
+            
+            response += f"\n📈 **Experimental Design**:\n"
+            response += f"• Samples: {design_result['design_matrix'].shape[0]}\n"
+            response += f"• Coefficients: {design_result['design_matrix'].shape[1]}\n"
+            response += f"• Design rank: {design_result['rank']} (full rank: {'✓' if design_result['rank'] == design_result['n_coefficients'] else '⚠️'})\n"
+            
+            if design_validation['warnings']:
+                response += f"\n⚠️ **Design Warnings**: {'; '.join(design_validation['warnings'][:2])}\n"
+            
+            response += f"\n💾 **Results Storage**:\n"
+            response += f"• Stored in: adata.uns['de_results_formula_{contrast_name}']\n"
+            if save_results:
+                response += f"• CSV file: {results_path}\n"
+                response += f"• H5AD file: {modality_path}\n"
+            
+            response += f"\n**Next steps**: Use `iterate_de_analysis` to try different formulas or `compare_de_iterations` to compare results."
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="run_differential_expression_with_formula",
+                parameters={
+                    "pseudobulk_modality": pseudobulk_modality,
+                    "formula": formula,
+                    "contrast": contrast,
+                    "alpha": alpha,
+                    "lfc_threshold": lfc_threshold
+                },
+                description=f"Formula-based DE analysis: {analysis_stats['n_significant_genes']} significant genes"
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in formula-based DE analysis: {e}")
+            return f"Error running differential expression with formula: {str(e)}"
+
+    @tool
+    def iterate_de_analysis(
+        pseudobulk_modality: str,
+        new_formula: Optional[str] = None,
+        new_contrast: Optional[List[str]] = None,
+        filter_criteria: Optional[dict] = None,
+        compare_to_previous: bool = True,
+        iteration_name: Optional[str] = None
+    ) -> str:
+        """
+        Support iterative analysis with formula/filter changes.
+        
+        Enables Step 12 of workflow - trying different formulas or filters, tracking
+        iterations, and comparing results between analyses.
+        
+        Args:
+            pseudobulk_modality: Name of pseudobulk modality
+            new_formula: New formula to try (if None, modify existing)
+            new_contrast: New contrast to test
+            filter_criteria: Additional filtering criteria (e.g., {'min_lfc': 0.5})
+            compare_to_previous: Whether to compare with previous iteration
+            iteration_name: Custom name for this iteration
+        """
+        try:
+            # Validate modality exists
+            if pseudobulk_modality not in data_manager.list_modalities():
+                return f"Modality '{pseudobulk_modality}' not found. Available: {data_manager.list_modalities()}"
+            
+            # Get the pseudobulk data
+            adata = data_manager.get_modality(pseudobulk_modality)
+            
+            # Initialize iteration tracking if not exists
+            if 'de_iterations' not in adata.uns:
+                adata.uns['de_iterations'] = {
+                    'iterations': [],
+                    'current_iteration': 0
+                }
+            
+            iteration_tracker = adata.uns['de_iterations']
+            current_iter = iteration_tracker['current_iteration'] + 1
+            
+            # Determine iteration name
+            if iteration_name is None:
+                iteration_name = f"iteration_{current_iter}"
+            
+            # Get previous results for comparison
+            previous_results = None
+            previous_iteration = None
+            if compare_to_previous and iteration_tracker['iterations']:
+                previous_iteration = iteration_tracker['iterations'][-1]
+                prev_key = f"de_results_formula_{previous_iteration['contrast_name']}"
+                if prev_key in adata.uns:
+                    previous_results = adata.uns[prev_key]['results_df']
+            
+            # Use existing formula/contrast if not provided
+            if new_formula is None or new_contrast is None:
+                if 'de_formula_design' in adata.uns:
+                    if new_formula is None:
+                        new_formula = adata.uns['de_formula_design']['formula']
+                    if new_contrast is None:
+                        new_contrast = adata.uns['de_formula_design']['contrast']
+                else:
+                    return "No previous formula/contrast found and none provided. Run a DE analysis first."
+            
+            logger.info(f"Starting DE iteration '{iteration_name}' on '{pseudobulk_modality}'")
+            
+            # Run the analysis with new parameters
+            run_result = run_differential_expression_with_formula(
+                pseudobulk_modality=pseudobulk_modality,
+                formula=new_formula,
+                contrast=new_contrast,
+                alpha=0.05,
+                lfc_threshold=filter_criteria.get('min_lfc', 0.0) if filter_criteria else 0.0,
+                save_results=False  # Don't save individual iterations
+            )
+            
+            if "Error" in run_result:
+                return f"Error in iteration '{iteration_name}': {run_result}"
+            
+            # Get current results
+            contrast_name = f"{new_contrast[0]}_{new_contrast[1]}_vs_{new_contrast[2]}"
+            current_key = f"de_results_formula_{contrast_name}"
+            
+            if current_key not in adata.uns:
+                return f"Results not found after analysis. Analysis may have failed."
+            
+            current_results = adata.uns[current_key]['results_df']
+            current_stats = adata.uns[current_key]['analysis_stats']
+            
+            # Store iteration information
+            iteration_info = {
+                'name': iteration_name,
+                'formula': new_formula,
+                'contrast': new_contrast,
+                'contrast_name': contrast_name,
+                'n_significant': current_stats['n_significant_genes'],
+                'timestamp': pd.Timestamp.now().isoformat(),
+                'filter_criteria': filter_criteria or {}
+            }
+            
+            # Compare with previous if requested
+            comparison_results = None
+            if compare_to_previous and previous_results is not None:
+                # Calculate overlap
+                current_sig = set(current_results[current_results['padj'] < 0.05].index)
+                previous_sig = set(previous_results[previous_results['padj'] < 0.05].index)
+                
+                overlap = len(current_sig & previous_sig)
+                current_only = len(current_sig - previous_sig)
+                previous_only = len(previous_sig - current_sig)
+                
+                # Calculate correlation of fold changes for overlapping genes
+                common_genes = list(current_sig & previous_sig)
+                if len(common_genes) > 3:
+                    current_lfc = current_results.loc[common_genes, 'log2FoldChange']
+                    previous_lfc = previous_results.loc[common_genes, 'log2FoldChange']
+                    correlation = current_lfc.corr(previous_lfc)
+                else:
+                    correlation = None
+                
+                comparison_results = {
+                    'overlap_genes': overlap,
+                    'current_only': current_only,
+                    'previous_only': previous_only,
+                    'correlation': correlation
+                }
+                
+                iteration_info['comparison'] = comparison_results
+            
+            # Update iteration tracking
+            iteration_tracker['iterations'].append(iteration_info)
+            iteration_tracker['current_iteration'] = current_iter
+            adata.uns['de_iterations'] = iteration_tracker
+            
+            # Update modality
+            data_manager.modalities[pseudobulk_modality] = adata
+            
+            # Format response
+            response = f"🔄 **DE Analysis Iteration '{iteration_name}' Complete**\n\n"
+            response += f"**Formula**: `{new_formula}`\n"
+            response += f"**Contrast**: {new_contrast[1]} vs {new_contrast[2]} (in {new_contrast[0]})\n\n"
+            
+            response += f"📊 **Current Results**:\n"
+            response += f"• Significant genes: {current_stats['n_significant_genes']:,}\n"
+            response += f"• Upregulated: {current_stats['n_upregulated']:,}\n"
+            response += f"• Downregulated: {current_stats['n_downregulated']:,}\n"
+            
+            if comparison_results:
+                response += f"\n🔄 **Comparison with Previous Iteration**:\n"
+                response += f"• Overlapping significant genes: {comparison_results['overlap_genes']:,}\n"
+                response += f"• New in current: {comparison_results['current_only']:,}\n"
+                response += f"• Lost from previous: {comparison_results['previous_only']:,}\n"
+                if comparison_results['correlation'] is not None:
+                    response += f"• Fold change correlation: {comparison_results['correlation']:.3f}\n"
+            
+            response += f"\n📈 **Iteration Summary**:\n"
+            response += f"• Total iterations: {len(iteration_tracker['iterations'])}\n"
+            response += f"• Current iteration: {current_iter}\n"
+            
+            response += f"\n💾 **Results stored in**: adata.uns['de_results_formula_{contrast_name}']\n"
+            response += f"💾 **Iteration tracking**: adata.uns['de_iterations']\n"
+            
+            response += f"\n**Next steps**: Use `compare_de_iterations` to compare all iterations or continue iterating with different parameters."
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="iterate_de_analysis",
+                parameters={
+                    "pseudobulk_modality": pseudobulk_modality,
+                    "iteration_name": iteration_name,
+                    "formula": new_formula,
+                    "contrast": new_contrast,
+                    "compare_to_previous": compare_to_previous
+                },
+                description=f"DE iteration {current_iter}: {current_stats['n_significant_genes']} significant genes"
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error in DE iteration: {e}")
+            return f"Error in DE analysis iteration: {str(e)}"
+
+    @tool
+    def compare_de_iterations(
+        pseudobulk_modality: str,
+        iteration_1: Optional[str] = None,
+        iteration_2: Optional[str] = None,
+        show_overlap: bool = True,
+        show_unique: bool = True,
+        save_comparison: bool = True
+    ) -> str:
+        """
+        Compare results between different DE analysis iterations.
+        
+        Shows overlapping and unique DEGs, correlation of fold changes, and helps
+        users understand impact of formula changes.
+        
+        Args:
+            pseudobulk_modality: Name of pseudobulk modality
+            iteration_1: Name of first iteration (latest if None)
+            iteration_2: Name of second iteration (second latest if None) 
+            show_overlap: Whether to show overlapping genes
+            show_unique: Whether to show unique genes per iteration
+            save_comparison: Whether to save comparison results
+        """
+        try:
+            # Validate modality exists
+            if pseudobulk_modality not in data_manager.list_modalities():
+                return f"Modality '{pseudobulk_modality}' not found. Available: {data_manager.list_modalities()}"
+            
+            # Get the pseudobulk data
+            adata = data_manager.get_modality(pseudobulk_modality)
+            
+            # Check iteration tracking exists
+            if 'de_iterations' not in adata.uns:
+                return "No iteration tracking found. Run `iterate_de_analysis` first to create iterations."
+            
+            iteration_tracker = adata.uns['de_iterations']
+            iterations = iteration_tracker['iterations']
+            
+            if len(iterations) < 2:
+                return f"Only {len(iterations)} iteration(s) available. Need at least 2 for comparison."
+            
+            # Select iterations to compare
+            if iteration_1 is None:
+                iter1_info = iterations[-1]  # Latest
+            else:
+                iter1_info = next((i for i in iterations if i['name'] == iteration_1), None)
+                if not iter1_info:
+                    available = [i['name'] for i in iterations]
+                    return f"Iteration '{iteration_1}' not found. Available: {available}"
+            
+            if iteration_2 is None:
+                iter2_info = iterations[-2] if len(iterations) >= 2 else iterations[0]  # Second latest
+            else:
+                iter2_info = next((i for i in iterations if i['name'] == iteration_2), None)
+                if not iter2_info:
+                    available = [i['name'] for i in iterations]
+                    return f"Iteration '{iteration_2}' not found. Available: {available}"
+            
+            # Get results DataFrames
+            iter1_key = f"de_results_formula_{iter1_info['contrast_name']}"
+            iter2_key = f"de_results_formula_{iter2_info['contrast_name']}"
+            
+            if iter1_key not in adata.uns or iter2_key not in adata.uns:
+                return f"Results not found for one or both iterations. Missing keys: {[k for k in [iter1_key, iter2_key] if k not in adata.uns]}"
+            
+            results1 = adata.uns[iter1_key]['results_df']
+            results2 = adata.uns[iter2_key]['results_df']
+            
+            # Get significant genes (FDR < 0.05)
+            sig1 = set(results1[results1['padj'] < 0.05].index)
+            sig2 = set(results2[results2['padj'] < 0.05].index)
+            
+            # Calculate overlaps
+            overlap = sig1 & sig2
+            unique1 = sig1 - sig2
+            unique2 = sig2 - sig1
+            
+            # Calculate fold change correlation for overlapping genes
+            if len(overlap) > 3:
+                overlap_genes = list(overlap)
+                lfc1 = results1.loc[overlap_genes, 'log2FoldChange']
+                lfc2 = results2.loc[overlap_genes, 'log2FoldChange']
+                correlation = lfc1.corr(lfc2)
+            else:
+                correlation = None
+            
+            # Format response
+            response = f"📊 **DE Iteration Comparison**\n\n"
+            response += f"**Comparing:**\n"
+            response += f"• Iteration 1: '{iter1_info['name']}' - {iter1_info['formula']}\n"
+            response += f"• Iteration 2: '{iter2_info['name']}' - {iter2_info['formula']}\n\n"
+            
+            response += f"📈 **Results Summary:**\n"
+            response += f"• Iteration 1 significant genes: {len(sig1):,}\n"
+            response += f"• Iteration 2 significant genes: {len(sig2):,}\n"
+            response += f"• Overlapping genes: {len(overlap):,} ({len(overlap)/max(len(sig1), len(sig2))*100:.1f}%)\n"
+            response += f"• Unique to iteration 1: {len(unique1):,}\n"
+            response += f"• Unique to iteration 2: {len(unique2):,}\n"
+            
+            if correlation is not None:
+                response += f"• Fold change correlation: {correlation:.3f}\n"
+            
+            if show_overlap and len(overlap) > 0:
+                response += f"\n🔗 **Top Overlapping Genes:**\n"
+                # Get top overlapping genes by average absolute fold change
+                overlap_df = results1.loc[list(overlap)]
+                overlap_df = overlap_df.reindex(overlap_df['padj'].sort_values().index)
+                
+                for gene in list(overlap_df.index)[:10]:
+                    lfc1 = results1.loc[gene, 'log2FoldChange']
+                    lfc2 = results2.loc[gene, 'log2FoldChange']
+                    response += f"• {gene}: LFC1={lfc1:.2f}, LFC2={lfc2:.2f}\n"
+            
+            if show_unique and (len(unique1) > 0 or len(unique2) > 0):
+                response += f"\n🎯 **Unique Significant Genes:**\n"
+                
+                if len(unique1) > 0:
+                    response += f"**Only in '{iter1_info['name']}'** ({len(unique1)} genes):\n"
+                    unique1_sorted = results1.loc[list(unique1)].sort_values('padj')
+                    for gene in unique1_sorted.index[:8]:
+                        lfc = results1.loc[gene, 'log2FoldChange']
+                        fdr = results1.loc[gene, 'padj']
+                        response += f"• {gene}: LFC={lfc:.2f}, FDR={fdr:.2e}\n"
+                
+                if len(unique2) > 0:
+                    response += f"\n**Only in '{iter2_info['name']}'** ({len(unique2)} genes):\n"
+                    unique2_sorted = results2.loc[list(unique2)].sort_values('padj')
+                    for gene in unique2_sorted.index[:8]:
+                        lfc = results2.loc[gene, 'log2FoldChange']
+                        fdr = results2.loc[gene, 'padj']
+                        response += f"• {gene}: LFC={lfc:.2f}, FDR={fdr:.2e}\n"
+            
+            # Analysis interpretation
+            response += f"\n💡 **Interpretation:**\n"
+            if correlation is not None:
+                if correlation > 0.8:
+                    response += f"• High correlation ({correlation:.3f}) suggests similar biological effects\n"
+                elif correlation > 0.5:
+                    response += f"• Moderate correlation ({correlation:.3f}) - some consistency but notable differences\n"
+                else:
+                    response += f"• Low correlation ({correlation:.3f}) - formulas capture different effects\n"
+            
+            overlap_percent = len(overlap) / max(len(sig1), len(sig2)) * 100
+            if overlap_percent > 70:
+                response += f"• High overlap ({overlap_percent:.1f}%) - formulas yield similar gene sets\n"
+            elif overlap_percent > 40:
+                response += f"• Moderate overlap ({overlap_percent:.1f}%) - some formula-specific effects\n"
+            else:
+                response += f"• Low overlap ({overlap_percent:.1f}%) - formulas capture different biology\n"
+            
+            # Save comparison if requested
+            if save_comparison:
+                comparison_data = {
+                    'iteration_1': iter1_info,
+                    'iteration_2': iter2_info,
+                    'overlap_genes': list(overlap),
+                    'unique_to_1': list(unique1),
+                    'unique_to_2': list(unique2),
+                    'correlation': correlation,
+                    'summary_stats': {
+                        'n_sig_1': len(sig1),
+                        'n_sig_2': len(sig2),
+                        'n_overlap': len(overlap),
+                        'overlap_percent': overlap_percent
+                    }
+                }
+                
+                # Store in modality
+                comparison_key = f"iteration_comparison_{iter1_info['name']}_vs_{iter2_info['name']}"
+                if 'iteration_comparisons' not in adata.uns:
+                    adata.uns['iteration_comparisons'] = {}
+                adata.uns['iteration_comparisons'][comparison_key] = comparison_data
+                
+                data_manager.modalities[pseudobulk_modality] = adata
+                response += f"\n💾 **Comparison saved**: adata.uns['iteration_comparisons']['{comparison_key}']\n"
+            
+            response += f"\n**Next steps**: Choose the most appropriate formula based on biological interpretation and statistical robustness."
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="compare_de_iterations",
+                parameters={
+                    "pseudobulk_modality": pseudobulk_modality,
+                    "iteration_1": iter1_info['name'],
+                    "iteration_2": iter2_info['name'],
+                    "show_overlap": show_overlap,
+                    "show_unique": show_unique
+                },
+                description=f"Compared iterations: {len(overlap)} overlapping, {len(unique1)}+{len(unique2)} unique genes"
+            )
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error comparing DE iterations: {e}")
+            return f"Error comparing DE iterations: {str(e)}"
+
+    # -------------------------
     # TOOL REGISTRY
     # -------------------------
     base_tools = [
@@ -2703,6 +3614,12 @@ Use this mapping to apply consistent annotations to similar datasets."""
         create_pseudobulk_matrix,
         prepare_differential_expression_design,
         run_pseudobulk_differential_expression,
+        # Agent-guided formula construction tools
+        suggest_formula_for_design,
+        construct_de_formula_interactive,
+        run_differential_expression_with_formula,
+        iterate_de_analysis,
+        compare_de_iterations,
         # Visualization tools
         create_umap_plot,
         create_qc_plots,

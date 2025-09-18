@@ -236,8 +236,9 @@ graph TB
         
         subgraph "Pseudobulk & Differential Expression Services"
             PBULK[PseudobulkService<br/>🧬 Single-cell to Pseudobulk Aggregation]
-            FORMULA[DifferentialFormulaService<br/>📊 R-style Formula Parsing & Design Matrix]
+            FORMULA[DifferentialFormulaService<br/>📊 R-style Formula Parsing & Design Matrix<br/>🤖 Agent-Guided Formula Construction<br/>🔄 Iterative Analysis Support]
             PBADAP[PseudobulkAdapter<br/>🔄 Schema Validation & QC]
+            WFLOW[WorkflowTracker<br/>🔄 DE Iteration Management<br/>📊 Result Comparison & Analytics]
         end
         
         subgraph "Proteomics Services - Professional Grade"
@@ -1028,3 +1029,62 @@ Analysis Services: 4 refactored services
 - **Storage Management**: Professional file naming and workspace organization
 
 This architecture provides a solid foundation for professional bioinformatics analysis with excellent maintainability, extensibility, and reliability.
+
+## 🧬 Agent-Guided Formula Construction Integration
+
+### Enhanced SingleCell Expert Agent Tools
+
+The `singlecell_expert` agent includes 5 new tools for conversational formula construction:
+
+```mermaid
+graph LR
+    subgraph "Agent Layer"
+        TE[Transcriptomics Expert<br/>🤖 Enhanced with Formula Tools]
+    end
+    
+    subgraph "New Agent Tools (5)"
+        T1[suggest_formula_for_design<br/>📊 Metadata Analysis]
+        T2[construct_de_formula_interactive<br/>🔧 Formula Building]  
+        T3[run_differential_expression_with_formula<br/>🧬 pyDESeq2 Execution]
+        T4[iterate_de_analysis<br/>🔄 Iterative Workflows]
+        T5[compare_de_iterations<br/>📈 Result Comparison]
+    end
+    
+    subgraph "Enhanced Services"
+        FORMULA[DifferentialFormulaService<br/>📊 3 New Methods Added]
+        WFLOW[WorkflowTracker<br/>🔄 New Iteration Management]
+        BULK[BulkRNASeqService<br/>📈 pyDESeq2 Integration]
+    end
+    
+    TE --> T1
+    TE --> T2  
+    TE --> T3
+    TE --> T4
+    TE --> T5
+    
+    T1 --> FORMULA
+    T2 --> FORMULA
+    T3 --> BULK
+    T4 --> WFLOW
+    T5 --> WFLOW
+
+    classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef tool fill:#f3e5f5,stroke:#4a148c,stroke-width:2px  
+    classDef service fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+
+    class TE agent
+    class T1,T2,T3,T4,T5 tool
+    class FORMULA,WFLOW,BULK service
+```
+
+### Service Enhancement Details
+
+- **DifferentialFormulaService**: Added `suggest_formulas()`, `preview_design_matrix()`, `estimate_statistical_power()`
+- **WorkflowTracker**: New lightweight class for DE iteration tracking and comparison
+- **Integration**: All data stored in AnnData.uns for seamless workflow integration
+
+### Workflow Coverage Impact
+
+- ✅ **Step 8**: Formula Construction → Agent-guided conversation
+- ✅ **Step 12**: Iterative Workflows → Natural iteration and comparison  
+- 🎯 **Result**: 92% workflow coverage (11/12 steps complete)
