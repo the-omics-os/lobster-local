@@ -2566,11 +2566,10 @@ The actual expression data download will be much faster now that metadata is pre
         self, geo_id: str, stored_samples: List[str], use_intersecting_genes_only: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        Concatenate stored AnnData samples using anndata's concat function.
+        Concatenate stored AnnData samples using ConcatenationService.
         
-        This function loads individual AnnData objects that were previously stored,
-        concatenates them using anndata.concat(), and returns the result as a DataFrame
-        for compatibility with the rest of the pipeline.
+        This function delegates to ConcatenationService to eliminate code duplication
+        while maintaining the same interface for backward compatibility.
         
         Args:
             geo_id: GEO series ID
@@ -2582,84 +2581,27 @@ The actual expression data download will be much faster now that metadata is pre
             DataFrame: Concatenated expression matrix or None if concatenation fails
         """
         try:
-            import anndata as ad
+            # Import and initialize ConcatenationService
+            from lobster.tools.concatenation_service import ConcatenationService
+            concat_service = ConcatenationService(self.data_manager)
             
-            logger.info(f"Concatenating {len(stored_samples)} stored samples for {geo_id}")
+            logger.info(f"Using ConcatenationService to concatenate {len(stored_samples)} stored samples for {geo_id}")
             
-            # Validate input
-            if not stored_samples:
-                logger.error("No stored samples provided for concatenation")
-                return None
+            # Use ConcatenationService for concatenation
+            output_name = f"geo_{geo_id.lower()}_concatenated_temp"
             
-            # Load all AnnData objects
-            adata_list = []
-            sample_ids = []
+            concatenated_adata, statistics = concat_service.concatenate_from_modalities(
+                modality_names=stored_samples,
+                output_name=None,  # Don't store, just return
+                use_intersecting_genes_only=use_intersecting_genes_only,
+                batch_key="batch"
+            )
             
-            for modality_name in stored_samples:
-                try:
-                    # Load the AnnData object from data manager
-                    adata = self.data_manager.get_modality(modality_name)
-                    if adata is None:
-                        logger.warning(f"Could not load modality: {modality_name}")
-                        continue
-                    
-                    # Extract sample ID from modality name
-                    sample_id = modality_name.split('_')[-1].upper()
-                    sample_ids.append(sample_id)
-                    
-                    # Add batch information to obs
-                    adata.obs['batch'] = sample_id
-                    adata.obs['sample_id'] = sample_id
-                    
-                    adata_list.append(adata)
-                    logger.debug(f"Loaded {modality_name}: {adata.shape}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to load modality {modality_name}: {e}")
-                    continue
+            logger.info(f"ConcatenationService completed: {statistics}")
+            return concatenated_adata
             
-            # Check if we have any valid data
-            if not adata_list:
-                logger.error("No valid AnnData objects could be loaded")
-                return None
-            
-            logger.info(f"Successfully loaded {len(adata_list)} AnnData objects")
-            
-            # Concatenate using anndata
-            if use_intersecting_genes_only:
-                # Use intersection (inner join) - only common genes
-                logger.info("Concatenating with gene intersection (inner join)")
-                combined_adata = ad.concat(
-                    adata_list, 
-                    axis=0,         # Concatenate along observations (cells)
-                    join='inner',   # Use only common genes
-                    merge='unique', # Merge unique keys in uns
-                    label='batch',
-                    keys=sample_ids
-                )
-            else:
-                # Use union (outer join) - all genes
-                logger.info("Concatenating with gene union (outer join)")
-                combined_adata = ad.concat(
-                    adata_list,
-                    axis=0,         # Concatenate along observations (cells)
-                    join='outer',   # Use all genes
-                    merge='unique', # Merge unique keys in uns
-                    fill_value=0,   # Fill missing values with 0
-                    label='batch',
-                    keys=sample_ids
-                )
-            
-            logger.info(f"Concatenation successful: {combined_adata.shape}")
-            
-            return combined_adata
-            
-        except ImportError:
-            logger.error("anndata package is required but not installed. Install with: pip install anndata")
-            return None
         except Exception as e:
-            logger.error(f"Error concatenating stored samples: {e}")
-            logger.exception("Full traceback:")
+            logger.error(f"Error concatenating stored samples using ConcatenationService: {e}")
             return None
 
 

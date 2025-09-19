@@ -584,185 +584,64 @@ The MuData object contains all selected modalities and is ready for cross-modal 
             str: Status message with concatenation results
         """
         try:
-            # Import anndata for concatenation
-            try:
-                import anndata as ad
-            except ImportError:
-                return "anndata package is required but not installed. Install with: pip install anndata"
+            # Import the ConcatenationService
+            from lobster.tools.concatenation_service import ConcatenationService
+            
+            # Initialize the concatenation service
+            concat_service = ConcatenationService(data_manager)
             
             # Auto-detect sample modalities if not provided
             if sample_modalities is None:
                 if geo_id is None:
                     return "Either provide sample_modalities list or geo_id for auto-detection"
                 
-                # Clean the GEO ID
                 clean_geo_id = geo_id.strip().upper()
-                
-                # Find all modalities matching the pattern for this GEO dataset
-                all_modalities = data_manager.list_modalities()
-                pattern = f"geo_{clean_geo_id.lower()}_sample_"
-                sample_modalities = [m for m in all_modalities if pattern in m]
+                sample_modalities = concat_service.auto_detect_samples(f"geo_{clean_geo_id.lower()}")
                 
                 if not sample_modalities:
-                    return f"No sample modalities found for {clean_geo_id}. Pattern searched: '{pattern}'"
+                    return f"No sample modalities found for {clean_geo_id}"
                 
                 logger.info(f"Auto-detected {len(sample_modalities)} samples for {clean_geo_id}")
-            
-            # Validate that modalities exist
-            available_modalities = data_manager.list_modalities()
-            missing = [m for m in sample_modalities if m not in available_modalities]
-            if missing:
-                return f"Sample modalities not found: {missing}"
             
             # Generate output name if not provided
             if output_modality_name is None:
                 if geo_id:
                     output_modality_name = f"geo_{geo_id.lower()}_concatenated"
                 else:
-                    # Extract common prefix from sample names
-                    if sample_modalities:
-                        # Try to find common prefix
-                        prefix = sample_modalities[0].rsplit('_sample_', 1)[0] if '_sample_' in sample_modalities[0] else sample_modalities[0].split('_')[0]
-                        output_modality_name = f"{prefix}_concatenated"
-                    else:
-                        output_modality_name = "concatenated_samples"
+                    prefix = sample_modalities[0].rsplit('_sample_', 1)[0] if '_sample_' in sample_modalities[0] else sample_modalities[0].split('_')[0]
+                    output_modality_name = f"{prefix}_concatenated"
             
             # Check if output modality already exists
-            if output_modality_name in available_modalities:
+            if output_modality_name in data_manager.list_modalities():
                 return f"Modality '{output_modality_name}' already exists. Use remove_modality first or choose a different name."
             
-            logger.info(f"Concatenating {len(sample_modalities)} samples into '{output_modality_name}'")
+            # Use ConcatenationService for the actual concatenation
+            concatenated_adata, statistics = concat_service.concatenate_from_modalities(
+                modality_names=sample_modalities,
+                output_name=output_modality_name if save_to_file else None,
+                use_intersecting_genes_only=use_intersecting_genes_only,
+                batch_key="batch"
+            )
             
-            # Load all AnnData objects
-            adata_list = []
-            sample_ids = []
-            failed_loads = []
-            
-            for modality_name in sample_modalities:
-                try:
-                    adata = data_manager.get_modality(modality_name)
-                    if adata is None:
-                        failed_loads.append(modality_name)
-                        continue
-                    
-                    # Extract sample ID from modality name
-                    if '_sample_' in modality_name:
-                        sample_id = modality_name.split('_sample_')[-1].upper()
-                    else:
-                        sample_id = modality_name
-                    
-                    # Add batch information
-                    adata.obs['batch'] = sample_id
-                    adata.obs['sample_id'] = sample_id
-                    
-                    sample_ids.append(sample_id)
-                    adata_list.append(adata)
-                    logger.debug(f"Loaded {modality_name}: {adata.shape}")
-                    
-                except Exception as e:
-                    logger.error(f"Failed to load {modality_name}: {e}")
-                    failed_loads.append(modality_name)
-            
-            if failed_loads:
-                logger.warning(f"Failed to load {len(failed_loads)} modalities: {failed_loads}")
-            
-            if not adata_list:
-                return "No valid AnnData objects could be loaded for concatenation"
-            
-            # Perform concatenation
-            logger.info(f"Concatenating {len(adata_list)} AnnData objects...")
-            
-            if use_intersecting_genes_only:
-                # Use only common genes
-                combined_adata = ad.concat(
-                    adata_list,
-                    axis=0,  # Concatenate along observations
-                    join='inner',  # Only common genes
-                    merge='unique',
-                    label='batch',
-                    keys=sample_ids
-                )
-                join_type = "intersection (common genes only)"
-            else:
-                # Use all genes
-                combined_adata = ad.concat(
-                    adata_list,
-                    axis=0,  # Concatenate along observations  
-                    join='outer',  # All genes
-                    merge='unique',
-                    fill_value=0,  # Fill missing with 0
-                    label='batch',
-                    keys=sample_ids
-                )
-                join_type = "union (all genes, missing filled with 0)"
-            
-            logger.info(f"Concatenation successful: {combined_adata.shape}")
-            
-            # Store as new modality in DataManagerV2
-            # We need to convert the AnnData to a format that can be loaded
-            # For now, we'll save it temporarily and reload it
+            # Format results for user display
             if save_to_file:
-                temp_path = data_manager.cache_dir / f"{output_modality_name}_temp.h5ad"
-                combined_adata.write_h5ad(temp_path)
-                
-                # Determine adapter based on size
-                if combined_adata.n_vars > 5000:
-                    adapter_name = "transcriptomics_single_cell"
-                else:
-                    adapter_name = "transcriptomics_bulk"
-                
-                # Load as modality
-                adata = data_manager.load_modality(
-                    name=output_modality_name,
-                    source=temp_path,
-                    adapter=adapter_name,
-                    validate=True,
-                    dataset_id=geo_id if geo_id else "concatenated",
-                    dataset_type="concatenated",
-                    processing_date=pd.Timestamp.now().isoformat(),
-                    concatenation_info={
-                        "n_samples": len(adata_list),
-                        "sample_ids": sample_ids,
-                        "join_type": join_type,
-                        "source_modalities": sample_modalities
-                    }
-                )
-                
-                # Save to workspace
                 save_path = f"{output_modality_name}.h5ad"
-                saved_file = data_manager.save_modality(output_modality_name, save_path)
-                
-                # Clean up temp file
-                temp_path.unlink(missing_ok=True)
-                
-                # Log the operation
-                data_manager.log_tool_usage(
-                    tool_name="concatenate_samples",
-                    parameters={
-                        "n_samples": len(sample_modalities),
-                        "output_name": output_modality_name,
-                        "join_type": join_type
-                    },
-                    description=f"Concatenated {len(sample_modalities)} samples into {output_modality_name}"
-                )
-                
-                return f"""Successfully concatenated {len(adata_list)} samples!
+                return f"""Successfully concatenated {statistics['n_samples']} samples using ConcatenationService!
 
 📊 Output modality: '{output_modality_name}'
-📈 Shape: {combined_adata.n_obs} obs × {combined_adata.n_vars} vars
-🔗 Join type: {join_type}
-📦 Samples included: {len(sample_ids)}
-💾 Saved to: {save_path}
-{'⚠️ Failed to load: ' + str(failed_loads) if failed_loads else '✅ All samples loaded successfully'}
+📈 Shape: {statistics['final_shape'][0]} obs × {statistics['final_shape'][1]} vars
+🔗 Join type: {statistics['join_type']}
+⚡ Strategy: {statistics['strategy_used']}
+⏱️ Processing time: {statistics.get('processing_time_seconds', 0):.2f}s
+💾 Saved and stored as modality for analysis
 
 The concatenated dataset is now available as modality '{output_modality_name}' for analysis."""
-            
             else:
                 return f"""Concatenation preview (not saved):
 
-📊 Shape: {combined_adata.n_obs} obs × {combined_adata.n_vars} vars
-🔗 Join type: {join_type}
-📦 Samples: {len(sample_ids)}
+📊 Shape: {statistics['final_shape'][0]} obs × {statistics['final_shape'][1]} vars
+🔗 Join type: {statistics['join_type']}
+⚡ Strategy: {statistics['strategy_used']}
 
 To save, run again with save_to_file=True"""
                 
