@@ -36,7 +36,7 @@ def create_bioinformatics_graph(
         config = {"recursion_limit": 100, ...}
         graph.invoke(input, config)
     """
-    logger.info("Creating bioinformatics multi-agent graph")
+    logger.debug("Creating bioinformatics multi-agent graph")
     
     # Get model configuration for the supervisor
     settings = get_settings()
@@ -152,5 +152,5 @@ def create_bioinformatics_graph(
         # debug=True  # Enable debug mode for better visibility
     )
     
-    logger.info("Bioinformatics multi-agent graph created successfully")
+    logger.debug("Bioinformatics multi-agent graph created successfully")
     return graph

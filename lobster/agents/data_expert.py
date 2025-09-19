@@ -561,11 +561,221 @@ The MuData object contains all selected modalities and is ready for cross-modal 
             logger.error(f"Error getting adapter info: {e}")
             return f"Error getting adapter info: {str(e)}"
 
+    @tool
+    def concatenate_samples(
+        sample_modalities: List[str] = None,
+        output_modality_name: str = None,
+        geo_id: str = None,
+        use_intersecting_genes_only: bool = True,
+        save_to_file: bool = True
+    ) -> str:
+        """
+        Concatenate multiple sample modalities into a single combined modality.
+        This is useful after downloading individual samples with SAMPLES_FIRST strategy.
+        
+        Args:
+            sample_modalities: List of modality names to concatenate. If None, will auto-detect based on geo_id
+            output_modality_name: Name for the output modality. If None, will generate based on geo_id
+            geo_id: GEO accession ID to auto-detect samples (e.g., GSE12345)
+            use_intersecting_genes_only: If True, use only common genes. If False, use all genes (fill missing with 0)
+            save_to_file: Whether to save the concatenated data to a file
+            
+        Returns:
+            str: Status message with concatenation results
+        """
+        try:
+            # Import anndata for concatenation
+            try:
+                import anndata as ad
+            except ImportError:
+                return "anndata package is required but not installed. Install with: pip install anndata"
+            
+            # Auto-detect sample modalities if not provided
+            if sample_modalities is None:
+                if geo_id is None:
+                    return "Either provide sample_modalities list or geo_id for auto-detection"
+                
+                # Clean the GEO ID
+                clean_geo_id = geo_id.strip().upper()
+                
+                # Find all modalities matching the pattern for this GEO dataset
+                all_modalities = data_manager.list_modalities()
+                pattern = f"geo_{clean_geo_id.lower()}_sample_"
+                sample_modalities = [m for m in all_modalities if pattern in m]
+                
+                if not sample_modalities:
+                    return f"No sample modalities found for {clean_geo_id}. Pattern searched: '{pattern}'"
+                
+                logger.info(f"Auto-detected {len(sample_modalities)} samples for {clean_geo_id}")
+            
+            # Validate that modalities exist
+            available_modalities = data_manager.list_modalities()
+            missing = [m for m in sample_modalities if m not in available_modalities]
+            if missing:
+                return f"Sample modalities not found: {missing}"
+            
+            # Generate output name if not provided
+            if output_modality_name is None:
+                if geo_id:
+                    output_modality_name = f"geo_{geo_id.lower()}_concatenated"
+                else:
+                    # Extract common prefix from sample names
+                    if sample_modalities:
+                        # Try to find common prefix
+                        prefix = sample_modalities[0].rsplit('_sample_', 1)[0] if '_sample_' in sample_modalities[0] else sample_modalities[0].split('_')[0]
+                        output_modality_name = f"{prefix}_concatenated"
+                    else:
+                        output_modality_name = "concatenated_samples"
+            
+            # Check if output modality already exists
+            if output_modality_name in available_modalities:
+                return f"Modality '{output_modality_name}' already exists. Use remove_modality first or choose a different name."
+            
+            logger.info(f"Concatenating {len(sample_modalities)} samples into '{output_modality_name}'")
+            
+            # Load all AnnData objects
+            adata_list = []
+            sample_ids = []
+            failed_loads = []
+            
+            for modality_name in sample_modalities:
+                try:
+                    adata = data_manager.get_modality(modality_name)
+                    if adata is None:
+                        failed_loads.append(modality_name)
+                        continue
+                    
+                    # Extract sample ID from modality name
+                    if '_sample_' in modality_name:
+                        sample_id = modality_name.split('_sample_')[-1].upper()
+                    else:
+                        sample_id = modality_name
+                    
+                    # Add batch information
+                    adata.obs['batch'] = sample_id
+                    adata.obs['sample_id'] = sample_id
+                    
+                    sample_ids.append(sample_id)
+                    adata_list.append(adata)
+                    logger.debug(f"Loaded {modality_name}: {adata.shape}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to load {modality_name}: {e}")
+                    failed_loads.append(modality_name)
+            
+            if failed_loads:
+                logger.warning(f"Failed to load {len(failed_loads)} modalities: {failed_loads}")
+            
+            if not adata_list:
+                return "No valid AnnData objects could be loaded for concatenation"
+            
+            # Perform concatenation
+            logger.info(f"Concatenating {len(adata_list)} AnnData objects...")
+            
+            if use_intersecting_genes_only:
+                # Use only common genes
+                combined_adata = ad.concat(
+                    adata_list,
+                    axis=0,  # Concatenate along observations
+                    join='inner',  # Only common genes
+                    merge='unique',
+                    label='batch',
+                    keys=sample_ids
+                )
+                join_type = "intersection (common genes only)"
+            else:
+                # Use all genes
+                combined_adata = ad.concat(
+                    adata_list,
+                    axis=0,  # Concatenate along observations  
+                    join='outer',  # All genes
+                    merge='unique',
+                    fill_value=0,  # Fill missing with 0
+                    label='batch',
+                    keys=sample_ids
+                )
+                join_type = "union (all genes, missing filled with 0)"
+            
+            logger.info(f"Concatenation successful: {combined_adata.shape}")
+            
+            # Store as new modality in DataManagerV2
+            # We need to convert the AnnData to a format that can be loaded
+            # For now, we'll save it temporarily and reload it
+            if save_to_file:
+                temp_path = data_manager.cache_dir / f"{output_modality_name}_temp.h5ad"
+                combined_adata.write_h5ad(temp_path)
+                
+                # Determine adapter based on size
+                if combined_adata.n_vars > 5000:
+                    adapter_name = "transcriptomics_single_cell"
+                else:
+                    adapter_name = "transcriptomics_bulk"
+                
+                # Load as modality
+                adata = data_manager.load_modality(
+                    name=output_modality_name,
+                    source=temp_path,
+                    adapter=adapter_name,
+                    validate=True,
+                    dataset_id=geo_id if geo_id else "concatenated",
+                    dataset_type="concatenated",
+                    processing_date=pd.Timestamp.now().isoformat(),
+                    concatenation_info={
+                        "n_samples": len(adata_list),
+                        "sample_ids": sample_ids,
+                        "join_type": join_type,
+                        "source_modalities": sample_modalities
+                    }
+                )
+                
+                # Save to workspace
+                save_path = f"{output_modality_name}.h5ad"
+                saved_file = data_manager.save_modality(output_modality_name, save_path)
+                
+                # Clean up temp file
+                temp_path.unlink(missing_ok=True)
+                
+                # Log the operation
+                data_manager.log_tool_usage(
+                    tool_name="concatenate_samples",
+                    parameters={
+                        "n_samples": len(sample_modalities),
+                        "output_name": output_modality_name,
+                        "join_type": join_type
+                    },
+                    description=f"Concatenated {len(sample_modalities)} samples into {output_modality_name}"
+                )
+                
+                return f"""Successfully concatenated {len(adata_list)} samples!
+
+📊 Output modality: '{output_modality_name}'
+📈 Shape: {combined_adata.n_obs} obs × {combined_adata.n_vars} vars
+🔗 Join type: {join_type}
+📦 Samples included: {len(sample_ids)}
+💾 Saved to: {save_path}
+{'⚠️ Failed to load: ' + str(failed_loads) if failed_loads else '✅ All samples loaded successfully'}
+
+The concatenated dataset is now available as modality '{output_modality_name}' for analysis."""
+            
+            else:
+                return f"""Concatenation preview (not saved):
+
+📊 Shape: {combined_adata.n_obs} obs × {combined_adata.n_vars} vars
+🔗 Join type: {join_type}
+📦 Samples: {len(sample_ids)}
+
+To save, run again with save_to_file=True"""
+                
+        except Exception as e:
+            logger.error(f"Error concatenating samples: {e}")
+            return f"Error concatenating samples: {str(e)}"
+
     base_tools = [
         #CORE
         fetch_geo_metadata_and_strategy_config,
         check_file_head_from_supplementary_files,
         download_geo_dataset,
+        concatenate_samples,
         #HELPER
         check_tmp_metadata_keys,
         get_data_summary,
@@ -616,6 +826,15 @@ It returns the head of a file (for example annoation, txt, csv, xlsx etc) to und
 - **download_geo_dataset**: 
 This tool is used after understanding the metadata logic of a GEO entry. This tool downloads data from GEO and load as modality. 
 Before using this tool always fetch metadata first and get a good understand what the relevant files are. 
+
+- **concatenate_samples**:
+This tool concatenates multiple sample modalities into a single combined modality. This is particularly useful after downloading individual samples with the SAMPLES_FIRST strategy.
+Key features:
+  - Auto-detects samples for a GEO dataset if geo_id is provided
+  - Can concatenate with intersection (common genes only) or union (all genes)
+  - Automatically adds batch information for tracking sample origins
+  - Creates a new modality with the concatenated data
+Use this after downloading samples individually when you need a single combined dataset for analysis.
 </Available Core Tools>
 
 <Available helper Tools>
@@ -713,6 +932,23 @@ once the dataset is downloaded you will see summary information about the downlo
 
 # Step 5: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
+```
+
+### Sample Concatenation Workflow (After SAMPLES_FIRST Download)
+```bash
+# Step 1: Check what sample modalities were downloaded
+list_available_modalities()  # Look for patterns like geo_gse123456_sample_*
+
+#  Step 2: manually specify samples
+concatenate_samples(
+    sample_modalities=["geo_gse123456_sample_gsm001", "geo_gse123456_sample_gsm002"],
+    output_modality_name="geo_gse123456_combined"
+)
+
+# Step 3: Verify the concatenated modality
+get_data_summary("geo_gse123456_concatenated")
+
+# Step 4: The concatenated data is now ready for analysis by other agents
 ```
 
 ### Workspace Exploration

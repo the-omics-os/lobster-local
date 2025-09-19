@@ -112,7 +112,7 @@ class DataManagerV2:
         self._register_default_backends()
         self._register_default_adapters()
         
-        logger.info(f"Initialized DataManagerV2 with workspace: {self.workspace_path}")
+        logger.debug(f"Initialized DataManagerV2 with workspace: {self.workspace_path}")
 
     def _setup_workspace(self) -> None:
         """Set up workspace directories."""

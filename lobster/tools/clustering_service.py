@@ -76,6 +76,7 @@ class ClusteringService:
         self,
         adata: anndata.AnnData,
         resolution: Optional[float] = None,
+        use_rep: Optional[str] = None,
         batch_correction: bool = False,
         batch_key: Optional[str] = None,
         demo_mode: bool = False,
@@ -88,6 +89,9 @@ class ClusteringService:
         Args:
             adata: AnnData object to cluster
             resolution: Resolution parameter for Leiden clustering
+            use_rep: Representation to use for clustering (e.g., 'X_scvi', 'X_pca'). 
+                    If None, uses standard PCA workflow. If specified, uses the 
+                    custom embedding from adata.obsm[use_rep] for neighbor calculation.
             batch_correction: Whether to perform batch correction
             batch_key: Column name for batch information
             demo_mode: Whether to run in demo mode (faster processing with reduced quality)
@@ -167,7 +171,7 @@ class ClusteringService:
 
             # Perform clustering
             adata_clustered = self._perform_clustering(
-                adata_clustered, resolution, demo_mode, skip_steps
+                adata_clustered, resolution, use_rep, demo_mode, skip_steps
             )
             
             # Compile clustering statistics
@@ -261,6 +265,7 @@ class ClusteringService:
         self,
         adata: sc.AnnData,
         resolution: float,
+        use_rep: Optional[str] = None,
         demo_mode: bool = False,
         skip_steps: Optional[list] = None,
     ) -> sc.AnnData:
@@ -270,6 +275,9 @@ class ClusteringService:
         Args:
             adata: AnnData object
             resolution: Clustering resolution parameter
+            use_rep: Representation to use for clustering (e.g., 'X_scvi', 'X_pca').
+                    If None, uses standard PCA workflow. If specified, uses the
+                    custom embedding from adata.obsm[use_rep] for neighbor calculation.
             demo_mode: Whether to run in demo mode (faster with reduced quality)
             skip_steps: List of steps to skip (e.g., 'marker_genes')
 
@@ -280,79 +288,119 @@ class ClusteringService:
         skip_steps = skip_steps or []
         start_time = time.time()
 
-        # Basic preprocessing (follows publication workflow)
-        logger.info("Normalizing data")
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-        self._update_progress("Normalization completed")
-
-        # Find highly variable genes (follows the parameters from 02_All_cell_clustering.R)
-        logger.info("Finding highly variable genes")
-        sc.pp.highly_variable_genes(
-            adata, min_mean=0.0125, max_mean=3, min_disp=0.5, flavor="seurat"
-        )
-        self._update_progress("Highly variable genes identified")
-
-        # Store raw data before scaling
-        adata.raw = adata.copy()
-
-        # Use only highly variable genes for dimensionality reduction
-        n_hvg = sum(adata.var.highly_variable)
-        logger.info(f"Using {n_hvg} highly variable genes")
-
-        # In demo mode, further restrict the number of HVG for faster processing
-        if demo_mode and n_hvg > 1000:
-            logger.info("Demo mode: Restricting to top 1000 variable genes")
-            # Get the top 1000 most variable genes
-            most_variable_genes = (
-                adata.var.sort_values("dispersions_norm", ascending=False)
-                .head(1000)
-                .index
+        # Check if using custom embeddings (e.g., scVI)
+        if use_rep and use_rep in adata.obsm:
+            logger.info(f"Using custom embedding '{use_rep}' for clustering")
+            
+            # Validate custom embedding
+            embedding_shape = adata.obsm[use_rep].shape
+            logger.info(f"Custom embedding shape: {embedding_shape[0]} cells × {embedding_shape[1]} dimensions")
+            
+            # Store raw data for marker gene analysis
+            adata.raw = adata.copy()
+            self._update_progress("Using custom embeddings (skipping normalization/PCA)")
+            
+            # Compute neighborhood graph using custom embedding
+            logger.info("Computing neighborhood graph from custom embedding")
+            n_neighbors = 10 if demo_mode else 15
+            sc.pp.neighbors(
+                adata, 
+                use_rep=use_rep, 
+                n_neighbors=n_neighbors
             )
-            adata_hvg = adata[:, most_variable_genes]
+            self._update_progress("Neighborhood graph computed from custom embedding")
+            
+            # Run Leiden clustering
+            logger.info(f"Running Leiden clustering with resolution {resolution}")
+            sc.tl.leiden(adata, resolution=resolution, key_added="leiden")
+            self._update_progress("Leiden clustering completed")
+            
+            # UMAP for visualization using custom embedding
+            logger.info("Computing UMAP coordinates from custom embedding")
+            if demo_mode:
+                sc.tl.umap(adata, min_dist=0.5, spread=1.5)
+            else:
+                sc.tl.umap(adata)
+            self._update_progress("UMAP coordinates computed from custom embedding")
+            
         else:
-            adata_hvg = adata[:, adata.var.highly_variable]
+            # Standard workflow when no custom embedding specified
+            if use_rep:
+                logger.warning(f"Custom embedding '{use_rep}' not found in adata.obsm, using standard PCA workflow")
+            
+            # Basic preprocessing (follows publication workflow)
+            logger.info("Normalizing data")
+            sc.pp.normalize_total(adata, target_sum=1e4)
+            sc.pp.log1p(adata)
+            self._update_progress("Normalization completed")
 
-        # Scale data (with max value cap to avoid influence of outliers)
-        logger.info("Scaling data")
-        sc.pp.scale(adata_hvg, max_value=10)
-        self._update_progress("Data scaling completed")
+            # Find highly variable genes (follows the parameters from 02_All_cell_clustering.R)
+            logger.info("Finding highly variable genes")
+            sc.pp.highly_variable_genes(
+                adata, min_mean=0.0125, max_mean=3, min_disp=0.5, flavor="seurat"
+            )
+            self._update_progress("Highly variable genes identified")
 
-        # PCA (using 'arpack' SVD solver for better performance with sparse matrices)
-        logger.info("Running PCA")
-        sc.tl.pca(adata_hvg, svd_solver="arpack")
-        self._update_progress("PCA completed")
+            # Store raw data before scaling
+            adata.raw = adata.copy()
 
-        # Determine optimal number of PCs (following publication's approach using 20 PCs)
-        # In demo mode, use fewer PCs for faster processing
-        n_pcs = 10 if demo_mode else 20
-        logger.info(f"Using {n_pcs} principal components for neighborhood graph")
+            # Use only highly variable genes for dimensionality reduction
+            n_hvg = sum(adata.var.highly_variable)
+            logger.info(f"Using {n_hvg} highly variable genes")
 
-        # Compute neighborhood graph
-        logger.info("Computing neighborhood graph")
-        n_neighbors = (
-            10 if demo_mode else 15
-        )  # Use fewer neighbors in demo mode for speed
-        sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
-        self._update_progress("Neighborhood graph computed")
+            # In demo mode, further restrict the number of HVG for faster processing
+            if demo_mode and n_hvg > 1000:
+                logger.info("Demo mode: Restricting to top 1000 variable genes")
+                # Get the top 1000 most variable genes
+                most_variable_genes = (
+                    adata.var.sort_values("dispersions_norm", ascending=False)
+                    .head(1000)
+                    .index
+                )
+                adata_hvg = adata[:, most_variable_genes]
+            else:
+                adata_hvg = adata[:, adata.var.highly_variable]
 
-        # Run Leiden clustering at specified resolution (similar to publication's approach)
-        logger.info(f"Running Leiden clustering with resolution {resolution}")
-        sc.tl.leiden(adata_hvg, resolution=resolution, key_added="leiden")
-        self._update_progress("Leiden clustering completed")
+            # Scale data (with max value cap to avoid influence of outliers)
+            logger.info("Scaling data")
+            sc.pp.scale(adata_hvg, max_value=10)
+            self._update_progress("Data scaling completed")
 
-        # UMAP for visualization
-        logger.info("Computing UMAP coordinates")
-        if demo_mode:
-            # Use faster UMAP settings in demo mode
-            sc.tl.umap(adata_hvg, min_dist=0.5, spread=1.5)
-        else:
-            sc.tl.umap(adata_hvg)
-        self._update_progress("UMAP coordinates computed")
+            # PCA (using 'arpack' SVD solver for better performance with sparse matrices)
+            logger.info("Running PCA")
+            sc.tl.pca(adata_hvg, svd_solver="arpack")
+            self._update_progress("PCA completed")
 
-        # Transfer clustering results and UMAP coordinates back to the original object
-        adata.obs["leiden"] = adata_hvg.obs["leiden"]
-        adata.obsm["X_umap"] = adata_hvg.obsm["X_umap"]
+            # Determine optimal number of PCs (following publication's approach using 20 PCs)
+            # In demo mode, use fewer PCs for faster processing
+            n_pcs = 10 if demo_mode else 20
+            logger.info(f"Using {n_pcs} principal components for neighborhood graph")
+
+            # Compute neighborhood graph
+            logger.info("Computing neighborhood graph")
+            n_neighbors = (
+                10 if demo_mode else 15
+            )  # Use fewer neighbors in demo mode for speed
+            sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
+            self._update_progress("Neighborhood graph computed")
+
+            # Run Leiden clustering at specified resolution (similar to publication's approach)
+            logger.info(f"Running Leiden clustering with resolution {resolution}")
+            sc.tl.leiden(adata_hvg, resolution=resolution, key_added="leiden")
+            self._update_progress("Leiden clustering completed")
+
+            # UMAP for visualization
+            logger.info("Computing UMAP coordinates")
+            if demo_mode:
+                # Use faster UMAP settings in demo mode
+                sc.tl.umap(adata_hvg, min_dist=0.5, spread=1.5)
+            else:
+                sc.tl.umap(adata_hvg)
+            self._update_progress("UMAP coordinates computed")
+
+            # Transfer clustering results and UMAP coordinates back to the original object
+            adata.obs["leiden"] = adata_hvg.obs["leiden"]
+            adata.obsm["X_umap"] = adata_hvg.obsm["X_umap"]
 
         # Find marker genes for each cluster, unless skipped
         if "marker_genes" not in skip_steps:

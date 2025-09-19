@@ -27,7 +27,7 @@ class LobsterTheme:
     # Core Brand Colors
     PRIMARY_ORANGE = "#e45c47"
     BACKGROUND_WHITE = "white"
-    TEXT_BLACK = "black"
+    TEXT_BLACK = "white"  # Changed to white for dark terminal compatibility
 
     # Extended Color Palette
     COLORS = {
@@ -40,9 +40,9 @@ class LobsterTheme:
         # Background and text
         "background": BACKGROUND_WHITE,
         "text_primary": TEXT_BLACK,
-        "text_secondary": "#333333",
-        "text_tertiary": "#666666",
-        "text_muted": "#999999",
+        "text_secondary": "#cccccc",  # Lighter for dark backgrounds
+        "text_tertiary": "#aaaaaa",   # Lighter for dark backgrounds
+        "text_muted": "#888888",      # Lighter for dark backgrounds
 
         # Status colors with orange variations
         "success": "#28a745",
@@ -71,10 +71,10 @@ class LobsterTheme:
 
         # Progress and status indicators
         "progress_complete": PRIMARY_ORANGE,
-        "progress_incomplete": "#f0f0f0",
+        "progress_incomplete": "#333333",  # Darker for visibility on dark backgrounds
         "loading": PRIMARY_ORANGE,
         "active": PRIMARY_ORANGE,
-        "inactive": "#cccccc"
+        "inactive": "#666666"              # More visible on dark backgrounds
     }
 
     # Rich Theme Styles
@@ -87,9 +87,9 @@ class LobsterTheme:
 
         # Text hierarchy
         "text.primary": TEXT_BLACK,
-        "text.secondary": "#333333",
-        "text.tertiary": "#666666",
-        "text.muted": "#999999",
+        "text.secondary": "#cccccc",  # Lighter for dark backgrounds
+        "text.tertiary": "#aaaaaa",   # Lighter for dark backgrounds
+        "text.muted": "#888888",      # Lighter for dark backgrounds
         "text.inverse": f"{BACKGROUND_WHITE} on {PRIMARY_ORANGE}",
 
         # Status styles
@@ -102,10 +102,10 @@ class LobsterTheme:
         # Data styles
         "data.header": f"bold {PRIMARY_ORANGE}",
         "data.value": TEXT_BLACK,
-        "data.key": "#333333",
-        "data.number": "#0066cc",
-        "data.string": "#006600",
-        "data.boolean": "#cc6600",
+        "data.key": "#cccccc",  # Lighter for dark backgrounds
+        "data.number": "#66aaff",      # Brighter blue for dark backgrounds
+        "data.string": "#66ff66",      # Brighter green for dark backgrounds
+        "data.boolean": "#ffaa66",     # Brighter orange for dark backgrounds
 
         # Interactive elements
         "interactive.prompt": f"bold {PRIMARY_ORANGE}",
@@ -117,7 +117,7 @@ class LobsterTheme:
         "progress.bar": f"{PRIMARY_ORANGE}",
         "progress.complete": f"bold {PRIMARY_ORANGE}",
         "progress.percentage": f"bold {PRIMARY_ORANGE}",
-        "progress.data": "#666666",
+        "progress.data": "#aaaaaa",    # Lighter for dark backgrounds
 
         # Panel and border styles
         "panel.title": f"bold {PRIMARY_ORANGE}",
@@ -134,10 +134,10 @@ class LobsterTheme:
         "tree.file": TEXT_BLACK,
 
         # Table styles
-        "table.header": f"bold {PRIMARY_ORANGE} on white",
+        "table.header": f"bold {PRIMARY_ORANGE}",  # Removed white background
         "table.cell": TEXT_BLACK,
-        "table.row_odd": "white",
-        "table.row_even": "#fafafa",
+        "table.row_odd": "default",               # Use terminal default background
+        "table.row_even": "default",              # Use terminal default background
 
         # Agent and system styles
         "agent.name": f"bold {PRIMARY_ORANGE}",
@@ -150,7 +150,7 @@ class LobsterTheme:
         "analysis.metric": f"bold {PRIMARY_ORANGE}",
         "analysis.result": TEXT_BLACK,
         "analysis.significant": "bold #28a745",
-        "analysis.nonsignificant": "#666666"
+        "analysis.nonsignificant": "#aaaaaa"  # Lighter for dark backgrounds
     })
 
     # Box styles with orange branding
@@ -224,16 +224,16 @@ class LobsterTheme:
             "speed": "[progress.data]{task.speed}",
             "time_remaining": "[progress.data]{task.time_remaining}",
             "completed": f"[bold {cls.PRIMARY_ORANGE}]",
-            "remaining": "[#f0f0f0]"
+            "remaining": "[#333333]"  # Darker for visibility on dark backgrounds
         }
 
     @classmethod
     def get_table_style(cls) -> Dict[str, Any]:
         """Get table styling configuration."""
         return {
-            "header_style": f"bold {cls.PRIMARY_ORANGE} on white",
+            "header_style": f"bold {cls.PRIMARY_ORANGE}",  # Removed white background
             "border_style": cls.PRIMARY_ORANGE,
-            "row_styles": ["white", "#fafafa"],
+            "row_styles": ["default", "default"],          # Use terminal default backgrounds
             "show_header": True,
             "show_lines": True,
             "box": cls.BOXES["primary"]

@@ -61,7 +61,7 @@ class EnhancedSingleCellService:
             "Epithelial": ["EPCAM", "KRT8", "KRT18", "KRT19"],
         }
 
-        logger.info(f"Loaded {len(self.cell_type_markers)} cell type marker sets")
+        logger.debug(f"Loaded {len(self.cell_type_markers)} cell type marker sets")
         logger.debug(f"Available cell types: {list(self.cell_type_markers.keys())}")
         logger.debug("EnhancedSingleCellService initialized successfully")
 

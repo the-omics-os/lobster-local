@@ -740,6 +740,193 @@ def machine_learning_expert(
             return f"Error creating ML summary: {str(e)}"
 
     # -------------------------
+    # DEEP LEARNING EMBEDDING TOOLS (scVI Integration)
+    # -------------------------
+    @tool
+    def check_scvi_availability() -> str:
+        """
+        Check if scVI dependencies are available and provide installation instructions.
+        
+        Returns:
+            str: Status message with availability and installation guidance
+        """
+        try:
+            from lobster.tools.scvi_embedding_service import ScviEmbeddingService
+            
+            service = ScviEmbeddingService()
+            availability_info = service.check_availability()
+            
+            if availability_info["ready_for_scvi"]:
+                device = availability_info["hardware_recommendation"]["device"]
+                info = availability_info["hardware_recommendation"]["info"]
+                
+                return f"""✅ scVI is ready for deep learning embeddings!
+
+🔧 **Hardware Configuration:**
+- Compute device: {device.upper()}
+- Hardware info: {info}
+
+🚀 **Available Features:**
+- Deep learning-based dimensionality reduction
+- Batch correction with scVI models
+- State-of-the-art single-cell embeddings
+- GPU acceleration (if available)
+
+You can now use `train_scvi_embedding()` to create deep learning embeddings."""
+            else:
+                hardware_rec = availability_info["hardware_recommendation"]
+                missing = []
+                if not availability_info["torch_available"]:
+                    missing.append("PyTorch")
+                if not availability_info["scvi_available"]:
+                    missing.append("scVI")
+                
+                return f"""❌ scVI dependencies not available
+
+🔧 **Missing Dependencies:** {', '.join(missing)}
+
+💡 **Installation Instructions:**
+{hardware_rec['command']}
+
+📋 **Hardware Detected:** {hardware_rec['info']}
+
+**Manual Installation Steps:**
+1. For CPU-only (recommended for most): `pip install torch scvi-tools`
+2. For NVIDIA GPU: `pip install torch --index-url https://download.pytorch.org/whl/cu118` then `pip install scvi-tools`
+3. For Apple Silicon: `pip install torch scvi-tools` (MPS acceleration)
+
+After installation, restart your session and run this tool again."""
+                
+        except Exception as e:
+            logger.error(f"Error checking scVI availability: {e}")
+            return f"Error checking scVI availability: {str(e)}"
+
+    @tool
+    def train_scvi_embedding(
+        modality_name: str,
+        n_latent: int = 10,
+        n_layers: int = 2,
+        n_hidden: int = 128,
+        max_epochs: int = 400,
+        batch_key: Optional[str] = None,
+        use_gpu: bool = False,
+        save_model: bool = True
+    ) -> str:
+        """
+        Train scVI model for deep learning-based embedding and dimensionality reduction.
+        
+        Args:
+            modality_name: Name of the modality to process
+            n_latent: Number of latent dimensions (embedding size, default: 10)
+            n_layers: Number of hidden layers in the neural network (default: 2)
+            n_hidden: Number of hidden units per layer (default: 128)
+            max_epochs: Maximum training epochs (default: 400)
+            batch_key: Column name for batch correction (optional)
+            use_gpu: Whether to use GPU if available (default: False for stability)
+            save_model: Whether to save the trained model (default: True)
+            
+        Returns:
+            str: Summary of scVI training results with embedding information
+        """
+        try:
+            # Check scVI availability first
+            from lobster.tools.scvi_embedding_service import ScviEmbeddingService
+            
+            service = ScviEmbeddingService()
+            if not service.check_availability()["ready_for_scvi"]:
+                return check_scvi_availability()
+            
+            # Validate modality exists
+            if modality_name not in data_manager.list_modalities():
+                available = data_manager.list_modalities()
+                return f"❌ Modality '{modality_name}' not found.\n\n📊 Available modalities: {', '.join(available)}"
+            
+            # Get the modality
+            adata = data_manager.get_modality(modality_name)
+            logger.info(f"Training scVI embedding for '{modality_name}': {adata.shape}")
+            
+            # Validate batch key if provided
+            if batch_key and batch_key not in adata.obs.columns:
+                available_cols = [col for col in adata.obs.columns 
+                                if any(keyword in col.lower() for keyword in ['batch', 'sample', 'donor', 'replicate'])]
+                return f"❌ Batch key '{batch_key}' not found in modality observations.\n\n📋 Available batch-related columns: {available_cols}"
+            
+            # Train scVI model
+            model, training_info = service.train_scvi_embedding(
+                adata=adata,
+                batch_key=batch_key,
+                n_latent=n_latent,
+                n_layers=n_layers,
+                n_hidden=n_hidden,
+                max_epochs=max_epochs,
+                force_cpu=not use_gpu,
+                save_path=f"{modality_name}_scvi_model" if save_model else None
+            )
+            
+            # Update the modality in data manager
+            data_manager.modalities[modality_name] = adata
+            
+            # Log the operation
+            data_manager.log_tool_usage(
+                tool_name="train_scvi_embedding",
+                parameters={
+                    "modality_name": modality_name,
+                    "n_latent": n_latent,
+                    "n_layers": n_layers,
+                    "n_hidden": n_hidden,
+                    "max_epochs": max_epochs,
+                    "batch_key": batch_key,
+                    "device": training_info["device"]
+                },
+                description=f"Trained scVI model with {n_latent} latent dimensions on {training_info['device']}"
+            )
+            
+            # Generate response
+            response = f"""✅ Successfully trained scVI embedding for '{modality_name}'!
+
+🧠 **Deep Learning Model:**
+- Architecture: scVI (single-cell Variational Inference)
+- Latent dimensions: {training_info['n_latent']}
+- Hidden layers: {n_layers} × {n_hidden} units
+- Training device: {training_info['device'].upper()}
+
+📊 **Training Results:**
+- Dataset: {training_info['n_cells']:,} cells × {training_info['n_genes']:,} genes
+- Training epochs: {training_info['max_epochs']} (with early stopping)
+- Embedding shape: {training_info['embedding_shape']}
+- Embeddings stored in: obsm['X_scvi']"""
+
+            if batch_key:
+                response += f"\n- Batch correction: ✓ (using '{batch_key}')"
+            
+            if training_info["model_saved"]:
+                response += f"\n- Model saved: ✓ (for future inference)"
+            
+            response += f"""
+
+🎯 **Next Steps:**
+The scVI embeddings are now available in modality.obsm['X_scvi'] and can be used for:
+- Clustering with custom embeddings (set use_rep='X_scvi')
+- Visualization (UMAP/t-SNE on scVI space)
+- Batch-corrected downstream analysis
+- Transfer learning to new datasets
+
+📈 **Performance Notes:**
+- scVI provides state-of-the-art embeddings for single-cell data
+- Better batch correction than traditional methods
+- Probabilistic model enables uncertainty quantification
+- Ready for clustering and visualization!"""
+            
+            ml_results["details"]["scvi_training"] = response
+            return response
+            
+        except ImportError as e:
+            return f"❌ scVI dependencies not available: {str(e)}\n\nRun `check_scvi_availability()` for installation instructions."
+        except Exception as e:
+            logger.error(f"Error training scVI embedding: {e}")
+            return f"❌ Error training scVI embedding: {str(e)}"
+
+    # -------------------------
     # TOOL REGISTRY
     # -------------------------
     base_tools = [
@@ -747,7 +934,10 @@ def machine_learning_expert(
         prepare_ml_features,
         create_ml_splits,
         export_for_ml_framework,
-        create_ml_analysis_summary
+        create_ml_analysis_summary,
+        # Deep learning tools
+        check_scvi_availability,
+        train_scvi_embedding
     ]
     
     tools = base_tools + (handoff_tools or [])
@@ -783,11 +973,17 @@ You perform ML data preparation following best practices:
 </Task>
 
 <Available ML Tools>
+
+## Traditional ML Data Preparation:
 - `check_ml_ready_modalities`: Assess which modalities are ready for ML and provide recommendations
 - `prepare_ml_features`: Engineer features from biological data (selection, scaling, dimensionality reduction)
 - `create_ml_splits`: Create stratified train/test/validation splits with proper class balance
 - `export_for_ml_framework`: Export data in formats for PyTorch, TensorFlow, scikit-learn, etc.
 - `create_ml_analysis_summary`: Generate comprehensive ML preparation report
+
+## Deep Learning & scVI Tools:
+- `check_scvi_availability`: Check if scVI dependencies are installed and provide hardware-specific installation guidance
+- `train_scvi_embedding`: Train scVI models for state-of-the-art single-cell embeddings with batch correction
 
 <Professional ML Workflows & Tool Usage Order>
 
@@ -904,7 +1100,64 @@ export_for_ml_framework("modality_ml_features",
                        label_column="treatment")
 ```
 
-## 5. COMPREHENSIVE ML PIPELINE (Supervisor Request: "Prepare complete ML dataset")
+## 5. DEEP LEARNING & scVI WORKFLOWS (Single-cell Embedding Tasks)
+
+### scVI Availability Check (Supervisor Request: "Check scVI" or handoff from SingleCell Expert)
+```bash
+# Step 1: Check if scVI dependencies are installed
+check_scvi_availability()
+
+# Step 2: Report availability status and installation guidance to supervisor
+# If not available, provide hardware-specific installation instructions
+# If available, confirm ready for deep learning embedding training
+```
+
+### scVI Embedding Training (Supervisor/SingleCell Expert Request: "Train scVI embedding")
+```bash
+# Step 1: Verify scVI availability first
+check_scvi_availability()
+
+# Step 2: Train scVI model with specified parameters
+train_scvi_embedding("single_cell_modality", 
+                    n_latent=10, 
+                    batch_key="sample", 
+                    max_epochs=400, 
+                    use_gpu=False)
+
+# Step 3: Report training completion and embedding storage to supervisor
+# Embeddings will be stored in modality.obsm['X_scvi'] for downstream use
+```
+
+### scVI Training Scenarios (Common Handoff Patterns)
+```bash
+# Small dataset (CPU recommended)
+train_scvi_embedding("filtered_data", n_latent=8, max_epochs=200, use_gpu=False)
+
+# Large dataset with batches (GPU if available)
+train_scvi_embedding("large_dataset", n_latent=15, batch_key="donor", max_epochs=400, use_gpu=True)
+
+# Multi-batch study (focus on batch correction)
+train_scvi_embedding("multi_batch_data", n_latent=12, batch_key="batch_id", max_epochs=300)
+```
+
+### Agent Handoff Protocol for scVI (SingleCell Expert → ML Expert)
+```bash
+# When receiving handoff request from SingleCell Expert:
+
+# Step 1: Parse handoff message for parameters
+# Look for: modality_name, n_latent, batch_key, max_epochs, use_gpu
+
+# Step 2: Validate scVI availability
+check_scvi_availability()
+
+# Step 3: If available, train scVI with requested parameters
+train_scvi_embedding(modality_name, n_latent=n_latent, batch_key=batch_key, max_epochs=max_epochs, use_gpu=use_gpu)
+
+# Step 4: Report completion back to supervisor for handoff return
+# Message should confirm embeddings stored and ready for clustering
+```
+
+## 6. COMPREHENSIVE ML PIPELINE (Supervisor Request: "Prepare complete ML dataset")
 
 ### Full ML Preparation Pipeline
 ```bash
@@ -931,6 +1184,24 @@ export_for_ml_framework("preprocessed_modality_ml_features_train",
 
 # Step 5: Generate comprehensive report
 create_ml_analysis_summary()
+```
+
+### Complete Deep Learning Pipeline (Supervisor Request: "Prepare data with scVI embeddings")
+```bash
+# Step 1: Check scVI availability and hardware
+check_scvi_availability()
+
+# Step 2: Train scVI embeddings for dimensionality reduction
+train_scvi_embedding("single_cell_data", 
+                    n_latent=15, 
+                    batch_key="sample", 
+                    max_epochs=400)
+
+# Step 3: The embeddings are now available for clustering (handoff to SingleCell Expert)
+# or for advanced ML workflows using the scVI latent space
+
+# Step 4: Optional - export scVI embeddings for external ML frameworks
+# The embeddings in obsm['X_scvi'] can be exported like any other features
 ```
 
 <ML Parameter Guidelines>

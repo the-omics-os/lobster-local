@@ -66,7 +66,7 @@ class MLProteomicsService:
             Dict containing biomarker proteins and validation results
         """
         try:
-            logger.info(f"Discovering protein biomarkers using {method}")
+            logger.debug(f"Discovering protein biomarkers using {method}")
             logger.info(f"Data: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
             logger.info(f"Proteins: {X_train.shape[1]} features")
             logger.info(f"Target biomarkers: {n_biomarkers}")

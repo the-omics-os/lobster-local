@@ -182,7 +182,7 @@ class PublicationService:
             logger.error(f"Failed to register GEO provider: {e}")
         
         # Future: Add other providers (bioRxiv, medRxiv) when implemented
-        logger.info(f"Registered {len(self.registry.list_providers())} providers")
+        logger.debug(f"Registered {len(self.registry.list_providers())} providers")
     
     def search_literature(
         self,

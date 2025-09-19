@@ -69,7 +69,7 @@ class MLTranscriptomicsService:
         """
         try:
             # Template implementation - would use PyTorch or TensorFlow in practice
-            logger.info(f"Training deep learning model for cell type classification")
+            logger.debug(f"Training deep learning model for cell type classification")
             logger.info(f"Data: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
             logger.info(f"Features: {X_train.shape[1]} genes")
             logger.info(f"Classes: {len(np.unique(y_train))} cell types")

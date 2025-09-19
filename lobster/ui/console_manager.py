@@ -161,7 +161,7 @@ class LobsterConsoleManager:
             highlight=True,
             markup=True,
             emoji=True,
-            record=True  # Enable session recording
+            record=False  # Disable session recording to allow terminal scrolling
         )
 
         # Error console (stderr) with same theming
@@ -176,7 +176,7 @@ class LobsterConsoleManager:
             highlight=True,
             markup=True,
             emoji=True,
-            record=True
+            record=False  # Disable session recording to allow terminal scrolling
         )
 
     def _setup_logging(self):
@@ -406,7 +406,7 @@ class LobsterConsoleManager:
             refresh_per_second=refresh_per_second,
             auto_refresh=True,
             vertical_overflow="visible",
-            transient=False
+            transient=True  # Enable transient mode to allow terminal scrolling
         )
 
     def has_history_support(self) -> bool:

@@ -63,7 +63,7 @@ class BulkRNASeqService:
         # Initialize formula service
         self.formula_service = DifferentialFormulaService()
         
-        logger.info(f"BulkRNASeqService initialized with results_dir: {self.results_dir}")
+        logger.debug(f"BulkRNASeqService initialized with results_dir: {self.results_dir}")
 
     def run_fastqc(self, fastq_files: List[str]) -> str:
         """

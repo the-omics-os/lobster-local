@@ -390,7 +390,7 @@ console = console_manager.console
 
 app = typer.Typer(
     name="lobster",
-    help="🦞 Lobster by homara AI - Multi-Agent Bioinformatics Analysis System",
+    help="🦞 Lobster by Omics-OS - Multi-Agent Bioinformatics Analysis System",
     add_completion=True,
     rich_markup_mode="rich"
 )
@@ -411,6 +411,7 @@ current_directory = Path.cwd()
 def init_client(
     workspace: Optional[Path] = None,
     reasoning: bool = False,
+    verbose: bool = False,
     debug: bool = False
 ) -> AgentClient:
     """Initialize either local or cloud client based on environment."""
@@ -496,7 +497,7 @@ def init_client(
             console.print("")
             console.print("[bold white]🌟 Get Lobster Cloud Access:[/bold white]")
             console.print("   • Visit: [bold blue]https://cloud.lobster.ai[/bold blue]")
-            console.print("   • Email: [bold blue]cloud@homara.ai[/bold blue]")
+            console.print("   • Email: [bold blue]cloud@omics-os.com[/bold blue]")
             console.print("")
             console.print("[bold white]💻 For now, using local mode with full functionality:[/bold white]")
             console.print("[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/cyan]")
@@ -519,17 +520,20 @@ def init_client(
     data_manager = DataManagerV2(workspace_path=workspace, console=console)
     
     # Create callback using the appropriate terminal_callback_handler
+    # Configure callbacks based on reasoning and verbose flags independently
     callbacks = []
-    if reasoning:
-        # Use full TerminalCallbackHandler for detailed reasoning output
-        reasoning_callback = TerminalCallbackHandler(
+    
+    if reasoning or verbose:
+        # Use full TerminalCallbackHandler when either reasoning or verbose is enabled
+        callback = TerminalCallbackHandler(
             console=console,
-            show_reasoning=True,
-            verbose=True
+            show_reasoning=reasoning,  # Only show reasoning if reasoning flag is True
+            verbose=verbose,           # Control tool/agent verbosity independently
+            show_tools=verbose         # Only show detailed tool output if verbose is True
         )
-        callbacks.append(reasoning_callback)
+        callbacks.append(callback)
     else:
-        # Use simplified callback for basic output
+        # Use simplified callback for minimal, clean output (default)
         simple_callback = SimpleTerminalCallback(
             console=console,
             show_reasoning=False
@@ -588,7 +592,8 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
                 HTML(f'<ansibrightblack>{clean_prompt}</ansibrightblack>'),
                 completer=main_completer,
                 complete_while_typing=True,
-                mouse_support=True,
+                # Disable mouse support so terminal scroll remains usable
+                mouse_support=False, #FIXME change this back to True if needed. I deactivated to allow scrolling
                 style=style,
                 complete_style='multi-column'
             )
@@ -601,7 +606,8 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
             # Use prompt_toolkit without autocomplete (no client provided)
             user_input = prompt(
                 HTML(f'<ansibrightblack>{clean_prompt}</ansibrightblack>'),
-                mouse_support=True
+                # Disable mouse support so terminal scroll remains usable
+                mouse_support=False #FIXME change this back to True if needed. I deactivated to allow scrolling
             )
             return user_input.strip()
 
@@ -858,7 +864,7 @@ def get_current_agent_name() -> str:
 def display_welcome():
     """Display welcome message with enhanced orange branding."""
     # Create branded header
-    header_text = LobsterTheme.create_title_text("LOBSTER by homara AI", "🦞")
+    header_text = LobsterTheme.create_title_text("LOBSTER by Omics-OS", "🦞")
 
     # Check for enhanced input capabilities
     input_features = console_manager.get_input_features()
@@ -898,7 +904,7 @@ def display_welcome():
 • Single query mode via [{LobsterTheme.PRIMARY_ORANGE}]lobster query[/{LobsterTheme.PRIMARY_ORANGE}] command
 • API server mode via [{LobsterTheme.PRIMARY_ORANGE}]lobster serve[/{LobsterTheme.PRIMARY_ORANGE}] command
 
-[dim grey50]Powered by LangGraph | © 2025 homara AI[/dim grey50]"""
+[dim grey50]Powered by LangGraph | © 2025 Omics-OS[/dim grey50]"""
 
     # Create branded welcome panel
     welcome_panel = LobsterTheme.create_panel(
@@ -936,10 +942,52 @@ def display_status(client: AgentClient):
     console_manager.print_status_panel(status_data, "System Status")
 
 
+def init_client_with_animation(
+    workspace: Optional[Path] = None,
+    reasoning: bool = False,
+    verbose: bool = False,
+    debug: bool = False
+) -> AgentClient:
+    """Initialize client with simple agent loading animation."""
+    import time
+    from lobster.config.agent_registry import AGENT_REGISTRY
+
+    console_manager = get_console_manager()
+
+    # Agent emojis
+    agent_emojis = {
+        'data_expert_agent': '🗄️',
+        'singlecell_expert_agent': '🧬',
+        'bulk_rnaseq_expert_agent': '📊',
+        'research_agent': '📚',
+        'method_expert_agent': '🔬',
+        'ms_proteomics_expert_agent': '🧪',
+        'affinity_proteomics_expert_agent': '🔗',
+        'machine_learning_expert_agent': '🤖'
+    }
+
+    console.print(f"[bold {LobsterTheme.PRIMARY_ORANGE}]🦞 Initializing Lobster AI...[/bold {LobsterTheme.PRIMARY_ORANGE}]")
+    
+    # Show agents being loaded
+    for agent_name, config in AGENT_REGISTRY.items():
+        emoji = agent_emojis.get(agent_name, '⚡')
+        with console.status(f"[{LobsterTheme.PRIMARY_ORANGE}]{emoji} Loading {config.display_name}...[/{LobsterTheme.PRIMARY_ORANGE}]"):
+            time.sleep(0.2)  # Brief loading time
+        console.print(f"  [green]✓[/green] {emoji} {config.display_name}")
+    
+    # Actually initialize the client
+    console.print(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🔧 Starting multi-agent system...[/{LobsterTheme.PRIMARY_ORANGE}]")
+    client = init_client(workspace, reasoning, verbose, debug)
+    
+    console.print(f"[bold green]✅ Lobster AI ready![/bold green]\n")
+    return client
+
+
 @app.command()
 def chat(
     workspace: Optional[Path] = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     reasoning: bool = typer.Option(False, "--reasoning", is_flag=True, help="Show agent reasoning"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed tool usage and agent activity"),
     debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode with enhanced error reporting")
 ):
     """
@@ -962,12 +1010,9 @@ def chat(
 
     display_welcome()
 
-    # Initialize client with enhanced status reporting
-    console_manager.print(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Initializing Lobster agents...[/{LobsterTheme.PRIMARY_ORANGE}]")
-
+    # Initialize client with animated loading sequence
     try:
-        client = init_client(workspace, reasoning, debug)
-        console_manager.print_success_panel("System ready!", "All agents initialized successfully")
+        client = init_client_with_animation(workspace, reasoning, verbose, debug)
     except Exception as e:
         console_manager.print_error_panel(
             f"Failed to initialize Lobster: {str(e)}",
@@ -1039,7 +1084,7 @@ def chat(
         except KeyboardInterrupt:
             if Confirm.ask(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Exit Lobster?[/{LobsterTheme.PRIMARY_ORANGE}]"):
                 exit_panel = LobsterTheme.create_panel(
-                    "👋 Thank you for using Lobster by homara AI",
+                    "👋 Thank you for using Lobster by Omics-OS",
                     title="Goodbye"
                 )
                 console_manager.print(exit_panel)
@@ -2270,7 +2315,7 @@ when they are started by agents or analysis workflows.
     
     elif cmd == "/exit":
         if Confirm.ask("[red]🦞 Exit Lobster?[/red]"):
-            console.print("\n[bold white on red] 👋 Thank you for using Lobster by homara AI [/bold white on red]\n")
+            console.print("\n[bold white on red] 👋 Thank you for using Lobster by Omics-OS [/bold white on red]\n")
             raise KeyboardInterrupt
     
     else:
@@ -2282,13 +2327,14 @@ def query(
     question: str,
     workspace: Optional[Path] = typer.Option(None, "--workspace", "-w"),
     reasoning: bool = typer.Option(False, "--reasoning", "-r"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed tool usage and agent activity"),
     output: Optional[Path] = typer.Option(None, "--output", "-o")
 ):
     """
     Send a single query to the agent system.
     """
     # Initialize client
-    client = init_client(workspace, reasoning)
+    client = init_client(workspace, reasoning, verbose)
     
     # Process query
     with console.status("[red]🦞 Processing query...[/red]"):
@@ -2324,7 +2370,7 @@ def serve(
     # Create FastAPI app
     api = FastAPI(
         title="Lobster Agent API",
-        description="🦞 Multi-Agent Bioinformatics System by homara AI",
+        description="🦞 Multi-Agent Bioinformatics System by Omics-OS",
         version="2.0"
     )
     
