@@ -33,7 +33,7 @@ from lobster.ui.live_dashboard import get_dashboard
 from lobster.ui.components import (
     create_file_tree, create_workspace_tree,
     create_system_dashboard, create_workspace_dashboard, create_analysis_dashboard,
-    create_multi_progress_layout, get_multi_progress_manager
+    create_multi_progress_layout, get_multi_progress_manager, get_status_display
 )
 # Implobsterort the proper callback handler
 from lobster.utils import TerminalCallbackHandler, SimpleTerminalCallback
@@ -152,6 +152,59 @@ class CloudAwareCache:
                 raise e
 
         return self.cache[key]['data']
+
+#FIXME currenlty langraph implementation 
+def _add_command_to_history(client: AgentClient, command: str, summary: str, is_error: bool = False) -> None:
+    """Add command execution to conversation history for AI context."""
+    try:
+        # Import required message types
+        from langchain_core.messages import HumanMessage, AIMessage
+
+        # Format messages for conversation history
+        human_message_command_usage = f"Command: {command}"
+        status_prefix = "Error" if is_error else "Result"
+        ai_message_command_response = f"Command {status_prefix}: {summary}"
+
+        # Add messages directly to client.messages (the correct API)
+        if hasattr(client, 'messages') and isinstance(client.messages, list):
+            config = dict(
+                configurable = dict(
+                    thread_id = client.session_id
+                )
+            )
+            #first we add to clinet message history for future use (currently langraph implementation )
+            client.messages.append(HumanMessage(content=human_message_command_usage))
+            client.messages.append(AIMessage(content=ai_message_command_response))
+            #then we use the client method to add to history
+            client.graph.update_state(config, dict(
+                messages = [HumanMessage(human_message_command_usage), 
+                            AIMessage(ai_message_command_response)])
+            )
+        else:
+            # Fallback for other client types (cloud, API, etc.)
+            console.print(f"[dim yellow]Command history not supported for this client type[/dim yellow]", style="dim")
+
+    except Exception as e:
+        # Never break CLI functionality for history logging
+        console.print(f"[dim yellow]History logging failed: {str(e)[:50]}[/dim yellow]", style="dim")
+
+
+def check_for_missing_slash_command(user_input: str) -> Optional[str]:
+    """Check if user input matches a command without the leading slash."""
+    if not user_input or user_input.startswith("/"):
+        return None
+
+    # Get the first word (potential command)
+    first_word = user_input.split()[0].lower()
+
+    # Check against known commands (without the slash)
+    available_commands = extract_available_commands()
+    for cmd in available_commands.keys():
+        cmd_without_slash = cmd[1:]  # Remove the leading slash
+        if first_word == cmd_without_slash:
+            return cmd
+
+    return None
 
 
 def extract_available_commands() -> Dict[str, str]:
@@ -972,14 +1025,14 @@ def init_client_with_animation(
     for agent_name, config in AGENT_REGISTRY.items():
         emoji = agent_emojis.get(agent_name, '⚡')
         with console.status(f"[{LobsterTheme.PRIMARY_ORANGE}]{emoji} Loading {config.display_name}...[/{LobsterTheme.PRIMARY_ORANGE}]"):
-            time.sleep(0.2)  # Brief loading time
+            time.sleep(0.1)  # Brief loading time
         console.print(f"  [green]✓[/green] {emoji} {config.display_name}")
     
     # Actually initialize the client
     console.print(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🔧 Starting multi-agent system...[/{LobsterTheme.PRIMARY_ORANGE}]")
     client = init_client(workspace, reasoning, verbose, debug)
     
-    console.print(f"[bold green]✅ Lobster AI ready![/bold green]\n")
+    console.print(f"[bold green]✅ Lobster is cooked and ready![/bold green]\n")
     return client
 
 
@@ -1033,12 +1086,27 @@ def chat(
             if current_directory == Path.cwd():
                 current_path = str(current_directory.name)
             user_input = get_user_input_with_editing(f"\n[bold red]🦞 {current_path}[/bold red] ", client)
-            
+
+            # Skip processing if input is empty or just whitespace
+            if not user_input.strip():
+                continue
+
             # Handle commands
             if user_input.startswith("/"):
                 handle_command(user_input, client)
                 continue
-            
+
+            # Check if user forgot the slash for a command
+            potential_command = check_for_missing_slash_command(user_input)
+            if potential_command:
+                if Confirm.ask(f"[yellow]Did you mean '{potential_command}'?[/yellow]", default=True):
+                    # Replace first word with the slash command
+                    words = user_input.split()
+                    words[0] = potential_command
+                    corrected_input = " ".join(words)
+                    handle_command(corrected_input, client)
+                    continue
+
             # Check if it's a shell command first
             if execute_shell_command(user_input):
                 continue
@@ -1129,11 +1197,21 @@ def handle_command(command: str, client: AgentClient):
     cmd = command.lower().strip()
 
     try:
-        _execute_command(cmd, client)
+        # Execute command and capture summary for history
+        command_summary = _execute_command(cmd, client)
+
+        # Add to conversation history if summary provided
+        if command_summary:
+            _add_command_to_history(client, command, command_summary)
+
     except Exception as e:
         # Enhanced command error handling
         error_message = str(e)
         error_type = type(e).__name__
+
+        # Log command failure to history
+        error_summary = f"Failed: {error_type}: {error_message[:100]}"
+        _add_command_to_history(client, command, error_summary, is_error=True)
 
         # Command-specific error suggestions
         if cmd.startswith("/read"):
@@ -1151,8 +1229,13 @@ def handle_command(command: str, client: AgentClient):
         )
 
 
-def _execute_command(cmd: str, client: AgentClient):
-    """Execute individual slash commands."""
+def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
+    """Execute individual slash commands.
+
+    Returns:
+        Optional[str]: Summary of command execution for conversation history,
+                      or None if command should not be logged to history.
+    """
     
     if cmd == "/help":
         help_text = f"""[bold white]Available Commands:[/bold white]
@@ -1292,8 +1375,23 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
     elif cmd == "/dashboard":
         # Show comprehensive system health dashboard
         try:
-            dashboard_layout = create_system_dashboard(client)
-            console_manager.print(dashboard_layout)
+            # Create a compact dashboard using individual panels instead of full-screen layout
+            status_display = get_status_display()
+
+            # Get individual panels from the dashboard components
+            core_panel = status_display._create_core_status_panel(client)
+            resource_panel = status_display._create_resource_panel()
+            agent_panel = status_display._create_agent_status_panel(client)
+
+            # Print panels individually instead of using full-screen layout
+            console_manager.print(LobsterTheme.create_panel(
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]System Health Dashboard[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                title="🦞 Dashboard"
+            ))
+            console_manager.print(core_panel)
+            console_manager.print(resource_panel)
+            console_manager.print(agent_panel)
+
         except Exception as e:
             console_manager.print_error_panel(
                 f"Failed to create system dashboard: {e}",
@@ -1303,8 +1401,23 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
     elif cmd == "/workspace-info":
         # Show detailed workspace overview
         try:
-            workspace_layout = create_workspace_dashboard(client)
-            console_manager.print(workspace_layout)
+            # Create a compact workspace overview using individual panels instead of full-screen layout
+            status_display = get_status_display()
+
+            # Get individual panels from the workspace dashboard components
+            workspace_info_panel = status_display._create_workspace_info_panel(client)
+            files_panel = status_display._create_recent_files_panel(client)
+            data_panel = status_display._create_data_status_panel(client)
+
+            # Print panels individually instead of using full-screen layout
+            console_manager.print(LobsterTheme.create_panel(
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]Workspace Overview[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                title="🏗️ Workspace"
+            ))
+            console_manager.print(workspace_info_panel)
+            console_manager.print(files_panel)
+            console_manager.print(data_panel)
+
         except Exception as e:
             console_manager.print_error_panel(
                 f"Failed to create workspace overview: {e}",
@@ -1314,8 +1427,21 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
     elif cmd == "/analysis-dash":
         # Show analysis monitoring dashboard
         try:
-            analysis_layout = create_analysis_dashboard(client)
-            console_manager.print(analysis_layout)
+            # Create a compact analysis dashboard using individual panels instead of full-screen layout
+            status_display = get_status_display()
+
+            # Get individual panels from the analysis dashboard components
+            analysis_panel = status_display._create_analysis_panel(client)
+            plots_panel = status_display._create_plots_panel(client)
+
+            # Print panels individually instead of using full-screen layout
+            console_manager.print(LobsterTheme.create_panel(
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]Analysis Dashboard[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                title="🧬 Analysis"
+            ))
+            console_manager.print(analysis_panel)
+            console_manager.print(plots_panel)
+
         except Exception as e:
             console_manager.print_error_panel(
                 f"Failed to create analysis dashboard: {e}",
@@ -1329,8 +1455,17 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
             active_count = progress_manager.get_active_operations_count()
 
             if active_count > 0:
-                progress_layout = create_multi_progress_layout()
-                console_manager.print(progress_layout)
+                # Create a compact progress display using individual panels instead of full-screen layout
+                operations_panel = progress_manager._create_operations_panel()
+                details_panel = progress_manager._create_details_panel()
+
+                # Print panels individually instead of using full-screen layout
+                console_manager.print(LobsterTheme.create_panel(
+                    f"[bold {LobsterTheme.PRIMARY_ORANGE}]Multi-Task Progress Monitor[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                    title=f"🔄 Progress ({active_count} active)"
+                ))
+                console_manager.print(operations_panel)
+                console_manager.print(details_panel)
             else:
                 # Show information about the progress system
                 info_text = f"""[bold white]Multi-Task Progress Monitor[/bold white]
@@ -1573,8 +1708,18 @@ when they are started by agents or analysis workflows.
                 console.print(f"\n[red]❌ Failed to load {len(failed_files)} files:[/red]")
                 for failed in failed_files:
                     console.print(f"  • [red]{failed}[/red]")
-            
-            return
+
+            # Return summary for conversation history
+            if loaded_files:
+                modality_names = [f['modality_name'] for f in loaded_files]
+                if len(loaded_files) == 1:
+                    return f"Loaded 1 file '{loaded_files[0]['name']}' as modality '{loaded_files[0]['modality_name']}' - Shape: {loaded_files[0]['shape'][0]}×{loaded_files[0]['shape'][1]}"
+                else:
+                    return f"Bulk loaded {len(loaded_files)} files as modalities: {', '.join(modality_names[:3])}{'...' if len(modality_names) > 3 else ''}"
+            elif failed_files:
+                return f"Failed to load {len(failed_files)} files matching pattern '{filename}'"
+            else:
+                return f"No files found matching pattern '{filename}'"
         
         # Single file processing (existing logic)
         # First, locate and identify the file
@@ -1588,7 +1733,7 @@ when they are started by agents or analysis workflows.
                     console.print(f"  • [grey50]{path}[/grey50]")
                 if len(file_info['searched_paths']) > 5:
                     console.print(f"  • [grey50]... and {len(file_info['searched_paths'])-5} more[/grey50]")
-            return
+            return f"File '{filename}' not found"
         
         # Show file location info
         file_path = file_info['path']
@@ -1653,10 +1798,16 @@ when they are started by agents or analysis workflows.
                 console.print(f"  • [yellow]Analyze the {load_result['modality_name']} dataset[/yellow] - Start analysis")
                 console.print(f"  • [yellow]Generate a quality control report for {load_result['modality_name']}[/yellow] - QC analysis")
                 console.print(f"  • [yellow]Show me the first few rows of {load_result['modality_name']}[/yellow] - Data preview")
+
+                # Return summary for conversation history
+                return f"Loaded file '{filename}' as modality '{load_result['modality_name']}' - Shape: {load_result['data_shape'][0]:,}×{load_result['data_shape'][1]:,}, Size: {size_str}"
             else:
                 console.print(f"[bold red on white] ⚠️  Loading Failed [/bold red on white] [red]{load_result['error']}[/red]")
                 if 'suggestion' in load_result:
                     console.print(f"[yellow]💡 Suggestion: {load_result['suggestion']}[/yellow]")
+
+                # Return summary for conversation history
+                return f"Failed to load file '{filename}': {load_result['error']}"
         
         elif file_category in ['code', 'documentation', 'metadata'] or not file_info.get('binary', True):
             # This is a text file - display content
@@ -1685,15 +1836,20 @@ when they are started by agents or analysis workflows.
                     
                     syntax = Syntax(content, language, theme="monokai", line_numbers=True)
                     console.print(Panel(
-                        syntax, 
+                        syntax,
                         title=f"[bold white on red] 📄 {file_path.name} [/bold white on red]",
                         border_style="red",
                         box=box.DOUBLE
                     ))
+
+                    # Return summary for conversation history
+                    return f"Displayed text file '{filename}' ({file_description}, {len(content.splitlines())} lines)"
                 else:
                     console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]")
+                    return f"Failed to read text file '{filename}'"
             except Exception as e:
                 console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {e}[/red]")
+                return f"Error reading text file '{filename}': {str(e)}"
         
         else:
             # Binary file or unsupported type
@@ -1707,15 +1863,22 @@ when they are started by agents or analysis workflows.
                 console.print(f"[cyan]💡 This is an archive file. Extract it first to access the contents.[/cyan]")
             else:
                 console.print(f"[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]")
+
+            # Return summary for conversation history
+            return f"Identified file '{filename}' as {file_description} ({file_category}) - not supported for loading or display"
     
     elif cmd == "/export":
         export_path = client.export_session()
         console.print(f"[bold red]✓[/bold red] [white]Session exported to:[/white] [grey74]{export_path}[/grey74]")
+        return f"Session exported to: {export_path}"
     
     elif cmd == "/reset":
         if Confirm.ask("[red]🦞 Reset conversation?[/red]"):
             client.reset()
             console.print("[bold red]✓[/bold red] [white]Conversation reset[/white]")
+            return "Conversation reset - cleared message history and session state"
+        else:
+            return "Reset cancelled by user"
     
     elif cmd == "/data":
         # Show current data summary with enhanced metadata display
@@ -2237,13 +2400,15 @@ when they are started by agents or analysis workflows.
     elif cmd == "/save":
         # Auto-save current state
         saved_items = client.data_manager.auto_save_state()
-        
+
         if saved_items:
             console.print(f"[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
             for item in saved_items:
                 console.print(f"  • {item}")
+            return f"Saved {len(saved_items)} items to workspace: {', '.join(saved_items[:3])}{'...' if len(saved_items) > 3 else ''}"
         else:
             console.print("[grey50]Nothing to save (no data or plots loaded)[/grey50]")
+            return "No data or plots to save"
     
     elif cmd == "/modes":
         # List all available modes/profiles
@@ -2300,6 +2465,7 @@ when they are started by agents or analysis workflows.
             change_mode(new_mode, client)
             console.print(f"[bold red]✓[/bold red] [white]Mode changed to:[/white] [bold red]{new_mode}[/bold red]")
             display_status(client)
+            return f"Operation mode changed to '{new_mode}' - agent models and configurations updated"
         else:
             # Display available profilescan you
             console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Invalid mode: {new_mode}[/red]")
@@ -2309,6 +2475,7 @@ when they are started by agents or analysis workflows.
                     console.print(f"  • [bold red]{profile}[/bold red] (current)")
                 else:
                     console.print(f"  • {profile}")
+            return f"Invalid mode '{new_mode}' - available modes: {', '.join(sorted(available_profiles.keys()))}"
     
     elif cmd == "/clear":
         console.clear()
