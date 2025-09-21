@@ -90,6 +90,9 @@ The CLI (`lobster/cli.py`) features a modern terminal interface with comprehensi
 - `/data` - Show current dataset information
 - `/plots` - List generated visualizations
 - `/workspace` - Show workspace information
+- `/workspace list` - List available datasets without loading (v2.2+)
+- `/workspace load <name>` - Load specific dataset by name (v2.2+)
+- `/restore [pattern]` - Restore previous session datasets (v2.2+)
 - `/modes` - List available operation modes
 
 ## Architecture Overview
@@ -197,6 +200,7 @@ When modifying the codebase, be aware of cloud dependencies:
 - Tool usage history for provenance tracking (W3C-PROV compliant)
 - Backend/adapter registry for extensible data handling
 - Schema validation for transcriptomics and proteomics data
+- **Workspace restoration** (v2.2+): Session persistence, lazy loading, pattern-based restoration
 
 **Professional Naming Convention:**
 ```
@@ -432,7 +436,12 @@ DataManagerV2 (lobster/core/data_manager_v2.py)
 ├── Manages named modalities (Dict[str, AnnData])
 ├── Tracks provenance and tool usage
 ├── Validates schemas (transcriptomics/proteomics)
-└── Delegates to backends (H5AD, MuData)
+├── Delegates to backends (H5AD, MuData)
+└── Workspace restoration (v2.2+):
+    ├── _scan_workspace() - Detect available datasets
+    ├── load_dataset(name) - Lazy load specific dataset
+    ├── restore_session(pattern) - Pattern-based restoration
+    └── .session.json - Persistent session tracking
 ```
 
 ### Testing Connectivity

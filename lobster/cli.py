@@ -226,6 +226,9 @@ def extract_available_commands() -> Dict[str, str]:
         '/data': 'Show current data summary',
         '/metadata': 'Show detailed metadata information',
         '/workspace': 'Show workspace status and information',
+        '/workspace list': 'List available datasets in workspace',
+        '/workspace load': 'Load specific dataset from workspace',
+        '/restore': 'Restore previous session datasets',
         '/modalities': 'Show detailed modality information',
         '/plots': 'List all generated plots',
         '/plot': 'Open plots directory or specific plot',
@@ -388,6 +391,40 @@ if PROMPT_TOOLKIT_AVAILABLE:
             elif text.startswith('/') and ' ' not in text:
                 # Command completion (typing a command)
                 yield from self.command_completer.get_completions(document, complete_event)
+
+            elif text.startswith('/workspace load '):
+                # Suggest available dataset names
+                prefix = text.replace('/workspace load ', '')
+                try:
+                    if hasattr(self.client.data_manager, 'available_datasets'):
+                        for name, info in self.client.data_manager.available_datasets.items():
+                            if name.lower().startswith(prefix.lower()):
+                                size_mb = info.get('size_mb', 0)
+                                shape = info.get('shape', (0, 0))
+                                meta = f"{size_mb:.1f}MB • {shape[0]}×{shape[1]}"
+                                yield Completion(
+                                    text=name,
+                                    start_position=-len(prefix),
+                                    display=HTML(f'<ansicyan>{name}</ansicyan>'),
+                                    display_meta=HTML(f'<dim>{meta}</dim>'),
+                                    style='class:completion.dataset'
+                                )
+                except Exception:
+                    pass
+
+            elif text.startswith('/restore '):
+                # Suggest restore patterns
+                patterns = ['recent', 'all', '*']
+                prefix = text.replace('/restore ', '')
+                for pattern in patterns:
+                    if pattern.startswith(prefix):
+                        yield Completion(
+                            text=pattern,
+                            start_position=-len(prefix),
+                            display=HTML(f'<ansiyellow>{pattern}</ansiyellow>'),
+                            display_meta=HTML('<dim>restore pattern</dim>'),
+                            style='class:completion.pattern'
+                        )
 
             elif any(text.startswith(cmd + ' ') for cmd in self.file_commands):
                 # File completion for file-accepting commands
@@ -1043,6 +1080,48 @@ def display_status(client: AgentClient):
     console_manager.print_status_panel(status_data, "System Status")
 
 
+def _show_workspace_prompt(client):
+    """Display workspace restoration prompt on startup."""
+    datasets = client.data_manager.available_datasets
+    session = client.data_manager.session_data
+
+    if not datasets:
+        return
+
+    # Calculate workspace info
+    total_size = sum(d["size_mb"] for d in datasets.values())
+    dataset_count = len(datasets)
+
+    # Get last session info
+    last_used = "unknown"
+    if session and "last_modified" in session:
+        from datetime import datetime
+        last_modified = datetime.fromisoformat(session["last_modified"])
+        time_diff = datetime.now() - last_modified
+        if time_diff.days > 0:
+            last_used = f"{time_diff.days} day{'s' if time_diff.days > 1 else ''} ago"
+        elif time_diff.seconds > 3600:
+            hours = time_diff.seconds // 3600
+            last_used = f"{hours} hour{'s' if hours > 1 else ''} ago"
+        else:
+            minutes = time_diff.seconds // 60
+            last_used = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
+
+    # Create informative panel
+    panel_content = f"""📂 Found existing workspace (last used: {last_used})
+   • {dataset_count} datasets available ({total_size:.1f} MB)
+
+Type [{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}] to continue where you left off
+Type [{LobsterTheme.PRIMARY_ORANGE}]/workspace list[/{LobsterTheme.PRIMARY_ORANGE}] to see available datasets
+Type [{LobsterTheme.PRIMARY_ORANGE}]/workspace load <name>[/{LobsterTheme.PRIMARY_ORANGE}] to load specific datasets"""
+
+    console.print(Panel(
+        panel_content,
+        title="Workspace Detected",
+        border_style="orange",
+        padding=(1, 2)
+    ))
+
 def init_client_with_animation(
     workspace: Optional[Path] = None,
     reasoning: bool = False,
@@ -1120,7 +1199,10 @@ def chat(
             "Check your configuration and try again"
         )
         raise
-    
+
+    # Check for existing workspace and show restoration prompt
+    _show_workspace_prompt(client)
+
     # Show initial status
     display_status(client)
     
@@ -1300,6 +1382,10 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show current data summary
 [{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Show detailed metadata information
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show workspace status and information
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available datasets in workspace
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace load <name>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Load specific dataset from workspace
+[{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Restore previous session datasets
+[{LobsterTheme.PRIMARY_ORANGE}]/restore <pattern>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Restore datasets matching pattern (recent/all/*)
 [{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
 [{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List all generated plots
 [{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Open plots directory in file manager
@@ -2164,13 +2250,59 @@ when they are started by agents or analysis workflows.
         else:
             console.print("[grey50]No current data metadata available[/grey50]")
     
-    elif cmd == "/workspace":
-        # Show workspace status and information
-        console.print("[bold red]🏗️  Workspace Information[/bold red]\n")
-        
-        # Check if using DataManagerV2
-        if hasattr(client.data_manager, 'get_workspace_status'):
-            workspace_status = client.data_manager.get_workspace_status()
+    elif cmd.startswith("/workspace"):
+        # Workspace management commands
+        parts = cmd.split()
+        subcommand = parts[1] if len(parts) > 1 else "info"
+
+        if subcommand == "list":
+            # Show available datasets without loading
+            available = client.data_manager.available_datasets
+            loaded = set(client.data_manager.modalities.keys())
+
+            table = Table(title="Available Datasets", box=box.ROUNDED)
+            table.add_column("Status", style="green")
+            table.add_column("Name", style="bold")
+            table.add_column("Size", style="cyan")
+            table.add_column("Shape", style="white")
+            table.add_column("Modified", style="dim")
+
+            for name, info in sorted(available.items()):
+                status = "✓" if name in loaded else "○"
+                size = f"{info['size_mb']:.1f} MB"
+                shape = f"{info['shape'][0]:,} × {info['shape'][1]:,}" if info['shape'] else "N/A"
+                modified = info['modified'].split('T')[0]
+                table.add_row(status, name, size, shape, modified)
+
+            console.print(table)
+            return f"Listed {len(available)} available datasets"
+
+        elif subcommand == "load":
+            # Load specific datasets
+            if len(parts) < 3:
+                console.print("[red]Usage: /workspace load <pattern>[/red]")
+                return None
+            else:
+                pattern = parts[2]
+                result = client.data_manager.restore_session(pattern)
+
+                # Display results
+                if result["restored"]:
+                    console.print(f"[green]✓ Loaded {len(result['restored'])} datasets ({result['total_size_mb']:.1f} MB)[/green]")
+                    for name in result["restored"]:
+                        console.print(f"  • {name}")
+                    return f"Loaded {len(result['restored'])} datasets from workspace"
+                else:
+                    console.print("[yellow]No datasets loaded[/yellow]")
+                    return None
+
+        else:  # Default to info subcommand
+            # Show workspace status and information
+            console.print("[bold red]🏗️  Workspace Information[/bold red]\n")
+
+            # Check if using DataManagerV2
+            if hasattr(client.data_manager, 'get_workspace_status'):
+                workspace_status = client.data_manager.get_workspace_status()
             
             # Main workspace info
             workspace_table = Table(
@@ -2482,6 +2614,40 @@ when they are started by agents or analysis workflows.
         else:
             console.print("[grey50]Nothing to save (no data or plots loaded)[/grey50]")
             return "No data or plots to save"
+
+    elif cmd.startswith("/restore"):
+        # Restore previous session
+        parts = cmd.split()
+        pattern = "recent"  # default
+        if len(parts) > 1:
+            pattern = parts[1]
+
+        # Show what will be restored
+        console.print(f"[yellow]Restoring workspace (pattern: {pattern})...[/yellow]")
+
+        # Create progress bar
+        from rich.progress import Progress
+        with Progress() as progress:
+            task = progress.add_task("Restoring datasets...", total=100)
+
+            # Perform restoration
+            result = client.data_manager.restore_session(pattern)
+
+            progress.update(task, advance=100)
+
+        # Display results
+        if result["restored"]:
+            console.print(f"[green]✓ Restored {len(result['restored'])} datasets ({result['total_size_mb']:.1f} MB)[/green]")
+            for name in result["restored"]:
+                console.print(f"  • {name}")
+            return f"Restored {len(result['restored'])} datasets from workspace"
+        else:
+            console.print("[yellow]No datasets to restore[/yellow]")
+
+        if result["skipped"]:
+            console.print(f"[dim]Skipped {len(result['skipped'])} datasets (size limit)[/dim]")
+
+        return None
     
     elif cmd == "/modes":
         # List all available modes/profiles

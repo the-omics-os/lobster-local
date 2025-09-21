@@ -152,6 +152,12 @@ Lobster AI features a **stunning Rich CLI interface** with professional orange b
 ✨ Enhanced input: Arrow navigation, command history, and reverse search enabled
 ```
 
+**New Features (v2.2+):**
+- **🔄 Workspace Restoration** - Automatically detect and restore previous sessions
+- **📂 /restore command** - Continue where you left off with pattern-based restoration
+- **💾 Lazy Loading** - Load datasets on-demand to manage memory efficiently
+- **🎯 Session Persistence** - Automatic tracking of active datasets between sessions
+
 **New Features (v2.1+):**
 - **← → Arrow keys** - Navigate within text naturally
 - **↑ ↓ Arrow keys** - Browse persistent command history
@@ -196,6 +202,8 @@ Lobster AI features a **stunning Rich CLI interface** with professional orange b
 | `/analysis-dash` | Analysis monitoring | Real-time operation tracking |
 | `/tree` | Directory tree navigation | Hierarchical view with file type icons |
 | `/progress` | Multi-task progress monitor | Live concurrent operation tracking |
+| `/restore` | Restore previous session datasets | Pattern-based restoration with memory limits |
+| `/workspace list` | View available datasets | Status indicators for loaded/unloaded data |
 | `/files` | Enhanced file listing | Orange-themed tables with metadata |
 | `/help` | Comprehensive help system | Professional styling with orange highlights |
 

@@ -63,7 +63,8 @@ class DataManagerV2:
         default_backend: str = "h5ad",
         workspace_path: Optional[Union[str, Path]] = None,
         enable_provenance: bool = True,
-        console=None
+        console=None,
+        auto_scan: bool = True
     ):
         """
         Initialize DataManagerV2.
@@ -73,45 +74,60 @@ class DataManagerV2:
             workspace_path: Optional workspace directory for data storage
             enable_provenance: Whether to enable provenance tracking
             console: Optional Rich console instance for progress tracking
+            auto_scan: Whether to automatically scan workspace for available datasets
         """
         self.default_backend = default_backend
         self.workspace_path = Path(workspace_path) if workspace_path else Path.cwd() / ".lobster_workspace"
         self.enable_provenance = enable_provenance
         self.console = console  # Store console for progress tracking in tools
-        
+
         # Core storage
         self.backends: Dict[str, IDataBackend] = {}
         self.adapters: Dict[str, IModalityAdapter] = {}
         self.modalities: Dict[str, anndata.AnnData] = {}
-        
+
+        # Workspace restoration attributes
+        self.session_file = self.workspace_path / ".session.json"
+        self.available_datasets: Dict[str, Dict] = {}
+        self.session_data: Optional[Dict] = None
+        self.session_id = str(datetime.now().timestamp())  # Unique session ID
+
         # Metadata storage for GEO datasets and other sources temporary until data is loaded
         self.metadata_store: Dict[str, Dict[str, Any]] = {}
-        
+
         # Legacy compatibility attributes for tool usage tracking
         self.tool_usage_history: List[Dict[str, Any]] = []
         self.processing_log: List[str] = []
-        
+
         # Plot management
         self.latest_plots: List[Dict[str, Any]] = []  # Store plots with metadata
         self.plot_counter: int = 0  # Counter for generating unique IDs
         self.max_plots_history: int = 50  # Maximum number of plots to keep in history
-        
+
         # Current dataset management (for legacy compatibility)
         self.current_dataset: Optional[str] = None  # Name of current active modality
         self.current_data: Optional[pd.DataFrame] = None  # Legacy compatibility
         self.current_metadata: Dict[str, Any] = {}  # Legacy metadata
         self.adata: Optional[anndata.AnnData] = None  # Legacy AnnData reference
-        
+
         # Provenance tracking
         self.provenance = ProvenanceTracker() if enable_provenance else None
-        
+
         # Setup workspace
         self._setup_workspace()
-        
+
+        # Scan workspace for available datasets
+        if auto_scan:
+            self._scan_workspace()
+
+        # Load session metadata if exists
+        if self.session_file.exists():
+            self._load_session_metadata()
+
         # Register default backends and adapters
         self._register_default_backends()
         self._register_default_adapters()
-        
+
         logger.debug(f"Initialized DataManagerV2 with workspace: {self.workspace_path}")
 
     def _setup_workspace(self) -> None:
@@ -1365,6 +1381,27 @@ class DataManagerV2:
         except Exception:
             return False
 
+    def set_current_dataset(self, modality_name: str) -> None:
+        """
+        Set the current active dataset/modality.
+
+        Args:
+            modality_name: Name of the modality to set as current
+
+        Raises:
+            ValueError: If modality not found
+        """
+        if modality_name not in self.modalities:
+            raise ValueError(f"Modality '{modality_name}' not found")
+
+        self.current_dataset = modality_name
+        self.adata = self.modalities[modality_name]
+
+        # Update session file to reflect current dataset access
+        self._update_session_file("accessed")
+
+        logger.info(f"Set current dataset to: {modality_name}")
+
     def set_data(self, data: pd.DataFrame, metadata: Dict[str, Any] = None) -> pd.DataFrame:
         """
         Legacy compatibility method - converts DataFrame to modality.
@@ -2323,7 +2360,7 @@ class DataManagerV2:
     def _detect_modality_type(self, modality_name: str) -> str:
         """Detect modality type from name and registered adapters."""
         name_lower = modality_name.lower()
-        
+
         if 'transcriptomics' in name_lower or 'rna' in name_lower or 'geo' in name_lower:
             if 'single_cell' in name_lower or 'sc' in name_lower:
                 return 'single_cell_rna_seq'
@@ -2334,5 +2371,192 @@ class DataManagerV2:
                 return 'mass_spectrometry_proteomics'
             else:
                 return 'affinity_proteomics'
-        
+
         return 'unknown'
+
+    def _scan_workspace(self) -> None:
+        """Scan workspace for available datasets without loading them."""
+        data_dir = self.workspace_path / "data"
+
+        if not data_dir.exists():
+            return
+
+        for h5ad_file in data_dir.glob("*.h5ad"):
+            try:
+                # Use h5py for efficient metadata extraction
+                import h5py
+                with h5py.File(h5ad_file, 'r') as f:
+                    # Extract basic metadata
+                    shape = f['X'].shape if 'X' in f else (0, 0)
+
+                    self.available_datasets[h5ad_file.stem] = {
+                        "path": str(h5ad_file),
+                        "size_mb": h5ad_file.stat().st_size / 1e6,
+                        "shape": shape,
+                        "modified": datetime.fromtimestamp(h5ad_file.stat().st_mtime).isoformat(),
+                        "type": "h5ad"
+                    }
+            except Exception as e:
+                logger.warning(f"Could not scan {h5ad_file}: {e}")
+
+    def _load_session_metadata(self) -> None:
+        """Load session metadata from file."""
+        try:
+            with open(self.session_file, 'r') as f:
+                self.session_data = json.load(f)
+            logger.debug(f"Loaded session metadata from {self.session_file}")
+        except Exception as e:
+            logger.warning(f"Could not load session metadata: {e}")
+            self.session_data = None
+
+    def _update_session_file(self, action: str = "update") -> None:
+        """Update session file with current state."""
+        try:
+            # Get Lobster version if available
+            try:
+                from importlib.metadata import version
+                lobster_version = version('lobster')
+            except:
+                lobster_version = "unknown"
+
+            session_data = {
+                "session_id": self.session_id,
+                "created_at": self.session_data.get("created_at", datetime.now().isoformat()) if self.session_data else datetime.now().isoformat(),
+                "last_modified": datetime.now().isoformat(),
+                "lobster_version": lobster_version,
+                "active_modalities": {},
+                "workspace_stats": {
+                    "total_datasets": len(self.available_datasets),
+                    "total_loaded": len(self.modalities),
+                    "total_size_mb": sum(d["size_mb"] for d in self.available_datasets.values())
+                }
+            }
+
+            # Add loaded modalities info
+            for name, adata in self.modalities.items():
+                if name in self.available_datasets:
+                    session_data["active_modalities"][name] = {
+                        **self.available_datasets[name],
+                        "last_accessed": datetime.now().isoformat()
+                    }
+                else:
+                    # For modalities not in available_datasets (newly created)
+                    session_data["active_modalities"][name] = {
+                        "shape": adata.shape,
+                        "last_accessed": datetime.now().isoformat(),
+                        "type": "in_memory"
+                    }
+
+            # Add command history if available
+            if self.tool_usage_history:
+                # Keep last 50 commands
+                recent_commands = self.tool_usage_history[-50:]
+                session_data["command_history"] = [
+                    {"timestamp": cmd.get("timestamp"), "command": cmd.get("tool")}
+                    for cmd in recent_commands
+                ]
+
+            # Write atomically
+            temp_file = self.session_file.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
+                json.dump(session_data, f, indent=2)
+            temp_file.replace(self.session_file)
+
+            logger.debug(f"Updated session file: {self.session_file}")
+        except Exception as e:
+            logger.warning(f"Could not update session file: {e}")
+
+    def load_dataset(self, name: str, force_reload: bool = False) -> bool:
+        """Load a specific dataset from disk.
+
+        Args:
+            name: Name of the dataset to load
+            force_reload: Whether to reload even if already in memory
+
+        Returns:
+            bool: True if successfully loaded, False otherwise
+        """
+        if name in self.modalities and not force_reload:
+            return True  # Already loaded
+
+        if name not in self.available_datasets:
+            logger.error(f"Dataset '{name}' not found in workspace")
+            return False
+
+        try:
+            path = Path(self.available_datasets[name]["path"])
+            self.modalities[name] = anndata.read_h5ad(path)
+
+            # Update session file
+            self._update_session_file("loaded")
+
+            # Log operation
+            self.log_tool_usage(
+                tool_name="load_dataset",
+                parameters={"name": name},
+                description=f"Loaded dataset {name} ({self.available_datasets[name]['size_mb']:.1f} MB)"
+            )
+
+            logger.info(f"Loaded dataset '{name}' from workspace")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to load dataset {name}: {e}")
+            return False
+
+    def restore_session(self, pattern: str = "recent", max_size_mb: float = 1000) -> Dict[str, Any]:
+        """Restore datasets based on pattern with memory limits.
+
+        Args:
+            pattern: Restoration pattern ('recent', 'all', or glob pattern)
+            max_size_mb: Maximum total size of datasets to load
+
+        Returns:
+            Dict[str, Any]: Restoration results
+        """
+        restored = []
+        skipped = []
+        total_size = 0
+
+        if pattern == "recent":
+            # Load datasets from last session
+            if self.session_data and "active_modalities" in self.session_data:
+                for name in self.session_data["active_modalities"]:
+                    if name in self.available_datasets:
+                        size_mb = self.available_datasets[name]["size_mb"]
+                        if total_size + size_mb <= max_size_mb:
+                            if self.load_dataset(name):
+                                restored.append(name)
+                                total_size += size_mb
+                        else:
+                            skipped.append((name, "size_limit"))
+
+        elif pattern == "all":
+            # Load all available datasets
+            for name in sorted(self.available_datasets.keys()):
+                size_mb = self.available_datasets[name]["size_mb"]
+                if total_size + size_mb <= max_size_mb:
+                    if self.load_dataset(name):
+                        restored.append(name)
+                        total_size += size_mb
+                else:
+                    skipped.append((name, "size_limit"))
+
+        else:
+            # Pattern matching (glob-style)
+            import fnmatch
+            for name in self.available_datasets:
+                if fnmatch.fnmatch(name, pattern):
+                    size_mb = self.available_datasets[name]["size_mb"]
+                    if total_size + size_mb <= max_size_mb:
+                        if self.load_dataset(name):
+                            restored.append(name)
+                            total_size += size_mb
+                    else:
+                        skipped.append((name, "size_limit"))
+
+        return {
+            "restored": restored,
+            "skipped": skipped,
+            "total_size_mb": total_size,
+            "pattern": pattern
+        }
