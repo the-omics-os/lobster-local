@@ -7,8 +7,8 @@ Used by scVI integration to determine hardware capabilities.
 
 import os
 import subprocess
-import platform
 from typing import Dict, Optional, Tuple
+from lobster.utils import IS_MACOS
 
 
 class GPUDetector:
@@ -39,7 +39,7 @@ class GPUDetector:
     @staticmethod
     def check_apple_silicon() -> bool:
         """Check if running on Apple Silicon (M1/M2/M3) Mac."""
-        if platform.system() != "Darwin":
+        if not IS_MACOS:
             return False
         
         try:

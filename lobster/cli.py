@@ -35,8 +35,8 @@ from lobster.ui.components import (
     create_system_dashboard, create_workspace_dashboard, create_analysis_dashboard,
     create_multi_progress_layout, get_multi_progress_manager, get_status_display
 )
-# Implobsterort the proper callback handler
-from lobster.utils import TerminalCallbackHandler, SimpleTerminalCallback
+# Import the proper callback handler and system utilities
+from lobster.utils import TerminalCallbackHandler, SimpleTerminalCallback, open_path
 from lobster.config.agent_config import get_agent_configurator, initialize_configurator, LobsterAgentConfigurator
 import json
 import time
@@ -52,6 +52,7 @@ try:
     from prompt_toolkit.completion import CompleteEvent
     from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.styles import Style
+    from prompt_toolkit.history import FileHistory
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
@@ -228,6 +229,7 @@ def extract_available_commands() -> Dict[str, str]:
         '/modalities': 'Show detailed modality information',
         '/plots': 'List all generated plots',
         '/plot': 'Open plots directory or specific plot',
+        '/open': 'Open file or folder in system default application',
         '/save': 'Save current state to workspace',
         '/read': 'Read a file from workspace (supports glob patterns)',
         '/export': 'Export session data',
@@ -373,7 +375,7 @@ if PROMPT_TOOLKIT_AVAILABLE:
             self.file_completer = LobsterFileCompleter(client)
 
             # Commands that expect file arguments
-            self.file_commands = {'/read', '/plot'}
+            self.file_commands = {'/read', '/plot', '/open'}
 
         def get_completions(self, document: Document, complete_event: CompleteEvent) -> Iterable[Completion]:
             """Generate context-aware completions."""
@@ -620,6 +622,18 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
     - Full command history persistence
     """
     try:
+        # Create history file path for persistent command history
+        history_file = None
+        if PROMPT_TOOLKIT_AVAILABLE:
+            try:
+                from pathlib import Path
+                history_dir = Path.home() / ".lobster"
+                history_dir.mkdir(exist_ok=True)
+                history_file = FileHistory(str(history_dir / "lobster_history"))
+            except Exception:
+                # If history file creation fails, continue without it
+                history_file = None
+
         # Try to use prompt_toolkit with autocomplete if available
         if PROMPT_TOOLKIT_AVAILABLE and client:
             # Clean prompt text - remove Rich markup and emoji, keep it simple
@@ -648,7 +662,8 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
                 # Disable mouse support so terminal scroll remains usable
                 mouse_support=False, #FIXME change this back to True if needed. I deactivated to allow scrolling
                 style=style,
-                complete_style='multi-column'
+                complete_style='multi-column',
+                history=history_file
             )
             return user_input.strip()
 
@@ -660,7 +675,8 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
             user_input = prompt(
                 HTML(f'<ansibrightblack>{clean_prompt}</ansibrightblack>'),
                 # Disable mouse support so terminal scroll remains usable
-                mouse_support=False #FIXME change this back to True if needed. I deactivated to allow scrolling
+                mouse_support=False, #FIXME change this back to True if needed. I deactivated to allow scrolling
+                history=history_file
             )
             return user_input.strip()
 
@@ -857,7 +873,39 @@ def execute_shell_command(command: str) -> bool:
                 console.print(f"[red]cat: {file_path}: {e}[/red]")
             
             return True
-        
+
+        elif cmd == "open":
+            # Handle open command to open files or folders
+            if len(parts) < 2:
+                console.print("[red]open: missing file or folder argument[/red]")
+                return True
+
+            file_or_folder = " ".join(parts[1:])  # Handle paths with spaces
+
+            # Resolve path relative to current directory if not absolute
+            if not file_or_folder.startswith("/") and not file_or_folder.startswith("~/"):
+                target_path = current_directory / file_or_folder
+            else:
+                target_path = Path(file_or_folder).expanduser()
+
+            if not target_path.exists():
+                console.print(f"[red]open: '{file_or_folder}': No such file or directory[/red]")
+                return True
+
+            # Open file or folder using centralized system utility
+            success, message = open_path(target_path)
+
+            if success:
+                # Format success message with appropriate icon
+                if target_path.is_dir():
+                    console.print(f"[green]📁 {message}[/green]")
+                else:
+                    console.print(f"[green]📄 {message}[/green]")
+            else:
+                console.print(f"[red]open: {message}[/red]")
+
+            return True
+
         elif cmd in ["cp", "mv", "mkdir", "touch", "rm"]:
             # Execute other shell commands with improved output formatting
             result = subprocess.run(command, shell=True, cwd=current_directory, 
@@ -1256,6 +1304,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List all generated plots
 [{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Open plots directory in file manager
 [{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    [grey50]-[/grey50] Open specific plot by ID or name
+[{LobsterTheme.PRIMARY_ORANGE}]/open[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Open file or folder in system default application
 [{LobsterTheme.PRIMARY_ORANGE}]/save[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Save current state to workspace
 [{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
 [{LobsterTheme.PRIMARY_ORANGE}]/export[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Export session data
@@ -1277,6 +1326,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]cd[/{LobsterTheme.PRIMARY_ORANGE}] <path>      [grey50]-[/grey50] Change directory
 [{LobsterTheme.PRIMARY_ORANGE}]pwd[/{LobsterTheme.PRIMARY_ORANGE}]            [grey50]-[/grey50] Print current directory
 [{LobsterTheme.PRIMARY_ORANGE}]ls[/{LobsterTheme.PRIMARY_ORANGE}] [path]      [grey50]-[/grey50] List directory contents
+[{LobsterTheme.PRIMARY_ORANGE}]open[/{LobsterTheme.PRIMARY_ORANGE}] <file>    [grey50]-[/grey50] Open file or folder in system default application
 [{LobsterTheme.PRIMARY_ORANGE}]mkdir[/{LobsterTheme.PRIMARY_ORANGE}] <dir>    [grey50]-[/grey50] Create directory
 [{LobsterTheme.PRIMARY_ORANGE}]touch[/{LobsterTheme.PRIMARY_ORANGE}] <file>   [grey50]-[/grey50] Create file
 [{LobsterTheme.PRIMARY_ORANGE}]cp[/{LobsterTheme.PRIMARY_ORANGE}] <src> <dst> [grey50]-[/grey50] Copy file/directory
@@ -2291,37 +2341,13 @@ when they are started by agents or analysis workflows.
                     if saved_files:
                         console.print(f"[bold red]✓[/bold red] [white]Saved {len(saved_files)} plot files to workspace[/white]")
             
-            # Open the directory in file manager
-            import platform
-            import subprocess
-            
-            try:
-                system = platform.system()
-                if system == "Darwin":  # macOS
-                    subprocess.run(["open", str(plots_dir)], check=True)
-                    console.print(f"[bold red]✓[/bold red] [white]Opened plots directory in Finder:[/white] [grey74]{plots_dir}[/grey74]")
-                elif system == "Linux":
-                    # Try common file managers
-                    file_managers = ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm"]
-                    opened = False
-                    for fm in file_managers:
-                        try:
-                            subprocess.run([fm, str(plots_dir)], check=True, stderr=subprocess.DEVNULL)
-                            console.print(f"[bold red]✓[/bold red] [white]Opened plots directory:[/white] [grey74]{plots_dir}[/grey74]")
-                            opened = True
-                            break
-                        except (subprocess.CalledProcessError, FileNotFoundError):
-                            continue
-                    if not opened:
-                        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not open file manager. Directory: {plots_dir}[/red]")
-                elif system == "Windows":
-                    subprocess.run(["explorer", str(plots_dir)], check=True)
-                    console.print(f"[bold red]✓[/bold red] [white]Opened plots directory in Explorer:[/white] [grey74]{plots_dir}[/grey74]")
-                else:
-                    console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Unsupported operating system: {system}[/red]")
-                    console.print(f"[white]Plots directory:[/white] [grey74]{plots_dir}[/grey74]")
-            except Exception as e:
-                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Failed to open plots directory: {e}[/red]")
+            # Open the directory in file manager using centralized system utility
+            success, message = open_path(plots_dir)
+
+            if success:
+                console.print(f"[bold red]✓[/bold red] [white]{message}[/white]")
+            else:
+                console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]{message}[/red]")
                 console.print(f"[white]Plots directory:[/white] [grey74]{plots_dir}[/grey74]")
         
         else:
@@ -2372,31 +2398,78 @@ when they are started by agents or analysis workflows.
                 file_to_open = html_path if html_path.exists() else png_path
                 
                 if file_to_open.exists():
-                    import platform
-                    import subprocess
-                    
-                    try:
-                        system = platform.system()
-                        if system == "Darwin":  # macOS
-                            subprocess.run(["open", str(file_to_open)], check=True)
-                            console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
-                        elif system == "Linux":
-                            subprocess.run(["xdg-open", str(file_to_open)], check=True)
-                            console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
-                        elif system == "Windows":
-                            subprocess.run(["start", "", str(file_to_open)], shell=True, check=True)
-                            console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
-                        else:
-                            console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Unsupported operating system: {system}[/red]")
-                    except Exception as e:
-                        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Failed to open plot: {e}[/red]")
+                    # Open plot using centralized system utility
+                    success, message = open_path(file_to_open)
+
+                    if success:
+                        console.print(f"[bold red]✓[/bold red] [white]Opened plot:[/white] [grey74]{plot_info['original_title']}[/grey74]")
+                    else:
+                        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Failed to open plot: {message}[/red]")
                         console.print(f"[white]Plot file:[/white] [grey74]{file_to_open}[/grey74]")
                 else:
                     console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot file not found. Try running /save first.[/red]")
             else:
                 console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot not found: {plot_identifier}[/red]")
                 console.print("[grey50]Use /plots to see available plot IDs and titles[/grey50]")
-    
+
+    elif cmd.startswith("/open "):
+        # Handle /open command for files and folders
+        file_or_folder = cmd[6:].strip()
+
+        if not file_or_folder:
+            console.print("[red]/open: missing file or folder argument[/red]")
+            console.print("[grey50]Usage: /open <file_or_folder>[/grey50]")
+            return "No file or folder specified for /open command"
+
+        # Try to resolve path - check current directory first, then workspace
+        target_path = None
+
+        # Check current directory
+        if not file_or_folder.startswith("/") and not file_or_folder.startswith("~/"):
+            current_path = current_directory / file_or_folder
+            if current_path.exists():
+                target_path = current_path
+
+        # Check absolute/home path
+        if target_path is None:
+            abs_path = Path(file_or_folder).expanduser()
+            if abs_path.exists():
+                target_path = abs_path
+
+        # Check workspace if we have a client
+        if target_path is None and hasattr(client, 'data_manager'):
+            # Look in workspace for the file
+            workspace_files = client.data_manager.list_workspace_files()
+            for category, files in workspace_files.items():
+                for file_info in files:
+                    if file_info['name'] == file_or_folder or file_info['path'].endswith(file_or_folder):
+                        target_path = Path(file_info['path'])
+                        break
+                if target_path:
+                    break
+
+        if not target_path or not target_path.exists():
+            console.print(f"[red]/open: '{file_or_folder}': No such file or directory[/red]")
+            console.print("[grey50]Check current directory, workspace, or use absolute path[/grey50]")
+            return f"File or folder '{file_or_folder}' not found"
+
+        # Open file or folder using centralized system utility
+        success, message = open_path(target_path)
+
+        if success:
+            # Format success message with appropriate styling
+            if target_path.is_dir():
+                console.print(f"[bold red]✓[/bold red] [white]{message}[/white]")
+            else:
+                console.print(f"[bold red]✓[/bold red] [white]{message}[/white]")
+
+            # Return summary for conversation history
+            item_type = "folder" if target_path.is_dir() else "file"
+            return f"Opened {item_type} '{target_path.name}' in system default application"
+        else:
+            console.print(f"[red]/open: {message}[/red]")
+            return f"Failed to open '{file_or_folder}': {message}"
+
     elif cmd == "/save":
         # Auto-save current state
         saved_items = client.data_manager.auto_save_state()
