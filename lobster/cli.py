@@ -2345,13 +2345,6 @@ when they are started by agents or analysis workflows.
             console.print(f"\n[bold white]🔌 Available Adapters:[/bold white]")
             for adapter in workspace_status.get("registered_adapters", []):
                 console.print(f"  • {adapter}")
-        else:
-            # Fallback for older DataManager
-            console.print("[bold white]📁 Basic Workspace Info:[/bold white]")
-            if hasattr(client.data_manager, 'workspace_path'):
-                console.print(f"  • Path: [grey74]{client.data_manager.workspace_path}[/grey74]")
-            if hasattr(client.data_manager, 'has_data'):
-                console.print(f"  • Data Loaded: {'✓' if client.data_manager.has_data() else '✗'}")
     
     elif cmd == "/modalities":
         # Show detailed modality information (DataManagerV2 specific)
