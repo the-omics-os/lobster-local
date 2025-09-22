@@ -116,9 +116,10 @@ Help and additional resources
 ## 📈 Version Highlights
 
 ### **v2.2+ Features**
-- 🔄 **Workspace Restoration** - Seamless session continuity
+- 🔄 **Workspace Restoration** - Seamless session continuity ([Details](31-data-expert-agent-enhancements.md))
 - 📂 **Pattern-based Dataset Loading** - Smart memory management
 - 💾 **Session Persistence** - Automatic state tracking
+- 🤖 **Enhanced Data Expert Agent** - New restoration tools and workflows
 
 ### **v2.1+ Features**
 - ⌨️ **Enhanced CLI** - Arrow navigation and command history

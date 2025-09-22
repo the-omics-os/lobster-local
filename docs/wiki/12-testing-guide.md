@@ -949,6 +949,237 @@ pytest --html=reports/report.html    # HTML report
 pytest --junitxml=reports/junit.xml  # JUnit XML report
 ```
 
+## 🎯 End-to-End Acceptance Testing System
+
+Lobster AI features a **sophisticated 3-tier testing architecture** that includes a comprehensive End-to-End acceptance testing system for validating complete user workflows.
+
+### 🌟 Testing Architecture Overview
+
+1. **Traditional pytest Framework** - Unit/Integration/System/Performance tests
+2. **End-to-End Acceptance Testing** - Natural language workflow validation
+3. **Hybrid Execution** - Combined reporting and analytics
+
+### 🚀 E2E Testing Components
+
+#### **Core Files**
+- **`tests/test_cases.json`** - 30+ realistic user scenarios with validation criteria
+- **`tests/run_integration_tests.py`** - Advanced test runner with performance monitoring
+- **`tests/run_tests.sh`** - User-friendly bash wrapper for easy execution
+
+#### **Key Features**
+- **Natural Language Testing**: Validates actual conversational interface users experience
+- **Performance Monitoring**: Real-time CPU, memory, disk I/O tracking during execution
+- **Scalable Architecture**: Tag-based filtering, priorities, parallel execution
+- **Response Validation**: Keyword matching, length checks, error detection
+- **Workspace Management**: Isolated test environments with automatic cleanup
+
+### 🎮 Quick Start Commands
+
+```bash
+# User-friendly bash wrapper (recommended)
+./tests/run_tests.sh                    # Run all scenarios sequentially
+./tests/run_tests.sh --parallel         # Run in parallel
+./tests/run_tests.sh --parallel -w 8    # 8 parallel workers
+
+# Advanced Python runner with full control
+python tests/run_integration_tests.py --categories basic,advanced --parallel
+python tests/run_integration_tests.py --performance-monitoring --workers 4
+python tests/run_integration_tests.py --run-pytest-integration --output results.json
+```
+
+### 📊 Test Categorization & Filtering
+
+```bash
+# Filter by categories
+python tests/run_integration_tests.py --categories basic,advanced,performance,error_handling
+
+# Filter by biological domains
+python tests/run_integration_tests.py --tags geo,proteomics,multiomics,spatial,qc
+
+# Filter by priority levels (1-5)
+python tests/run_integration_tests.py --priorities 1,2,3
+
+# Combine filters for targeted testing
+python tests/run_integration_tests.py --categories advanced --tags geo,qc --parallel
+```
+
+### 🧪 Test Scenarios (30+ Realistic Workflows)
+
+#### **Categories:**
+- **`basic`** - Simple workflows (GEO download, basic QC)
+- **`advanced`** - Complex analysis (multi-omics, trajectory analysis)
+- **`performance`** - Large dataset processing
+- **`error_handling`** - Edge cases and error recovery
+
+#### **Biological Domain Tags:**
+- **`geo`** - GEO dataset workflows
+- **`qc`** - Quality control processes
+- **`visualization`** - Plotting and visual analysis
+- **`multiomics`** - Cross-platform integration
+- **`spatial`** - Spatial transcriptomics
+- **`proteomics`** - Mass spec and affinity proteomics
+- **`clustering`** - Cell/sample grouping analysis
+
+#### **Example Test Scenarios:**
+```json
+{
+  "test_geo_download_with_qc_umap": {
+    "inputs": [
+      "Download GEO dataset GSE291670 and do the quality control",
+      "Generate the UMAP with resolution 0.7"
+    ],
+    "category": "basic",
+    "description": "Test complete workflow from download to UMAP visualization",
+    "expected_duration": 120.0,
+    "timeout": 400.0,
+    "tags": ["geo", "qc", "umap", "visualization"],
+    "priority": 3,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["quality control", "downloaded"],
+        "no_errors": true
+      },
+      "input_1": {
+        "required_keywords": ["UMAP", "resolution"],
+        "no_errors": true
+      }
+    }
+  }
+}
+```
+
+### ⚡ Performance Monitoring
+
+The E2E system includes comprehensive performance monitoring:
+
+```bash
+# Enable performance monitoring
+python tests/run_integration_tests.py --performance-monitoring
+
+# Features monitored:
+# - CPU usage percentage (average and peak)
+# - Memory consumption (RSS, peak usage)
+# - Disk I/O operations (read/write MB)
+# - Network activity (sent/received MB)
+# - Test execution duration vs expected
+# - Resource usage trends across test categories
+```
+
+### 🔄 Hybrid pytest Integration
+
+Combine traditional pytest tests with E2E scenarios for comprehensive validation:
+
+```bash
+# Run both pytest and E2E tests together
+python tests/run_integration_tests.py --run-pytest-integration
+
+# Features:
+# - Unified success/failure reporting
+# - Combined coverage analytics
+# - Category-wise performance breakdowns
+# - Comprehensive JSON output with both test types
+```
+
+### 🎯 Advanced E2E Features
+
+#### **Dependency Resolution**
+Tests can specify dependencies for automatic ordering:
+```json
+{
+  "dependencies": ["test_geo_download", "test_basic_qc"],
+  "priority": 4
+}
+```
+
+#### **Retry Logic**
+Configurable retry attempts for flaky tests:
+```json
+{
+  "retry_count": 2,
+  "timeout": 300.0
+}
+```
+
+#### **Response Validation**
+Sophisticated validation of AI responses:
+```json
+{
+  "validation_criteria": {
+    "input_0": {
+      "required_keywords": ["downloaded", "GSE109564"],
+      "forbidden_keywords": ["error", "failed"],
+      "min_length": 50,
+      "no_errors": true
+    }
+  }
+}
+```
+
+### 📋 Adding New E2E Test Scenarios
+
+Add realistic user scenarios to **`tests/test_cases.json`**:
+
+```json
+{
+  "test_my_custom_workflow": {
+    "inputs": [
+      "Download GSE123456 and perform quality control",
+      "Apply batch correction using Harmony",
+      "Create publication-ready UMAP plot"
+    ],
+    "category": "advanced",
+    "description": "Test batch correction workflow",
+    "tags": ["geo", "batch_correction", "visualization"],
+    "priority": 3,
+    "timeout": 600.0,
+    "expected_duration": 240.0,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["downloaded", "quality control"],
+        "no_errors": true
+      },
+      "input_1": {
+        "required_keywords": ["batch correction", "Harmony"],
+        "no_errors": true
+      },
+      "input_2": {
+        "required_keywords": ["UMAP", "publication"],
+        "no_errors": true
+      }
+    }
+  }
+}
+```
+
+### 📊 E2E Test Results & Analytics
+
+The E2E system generates comprehensive reports:
+
+```json
+{
+  "summary": {
+    "test_execution_summary": {
+      "total_tests": 25,
+      "passed_tests": 23,
+      "failed_tests": 2,
+      "success_rate": 0.92,
+      "total_duration": 1800.0,
+      "average_duration": 72.0
+    },
+    "category_breakdown": {
+      "basic": {"passed": 8, "failed": 0, "total": 8},
+      "advanced": {"passed": 12, "failed": 2, "total": 14},
+      "performance": {"passed": 3, "failed": 0, "total": 3}
+    },
+    "performance_summary": {
+      "avg_cpu_percent": 15.2,
+      "avg_memory_mb": 1024.5,
+      "max_memory_mb": 2048.0
+    }
+  }
+}
+```
+
 ## 📈 Coverage and Quality Metrics
 
 ### Coverage Requirements

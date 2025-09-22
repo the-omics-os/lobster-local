@@ -153,6 +153,45 @@ Load a local file into the data management system.
 **Returns:**
 - `str`: Loading status and modality information
 
+#### restore_workspace_datasets
+
+```python
+@tool
+def restore_workspace_datasets(pattern: str = "recent") -> str
+```
+
+Restore datasets from workspace based on pattern matching for session continuation.
+
+**Parameters:**
+- `pattern` (str): Dataset pattern to match. Options:
+  - `"recent"`: Load most recently used datasets (default)
+  - `"all"`: Load all available datasets
+  - `"*"`: Load all datasets (same as "all")
+  - `"<dataset_name>"`: Load specific dataset by name
+  - `"<partial_name>*"`: Load datasets matching partial name
+
+**Returns:**
+- `str`: Summary of loaded datasets with details including shape, size, and availability
+
+**Features:**
+- Flexible pattern matching for targeted dataset loading
+- Intelligent memory management and duplicate detection
+- Comprehensive reporting with modality details
+- Integration with provenance tracking system
+- Support for session continuation workflows
+
+**Example Usage:**
+```python
+# Restore recent datasets for continued analysis
+restore_workspace_datasets("recent")
+
+# Load specific dataset by name
+restore_workspace_datasets("geo_gse123456")
+
+# Load all datasets matching pattern
+restore_workspace_datasets("geo_*")
+```
+
 ## Single-Cell Expert Agent
 
 Specialized in single-cell RNA-seq analysis with complete workflow support.

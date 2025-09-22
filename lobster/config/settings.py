@@ -7,9 +7,10 @@ including the new professional agent configuration system.
 
 import os
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from dotenv import load_dotenv
 from lobster.config.agent_config import initialize_configurator
+from lobster.config.supervisor_config import SupervisorConfig
 
 class Settings:
     """
@@ -44,6 +45,9 @@ class Settings:
         # Initialize agent configurator based on environment
         profile = os.environ.get('GENIE_PROFILE', 'production')
         self.agent_configurator = initialize_configurator(profile=profile)
+
+        # Initialize supervisor configuration
+        self.supervisor_config = SupervisorConfig.from_env()
 
         # Base directories
         self.BASE_DIR = Path(__file__).resolve().parent.parent
@@ -138,14 +142,23 @@ class Settings:
     def get_agent_model_config(self, agent_name: str):
         """
         Get model configuration for a specific agent.
-        
+
         Args:
             agent_name: Name of the agent
-            
+
         Returns:
             ModelConfig object for the agent
         """
         return self.agent_configurator.get_model_config(agent_name)
+
+    def get_supervisor_config(self) -> SupervisorConfig:
+        """
+        Get supervisor configuration.
+
+        Returns:
+            SupervisorConfig: Supervisor configuration instance
+        """
+        return self.supervisor_config
     
     def print_agent_configuration(self):
         """Print current agent configuration."""

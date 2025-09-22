@@ -134,28 +134,32 @@ List all available datasets in workspace without loading them.
 
 Shows datasets with status (loaded/available), size, shape, and modification date.
 
-#### `/workspace load <name>`
-Load specific dataset from workspace.
+#### `/restore [pattern]`
+Restore datasets from workspace based on pattern matching.
 
 ```
-/workspace load my_dataset
-/workspace load *single_cell*    # Pattern matching
+/restore                    # Restore recent datasets (default)
+/restore recent            # Same as above
+/restore all               # Restore all available datasets
+/restore my_dataset        # Restore specific dataset by name
+/restore *liver*           # Restore datasets matching pattern
+/restore geo_*             # Restore all GEO datasets
 ```
 
 **Features**:
 - Tab completion for dataset names
-- Pattern matching support
-- Shows loading progress
+- Flexible pattern matching support
+- Shows loading progress with detailed summaries
+- Intelligent memory management
+- Session continuation support
 
-#### `/restore [pattern]`
-Restore datasets from previous session.
+**Pattern Options**:
+- `recent` - Load most recently used datasets (default)
+- `all` or `*` - Load all available datasets
+- `<dataset_name>` - Load specific dataset by exact name
+- `<partial_name>*` - Load datasets matching partial name pattern
 
-```
-/restore                    # Restore recent datasets
-/restore recent            # Same as above
-/restore all               # Restore all available datasets
-/restore *liver*           # Restore datasets matching pattern
-```
+> **Note**: This command replaces the previous `/workspace load` functionality with enhanced pattern matching and better integration with the data expert agent system.
 
 **Parameters**:
 - `recent`: Datasets from last session (default)
@@ -569,8 +573,8 @@ lobster chat
 # Pattern-based restoration
 /restore *experiment_2*
 
-# Workspace operations
-/workspace load batch_*
+# Dataset loading operations
+/restore batch_*
 ```
 
 #### Configuration Switching

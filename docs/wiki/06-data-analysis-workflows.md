@@ -541,6 +541,247 @@ coordinated changes across molecular layers"
 "Compare my results to the downloaded GEO dataset GSE12345"
 ```
 
+## Session Continuation and Workspace Management
+
+### Overview
+
+Lobster AI v2.2+ includes powerful workspace management capabilities that allow you to save your analysis progress and seamlessly continue work across sessions. This is particularly useful for long-running analyses or when working with multiple datasets.
+
+### Workspace Restoration Workflow
+
+#### Step 1: Check Current Workspace State
+
+Before starting any analysis session, check what data is currently loaded and what's available in your workspace:
+
+```bash
+# Check currently loaded data
+/data
+
+# List available datasets in workspace
+/workspace list
+
+# Show comprehensive workspace information
+/workspace
+```
+
+**Natural Language Alternative**:
+```
+"What data do I have available in my workspace?"
+"Show me my current analysis session status"
+```
+
+#### Step 2: Restore Previous Session
+
+Use the `/restore` command to load datasets from previous sessions:
+
+```bash
+# Restore most recent datasets (recommended for session continuation)
+/restore
+
+# Restore specific dataset by name
+/restore geo_gse123456_processed
+
+# Restore all datasets matching a pattern
+/restore geo_*                    # All GEO datasets
+/restore *single_cell*           # All single-cell datasets
+/restore experiment_batch_2*     # Specific experiment datasets
+
+# Restore all available datasets (use with caution for memory)
+/restore all
+```
+
+**Natural Language Alternative**:
+```
+"Continue my analysis from yesterday's session"
+"Load the GSE123456 dataset I was working on"
+"Restore all my single-cell datasets for comparison"
+```
+
+#### Step 3: Verify Restored Data
+
+After restoration, verify that your datasets are properly loaded:
+
+```bash
+# Check loaded modalities
+/modalities
+
+# Get detailed data summary
+/data
+
+# List available plots from previous session
+/plots
+```
+
+### Complete Session Continuation Example
+
+#### Scenario: Continuing Single-Cell Analysis
+
+```bash
+# Day 1: Initial Analysis
+"Download and analyze GSE123456 single-cell data"
+# ... perform quality control, clustering, etc.
+/save  # Save progress
+
+# Day 2: Continue Analysis
+/restore recent
+# System loads: geo_gse123456, geo_gse123456_filtered, geo_gse123456_clustered
+
+"Continue the differential expression analysis on the clustered data"
+# Agent automatically uses geo_gse123456_clustered for analysis
+```
+
+#### Scenario: Comparative Analysis Across Multiple Datasets
+
+```bash
+# Load multiple related datasets for comparison
+/restore geo_gse123*             # Loads multiple GSE datasets
+"Compare these datasets and identify common cell types"
+
+# Work with specific experiment batches
+/restore experiment_*
+"Perform batch correction across these experiment datasets"
+```
+
+#### Scenario: Project-Based Workflow
+
+```bash
+# Organize by project patterns
+/restore liver_*                 # All liver-related datasets
+/restore *cancer_study*          # All cancer study datasets
+/restore proteomics_*            # All proteomics datasets
+
+"Integrate these liver datasets for multi-omics analysis"
+```
+
+### Advanced Workspace Management
+
+#### Pattern Matching Best Practices
+
+| Use Case | Pattern | Example |
+|----------|---------|---------|
+| Continue recent work | `recent` | `/restore recent` |
+| Load specific dataset | `exact_name` | `/restore geo_gse123456_processed` |
+| Load by data type | `*type*` | `/restore *single_cell*` |
+| Load by experiment | `prefix*` | `/restore batch_2*` |
+| Load by source | `source_*` | `/restore geo_*` |
+
+#### Memory Management
+
+```bash
+# Check memory usage before loading
+/modalities                      # See current memory usage
+
+# Load incrementally for large datasets
+/restore experiment_1*           # Load first batch
+# Perform analysis
+/restore experiment_2*           # Load second batch when needed
+```
+
+#### Data Organization Tips
+
+**Recommended Naming Conventions**:
+```
+geo_gse123456                    # Raw GEO data
+geo_gse123456_filtered          # After quality control
+geo_gse123456_clustered         # After clustering
+geo_gse123456_annotated         # With cell type annotations
+custom_liver_study_raw          # Custom dataset
+custom_liver_study_processed    # After processing
+```
+
+### Integration with Analysis Workflows
+
+#### Single-Cell Workflow Continuation
+
+```bash
+# Session 1: Initial processing
+"Download GSE123456 and perform quality control"
+/save
+
+# Session 2: Clustering analysis
+/restore recent
+"Perform clustering and find marker genes"
+/save
+
+# Session 3: Cell type annotation
+/restore recent
+"Annotate cell types based on marker genes"
+```
+
+#### Multi-Dataset Comparison Workflow
+
+```bash
+# Load multiple datasets for comparison
+/restore geo_gse123456 geo_gse789012 custom_study
+"Compare these three datasets and identify batch effects"
+
+# Load by pattern for systematic comparison
+/restore *liver*
+"Perform integrated analysis of all liver datasets"
+```
+
+#### Cross-Session Plot Management
+
+```bash
+# Restore data and plots from previous session
+/restore recent
+/plots                          # List available plots
+
+"Generate additional plots comparing the clustered results"
+# New plots are automatically saved to workspace
+```
+
+### Natural Language Workspace Commands
+
+The data expert agent understands various natural language requests for workspace management:
+
+```
+"Load my recent datasets"
+"Continue my analysis from yesterday"
+"Load all the GEO datasets I downloaded"
+"Restore the liver study data for comparison"
+"What datasets do I have available?"
+"Load the processed single-cell data"
+"Continue working on the GSE123456 dataset"
+"Restore all my proteomics experiments"
+```
+
+### Troubleshooting Workspace Issues
+
+#### Common Problems and Solutions
+
+**Dataset Not Found**:
+```bash
+Problem: "Dataset 'my_dataset' not found"
+Solution: Check available datasets with /workspace list
+         Verify spelling and use Tab completion
+```
+
+**Memory Issues**:
+```bash
+Problem: System runs out of memory
+Solution: Use more specific patterns instead of /restore all
+         Load datasets incrementally
+         Check current usage with /modalities
+```
+
+**Outdated Workspace**:
+```bash
+Problem: Restored data seems outdated
+Solution: Check workspace location with /workspace
+         Verify you're in the correct project directory
+         Use /workspace list to see available datasets
+```
+
+### Best Practices for Session Management
+
+1. **Regular Saves**: Use `/save` after major analysis steps
+2. **Descriptive Names**: Use clear dataset names for easy pattern matching
+3. **Incremental Loading**: Load datasets as needed to manage memory
+4. **Verify Restoration**: Always check `/data` after restoration
+5. **Organize by Project**: Use consistent naming patterns for related analyses
+6. **Document Progress**: Keep track of analysis steps and parameters
+
 ## Workflow Best Practices
 
 ### General Principles

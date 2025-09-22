@@ -16,10 +16,12 @@ from langchain_aws import ChatBedrockConverse
 from lobster.agents.supervisor import create_supervisor_prompt
 from lobster.agents.state import OverallState
 from lobster.config.settings import get_settings
+from lobster.config.supervisor_config import SupervisorConfig
 from lobster.config.agent_registry import get_worker_agents, import_agent_factory
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 from lobster.tools.handoff_tool import create_custom_handoff_tool
+from typing import Optional
 
 logger = get_logger(__name__)
 
@@ -27,7 +29,8 @@ def create_bioinformatics_graph(
     data_manager: DataManagerV2,
     checkpointer: InMemorySaver = None,
     callback_handler=None,
-    manual_model_params: dict = None
+    manual_model_params: dict = None,
+    supervisor_config: Optional[SupervisorConfig] = None
 ):
     """Create the bioinformatics multi-agent graph using langgraph_supervisor.
     
@@ -124,8 +127,15 @@ def create_bioinformatics_graph(
             logger.error(f"Error listing available data: {e}")
             return f"Error listing available data: {str(e)}"    
     
-    # UPDATED SUPERVISOR PROMPT - More explicit about response handling
-    system_prompt = create_supervisor_prompt(data_manager)
+    # Get list of active agents that were successfully created
+    active_agent_names = [agent.name for agent in agents]
+
+    # Create supervisor prompt with configuration and active agents
+    system_prompt = create_supervisor_prompt(
+        data_manager=data_manager,
+        config=supervisor_config,
+        active_agents=active_agent_names
+    )
     
     #add forwarding tool for supervisor. This is useful when the supervisor determines that the worker's response is sufficient and doesn't require further processing or summarization by the supervisor itself.
     forwarding_tool = create_forward_message_tool("supervisor")

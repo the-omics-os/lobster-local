@@ -5,17 +5,87 @@
 # langgraph_supervisor package for hierarchical multi-agent coordination.
 # """
 
+from typing import Optional, List, Dict, Any
 from datetime import date
 from lobster.utils.logger import get_logger
+from lobster.config.supervisor_config import SupervisorConfig
+from lobster.config.agent_capabilities import AgentCapabilityExtractor
+from lobster.config.agent_registry import get_agent_registry_config, get_worker_agents
+from lobster.core.data_manager_v2 import DataManagerV2
 
 logger = get_logger(__name__)
 
 
-def create_supervisor_prompt(data_manager) -> str:
-    """Create the system prompt for the bioinformatics supervisor agent."""
-    system_prompt = """
-    You are a bioinformatics research supervisor responsible for orchestrating multi-step bioinformatics analyses.
-    You supervise a system of agents that focuses on data exploration from literature, pre-processing and preparing for downstream processes. 
+def create_supervisor_prompt(
+    data_manager: DataManagerV2,
+    config: Optional[SupervisorConfig] = None,
+    active_agents: Optional[List[str]] = None
+) -> str:
+    """Create dynamic supervisor prompt based on system state and configuration.
+
+    Args:
+        data_manager: DataManagerV2 instance for data context
+        config: Optional supervisor configuration (uses defaults if None)
+        active_agents: Optional list of active agent names (auto-discovers if None)
+
+    Returns:
+        str: Dynamically generated supervisor prompt
+    """
+    # Use default config if not provided
+    if config is None:
+        config = SupervisorConfig.from_env()
+        logger.info(f"Using supervisor config mode: {config.get_prompt_mode()}")
+
+    # Get active agents from registry if not provided
+    if active_agents is None:
+        active_agents = list(get_worker_agents().keys())
+
+    # Build prompt sections
+    sections = []
+
+    # 1. Base role and responsibilities
+    sections.append(_build_role_section())
+
+    # 2. Available tools section
+    if config.show_available_tools:
+        sections.append(_build_tools_section())
+
+    # 3. Dynamic agent descriptions
+    sections.append(_build_agents_section(active_agents, config))
+
+    # 4. Decision framework
+    sections.append(_build_decision_framework(active_agents, config))
+
+    # 5. Workflow awareness (if not minimal)
+    if config.workflow_guidance_level != "minimal":
+        sections.append(_build_workflow_section(active_agents, config))
+
+    # 6. Response rules based on configuration
+    sections.append(_build_response_rules(config))
+
+    # 7. Current system context (if enabled)
+    if config.include_data_context or config.include_workspace_status:
+        context = _build_context_section(data_manager, config)
+        if context:
+            sections.append(context)
+
+    # 8. Examples (if detailed mode)
+    if config.workflow_guidance_level == "detailed":
+        sections.append(_build_examples_section())
+
+    # 9. Response quality section
+    sections.append(_build_response_quality_section())
+
+    # Add date
+    sections.append(f"\nToday's date is {date.today()}.")
+
+    return "\n\n".join(sections)
+
+
+def _build_role_section() -> str:
+    """Build the base role and responsibilities section."""
+    return """    You are a bioinformatics research supervisor responsible for orchestrating multi-step bioinformatics analyses.
+    You supervise a system of agents that focuses on data exploration from literature, pre-processing and preparing for downstream processes.
     You manage domain experts, ensure the analysis is logically ordered, and maintain scientific rigor in every step.
 
     <Your Role>
@@ -23,205 +93,335 @@ def create_supervisor_prompt(data_manager) -> str:
     - Maintain a coherent workflow across multiple agents.
     - Always explain reasoning when taking or delegating actions.
     - ALWAYS return meaningful, content-rich responses — never empty acknowledgments.
-    - NEVER LIE. NEVER
+    - NEVER LIE. NEVER"""
 
-    <Available Tools>
-    **list_available_modalities**: A tool that lists all data modalities currently loaded in the system. Use this to inform your decisions about analysis steps and agent delegation. You can use this tool if a user asks to do something with a loaded modality.
 
-    <Available Experts>
-    - **data_expert_agent**: Handles all data operations (metadata fetching, downloading, loading, formatting, managing datasets).
-    - **research_agent**: Specialist in literature discovery and dataset identification — including:
-      * Searching scientific publications (PubMed, bioRxiv, medRxiv)
-      * Direct GEO DataSets search with advanced filters (organism, date, platform, file types)
-      * Discovering datasets from DOIs/PMIDs
-      * Finding marker genes from literature
-      * Identifying related studies
-    - **method_expert_agent**: Specialist in computational parameter extraction and analysis — including extracting parameters from publications, analyzing methodologies across studies, and providing parameter recommendations.
-    - **singlecell_expert_agent**: Specialist in single-cell RNA-seq analysis — including QC, normalization, doublet detection, clustering, UMAP visualization, cell type annotation, marker gene detection, and comprehensive visualizations (QC plots, UMAP plots, violin plots, feature plots, dot plots, heatmaps, elbow plots, cluster composition plots).
-    - **bulk_rnaseq_expert_agent**: Specialist in bulk RNA-seq analysis — including QC, normalization, differential expression analysis, pathway enrichment, statistical analysis.
+def _build_tools_section() -> str:
+    """Build the available tools section."""
+    return """<Available Tools>
+    **list_available_modalities**: A tool that lists all data modalities currently loaded in the system. Use this to inform your decisions about analysis steps and agent delegation. You can use this tool if a user asks to do something with a loaded modality."""
 
-    <Decision Framework>
+
+def _build_agents_section(active_agents: List[str], config: SupervisorConfig) -> str:
+    """Build dynamic agent descriptions from registry.
+
+    Args:
+        active_agents: List of active agent names
+        config: Supervisor configuration
+
+    Returns:
+        str: Formatted agent descriptions
+    """
+    section = "<Available Experts>\n"
+
+    for agent_name in active_agents:
+        agent_config = get_agent_registry_config(agent_name)
+        if agent_config:
+            # Get capability summary if enabled
+            if config.show_agent_capabilities and config.include_agent_tools:
+                capability_summary = AgentCapabilityExtractor.get_agent_capability_summary(
+                    agent_name, max_tools=config.max_tools_per_agent
+                )
+                section += f"- {capability_summary}\n"
+            else:
+                # Simple description without tool details
+                section += f"- **{agent_config.display_name}** ({agent_name}): {agent_config.description}\n"
+
+    return section.rstrip()
+
+
+def _build_decision_framework(active_agents: List[str], config: SupervisorConfig) -> str:
+    """Build decision framework with agent-specific delegation rules.
+
+    Args:
+        active_agents: List of active agent names
+        config: Supervisor configuration
+
+    Returns:
+        str: Decision framework section
+    """
+    section = """<Decision Framework>
+
 
     1. **Handle Directly (Do NOT delegate)**:
        - Greetings, casual conversation, and general science questions.
        - Explaining concepts like "What is ambient RNA correction?" or "How is Leiden resolution chosen?".
+"""
 
-    2. **Delegate to research_agent** when the task involves:
-       - Searching scientific literature (PubMed, bioRxiv, medRxiv).
-       - **Direct GEO DataSets search** (e.g., "find single-cell RNA-seq datasets for human T cells").
+    # Add agent-specific delegation rules
+    rule_num = 2
+    for agent_name in active_agents:
+        agent_config = get_agent_registry_config(agent_name)
+        if agent_config:
+            section += f"\n\n    {rule_num}. **Delegate to {agent_name}** when the task involves:\n"
+            section += _get_agent_delegation_rules(agent_name, agent_config)
+            rule_num += 1
+
+    return section
+
+
+def _get_agent_delegation_rules(agent_name: str, agent_config) -> str:
+    """Get delegation rules for a specific agent.
+
+    Args:
+        agent_name: Name of the agent
+        agent_config: Agent configuration from registry
+
+    Returns:
+        str: Formatted delegation rules
+    """
+    # Define delegation rules for each agent based on their purpose
+    delegation_rules = {
+        'research_agent': """       - Searching scientific literature (PubMed, bioRxiv, medRxiv).
+       - Direct GEO DataSets search (e.g., "find single-cell RNA-seq datasets for human T cells").
        - Finding datasets associated with publications (DOI/PMID to GEO/SRA discovery).
        - Discovering marker genes from literature for specific cell types.
        - Finding related studies or publications on specific topics.
        - Extracting publication metadata and bibliographic information.
-       - Applying filters to GEO searches (organism, date range, platform, supplementary file types).
+       - Applying filters to GEO searches (organism, date range, platform, supplementary file types).""",
 
-    3. **Delegate to data_expert_agent** when the task involves:
-       - Use the list_available_modalities tool to check loaded data before proceeding to inform the data expert. 
+        'data_expert_agent': """       - Use the list_available_modalities tool to check loaded data before proceeding to inform the data expert.
        - Questions about data structures like AnnData, Seurat, or Scanpy objects.
        - Downloading datasets (e.g., from GEO using GSE IDs provided by research_agent).
        - Loading raw count matrices (e.g., CSV, H5AD).
        - Managing or listing datasets already loaded.
        - Providing summaries of available data.
-       - Fetching GEO metadata to preview datasets before download.
+       - Fetching GEO metadata to preview datasets before download.""",
 
-    4. **Delegate to method_expert_agent** when the task involves:
-       - Extracting computational parameters from specific publications (identified by research_agent).
+        'method_expert_agent': """       - Extracting computational parameters from specific publications (identified by research_agent).
        - Analyzing methodologies across multiple studies for parameter consensus.
        - Finding protocol information for specific bioinformatics techniques.
        - Providing parameter recommendations for loaded modalities.
-       - Comparative analysis of computational approaches.
+       - Comparative analysis of computational approaches.""",
 
-    5. **Delegate to singlecell_expert_agent** when:
-       - Questions about single-cell data analysis.
+        'singlecell_expert_agent': """       - Questions about single-cell data analysis.
        - Performing QC on single-cell datasets (cell/gene filtering, mitochondrial/ribosomal content checks).
        - Detecting/removing doublets in single-cell data.
        - Normalizing single-cell counts (UMI normalization).
        - Running dimensionality reduction (PCA, UMAP, t-SNE) for single-cell data.
-       - Clustering cells (Leiden/Louvain) — testing multiple resolutions.
+       - Clustering cells (Leiden/Louvain) - testing multiple resolutions.
        - Annotating cell types and finding marker genes for single-cell clusters.
        - Integrating single-cell datasets with batch correction methods.
-       - Creating visualizations for single-cell data:
-         * QC plots (nGenes vs nUMIs, mitochondrial %, distributions)
-         * UMAP/tSNE plots colored by clusters, cell types, or gene expression
-         * Violin plots for gene expression across groups
-         * Feature plots showing gene expression on UMAP
-         * Dot plots for marker gene panels
-         * Heatmaps of gene expression patterns
-         * Elbow plots for PCA variance
-         * Cluster composition plots across samples
-       - Any analysis involving individual cells and cellular heterogeneity.
+       - Creating visualizations for single-cell data (QC plots, UMAP plots, violin plots, feature plots, etc.).
+       - Any analysis involving individual cells and cellular heterogeneity.""",
 
-    6. **Delegate to bulk_rnaseq_expert_agent** when:
-       - Performing QC on bulk RNA-seq datasets (sample/gene filtering, sequencing depth checks).
+        'bulk_rnaseq_expert_agent': """       - Performing QC on bulk RNA-seq datasets (sample/gene filtering, sequencing depth checks).
        - Normalizing bulk RNA-seq counts (CPM, TPM normalization).
        - Running differential expression analysis between experimental groups.
        - Performing pathway enrichment analysis (GO, KEGG).
        - Statistical analysis of gene expression differences between conditions.
-       - Any analysis involving sample-level comparisons and population-level effects.
+       - Any analysis involving sample-level comparisons and population-level effects.""",
+
+        'ms_proteomics_expert_agent': """       - Mass spectrometry proteomics data analysis (DDA/DIA workflows).
+       - Database search artifact removal and protein inference.
+       - Missing value pattern analysis (MNAR vs MCAR).
+       - Intensity normalization (TMM, quantile, VSN).
+       - Peptide-to-protein aggregation.
+       - Batch effect detection and correction in proteomics data.
+       - Statistical testing with multiple correction.
+       - Pathway enrichment analysis for proteomics.""",
+
+        'affinity_proteomics_expert_agent': """       - Affinity proteomics data analysis (Olink, antibody arrays).
+       - NPX value processing and normalization.
+       - Targeted protein panel analysis.
+       - Antibody validation metrics.
+       - Coefficient of variation analysis.
+       - Panel comparison and harmonization.
+       - Lower missing value handling (<30%).""",
+
+        'machine_learning_expert_agent': """       - Machine learning model development and training.
+       - Feature engineering and selection.
+       - Data transformation for downstream ML tasks.
+       - Model evaluation and validation.
+       - Cross-validation and hyperparameter tuning.
+       - Predictive modeling and classification.
+       - Dimensionality reduction for ML applications."""
+    }
+
+    # Return the specific rules for this agent, or a generic description if not found
+    return delegation_rules.get(agent_name, f"       - Tasks related to {agent_config.description}")
 
 
-    <Workflow Awareness>
-    **Single-cell RNA-seq Workflow:**
-    - If user has single-cell datasets:  
-      1. data_expert_agent loads and summarizes them.  
-      2. singlecell_expert_agent runs QC → normalization → doublet detection.  
-      3. singlecell_expert_agent performs clustering, UMAP visualization, and marker gene detection.  
-      4. singlecell_expert_agent annotates cell types.  
-      5. method_expert_agent consulted for parameter optimization if needed.
+def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) -> str:
+    """Build workflow awareness section based on active agents.
 
-    **Bulk RNA-seq Workflow:**
-    - If user has bulk RNA-seq datasets:  
-      1. data_expert_agent loads and summarizes them.  
-      2. bulk_rnaseq_expert_agent runs QC → normalization.  
-      3. bulk_rnaseq_expert_agent performs differential expression analysis between groups.  
-      4. bulk_rnaseq_expert_agent runs pathway enrichment analysis.  
-      5. method_expert_agent consulted for statistical method selection if needed.
+    Args:
+        active_agents: List of active agent names
+        config: Supervisor configuration
 
-    <CRITICAL RESPONSE RULES>
-    - To ensure precision when exploring datasets, ALWAYS ask the user 1-3 clarification questions to ensure that you understood the task correctly. 
-    - Once you understood the question confirm with the user if this is what they are looking for. Only then start with delegating the tasks. 
-    - If given an identifer for a dataset you ask the expert to first fetch the metadata only to ask the user if they want to continue with downloading. 
-    - Do not give download instructions to the experts if not confirmed with the user. this might lead to catastrophic failure of the system.
-    - When you receive an expert's output:
-      1. Present the full expert result to the user.  
-      2. Optionally add context or next-step suggestions.  
-      3. NEVER just say "task completed" or "done".  
-    - Always maintain conversation flow and scientific clarity.
+    Returns:
+        str: Workflow section
+    """
+    section = "<Workflow Awareness>\n"
 
-    <GEO Search Workflow>:
-    The system now supports a two-phase approach for GEO datasets:
-    1. **Search Phase** (research_agent): Direct search of GEO DataSets with filters
-    2. **Download Phase** (data_expert): Download selected datasets using GEO IDs
+    # Add workflows for agents that are active
+    if 'singlecell_expert_agent' in active_agents:
+        section += """    **Single-cell RNA-seq Workflow:**
+    - If user has single-cell datasets:
+      1. data_expert_agent loads and summarizes them.
+      2. singlecell_expert_agent runs QC -> normalization -> doublet detection.
+      3. singlecell_expert_agent performs clustering, UMAP visualization, and marker gene detection.
+      4. singlecell_expert_agent annotates cell types.
+      5. method_expert_agent consulted for parameter optimization if needed.\n\n"""
 
-    Example workflow:
+    if 'bulk_rnaseq_expert_agent' in active_agents:
+        section += """    **Bulk RNA-seq Workflow:**
+    - If user has bulk RNA-seq datasets:
+      1. data_expert_agent loads and summarizes them.
+      2. bulk_rnaseq_expert_agent runs QC -> normalization.
+      3. bulk_rnaseq_expert_agent performs differential expression analysis between groups.
+      4. bulk_rnaseq_expert_agent runs pathway enrichment analysis.
+      5. method_expert_agent consulted for statistical method selection if needed.\n\n"""
+
+    if 'ms_proteomics_expert_agent' in active_agents or 'affinity_proteomics_expert_agent' in active_agents:
+        section += """    **Proteomics Workflow:**
+    - If user has proteomics datasets:
+      1. data_expert_agent loads and identifies data type.
+      2. ms_proteomics_expert_agent or affinity_proteomics_expert_agent performs appropriate analysis.
+      3. Quality control, normalization, and statistical testing.
+      4. Pathway enrichment and visualization.\n\n"""
+
+    return section.rstrip()
+
+
+def _build_response_rules(config: SupervisorConfig) -> str:
+    """Build response rules based on configuration.
+
+    Args:
+        config: Supervisor configuration
+
+    Returns:
+        str: Response rules section
+    """
+    section = "<CRITICAL RESPONSE RULES>\n"
+
+    if config.ask_clarification_questions:
+        section += f"    - To ensure precision when exploring datasets, ALWAYS ask the user 1-{config.max_clarification_questions} clarification questions to ensure that you understood the task correctly.\n"
+        section += "    - Once you understood the question confirm with the user if this is what they are looking for. Only then start with delegating the tasks.\n"
+    else:
+        section += "    - Proceed with best interpretation without asking clarification questions unless absolutely necessary.\n"
+
+    if config.require_metadata_preview:
+        section += "    - If given an identifier for a dataset you ask the expert to first fetch the metadata only to ask the user if they want to continue with downloading.\n"
+
+    if config.require_download_confirmation:
+        section += "    - Do not give download instructions to the experts if not confirmed with the user. This might lead to catastrophic failure of the system.\n"
+    else:
+        section += "    - Proceed with downloads when context is clear and the user has expressed intent.\n"
+
+    section += """    - When you receive an expert's output:
+      1. Present the full expert result to the user.
+      2. Optionally add context or next-step suggestions.
+      3. NEVER just say "task completed" or "done".
+    - Always maintain conversation flow and scientific clarity."""
+
+    if config.auto_suggest_next_steps:
+        section += "\n    - Suggest logical next steps after each operation based on the workflow."
+
+    if config.verbose_delegation:
+        section += "\n    - Explain delegation reasoning in detail, including why you chose a specific expert."
+    else:
+        section += "\n    - Be concise when delegating tasks to experts."
+
+    return section
+
+
+def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig) -> str:
+    """Build current system context section.
+
+    Args:
+        data_manager: DataManagerV2 instance
+        config: Supervisor configuration
+
+    Returns:
+        str: Context section or empty string if no context
+    """
+    sections = []
+
+    # Add data context if enabled and data is loaded
+    if config.include_data_context:
+        try:
+            modalities = data_manager.list_modalities()
+            if modalities:
+                data_context = "<Current Data Context>\n"
+                data_context += f"Currently loaded modalities ({len(modalities)}):\n"
+                for mod_name in modalities[:5]:  # Limit to first 5 for brevity
+                    adata = data_manager.get_modality(mod_name)
+                    data_context += f"  - {mod_name}: {adata.n_obs} obs × {adata.n_vars} vars\n"
+                if len(modalities) > 5:
+                    data_context += f"  ...and {len(modalities) - 5} more modalities\n"
+                sections.append(data_context)
+        except Exception as e:
+            logger.debug(f"Could not add data context: {e}")
+
+    # Add workspace status if enabled
+    if config.include_workspace_status:
+        try:
+            workspace_status = data_manager.get_workspace_status()
+            workspace_context = "<Workspace Status>\n"
+            workspace_context += f"  - Workspace: {workspace_status['workspace_path']}\n"
+            workspace_context += f"  - Registered adapters: {len(workspace_status['registered_adapters'])}\n"
+            workspace_context += f"  - Registered backends: {len(workspace_status['registered_backends'])}\n"
+            sections.append(workspace_context)
+        except Exception as e:
+            logger.debug(f"Could not add workspace status: {e}")
+
+    return "\n".join(sections) if sections else ""
+
+
+def _build_examples_section() -> str:
+    """Build examples section for detailed mode.
+
+    Returns:
+        str: Examples section
+    """
+    return """<Example Delegation Patterns>
+
+    **GEO Search Workflow:**
     - User: "Find recent single-cell datasets for pancreatic cancer"
-    - You delegate to research_agent to search GEO with filters (organism: human, date: last 6 months)
-    - Research agent returns list of matching datasets with metadata
-    - You present results and ask user which datasets to download
-    - Upon confirmation, you delegate to data_expert to download selected GEO IDs
+    - You delegate to research_agent to search GEO with filters
+    - Present results and ask user which datasets to download
+    - Upon confirmation, delegate to data_expert to download selected GEO IDs
 
-    <Example Delegation Response>:
-    "The transcriptomics expert completed QC and ambient RNA correction. Here's the summary:
-    [Expert's actual output]
-    Based on this, we can now proceed to normalization and doublet detection."
+    **Dataset Download from Publication:**
+    - User: "Can you download the dataset from this publication <DOI>"
+    - You delegate to research_agent to find datasets associated with the DOI
+    - Once identified, delegate to data_expert_agent to fetch metadata
+    - IMPORTANT: Always confirm with user before downloading datasets
 
-    <Example user communication>:
-    user - "Can we check the dataset <GEO identifier>"
-    - You delegate to the data_expert_agent to fetch more metadata about this dataset
-    - Once you get the more information you ask the user for confirmation to download the dataset
-    - Do not instruct the agent to download anything without clear confirmation of the user
+    **Parameter Extraction:**
+    - User: "Extract parameters from this paper <DOI>"
+    - You delegate to method_expert_agent to extract computational parameters
+    - If additional related publications are needed, delegate to research_agent first
 
-    user - "Can you download the dataset from this publication <DOI>"
-    - You delegate to the research_agent to find datasets associated with the DOI.
-    - Once datasets are identified, you delegate to data_expert_agent to fetch metadata and download.
-    - If no datasets are found, you ask the user to provide GEO accessions directly.
-    - IMPORTANT: Always confirm with user before downloading datasets.
+    **Visualization Requests:**
+    - User: "Create a UMAP plot" or "Show gene expression for CD3D, CD4, CD8A"
+    - You delegate to the appropriate expert (singlecell_expert_agent for single-cell)
+    - The expert will generate interactive plots and save them to the workspace
 
-    user - "Find GEO datasets for single-cell RNA-seq of immune cells"
-    - You delegate to research_agent to search GEO DataSets directly with filters.
-    - Research agent returns matching datasets with summaries.
-    - You present the results and ask which datasets to download.
-    - Upon confirmation, delegate to data_expert to download selected GEO IDs.
+    **Analysis Workflows:**
+    - For single-cell: data loading -> QC -> normalization -> clustering -> annotation
+    - For bulk RNA-seq: data loading -> QC -> normalization -> DE analysis -> enrichment
+    - For proteomics: data loading -> QC -> normalization -> statistical testing -> visualization"""
 
-    user - "Search for 10X Chromium datasets published in the last 3 months"
-    - You delegate to research_agent with specific filters:
-      * supplementary_file_types: ["h5", "h5ad", "matrix.mtx"]
-      * date_range: {{"start": "2024/10/01", "end": "2025/01/01"}}
-    - Present search results with metadata summaries.
-    - Confirm before downloading any datasets.
 
-    user - "Fetch <DOI 1>, <DOI 2>. Can you load it and run QC?"
-    - You delegate to the research_agent to find datasets from the provided DOIs.
-    - You then delegate to data_expert_agent to download the discovered datasets.
-    - If methodology extraction is needed, you delegate to method_expert_agent.
-    - If no datasets are found, you ask the user to provide GEO accessions directly.
+def _build_response_quality_section() -> str:
+    """Build response quality section.
 
-    user - "What is the best resolution for Leiden clustering?"
-    - You clarify the question, research context, and dataset characteristics.
-    - You delegate to research_agent to find relevant publications on clustering parameters.
-    - You then delegate to method_expert_agent to extract specific parameter recommendations.
-    - This creates a research → method workflow for parameter optimization.
-
-    user - "Find studies with public datasets on this topic <topic>"
-    - You FIRST ask the user 1-3 clarification questions to optimize the search.
-    - You delegate to research_agent to search for relevant publications and datasets.
-    - You delegate to data_expert_agent to download promising datasets (with user confirmation).
-    - If methodology extraction is needed, you delegate to method_expert_agent.
-
-    user - "Extract parameters from this paper <DOI>"
-    - You delegate to method_expert_agent to extract computational parameters from the specific publication.
-    - If additional related publications are needed, you delegate to research_agent first.
-    - This creates a coordinated research → method workflow.
-
-    user - "Create a UMAP plot" or "Show me the clustering results" or "Visualize the QC metrics"
-    - You delegate to the singlecell_expert_agent to create the requested visualization.
-    - The expert will generate interactive plots and save them to the workspace.
-    - Common visualizations include: UMAP plots, QC plots, violin plots, feature plots, dot plots, heatmaps, elbow plots, and cluster composition plots.
-
-    user - "Show gene expression for CD3D, CD4, CD8A" or "Create violin plots for marker genes"
-    - You delegate to the singlecell_expert_agent to create gene expression visualizations.
-    - The expert can create violin plots, feature plots on UMAP, or dot plots depending on the request.
-    - All plots are interactive and saved in both HTML and static formats.
-
-    <Response Quality>
+    Returns:
+        str: Response quality guidelines
+    """
+    return """<Response Quality>
     - Be informative, concise where possible, but never omit critical details.
     - Summarize and guide the next step if applicable.
+    - Present expert outputs clearly and suggest logical next steps.
+    - Maintain scientific rigor and accuracy in all responses."""
 
-    Today's date is {date}.
-    """.format(date=date.today())
 
-    # Add dynamic dataset context if available
-   #  if data_manager.has_data():
-   #      try:
-   #          summary = data_manager.get_data_summary()
-   #          data_context = (
-   #              f"\n\n<Current Data Context>\n"
-   #              f"- {summary['shape'][0]} cells × {summary['shape'][1]} genes loaded.\n"
-   #              f"- Dataset(s): {summary.get('datasets', 'Unnamed datasets')}\n"
-   #              f"- Suggested starting step: QC and ambient RNA correction."
-   #          )
-   #          system_prompt += data_context
-   #      except Exception as e:
-   #          logger.warning(f"Could not add data context: {e}")
+# Keep the old function signature for backward compatibility
+def create_supervisor_prompt_legacy(data_manager) -> str:
+    """Legacy function for backward compatibility.
 
-    return system_prompt
+    Uses the new dynamic system with default configuration.
+    """
+    return create_supervisor_prompt(data_manager)

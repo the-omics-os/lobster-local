@@ -67,15 +67,123 @@ sc_data = SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
 print(f"Generated: {sc_data.shape[0]} cells × {sc_data.shape[1]} genes")
 ```
 
-## 🏃 **Enhanced Test Runner**
+## 🏃 **Enhanced End-to-End Testing System**
+
+Lobster AI features a **sophisticated 3-tier testing architecture** that validates everything from individual components to complete user workflows:
+
+### 🎯 **Testing Architecture**
+
+1. **Traditional pytest Framework** (Unit/Integration/System/Performance)
+2. **End-to-End Acceptance Testing** (Natural language workflows)
+3. **Hybrid Execution** (Combined reporting and analytics)
+
+### 🚀 **Quick Start Commands**
 
 ```bash
-# Run all test cases with performance monitoring
+# User-friendly bash wrapper (recommended)
+./tests/run_tests.sh                    # Run all scenarios sequentially
+./tests/run_tests.sh --parallel         # Run in parallel
+./tests/run_tests.sh --parallel -w 8    # 8 parallel workers
+
+# Advanced Python runner with full control
+python tests/run_integration_tests.py --categories basic,advanced --parallel
+python tests/run_integration_tests.py --performance-monitoring --workers 4
+python tests/run_integration_tests.py --run-pytest-integration --output results.json
+```
+
+### 📊 **Test Categorization & Filtering**
+
+```bash
+# Filter by categories
+python tests/run_integration_tests.py --categories basic,advanced,performance
+
+# Filter by biological domains
+python tests/run_integration_tests.py --tags geo,proteomics,multiomics,spatial
+
+# Filter by priority levels (1-5)
+python tests/run_integration_tests.py --priorities 1,2,3
+
+# Combine filters for targeted testing
+python tests/run_integration_tests.py --categories advanced --tags geo,qc --parallel
+```
+
+### 🧪 **Test Scenarios (30+ Realistic Workflows)**
+
+The **`test_cases.json`** file contains comprehensive user scenarios:
+
+#### **Categories:**
+- **`basic`** - Simple workflows (GEO download, basic QC)
+- **`advanced`** - Complex analysis (multi-omics, trajectory analysis)
+- **`performance`** - Large dataset processing
+- **`error_handling`** - Edge cases and error recovery
+
+#### **Tags:**
+- **`geo`** - GEO dataset workflows
+- **`qc`** - Quality control processes
+- **`visualization`** - Plotting and visual analysis
+- **`multiomics`** - Cross-platform integration
+- **`spatial`** - Spatial transcriptomics
+- **`proteomics`** - Mass spec and affinity proteomics
+- **`clustering`** - Cell/sample grouping analysis
+
+### ⚡ **Performance Monitoring**
+
+Real-time system monitoring during test execution:
+
+```bash
+# Enable performance monitoring
 python tests/run_integration_tests.py --performance-monitoring
 
-# Run specific categories in parallel
-python tests/run_integration_tests.py --categories basic,advanced --parallel
+# Monitor CPU, memory, disk I/O, network usage
+# Automatic performance regression detection
+# Memory leak detection for long-running tests
 ```
+
+### 🔄 **Hybrid pytest Integration**
+
+Combine traditional pytest tests with E2E scenarios:
+
+```bash
+# Run both pytest and E2E tests together
+python tests/run_integration_tests.py --run-pytest-integration
+
+# Combined reporting with unified success metrics
+# Comprehensive analytics and category breakdowns
+```
+
+### 📋 **Adding New Test Scenarios**
+
+Add realistic user scenarios to **`test_cases.json`**:
+
+```json
+{
+  "test_my_workflow": {
+    "inputs": [
+      "Download GSE123456 and perform quality control",
+      "Create UMAP visualization with resolution 0.8"
+    ],
+    "category": "basic",
+    "description": "Test custom workflow",
+    "tags": ["geo", "visualization"],
+    "priority": 2,
+    "timeout": 300.0,
+    "validation_criteria": {
+      "input_0": {
+        "required_keywords": ["downloaded", "quality control"],
+        "no_errors": true
+      }
+    }
+  }
+}
+```
+
+### 📈 **Advanced Features**
+
+- **Dependency Resolution**: Automatic test ordering based on dependencies
+- **Retry Logic**: Configurable retry attempts for flaky tests
+- **Workspace Management**: Isolated test environments with automatic cleanup
+- **Response Validation**: Keyword matching, length checks, error detection
+- **Comprehensive Reporting**: JSON output with performance metrics and analytics
 
 ## 🧪 **NEW: Comprehensive Tools Test Suite**
 

@@ -462,6 +462,36 @@ Automated testing runs on every pull request with:
 - **📊 Performance**: Benchmark comparisons and regression detection
 - **📈 Coverage**: Automated coverage reporting to Codecov
 
+### 🎯 **End-to-End Acceptance Testing**
+
+Lobster AI features a **sophisticated acceptance testing system** that validates complete user workflows through natural language interactions:
+
+```bash
+# Run realistic user scenarios with performance monitoring
+./tests/run_tests.sh --parallel
+
+# Run specific test categories
+python tests/run_integration_tests.py --categories basic,advanced --parallel
+
+# Filter by biological domains
+python tests/run_integration_tests.py --tags geo,proteomics,multiomics
+
+# Run with advanced monitoring
+python tests/run_integration_tests.py --performance-monitoring --categories advanced
+```
+
+#### 🌟 **Key Features**
+- **30+ Realistic Scenarios**: Complete workflows from data download to publication-ready results
+- **Natural Language Testing**: Validates the actual conversational interface users experience
+- **Performance Monitoring**: Real-time CPU, memory, and I/O tracking during test execution
+- **Scalable Architecture**: Tag-based filtering, priorities, parallel execution, and dependency resolution
+- **Hybrid Integration**: Combines pytest framework tests with acceptance testing for comprehensive coverage
+
+#### 📋 **Test Categories & Tags**
+- **Categories**: `basic`, `advanced`, `performance`, `error_handling`
+- **Tags**: `geo`, `qc`, `visualization`, `multiomics`, `spatial`, `proteomics`, `clustering`
+- **Scenarios**: GEO dataset workflows, multi-omics integration, troubleshooting, parameter optimization
+
 ### 🎯 **Quality Standards**
 
 - **Minimum Coverage**: 80% (targeting 95%+)
