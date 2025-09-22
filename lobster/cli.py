@@ -87,6 +87,7 @@ class LobsterClientAdapter:
                 return []
         except Exception as e:
             # Graceful fallback for any errors
+            console = console_manager.get_console()
             console.print(f"[dim red]Error getting workspace files: {e}[/dim red]")
             return []
 
@@ -148,6 +149,7 @@ class CloudAwareCache:
                 if self.is_cloud and ('connection' in str(e).lower() or 'timeout' in str(e).lower()):
                     # For cloud connection errors, return stale cache if available
                     if key in self.cache:
+                        console = console_manager.get_console()
                         console.print(f"[dim yellow]Using cached data due to connection issue[/dim yellow]")
                         return self.cache[key]['data']
                 raise e
@@ -336,6 +338,7 @@ if PROMPT_TOOLKIT_AVAILABLE:
                 )
             except Exception as e:
                 # Graceful fallback
+                console = console_manager.get_console()
                 console.print(f"[dim red]File completion error: {e}[/dim red]")
                 files = []
 
@@ -1389,7 +1392,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
 [{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List all generated plots
 [{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Open plots directory in file manager
-[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    [grey50]-[/grey50] Open specific plot by ID or name
+[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    [grey50]-[/grey50] Open a specific plot by ID or name
 [{LobsterTheme.PRIMARY_ORANGE}]/open[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Open file or folder in system default application
 [{LobsterTheme.PRIMARY_ORANGE}]/save[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Save current state to workspace
 [{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
@@ -2592,7 +2595,7 @@ when they are started by agents or analysis workflows.
             item_type = "folder" if target_path.is_dir() else "file"
             return f"Opened {item_type} '{target_path.name}' in system default application"
         else:
-            console.print(f"[red]/open: {message}[/red]")
+            console.print(f"[red]open: {message}[/red]")
             return f"Failed to open '{file_or_folder}': {message}"
 
     elif cmd == "/save":
