@@ -1,9 +1,10 @@
 """
-Data Expert Agent for handling all data fetching, downloading, and extraction.
+Data Expert Agent for multi-omics data acquisition, processing, and workspace management.
 
-This agent is responsible for managing all data acquisition operations using
-the new modular DataManagerV2 system with proper modality handling and 
-multi-omics support.
+This agent is responsible for managing all data-related operations using the modular
+DataManagerV2 system, including GEO data fetching, local file processing, workspace
+restoration, and multi-omics data integration with proper modality handling and
+schema validation.
 """
 
 from typing import List, Dict
@@ -24,12 +25,35 @@ logger = get_logger(__name__)
 
 
 def data_expert(
-    data_manager: DataManagerV2, 
-    callback_handler=None, 
+    data_manager: DataManagerV2,
+    callback_handler=None,
     agent_name: str = "data_expert_agent",
     handoff_tools: List = None
-):  
-    """Create data expert agent for handling all data operations with DataManagerV2."""
+):
+    """
+    Create a multi-omics data acquisition, processing, and workspace management specialist agent.
+
+    This expert agent serves as the primary interface for all data-related operations in the
+    Lobster bioinformatics platform, specializing in:
+
+    - **GEO Data Acquisition**: Fetching, validating, and downloading datasets from NCBI GEO
+    - **Local File Processing**: Loading and validating custom data files with automatic format detection
+    - **Workspace Management**: Restoring previous sessions and managing dataset persistence
+    - **Multi-modal Integration**: Handling transcriptomics, proteomics, and other omics data types
+    - **Quality Assurance**: Ensuring data integrity through schema validation and provenance tracking
+
+    Built on the modular DataManagerV2 architecture, this agent provides seamless integration
+    with downstream analysis workflows while maintaining professional scientific standards.
+
+    Args:
+        data_manager: DataManagerV2 instance for modular data operations
+        callback_handler: Optional callback handler for LLM interactions
+        agent_name: Name identifier for the agent instance
+        handoff_tools: Additional tools for inter-agent communication
+
+    Returns:
+        Configured ReAct agent with comprehensive data management capabilities
+    """
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('data_expert')
@@ -649,12 +673,96 @@ To save, run again with save_to_file=True"""
             logger.error(f"Error concatenating samples: {e}")
             return f"Error concatenating samples: {str(e)}"
 
+    @tool
+    def restore_workspace_datasets(
+        pattern: str = "recent"
+    ) -> str:
+        """
+        Restore datasets from workspace based on pattern matching.
+
+        This tool loads previously saved datasets back into memory from the workspace.
+        Useful for continuing analysis sessions or loading specific datasets.
+
+        Args:
+            pattern: Dataset pattern to match. Options:
+                    - "recent": Load most recently used datasets (default)
+                    - "all": Load all available datasets
+                    - "*": Load all datasets (same as "all")
+                    - "<dataset_name>": Load specific dataset by name
+                    - "<partial_name>*": Load datasets matching partial name
+
+        Returns:
+            str: Summary of loaded datasets with details
+        """
+        try:
+            logger.info(f"Restoring workspace datasets with pattern: {pattern}")
+
+            # Check available datasets first
+            available = data_manager.available_datasets
+            if not available:
+                return "No datasets available in workspace. Use download_geo_dataset to create datasets first."
+
+            # Show what's available for context
+            available_info = f"Available datasets: {len(available)} total\n"
+            for name, info in list(available.items())[:3]:  # Show first 3
+                available_info += f"  • {name} ({info['size_mb']:.1f} MB)\n"
+            if len(available) > 3:
+                available_info += f"  • ... and {len(available) - 3} more\n"
+
+            # Perform restoration
+            result = data_manager.restore_session(pattern)
+
+            if result["restored"]:
+                # Format success response
+                response = f"""Successfully restored {len(result['restored'])} dataset(s) from workspace!
+
+📊 **Loaded Datasets:**
+"""
+                for dataset_name in result["restored"]:
+                    try:
+                        adata = data_manager.get_modality(dataset_name)
+                        response += f"  • **{dataset_name}**: {adata.n_obs} obs × {adata.n_vars} vars\n"
+                    except Exception:
+                        response += f"  • **{dataset_name}**: (loaded, details unavailable)\n"
+
+                response += f"\n💾 **Total Size**: {result['total_size_mb']:.1f} MB\n"
+                response += f"⚡ **Pattern Used**: {pattern}\n"
+
+                if result.get("skipped"):
+                    response += f"\n⚠️ **Skipped**: {len(result['skipped'])} datasets (size limits)\n"
+
+                response += f"\n✅ All restored datasets are now available as modalities for analysis."
+
+                # Log the operation
+                data_manager.log_tool_usage(
+                    tool_name="restore_workspace_datasets",
+                    parameters={"pattern": pattern},
+                    description=f"Restored {len(result['restored'])} datasets from workspace"
+                )
+
+                return response
+            else:
+                return f"""No datasets matched pattern '{pattern}'.
+
+{available_info}
+
+💡 **Try these patterns:**
+  • "recent" - Load most recently used datasets
+  • "all" - Load all available datasets
+  • "<dataset_name>" - Load specific dataset
+  • "geo_*" - Load all GEO datasets"""
+
+        except Exception as e:
+            logger.error(f"Error restoring workspace datasets: {e}")
+            return f"Error restoring datasets: {str(e)}"
+
     base_tools = [
         #CORE
         fetch_geo_metadata_and_strategy_config,
         check_file_head_from_supplementary_files,
         download_geo_dataset,
         concatenate_samples,
+        restore_workspace_datasets,
         #HELPER
         check_tmp_metadata_keys,
         get_data_summary,
@@ -681,8 +789,9 @@ You handle all data acquisition, storage, and retrieval operations using the new
 1. **Download and load datasets** from various sources (GEO, local files, etc.)
 2. **Process and validate data** using appropriate modality adapters
 3. **Store data as modalities** with proper schema enforcement
-4. **Provide data access** to other agents via modality names
-5. **Maintain workspace** with proper organization and provenance tracking
+4. **Restore workspace datasets** from previous sessions for continued analysis
+5. **Provide data access** to other agents via modality names
+6. **Maintain workspace** with proper organization and provenance tracking
 </Task>
 
 <Available Core Tools>
@@ -717,7 +826,12 @@ Use this after downloading samples individually when you need a single combined 
 </Available Core Tools>
 
 <Available helper Tools>
-- check_tmp_metadata_keys: Check for which identifiers the metadata is currently temporary stored (returns a list of identifiers) 
+- **restore_workspace_datasets**: Restore datasets from workspace based on pattern matching for session continuation
+  - Supports flexible patterns: "recent", "all", specific names, or wildcards
+  - Automatically loads datasets back into memory from workspace
+  - Provides detailed summaries of restored data with modality information
+  - Use for continuing previous sessions or loading specific datasets for analysis
+- check_tmp_metadata_keys: Check for which identifiers the metadata is currently temporary stored (returns a list of identifiers)
 - get_data_summary: Get summary of loaded modalities or specific modality
 - upload_data_file: Upload local files and create modalities with auto-detection
 - list_available_modalities: Show all currently loaded modalities with details
@@ -840,6 +954,27 @@ get_adapter_info()
 
 # Step 3: Examine specific modality if exists
 get_data_summary("<existing_modality_name>")
+```
+
+### Workspace Restoration (Session Continuation)
+```bash
+# Step 1: Check what's currently loaded vs what's available
+list_available_modalities()  # See what's currently in memory
+
+# Step 2: Restore recent datasets for continued analysis
+restore_workspace_datasets("recent")  # Load most recently used datasets
+
+# Step 3: Load specific dataset by name
+restore_workspace_datasets("geo_gse123456")
+
+# Step 4: Load all datasets matching pattern
+restore_workspace_datasets("geo_*")  # Load all GEO datasets
+
+# Step 5: Load all available datasets (use with caution for memory)
+restore_workspace_datasets("all")
+
+# Step 6: Verify restored data and continue analysis
+get_data_summary()
 ```
 
 ## 2. DATA LOADING WORKFLOWS

@@ -666,7 +666,6 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
         history_file = None
         if PROMPT_TOOLKIT_AVAILABLE:
             try:
-                from pathlib import Path
                 history_dir = Path.home() / ".lobster"
                 history_dir.mkdir(exist_ok=True)
                 history_file = FileHistory(str(history_dir / "lobster_history"))
@@ -1121,7 +1120,7 @@ Type [{LobsterTheme.PRIMARY_ORANGE}]/workspace load <name>[/{LobsterTheme.PRIMAR
     console.print(Panel(
         panel_content,
         title="Workspace Detected",
-        border_style="orange",
+        border_style=LobsterTheme.PRIMARY_ORANGE,
         padding=(1, 2)
     ))
 
@@ -1386,7 +1385,6 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Show detailed metadata information
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show workspace status and information
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available datasets in workspace
-[{LobsterTheme.PRIMARY_ORANGE}]/workspace load <name>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Load specific dataset from workspace
 [{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Restore previous session datasets
 [{LobsterTheme.PRIMARY_ORANGE}]/restore <pattern>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Restore datasets matching pattern (recent/all/*)
 [{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
@@ -1710,8 +1708,7 @@ when they are started by agents or analysis workflows.
         
         if is_glob_pattern:
             # Handle glob patterns for multiple files
-            from pathlib import Path
-            
+
             # Use current directory as base for relative patterns
             if not Path(filename).is_absolute():
                 base_path = current_directory
@@ -2287,7 +2284,21 @@ when they are started by agents or analysis workflows.
                 return None
             else:
                 pattern = parts[2]
-                result = client.data_manager.restore_session(pattern)
+
+                # Show what will be loaded
+                console.print(f"[yellow]Loading workspace datasets (pattern: {pattern})...[/yellow]")
+
+                # Create progress bar
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=console,
+                    transient=True
+                ) as progress:
+                    task = progress.add_task(f"Loading datasets matching '{pattern}'...", total=None)
+
+                    # Perform workspace loading
+                    result = client.data_manager.restore_session(pattern)
 
                 # Display results
                 if result["restored"]:
@@ -2622,7 +2633,6 @@ when they are started by agents or analysis workflows.
         console.print(f"[yellow]Restoring workspace (pattern: {pattern})...[/yellow]")
 
         # Create progress bar
-        from rich.progress import Progress
         with Progress() as progress:
             task = progress.add_task("Restoring datasets...", total=100)
 
