@@ -42,6 +42,8 @@ import json
 import time
 import ast
 import inspect
+import numpy as np
+import pandas as pd
 from typing import Dict, List, Any, Iterable
 
 # Import prompt_toolkit for autocomplete functionality (optional dependency)
@@ -232,6 +234,7 @@ def extract_available_commands() -> Dict[str, str]:
         '/workspace load': 'Load specific dataset from workspace',
         '/restore': 'Restore previous session datasets',
         '/modalities': 'Show detailed modality information',
+        '/describe': 'Show detailed information about a specific modality',
         '/plots': 'List all generated plots',
         '/plot': 'Open plots directory or specific plot',
         '/open': 'Open file or folder in system default application',
@@ -428,6 +431,31 @@ if PROMPT_TOOLKIT_AVAILABLE:
                             display_meta=HTML('<dim>restore pattern</dim>'),
                             style='class:completion.pattern'
                         )
+
+            elif text.startswith('/describe '):
+                # Suggest modality names for describe command
+                prefix = text.replace('/describe ', '')
+                try:
+                    if hasattr(self.client.data_manager, 'list_modalities'):
+                        modalities = self.client.data_manager.list_modalities()
+                        for modality_name in modalities:
+                            if modality_name.lower().startswith(prefix.lower()):
+                                # Get basic info about the modality if possible
+                                try:
+                                    adata = self.client.data_manager.get_modality(modality_name)
+                                    meta = f"{adata.n_obs:,} obs × {adata.n_vars:,} vars"
+                                except:
+                                    meta = "modality"
+
+                                yield Completion(
+                                    text=modality_name,
+                                    start_position=-len(prefix),
+                                    display=HTML(f'<ansicyan>{modality_name}</ansicyan>'),
+                                    display_meta=HTML(f'<dim>{meta}</dim>'),
+                                    style='class:completion.modality'
+                                )
+                except Exception:
+                    pass
 
             elif any(text.startswith(cmd + ' ') for cmd in self.file_commands):
                 # File completion for file-accepting commands
@@ -1055,6 +1083,140 @@ def display_welcome():
     console_manager.print(welcome_panel)
 
 
+# ============================================================================
+# Helper Functions for Data Display
+# ============================================================================
+
+def _format_data_preview(matrix, max_rows: int = 5, max_cols: int = 5) -> Table:
+    """Format a data matrix preview as a Rich table."""
+    import scipy.sparse as sp
+
+    # Convert sparse to dense for preview if needed
+    if sp.issparse(matrix):
+        # Get a small subset for preview
+        preview_rows = min(max_rows, matrix.shape[0])
+        preview_cols = min(max_cols, matrix.shape[1])
+        preview_data = matrix[:preview_rows, :preview_cols].toarray()
+    else:
+        preview_rows = min(max_rows, matrix.shape[0])
+        preview_cols = min(max_cols, matrix.shape[1])
+        preview_data = matrix[:preview_rows, :preview_cols]
+
+    # Create table
+    table = Table(box=box.SIMPLE)
+
+    # Add columns
+    table.add_column("", style="bold grey50")  # Row index
+    for i in range(preview_cols):
+        table.add_column(f"[{i}]", style="cyan")
+
+    # Add rows
+    for i in range(preview_rows):
+        row_values = ["[" + str(i) + "]"]
+        for j in range(preview_cols):
+            val = preview_data[i, j]
+            # Format the value
+            if isinstance(val, (int, np.integer)):
+                formatted = str(val)
+            elif isinstance(val, (float, np.floating)):
+                formatted = f"{val:.2f}"
+            else:
+                formatted = str(val)
+            row_values.append(formatted)
+        table.add_row(*row_values)
+
+    # Add ellipsis row if there are more rows
+    if matrix.shape[0] > max_rows or matrix.shape[1] > max_cols:
+        ellipsis_row = ["..."] * (min(preview_cols, matrix.shape[1]) + 1)
+        table.add_row(*ellipsis_row, style="dim")
+
+    return table
+
+
+def _format_dataframe_preview(df: pd.DataFrame, max_rows: int = 5) -> Table:
+    """Format a DataFrame preview as a Rich table."""
+    table = Table(box=box.SIMPLE)
+
+    # Add index column
+    table.add_column("Index", style="bold grey50")
+
+    # Add data columns
+    for col in df.columns[:10]:  # Limit to first 10 columns
+        dtype_str = str(df[col].dtype)
+        style = "cyan" if dtype_str.startswith("int") or dtype_str.startswith("float") else "white"
+        table.add_column(str(col), style=style)
+
+    # Add rows
+    preview_rows = min(max_rows, len(df))
+    for idx in range(preview_rows):
+        row_data = [str(df.index[idx])]
+        for col in df.columns[:10]:
+            val = df.iloc[idx][col]
+            # Format based on type
+            if pd.isna(val):
+                formatted = "NaN"
+            elif isinstance(val, (int, np.integer)):
+                formatted = str(val)
+            elif isinstance(val, (float, np.floating)):
+                formatted = f"{val:.2f}"
+            else:
+                formatted = str(val)[:20]  # Truncate long strings
+            row_data.append(formatted)
+        table.add_row(*row_data)
+
+    # Add ellipsis if there are more rows
+    if len(df) > max_rows:
+        ellipsis_row = ["..."] * (min(10, len(df.columns)) + 1)
+        table.add_row(*ellipsis_row, style="dim")
+
+    # Add more columns indicator
+    if len(df.columns) > 10:
+        table.add_column(f"... +{len(df.columns) - 10} more", style="dim")
+
+    return table
+
+
+def _format_array_info(arrays_dict: Dict[str, np.ndarray]) -> Table:
+    """Format array information (obsm/varm) as a table."""
+    if not arrays_dict:
+        return None
+
+    table = Table(box=box.SIMPLE)
+    table.add_column("Key", style="bold cyan")
+    table.add_column("Shape", style="white")
+    table.add_column("Dtype", style="grey70")
+
+    for key, arr in arrays_dict.items():
+        shape_str = " × ".join(str(d) for d in arr.shape)
+        dtype_str = str(arr.dtype)
+        table.add_row(key, shape_str, dtype_str)
+
+    return table
+
+
+def _get_matrix_info(matrix) -> Dict[str, Any]:
+    """Get information about a matrix (sparse or dense)."""
+    import scipy.sparse as sp
+
+    info = {}
+    info['shape'] = matrix.shape
+    info['dtype'] = str(matrix.dtype)
+
+    if sp.issparse(matrix):
+        info['sparse'] = True
+        info['format'] = matrix.format.upper()
+        info['nnz'] = matrix.nnz
+        info['density'] = (matrix.nnz / (matrix.shape[0] * matrix.shape[1])) * 100
+        info['memory_mb'] = (matrix.data.nbytes + matrix.indices.nbytes + matrix.indptr.nbytes) / (1024**2)
+    else:
+        info['sparse'] = False
+        info['format'] = 'Dense'
+        info['memory_mb'] = matrix.nbytes / (1024**2)
+        info['density'] = 100.0
+
+    return info
+
+
 def display_status(client: AgentClient):
     """Display current system status with enhanced orange theming."""
     status = client.get_status()
@@ -1388,6 +1550,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Restore previous session datasets
 [{LobsterTheme.PRIMARY_ORANGE}]/restore <pattern>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Restore datasets matching pattern (recent/all/*)
 [{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
+[{LobsterTheme.PRIMARY_ORANGE}]/describe <name>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show comprehensive details about a specific modality
 [{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List all generated plots
 [{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Open plots directory in file manager
 [{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    [grey50]-[/grey50] Open a specific plot by ID or name
@@ -2427,7 +2590,190 @@ when they are started by agents or analysis workflows.
                 console.print("[grey50]No modalities loaded[/grey50]")
         else:
             console.print("[grey50]Modality information not available (using legacy DataManager)[/grey50]")
-    
+
+    elif cmd.startswith("/describe"):
+        # Show detailed information about a specific modality
+        parts = cmd.split()
+        if len(parts) < 2:
+            console.print("[red]Usage: /describe <modality_name>[/red]")
+            console.print("[dim]Available modalities:[/dim]")
+            if hasattr(client.data_manager, 'list_modalities'):
+                modalities = client.data_manager.list_modalities()
+                for mod in modalities:
+                    console.print(f"  • {mod}")
+            return None
+
+        modality_name = parts[1]
+
+        # Check if modality exists
+        if hasattr(client.data_manager, 'list_modalities'):
+            if modality_name not in client.data_manager.list_modalities():
+                console.print(f"[red]Modality '{modality_name}' not found[/red]")
+                console.print("[dim]Available modalities:[/dim]")
+                for mod in client.data_manager.list_modalities():
+                    console.print(f"  • {mod}")
+                return None
+
+            try:
+                # Get the modality
+                adata = client.data_manager.get_modality(modality_name)
+
+                # Create main header
+                console.print()
+                console.print(f"[bold {LobsterTheme.PRIMARY_ORANGE}]🧬 Modality: {modality_name}[/bold {LobsterTheme.PRIMARY_ORANGE}]")
+                console.print("━" * 60)
+
+                # Basic Information
+                matrix_info = _get_matrix_info(adata.X)
+                console.print(f"\n[bold white]📊 Basic Information[/bold white]")
+                basic_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+                basic_table.add_column("Property", style="grey70")
+                basic_table.add_column("Value", style="white")
+
+                basic_table.add_row("Shape", f"{adata.n_obs:,} observations × {adata.n_vars:,} variables")
+                basic_table.add_row("Memory", f"{matrix_info['memory_mb']:.1f} MB")
+                if matrix_info['sparse']:
+                    basic_table.add_row("Matrix Type", f"Sparse ({matrix_info['format']}, {matrix_info['density']:.1f}% density)")
+                    basic_table.add_row("Non-zero", f"{matrix_info['nnz']:,} elements")
+                else:
+                    basic_table.add_row("Matrix Type", "Dense array")
+                basic_table.add_row("Data Type", matrix_info['dtype'])
+
+                console.print(basic_table)
+
+                # Data Matrix (X) Preview
+                console.print(f"\n[bold white]📈 Data Matrix (X)[/bold white]")
+                console.print(f"[grey70]Preview (first 5×5 cells):[/grey70]")
+                x_preview = _format_data_preview(adata.X)
+                console.print(x_preview)
+
+                # Observations (obs)
+                if not adata.obs.empty:
+                    console.print(f"\n[bold white]🔬 Observations (obs) - {adata.n_obs:,} cells[/bold white]")
+
+                    # Column information
+                    obs_info = []
+                    for col in adata.obs.columns:
+                        dtype = str(adata.obs[col].dtype)
+                        obs_info.append(f"{col} ({dtype})")
+
+                    console.print(f"[grey70]Columns ({len(adata.obs.columns)}):[/grey70] {', '.join(obs_info[:5])}")
+                    if len(obs_info) > 5:
+                        console.print(f"[grey50]... and {len(obs_info) - 5} more columns[/grey50]")
+
+                    # Preview table
+                    if len(adata.obs) > 0:
+                        console.print(f"[grey70]Preview:[/grey70]")
+                        obs_preview = _format_dataframe_preview(adata.obs)
+                        console.print(obs_preview)
+
+                # Variables (var)
+                if not adata.var.empty:
+                    console.print(f"\n[bold white]🧪 Variables (var) - {adata.n_vars:,} features[/bold white]")
+
+                    # Column information
+                    var_info = []
+                    for col in adata.var.columns:
+                        dtype = str(adata.var[col].dtype)
+                        var_info.append(f"{col} ({dtype})")
+
+                    console.print(f"[grey70]Columns ({len(adata.var.columns)}):[/grey70] {', '.join(var_info[:5])}")
+                    if len(var_info) > 5:
+                        console.print(f"[grey50]... and {len(var_info) - 5} more columns[/grey50]")
+
+                    # Preview table
+                    if len(adata.var) > 0:
+                        console.print(f"[grey70]Preview:[/grey70]")
+                        var_preview = _format_dataframe_preview(adata.var)
+                        console.print(var_preview)
+
+                # Additional Data Structures
+                console.print(f"\n[bold white]📦 Additional Data Structures[/bold white]")
+
+                # Layers
+                if adata.layers:
+                    console.print(f"\n[cyan]Layers ({len(adata.layers)}):[/cyan]")
+                    for layer_name, layer_data in adata.layers.items():
+                        layer_info = _get_matrix_info(layer_data)
+                        console.print(f"  • {layer_name}: {layer_info['shape'][0]}×{layer_info['shape'][1]} {layer_info['dtype']}")
+
+                # Obsm (observation matrices)
+                if adata.obsm:
+                    console.print(f"\n[cyan]Observation Matrices (obsm):[/cyan]")
+                    obsm_table = _format_array_info(dict(adata.obsm))
+                    if obsm_table:
+                        console.print(obsm_table)
+
+                # Varm (variable matrices)
+                if adata.varm:
+                    console.print(f"\n[cyan]Variable Matrices (varm):[/cyan]")
+                    varm_table = _format_array_info(dict(adata.varm))
+                    if varm_table:
+                        console.print(varm_table)
+
+                # Obsp (observation pairwise)
+                if adata.obsp:
+                    console.print(f"\n[cyan]Observation Pairwise (obsp):[/cyan]")
+                    for key in adata.obsp.keys():
+                        matrix = adata.obsp[key]
+                        console.print(f"  • {key}: {matrix.shape[0]}×{matrix.shape[1]}")
+
+                # Varp (variable pairwise)
+                if adata.varp:
+                    console.print(f"\n[cyan]Variable Pairwise (varp):[/cyan]")
+                    for key in adata.varp.keys():
+                        matrix = adata.varp[key]
+                        console.print(f"  • {key}: {matrix.shape[0]}×{matrix.shape[1]}")
+
+                # Unstructured data (uns)
+                if adata.uns:
+                    console.print(f"\n[cyan]Unstructured Data (uns):[/cyan]")
+                    uns_items = []
+                    for key, value in adata.uns.items():
+                        if isinstance(value, dict):
+                            uns_items.append(f"{key} (dict with {len(value)} keys)")
+                        elif isinstance(value, (list, tuple)):
+                            uns_items.append(f"{key} (list/tuple with {len(value)} items)")
+                        elif isinstance(value, np.ndarray):
+                            uns_items.append(f"{key} (array {value.shape})")
+                        elif isinstance(value, pd.DataFrame):
+                            uns_items.append(f"{key} (DataFrame {value.shape})")
+                        else:
+                            type_name = type(value).__name__
+                            uns_items.append(f"{key} ({type_name})")
+
+                    for item in uns_items[:10]:
+                        console.print(f"  • {item}")
+                    if len(uns_items) > 10:
+                        console.print(f"[grey50]  ... and {len(uns_items) - 10} more items[/grey50]")
+
+                # Metadata from DataManager if available
+                if hasattr(client.data_manager, 'metadata_store') and modality_name in client.data_manager.metadata_store:
+                    metadata = client.data_manager.metadata_store[modality_name]
+                    console.print(f"\n[bold white]📋 Metadata[/bold white]")
+                    meta_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+                    meta_table.add_column("Property", style="grey70")
+                    meta_table.add_column("Value", style="white")
+
+                    if 'source' in metadata:
+                        meta_table.add_row("Source", metadata['source'])
+                    if 'created_at' in metadata:
+                        meta_table.add_row("Created", metadata['created_at'])
+                    if 'geo_accession' in metadata:
+                        meta_table.add_row("GEO Accession", metadata['geo_accession'])
+
+                    console.print(meta_table)
+
+                console.print()
+                return f"Described modality: {modality_name}"
+
+            except Exception as e:
+                console.print(f"[red]Error describing modality: {e}[/red]")
+                return None
+        else:
+            console.print("[grey50]Describe command not available (using legacy DataManager)[/grey50]")
+            return None
+
     elif cmd == "/plots":
         # Show generated plots
         plots = client.data_manager.get_plot_history()
