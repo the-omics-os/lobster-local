@@ -345,11 +345,9 @@ def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig
             if modalities:
                 data_context = "<Current Data Context>\n"
                 data_context += f"Currently loaded modalities ({len(modalities)}):\n"
-                for mod_name in modalities[:5]:  # Limit to first 5 for brevity
+                for mod_name in modalities: 
                     adata = data_manager.get_modality(mod_name)
                     data_context += f"  - {mod_name}: {adata.n_obs} obs × {adata.n_vars} vars\n"
-                if len(modalities) > 5:
-                    data_context += f"  ...and {len(modalities) - 5} more modalities\n"
                 sections.append(data_context)
         except Exception as e:
             logger.debug(f"Could not add data context: {e}")

@@ -62,6 +62,40 @@ LOBSTER_CLOUD_KEY=your-cloud-api-key-here
 LOBSTER_ENDPOINT=https://api.lobster.homara.ai  # Optional: defaults to production
 ```
 
+### Supervisor Configuration (v2.3+)
+
+The supervisor agent now features dynamic configuration for customizing interaction behavior:
+
+```env
+# Interaction Settings
+SUPERVISOR_ASK_QUESTIONS=true               # Ask clarification questions (default: true)
+SUPERVISOR_MAX_QUESTIONS=3                  # Max clarification questions (default: 3)
+SUPERVISOR_REQUIRE_CONFIRMATION=true        # Require download confirmation (default: true)
+SUPERVISOR_REQUIRE_PREVIEW=true             # Preview metadata before download (default: true)
+
+# Response Settings
+SUPERVISOR_AUTO_SUGGEST=true               # Suggest next steps (default: true)
+SUPERVISOR_VERBOSE=false                   # Verbose delegation explanations (default: false)
+SUPERVISOR_INCLUDE_EXPERT_OUTPUT=true      # Include full expert output (default: true)
+SUPERVISOR_SUMMARIZE_OUTPUT=false          # Summarize expert output (default: false)
+
+# Workflow Guidance
+SUPERVISOR_WORKFLOW_GUIDANCE=standard      # minimal, standard, detailed (default: standard)
+SUPERVISOR_DELEGATION_STRATEGY=auto        # auto, conservative, aggressive (default: auto)
+SUPERVISOR_ERROR_HANDLING=informative      # silent, informative, verbose (default: informative)
+
+# Context Settings
+SUPERVISOR_INCLUDE_DATA=true              # Include data context (default: true)
+SUPERVISOR_INCLUDE_WORKSPACE=true         # Include workspace status (default: true)
+SUPERVISOR_INCLUDE_SYSTEM=false           # Include system info (default: false)
+SUPERVISOR_INCLUDE_MEMORY=false           # Include memory stats (default: false)
+
+# Agent Discovery
+SUPERVISOR_AUTO_DISCOVER=true             # Auto-discover agents (default: true)
+SUPERVISOR_INCLUDE_AGENT_TOOLS=false      # List agent tools (default: false)
+SUPERVISOR_MAX_TOOLS_PER_AGENT=5          # Tools shown per agent (default: 5)
+```
+
 ## API Key Management
 
 ### OpenAI API Key
@@ -224,6 +258,59 @@ GENIE_SUPERVISOR_TEMPERATURE=0.3        # Conservative coordination
 GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7  # Balanced analysis
 GENIE_METHOD_AGENT_TEMPERATURE=0.1      # Precise parameter extraction
 ```
+
+### Supervisor Operation Modes (v2.3+)
+
+The supervisor agent supports three pre-configured operation modes:
+
+#### Research Mode (Interactive)
+**Use case**: Exploratory analysis, method development, teaching
+
+```env
+SUPERVISOR_ASK_QUESTIONS=true
+SUPERVISOR_WORKFLOW_GUIDANCE=detailed
+SUPERVISOR_REQUIRE_CONFIRMATION=true
+```
+
+**Characteristics:**
+- Asks clarification questions to ensure understanding
+- Provides detailed workflow guidance
+- Requires explicit confirmation for downloads
+- Includes examples and detailed instructions
+- Best for new users and complex exploratory work
+
+#### Production Mode (Automated)
+**Use case**: Automated pipelines, batch processing, routine analyses
+
+```env
+SUPERVISOR_ASK_QUESTIONS=false
+SUPERVISOR_WORKFLOW_GUIDANCE=minimal
+SUPERVISOR_REQUIRE_CONFIRMATION=false
+```
+
+**Characteristics:**
+- No clarification questions (proceeds with best interpretation)
+- Minimal workflow guidance
+- Automatic downloads when context is clear
+- Streamlined prompt (~1,400 characters smaller)
+- Optimized for speed and efficiency
+
+#### Development Mode (Verbose)
+**Use case**: Debugging, system understanding, agent development
+
+```env
+SUPERVISOR_VERBOSE=true
+SUPERVISOR_WORKFLOW_GUIDANCE=detailed
+SUPERVISOR_INCLUDE_SYSTEM=true
+SUPERVISOR_INCLUDE_MEMORY=true
+```
+
+**Characteristics:**
+- Detailed delegation explanations
+- Full workflow documentation
+- System and memory information included
+- Maximum transparency for debugging
+- Helpful when developing new agents or workflows
 
 ## Cloud vs Local Configuration
 

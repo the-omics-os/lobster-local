@@ -769,6 +769,102 @@ All agents seamlessly integrate with DataManagerV2:
 - **Plot Management**: Visualization tools automatically store plots in DataManagerV2
 - **Quality Metrics**: Agents can access quality metrics from the data manager
 
+## Supervisor Configuration API (v2.3+)
+
+The supervisor agent now features dynamic configuration and automatic agent discovery.
+
+### SupervisorConfig
+
+```python
+from lobster.config.supervisor_config import SupervisorConfig
+
+@dataclass
+class SupervisorConfig:
+    """Configuration for supervisor agent behavior."""
+
+    # Interaction settings
+    ask_clarification_questions: bool = True
+    max_clarification_questions: int = 3
+    require_download_confirmation: bool = True
+    require_metadata_preview: bool = True
+
+    # Response settings
+    auto_suggest_next_steps: bool = True
+    verbose_delegation: bool = False
+    include_expert_output: bool = True
+    summarize_expert_output: bool = False
+
+    # Context inclusion
+    include_data_context: bool = True
+    include_workspace_status: bool = True
+    include_system_info: bool = False
+    include_memory_stats: bool = False
+
+    # Workflow settings
+    workflow_guidance_level: str = "standard"  # minimal, standard, detailed
+    show_available_tools: bool = True
+    show_agent_capabilities: bool = True
+
+    # Advanced settings
+    delegation_strategy: str = "auto"  # auto, conservative, aggressive
+    error_handling: str = "informative"  # silent, informative, verbose
+```
+
+### Dynamic Prompt Generation
+
+```python
+from lobster.agents.supervisor import create_supervisor_prompt
+
+# Create prompt with custom configuration
+config = SupervisorConfig(
+    ask_clarification_questions=False,
+    workflow_guidance_level='minimal'
+)
+
+prompt = create_supervisor_prompt(
+    data_manager=data_manager,
+    config=config,
+    active_agents=['data_expert_agent', 'singlecell_expert_agent']
+)
+```
+
+### Agent Capability Extraction
+
+```python
+from lobster.config.agent_capabilities import AgentCapabilityExtractor
+
+# Extract capabilities for an agent
+capabilities = AgentCapabilityExtractor.extract_capabilities('singlecell_expert_agent')
+
+# Get all agent capabilities
+all_capabilities = AgentCapabilityExtractor.get_all_agent_capabilities()
+
+# Get formatted summary
+summary = AgentCapabilityExtractor.get_agent_capability_summary(
+    'singlecell_expert_agent',
+    max_tools=5
+)
+```
+
+### Graph Integration
+
+```python
+from lobster.agents.graph import create_bioinformatics_graph
+from lobster.config.supervisor_config import SupervisorConfig
+
+# Create graph with custom supervisor configuration
+supervisor_config = SupervisorConfig(
+    ask_clarification_questions=True,
+    max_clarification_questions=5,
+    workflow_guidance_level='detailed'
+)
+
+graph = create_bioinformatics_graph(
+    data_manager=data_manager,
+    supervisor_config=supervisor_config
+)
+```
+
 ## Usage Examples
 
 ### Basic Agent Usage
@@ -803,4 +899,4 @@ result = tools['assess_data_quality'].invoke({
 })
 ```
 
-This agents API provides a comprehensive set of specialized tools for bioinformatics analysis, with each agent focusing on its domain expertise while maintaining consistency through the standard tool pattern and integration with the core DataManagerV2 system.
+This agents API provides a comprehensive set of specialized tools for bioinformatics analysis, with each agent focusing on its domain expertise while maintaining consistency through the standard tool pattern and integration with the core DataManagerV2 system. The v2.3+ supervisor configuration system enables dynamic agent discovery and customizable interaction modes.

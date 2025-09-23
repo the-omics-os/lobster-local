@@ -25,21 +25,21 @@ class SupervisorConfig:
 
     # Interaction settings
     ask_clarification_questions: bool = True
-    max_clarification_questions: int = 3
+    max_clarification_questions: int = 2
     require_download_confirmation: bool = True
     require_metadata_preview: bool = True
 
     # Response settings
     auto_suggest_next_steps: bool = True
-    verbose_delegation: bool = False
+    verbose_delegation: bool = True
     include_expert_output: bool = True
     summarize_expert_output: bool = False
 
     # Context inclusion
     include_data_context: bool = True
     include_workspace_status: bool = True
-    include_system_info: bool = False
-    include_memory_stats: bool = False
+    include_system_info: bool = False #FIXME is missing in supervisor
+    include_memory_stats: bool = False #FIXME is missing in supervisor
 
     # Workflow settings
     workflow_guidance_level: str = "standard"  # minimal, standard, detailed
@@ -53,7 +53,7 @@ class SupervisorConfig:
     # Agent discovery settings
     auto_discover_agents: bool = True
     include_agent_tools: bool = False  # Whether to list individual agent tools
-    max_tools_per_agent: int = 5  # Limit tools shown per agent for brevity
+    max_tools_per_agent: int = 20  # Limit tools shown per agent for brevity
 
     @classmethod
     def from_env(cls) -> 'SupervisorConfig':

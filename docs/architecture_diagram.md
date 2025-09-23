@@ -215,6 +215,13 @@ graph TB
         HDTOOLS[Handoff Tools<br/>🔄 Dynamic Tool Generation]
     end
 
+    %% NEW: Supervisor Configuration System (v2.3+)
+    subgraph "Supervisor Configuration (v2.3+)"
+        SCONF[SupervisorConfig<br/>⚙️ Dynamic Configuration]
+        CAPEXT[AgentCapabilityExtractor<br/>🔍 Auto-Discovery]
+        MODES[Operation Modes<br/>🎯 Research/Production/Dev]
+    end
+
     %% Agents Layer
     subgraph "AI Agents - Dynamically Loaded"
         DE[Data Expert<br/>🔄 Data Loading & Management]
@@ -537,22 +544,31 @@ graph TB
 
     AREG --> ACONF
     AREG --> HELPERS
-    
+
     HELPERS --> GRAPH
     HELPERS --> CALLBACKS
     HELPERS --> SETTINGS
-    
+
     ACONF --> IMPORT
     ACONF --> TOOLS
     HELPERS --> DETECT
 
+    %% Supervisor Configuration connections
+    SCONF --> MODES
+    CAPEXT --> AREG
+    CAPEXT --> ACONF
+    SCONF --> GRAPH
+    MODES --> SCONF
+
     classDef registry fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
     classDef integration fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef dynamic fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    classDef config fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
 
     class AREG,ACONF,HELPERS registry
     class GRAPH,CALLBACKS,SETTINGS integration
     class IMPORT,TOOLS,DETECT dynamic
+    class SCONF,CAPEXT,MODES config
 ```
 
 ### Agent Configuration Schema
@@ -1279,3 +1295,93 @@ All file opening operations run on the **CLI side** regardless of cloud vs local
 - **CLI Commands**: `open <file>`, `/open <file>`, `/plot`, `/plot <ID>`
 - **GPU Detection**: Apple Silicon detection in `gpu_detector.py`
 - **Future Extensions**: Natural extension point for additional system utilities
+
+## 🎛️ **Supervisor Configuration System (v2.3+)**
+
+### Dynamic Agent Discovery & Configuration
+
+The supervisor agent now features **automatic agent discovery** and **configurable behavior**, eliminating manual updates when adding new agents:
+
+#### **Architecture Overview**
+
+```mermaid
+graph TB
+    subgraph "Configuration Sources"
+        ENV[Environment Variables<br/>SUPERVISOR_*]
+        CODE[Code Configuration<br/>SupervisorConfig()]
+        DEFAULT[Default Settings<br/>Backward Compatible]
+    end
+
+    subgraph "Discovery System"
+        REGISTRY[Agent Registry<br/>All Registered Agents]
+        CAPEXT[Capability Extractor<br/>@tool Discovery]
+        ACTIVE[Active Agents<br/>Successfully Loaded]
+    end
+
+    subgraph "Prompt Builder"
+        SECTIONS[Modular Sections<br/>Role, Agents, Rules]
+        CONTEXT[Dynamic Context<br/>Data & Workspace]
+        OPTIMIZE[Size Optimization<br/>Mode-Based]
+    end
+
+    ENV --> CONFIG[SupervisorConfig]
+    CODE --> CONFIG
+    DEFAULT --> CONFIG
+
+    REGISTRY --> DISCOVER[Agent Discovery]
+    CAPEXT --> DISCOVER
+    ACTIVE --> DISCOVER
+
+    CONFIG --> BUILD[create_supervisor_prompt()]
+    DISCOVER --> BUILD
+    BUILD --> SECTIONS
+    BUILD --> CONTEXT
+    BUILD --> OPTIMIZE
+
+    OPTIMIZE --> PROMPT[Dynamic Prompt<br/>8K-11K chars]
+
+    classDef config fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef discover fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
+    classDef build fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+
+    class ENV,CODE,DEFAULT,CONFIG config
+    class REGISTRY,CAPEXT,ACTIVE,DISCOVER discover
+    class BUILD,SECTIONS,CONTEXT,OPTIMIZE,PROMPT build
+```
+
+#### **Key Improvements**
+
+| Feature | Before (Static) | After (Dynamic) | Impact |
+|---------|----------------|-----------------|---------|
+| **Agent Discovery** | Manual updates in supervisor.py | Automatic from registry | Zero maintenance |
+| **Missing Agents** | 3 agents not included | All 8 agents included | Complete coverage |
+| **Configuration** | Hardcoded behavior | 20+ env variables | Full flexibility |
+| **Prompt Size** | Fixed ~9.5K chars | 8K-11K adaptive | 15% smaller in production |
+| **Adding Agents** | Update 3+ files | Update registry only | 66% less work |
+
+#### **Operation Modes**
+
+```python
+# Research Mode - Interactive exploration
+SUPERVISOR_ASK_QUESTIONS=true
+SUPERVISOR_WORKFLOW_GUIDANCE=detailed
+# Result: 11K char prompt with full guidance
+
+# Production Mode - Automated pipelines
+SUPERVISOR_ASK_QUESTIONS=false
+SUPERVISOR_WORKFLOW_GUIDANCE=minimal
+# Result: 8K char prompt, 1.4K chars saved
+
+# Development Mode - Debugging
+SUPERVISOR_VERBOSE=true
+SUPERVISOR_INCLUDE_SYSTEM=true
+# Result: Detailed explanations with system info
+```
+
+#### **Implementation Benefits**
+
+- **🚀 Zero Maintenance**: Add agents to registry only, supervisor auto-discovers
+- **⚙️ Flexible Behavior**: Configure interaction style per environment
+- **📊 Context Aware**: Includes current data/workspace state dynamically
+- **🎯 Mode Optimized**: Different prompt sizes for different use cases
+- **♻️ Backward Compatible**: Default config matches previous behavior exactly

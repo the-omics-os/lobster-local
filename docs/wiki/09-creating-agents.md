@@ -56,6 +56,17 @@ AGENT_REGISTRY = {
 }
 ```
 
+### 3. Automatic Supervisor Discovery (v2.3+)
+
+Once registered in `agent_registry.py`, your agent is **automatically discovered** by the supervisor:
+
+- **No manual updates needed**: The supervisor dynamically discovers all registered agents
+- **Automatic delegation rules**: The supervisor creates delegation rules based on your agent's description
+- **Dynamic prompt generation**: Your agent appears in the supervisor's available experts list
+- **Capability extraction**: The system can optionally extract your agent's @tool functions
+
+This eliminates the need to manually update `supervisor.py` or `graph.py` when adding new agents.
+
 ## 🔨 Creating a New Agent
 
 ### Step 1: Create Agent Module
