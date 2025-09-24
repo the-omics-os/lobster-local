@@ -6,6 +6,7 @@ Used by scVI integration to determine hardware capabilities.
 """
 
 import os
+import re
 import subprocess
 from typing import Dict, Optional, Tuple
 from lobster.utils import IS_MACOS
@@ -38,7 +39,15 @@ class GPUDetector:
     
     @staticmethod
     def check_apple_silicon() -> bool:
-        """Check if running on Apple Silicon (M1/M2/M3) Mac."""
+        """
+        Check if running on Apple Silicon (M-series) Mac.
+        
+        Detects Apple Silicon processors including M1, M2, M3, M4, M5, and future M-series chips
+        using professional regex pattern matching for scalability.
+        
+        Returns:
+            bool: True if running on Apple Silicon, False otherwise
+        """
         if not IS_MACOS:
             return False
         
@@ -50,9 +59,22 @@ class GPUDetector:
                 timeout=5
             )
             if result.returncode == 0:
-                cpu_info = result.stdout.strip().lower()
-                return 'apple' in cpu_info or 'm1' in cpu_info or 'm2' in cpu_info or 'm3' in cpu_info
-            return False
+                cpu_info = result.stdout.strip()
+                
+                # Professional regex patterns for Apple Silicon detection
+                apple_silicon_patterns = [
+                    r'\bApple\s+M\d+\b',           # Match "Apple M" followed by digits (M1, M2, M3, etc.)
+                    r'\bM\d+\s+(Pro|Max|Ultra)\b', # Match M-series variants (M1 Pro, M2 Max, M3 Ultra, etc.)
+                    r'\bApple\s+Silicon\b',        # Direct Apple Silicon reference
+                ]
+                
+                # Check against all patterns (case-insensitive)
+                for pattern in apple_silicon_patterns:
+                    if re.search(pattern, cpu_info, re.IGNORECASE):
+                        return True
+                
+                return False
+                
         except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError):
             return False
     

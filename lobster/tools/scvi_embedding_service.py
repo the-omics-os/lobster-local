@@ -171,7 +171,8 @@ class ScviEmbeddingService:
         
         train_kwargs = {
             "max_epochs": max_epochs,
-            "use_gpu": device != "cpu",
+            "accelerator":device,
+            "devices": "auto",
             "early_stopping": early_stopping,
             "early_stopping_patience": 10
         }

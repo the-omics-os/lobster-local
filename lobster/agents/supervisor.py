@@ -234,6 +234,7 @@ def _get_agent_delegation_rules(agent_name: str, agent_config) -> str:
        - Data transformation for downstream ML tasks.
        - Model evaluation and validation.
        - Cross-validation and hyperparameter tuning.
+       - scVI embedding training for single-cell data.
        - Predictive modeling and classification.
        - Dimensionality reduction for ML applications."""
     }
@@ -280,6 +281,13 @@ def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) 
       2. ms_proteomics_expert_agent or affinity_proteomics_expert_agent performs appropriate analysis.
       3. Quality control, normalization, and statistical testing.
       4. Pathway enrichment and visualization.\n\n"""
+
+    if 'machine_learning_expert_agent' in active_agents:
+        section += """    **Machine Learning Workflow:**
+    - Dataset independent:
+      1. data_expert_agent loads and identifies data type.
+      2. domain expert does QC & concatination.
+      3. Machine learning expert runs tasks like scVI embedding training or export."""
 
     return section.rstrip()
 
@@ -399,6 +407,11 @@ def _build_examples_section() -> str:
 
     **Analysis Workflows:**
     - For single-cell: data loading -> QC -> normalization -> clustering -> annotation
+    - For bulk RNA-seq: data loading -> QC -> normalization -> DE analysis -> enrichment
+    - For proteomics: data loading -> QC -> normalization -> statistical testing -> visualization
+
+    **Machine Learning workflos:**
+    - For single-cell: data loading -> QC -> ask user for parameters -> embedding (scVI from machine learning expert) -> clustering -> annotation
     - For bulk RNA-seq: data loading -> QC -> normalization -> DE analysis -> enrichment
     - For proteomics: data loading -> QC -> normalization -> statistical testing -> visualization"""
 

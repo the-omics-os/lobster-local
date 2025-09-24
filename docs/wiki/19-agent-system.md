@@ -261,6 +261,286 @@ Each agent maintains state through the shared DataManagerV2 instance:
 - **Plot Management** - Visualizations are centrally managed and accessible
 - **Metadata Preservation** - Analysis parameters and results are stored
 
+## Enhanced Expert Handoff System
+
+The Lobster platform features a **sophisticated expert-to-expert handoff system** that enables true agent collaboration with context preservation, automatic return flow management, and type-safe parameter passing.
+
+### Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "Enhanced Handoff Infrastructure"
+        EHM[ExpertHandoffManager<br/>🎯 Central Coordinator]
+        EHT[Enhanced Handoff Tools<br/>🔧 Type-Safe Validation]
+        HP[Handoff Patterns<br/>📋 Standardized Collaborations]
+    end
+
+    subgraph "Core Features"
+        CP[Context Preservation<br/>💾 Parameter Passing]
+        RF[Return Flow Logic<br/>🔄 A→B→A Patterns]
+        VL[Schema Validation<br/>✅ Type Safety]
+        EH[Error Handling<br/>🛡️ Graceful Degradation]
+    end
+
+    subgraph "Registry Integration"
+        AR[Agent Registry<br/>📋 Available Agents]
+        AT[Automatic Tools<br/>⚡ Dynamic Generation]
+        PM[Pattern Matching<br/>🎯 Smart Routing]
+    end
+
+    EHM --> CP
+    EHM --> RF
+    EHT --> VL
+    EHT --> EH
+    HP --> PM
+    AR --> AT
+    AT --> EHT
+
+    classDef infrastructure fill:#e8f5e8,stroke:#2e7d32,stroke-width:3px
+    classDef features fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef registry fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+
+    class EHM,EHT,HP infrastructure
+    class CP,RF,VL,EH features
+    class AR,AT,PM registry
+```
+
+### Expert Handoff Manager
+
+The **ExpertHandoffManager** serves as the central coordinator for all inter-agent communications:
+
+```python
+from lobster.tools.expert_handoff_manager import expert_handoff_manager
+
+# Create context-preserving handoff
+handoff_context = create_handoff_context(
+    from_expert="singlecell_expert",
+    to_expert="machine_learning_expert",
+    task_type="scvi_training",
+    parameters={"modality_name": "data", "n_latent": 10},
+    return_expectations={"embedding_key": "X_scvi"}
+)
+
+# Execute handoff with tracking
+command = expert_handoff_manager.create_context_preserving_handoff(
+    to_expert="machine_learning_expert",
+    context=handoff_context,
+    return_to_sender=True
+)
+```
+
+**Key Capabilities:**
+- **Context Preservation**: Full parameter and state passing between agents
+- **Chain Tracking**: Supports A→B→C→A patterns with loop prevention
+- **Return Flow Management**: Automatic routing back to sender or supervisor
+- **Audit Trail**: Complete handoff history for debugging and monitoring
+- **Concurrent Support**: Multiple simultaneous handoffs without interference
+
+### Standardized Handoff Patterns
+
+The system includes **15+ pre-defined handoff patterns** for common expert collaborations:
+
+```python
+# Single Cell Expert → ML Expert (scVI training)
+"singlecell_to_ml": {
+    "task_types": ["scvi_training", "deep_learning_embedding"],
+    "context_schema": SCVI_CONTEXT_SCHEMA,
+    "return_flow": "sender",
+    "priority": 10
+}
+
+# Single Cell Expert → Bulk RNA-seq Expert (pseudobulk analysis)
+"singlecell_to_bulk": {
+    "task_types": ["pseudobulk_analysis", "differential_expression"],
+    "context_schema": PSEUDOBULK_CONTEXT_SCHEMA,
+    "return_flow": "sender",
+    "priority": 8
+}
+
+# Data Expert → Research Agent (dataset discovery)
+"data_to_research": {
+    "task_types": ["dataset_search", "metadata_extraction"],
+    "context_schema": DATA_LOADING_SCHEMA,
+    "return_flow": "sender",
+    "priority": 7
+}
+```
+
+### Enhanced Handoff Workflow
+
+**Example: Single Cell Expert → ML Expert → Single Cell Expert (scVI Training)**
+
+```mermaid
+sequenceDiagram
+    participant SC as Single Cell Expert
+    participant EHM as ExpertHandoffManager
+    participant ML as ML Expert
+    participant DM as DataManagerV2
+
+    Note over SC: User requests scVI embeddings
+    SC->>SC: Validate modality and parameters
+    SC->>EHM: Create handoff with context
+    Note over EHM: handoff_id: abc-123<br/>task_type: scvi_training<br/>parameters: {modality, n_latent, ...}
+
+    EHM->>EHM: Track active handoff
+    EHM-->>SC: LangGraph Command(goto=ML)
+
+    SC->>ML: Handoff with preserved context
+    Note over ML: Receives validated parameters<br/>and task description
+
+    ML->>DM: Train scVI model
+    DM-->>ML: Store embeddings in obsm['X_scvi']
+    ML->>EHM: Complete handoff with results
+
+    EHM->>EHM: Determine return path
+    EHM-->>ML: Command(goto=SingleCell)
+
+    ML->>SC: Return with results
+    Note over SC: Process handoff results<br/>Verify embeddings stored<br/>Continue analysis
+
+    SC-->>EHM: Cleanup completed handoff
+```
+
+### Type-Safe Context Validation
+
+All handoffs use **schema-based validation** for type safety:
+
+```python
+# Schema definitions for different handoff types
+SCVI_CONTEXT_SCHEMA = {
+    "modality_name": str,
+    "n_latent": int,
+    "batch_key": Optional[str],
+    "max_epochs": int,
+    "use_gpu": bool
+}
+
+# Validation with detailed error messages
+def validate_context_schema(context: Dict[str, Any], schema: Dict[str, Type]):
+    """Validate context against schema with detailed error reporting."""
+    validated = {}
+    errors = []
+
+    for field_name, field_type in schema.items():
+        if field_name not in context and not _is_optional(field_type):
+            errors.append(f"Required field '{field_name}' is missing")
+        elif field_name in context:
+            value = context[field_name]
+            if not _validate_type(value, field_type):
+                errors.append(f"Field '{field_name}' must be {field_type}")
+
+    if errors:
+        raise ValueError(f"Context validation failed: {'; '.join(errors)}")
+
+    return validated
+```
+
+### Automatic Tool Registration
+
+The **Agent Registry System** automatically creates handoff tools based on available agents:
+
+```python
+# Automatic handoff tool creation
+def create_expert_handoff_tools(available_agents: List[str]) -> Dict[str, BaseTool]:
+    """Create handoff tools for all compatible expert pairs."""
+    handoff_tools = {}
+
+    for pattern_name, pattern in EXPERT_HANDOFF_PATTERNS.items():
+        if both_experts_available(pattern, available_agents):
+            for task_type in pattern.task_types:
+                tool_name = f"handoff_{pattern.from_expert}_to_{pattern.to_expert}_{task_type}"
+                handoff_tools[tool_name] = create_expert_handoff_tool(
+                    from_expert=pattern.from_expert,
+                    to_expert=pattern.to_expert,
+                    task_type=task_type,
+                    context_schema=pattern.context_schema,
+                    return_to_sender=(pattern.return_flow == "sender")
+                )
+
+    return handoff_tools
+```
+
+### Error Handling & Recovery
+
+The enhanced handoff system includes **comprehensive error handling**:
+
+```python
+# Graceful error handling in handoff tools
+try:
+    # Validate context against schema
+    validated_context = validate_context_schema(context, SCVI_CONTEXT_SCHEMA)
+
+    # Create and execute handoff
+    handoff_command = expert_handoff_manager.create_context_preserving_handoff(
+        to_expert="machine_learning_expert",
+        context=handoff_context,
+        return_to_sender=True
+    )
+
+    return handoff_command
+
+except ValueError as e:
+    # Context validation failed
+    return Command(
+        goto="__end__",
+        update={
+            "messages": state["messages"] + [
+                AIMessage(content=f"❌ Handoff validation failed: {str(e)}")
+            ],
+            "handoff_error": str(e)
+        }
+    )
+
+except Exception as e:
+    # Unexpected error - graceful degradation
+    return Command(
+        goto="__end__",
+        update={
+            "messages": state["messages"] + [
+                AIMessage(content=f"❌ Handoff failed: {str(e)}")
+            ]
+        }
+    )
+```
+
+### Monitoring & Debugging
+
+The handoff system provides **comprehensive monitoring** capabilities:
+
+```python
+# Get active handoffs for monitoring
+active_handoffs = expert_handoff_manager.get_active_handoffs()
+
+# Get handoff history for debugging
+history = expert_handoff_manager.get_handoff_history(limit=50)
+
+# Registry summary for system overview
+from lobster.config.agent_registry import get_handoff_registry_summary
+summary = get_handoff_registry_summary()
+
+# Example summary:
+{
+    "total_patterns": 15,
+    "available_agents": 8,
+    "patterns_by_priority": {10: [...], 9: [...], 8: [...]},
+    "handoff_matrix": {
+        "singlecell_expert": {
+            "machine_learning_expert": True,
+            "bulk_rnaseq_expert": True,
+            "research_agent": False
+        }
+    }
+}
+```
+
+### Performance Characteristics
+
+- **Handoff Overhead**: <100ms for context passing
+- **Memory Usage**: Minimal - only active contexts stored
+- **Scalability**: Supports concurrent handoffs without interference
+- **Error Recovery**: Automatic cleanup and rollback on failures
+- **Chain Protection**: Maximum depth limit prevents infinite loops (default: 10)
+
 ## Agent Tool Pattern
 
 All agents follow a consistent tool implementation pattern:

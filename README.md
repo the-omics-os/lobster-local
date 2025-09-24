@@ -540,6 +540,74 @@ Lobster AI maintains **publication-grade data quality standards** for transcript
 
 📊 **[View Full Quality Report →](AGENT_DATA_QC_CHECKLIST_report.md)**
 
+## 🙏 **Acknowledgments & Built With**
+
+Lobster AI stands on the shoulders of incredible open-source projects. We deeply appreciate the scientific computing and bioinformatics communities that make this work possible.
+
+### 🧬 **Core Scientific Computing**
+- **[NumPy](https://numpy.org/)** - Fundamental package for scientific computing with Python
+- **[Pandas](https://pandas.pydata.org/)** - Powerful data structures and data analysis tools
+- **[SciPy](https://scipy.org/)** - Scientific computing library for mathematics, science, and engineering
+- **[Scikit-learn](https://scikit-learn.org/)** - Machine learning library with simple and efficient tools for data mining and analysis
+- **[Statsmodels](https://www.statsmodels.org/)** - Statistical modeling and econometrics in Python
+
+### 🧬 **Bioinformatics & Genomics**
+- **[Scanpy](https://scanpy.readthedocs.io/)** - Single-cell analysis in Python
+- **[AnnData](https://anndata.readthedocs.io/)** - Annotated data structures for high-dimensional biological data
+- **[MuData](https://mudata.readthedocs.io/)** - Multimodal omics data framework
+- **[PyDESeq2](https://pydeseq2.readthedocs.io/)** - Python implementation of DESeq2 for differential gene expression analysis
+- **[scvi-tools](https://scvi-tools.org/)** - Deep probabilistic analysis of single-cell omics data
+- **[BioPython](https://biopython.org/)** - Tools for biological computation written in Python
+- **[Leiden Algorithm](https://github.com/vtraag/leidenalg)** - Community detection algorithm for network analysis
+- **[python-igraph](https://igraph.org/python/)** - Network analysis and graph theory library
+- **[Scrublet](https://github.com/swolock/scrublet)** - Python package for detecting doublets in single-cell RNA-seq data
+- **[GEOparse](https://github.com/guma44/GEOparse)** - Python library to access Gene Expression Omnibus Database
+
+### 📊 **Data Visualization**
+- **[Plotly](https://plotly.com/python/)** - Interactive graphing library for making publication-quality graphs
+- **[Matplotlib](https://matplotlib.org/)** - Comprehensive library for creating static, animated, and interactive visualizations
+- **[Seaborn](https://seaborn.pydata.org/)** - Statistical data visualization library based on matplotlib
+- **[Kaleido](https://github.com/plotly/Kaleido)** - Fast, safe and portable static image export for Plotly
+
+### 🤖 **AI & Machine Learning Framework**
+- **[LangChain](https://python.langchain.com/)** - Framework for developing applications powered by language models
+- **[LangGraph](https://langchain-ai.github.io/langgraph/)** - Library for building stateful, multi-actor applications with LLMs
+- **[OpenAI](https://openai.com/)** - AI research and deployment company providing GPT models
+- **[AWS Bedrock](https://aws.amazon.com/bedrock/)** - Fully managed service for foundation models
+
+### 🎨 **User Interface & Experience**
+- **[Rich](https://github.com/Textualize/rich)** - Python library for rich text and beautiful formatting in the terminal
+- **[Typer](https://typer.tiangolo.com/)** - Library for building CLI applications with Python type hints
+- **[Prompt Toolkit](https://python-prompt-toolkit.readthedocs.io/)** - Library for building powerful interactive command lines
+
+### 🌐 **Web & Cloud Services**
+- **[FastAPI](https://fastapi.tiangolo.com/)** - Modern, fast web framework for building APIs with Python
+- **[Streamlit](https://streamlit.io/)** - Framework for building data apps in Python
+- **[Uvicorn](https://www.uvicorn.org/)** - Lightning-fast ASGI server implementation
+- **[Boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)** - Amazon Web Services (AWS) SDK for Python
+
+### 💾 **Data I/O & Processing**
+- **[HDF5 (h5py)](https://www.h5py.org/)** - Pythonic interface to the HDF5 binary data format
+- **[PyTables](https://www.pytables.org/)** - Package for managing hierarchical datasets
+- **[Polars](https://pola.rs/)** - Fast multi-threaded DataFrame library
+- **[PyArrow](https://arrow.apache.org/docs/python/)** - Python API for Apache Arrow columnar memory format
+- **[OpenPyXL](https://openpyxl.readthedocs.io/)** - Library to read/write Excel 2010 xlsx/xlsm/xltx/xltm files
+
+### 🔧 **Development & Testing**
+- **[Pytest](https://pytest.org/)** - Framework for writing simple and scalable test programs
+- **[Black](https://black.readthedocs.io/)** - Uncompromising Python code formatter
+- **[Ruff](https://github.com/astral-sh/ruff)** - Extremely fast Python linter, written in Rust
+
+### 🎓 **Special Thanks**
+
+We extend our gratitude to:
+- The **Python Software Foundation** for the Python programming language
+- The **Scientific Python Ecosystem** for creating the foundation of modern scientific computing
+- The **Bioinformatics Community** for advancing computational biology and making data analysis accessible
+- All **open-source contributors** who dedicate their time to building and maintaining these incredible tools
+
+*Without these projects, Lobster AI would not be possible. Thank you for advancing science through open collaboration.*
+
 ## 🤝 **Community & Support**
 
 - 💬 **[Discord Community](https://discord.gg/homaraai)** - Chat with users and developers

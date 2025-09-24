@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from langchain_aws import ChatBedrockConverse
 
+import datetime
 from datetime import date
 
 import pandas as pd
@@ -28,6 +29,8 @@ from lobster.tools.manual_annotation_service import ManualAnnotationService
 from lobster.tools.annotation_templates import AnnotationTemplateService, TissueType
 from lobster.tools.differential_formula_service import DifferentialFormulaService
 from lobster.core import PseudobulkError, AggregationError, InsufficientCellsError, FormulaError, DesignMatrixError
+# COMMENTED OUT FOR SUPERVISOR-MEDIATED FLOW:
+# from lobster.tools.enhanced_handoff_tool import create_expert_handoff_tool, SCVI_CONTEXT_SCHEMA
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -3596,129 +3599,153 @@ Use this mapping to apply consistent annotations to similar datasets."""
     # -------------------------
     # DEEP LEARNING EMBEDDING TOOLS (scVI Integration)
     # -------------------------
-    @tool
-    def request_scvi_embedding(
-        modality_name: str,
-        n_latent: int = 10,
-        batch_key: Optional[str] = None,
-        max_epochs: int = 400,
-        use_gpu: bool = False
-    ) -> str:
-        """
-        Request ML Expert to train scVI embeddings for deep learning-based dimensionality reduction.
-        
-        This triggers a handoff to the Machine Learning Expert for state-of-the-art deep learning
-        embeddings using scVI (single-cell Variational Inference). The ML Expert will handle
-        all PyTorch/scVI dependencies and return control after embedding training is complete.
-        
-        Args:
-            modality_name: Name of the single-cell modality to process
-            n_latent: Number of latent dimensions for the embedding (default: 10)
-            batch_key: Column name for batch correction (optional, auto-detect if None)
-            max_epochs: Maximum training epochs for the neural network (default: 400)
-            use_gpu: Whether to use GPU acceleration if available (default: False for stability)
-            
-        Returns:
-            str: Handoff message requesting ML Expert to train scVI embeddings
-        """
-        try:
-            # Validate modality exists
-            if modality_name not in data_manager.list_modalities():
-                available = data_manager.list_modalities()
-                return f"❌ Modality '{modality_name}' not found.\n\n📊 Available modalities: {', '.join(available)}\n\nPlease specify a valid single-cell modality name."
-            
-            # Get the modality for validation
-            adata = data_manager.get_modality(modality_name)
-            
-            # Validate it's single-cell data (reasonable size and structure)
-            if adata.n_obs < 100:
-                return f"❌ Modality '{modality_name}' has only {adata.n_obs} observations. scVI requires at least 100 cells for meaningful training."
-            
-            if adata.n_vars < 500:
-                return f"❌ Modality '{modality_name}' has only {adata.n_vars} features. scVI works best with at least 500 genes."
-            
-            # Auto-detect batch key if not provided
-            detected_batch_key = None
-            if batch_key is None:
-                # Look for common batch column names
-                batch_candidates = [col for col in adata.obs.columns 
-                                  if any(keyword in col.lower() for keyword in ['batch', 'sample', 'donor', 'replicate', 'patient'])]
-                if batch_candidates:
-                    # Choose the one with reasonable number of categories
-                    for candidate in batch_candidates:
-                        n_categories = adata.obs[candidate].nunique()
-                        if 2 <= n_categories <= adata.n_obs // 10:  # Between 2 categories and 10% of cells
-                            detected_batch_key = candidate
-                            break
-            
-            # Validate provided batch key
-            if batch_key and batch_key not in adata.obs.columns:
-                available_batch = [col for col in adata.obs.columns 
-                                 if any(keyword in col.lower() for keyword in ['batch', 'sample', 'donor', 'replicate'])]
-                return f"❌ Batch key '{batch_key}' not found in modality observations.\n\n📋 Available batch-related columns: {available_batch}"
-            
-            # Use provided batch_key or detected one
-            final_batch_key = batch_key or detected_batch_key
-            
-            # Log the handoff request
-            data_manager.log_tool_usage(
-                tool_name="request_scvi_embedding",
-                parameters={
-                    "modality_name": modality_name,
-                    "n_latent": n_latent,
-                    "batch_key": final_batch_key,
-                    "max_epochs": max_epochs,
-                    "use_gpu": use_gpu
-                },
-                description=f"Requested scVI embedding training for {modality_name} with {n_latent} latent dimensions"
-            )
-            
-            # Create handoff message for ML Expert
-            handoff_message = f"""🧠 **HANDOFF TO MACHINE LEARNING EXPERT** - Deep Learning Embedding Request
+    # -------------------------
+    # FUTURE FEATURE: Direct Sub-agent Handoff (Currently Disabled)
+    # -------------------------
+    # The code below is commented out to maintain supervisor-mediated flow.
+    # In the future, this could enable direct SingleCell → ML Expert handoffs.
+    # For now, we return a message to the supervisor for delegation.
+    
+    # @tool
+    # def request_scvi_embedding_direct_handoff(
+    #     modality_name: str,
+    #     state: Annotated[dict, InjectedState],
+    #     tool_call_id: Annotated[str, InjectedToolCallId],
+    #     n_latent: int = 10,
+    #     batch_key: Optional[str] = None,
+    #     max_epochs: int = 400,
+    #     use_gpu: bool = False,
+    # ) -> Command:
+    #     """
+    #     FUTURE: Direct handoff to ML Expert for scVI embeddings.
+    #     Currently disabled - use request_scvi_embedding() instead.
+    #     """
+    #     # [Original direct handoff code preserved for future use]
+    #     pass
+    
+#     @tool
+#     def request_scvi_embedding(
+#         modality_name: str,
+#         n_latent: int = 10,
+#         batch_key: Optional[str] = None,
+#         max_epochs: int = 400,
+#         use_gpu: bool = False,
+#     ) -> str:
+#         """
+#         Request ML Expert to train scVI embeddings for deep learning-based dimensionality reduction.
 
-**Task**: Train scVI embedding for single-cell dimensionality reduction
+#         This generates a request message for the supervisor to delegate scVI training to the ML Expert.
+#         The supervisor will coordinate the handoff and ensure proper workflow management.
 
-**Modality Details:**
-- Name: '{modality_name}'
-- Shape: {adata.n_obs:,} cells × {adata.n_vars:,} genes
-- Data type: Single-cell RNA-seq
+#         Args:
+#             modality_name: Name of the single-cell modality to process
+#             n_latent: Number of latent dimensions for the embedding (default: 10)
+#             batch_key: Column name for batch correction (optional, auto-detect if None)
+#             max_epochs: Maximum training epochs for the neural network (default: 400)
+#             use_gpu: Whether to use GPU acceleration if available (default: False for stability)
 
-**scVI Training Parameters:**
-- Latent dimensions: {n_latent}
-- Max epochs: {max_epochs}
-- Batch correction: {'✓ (' + final_batch_key + ')' if final_batch_key else '✗ (None)'}
-- GPU acceleration: {'✓ (Requested)' if use_gpu else '✗ (CPU-only)'}
-
-**Expected Outcome:**
-The ML Expert should:
-1. Check scVI availability using `check_scvi_availability()`
-2. Train scVI model using `train_scvi_embedding()` with the specified parameters
-3. Store embeddings in modality.obsm['X_scvi'] 
-4. Return control to Single-Cell Expert for clustering with custom embeddings
-
-**Next Steps After ML Expert Completion:**
-The Single-Cell Expert will use the scVI embeddings for:
-- Advanced clustering with `cluster_modality(use_rep='X_scvi')`
-- Improved batch correction and cell type discovery
-- High-quality visualizations using deep learning embeddings
-
-**Context**: This is Step 2 of the customer's workflow - training state-of-the-art embeddings for enhanced single-cell analysis. scVI provides superior dimensionality reduction compared to traditional PCA, especially for batch correction and rare cell type discovery."""
+#         Returns:
+#             str: Request message for supervisor to delegate to ML Expert
+#         """
+#         try:
+#             # Validate modality exists
+#             if modality_name not in data_manager.list_modalities():
+#                 available = data_manager.list_modalities()
+#                 return f"❌ Modality '{modality_name}' not found.\n\n📊 Available modalities: {', '.join(available)}\n\nPlease specify a valid single-cell modality name."
             
-            # Store analysis context for when control returns
-            analysis_results["details"]["scvi_handoff_request"] = {
-                "modality_name": modality_name,
-                "n_latent": n_latent,
-                "batch_key": final_batch_key,
-                "use_gpu": use_gpu,
-                "requested_at": pd.Timestamp.now().isoformat(),
-                "data_shape": (adata.n_obs, adata.n_vars)
-            }
+#             # Get the modality for validation
+#             adata = data_manager.get_modality(modality_name)
             
-            return handoff_message
+#             # Validate it's single-cell data (reasonable size and structure)
+#             if adata.n_obs < 100:
+#                 return f"❌ Modality '{modality_name}' has only {adata.n_obs} observations. scVI requires at least 100 cells for meaningful training."
+
+#             if adata.n_vars < 500:
+#                 return f"❌ Modality '{modality_name}' has only {adata.n_vars} features. scVI works best with at least 500 genes."
             
-        except Exception as e:
-            logger.error(f"Error in scVI embedding request: {e}")
-            return f"❌ Error requesting scVI embedding: {str(e)}\n\nPlease ensure the modality exists and contains valid single-cell RNA-seq data."
+#             # Auto-detect batch key if not provided
+#             detected_batch_key = None
+#             if batch_key is None:
+#                 # Look for common batch column names
+#                 batch_candidates = [col for col in adata.obs.columns 
+#                                   if any(keyword in col.lower() for keyword in ['batch', 'sample', 'donor', 'replicate', 'patient'])]
+#                 if batch_candidates:
+#                     # Choose the one with reasonable number of categories
+#                     for candidate in batch_candidates:
+#                         n_categories = adata.obs[candidate].nunique()
+#                         if 2 <= n_categories <= adata.n_obs // 10:  # Between 2 categories and 10% of cells
+#                             detected_batch_key = candidate
+#                             break
+            
+#             # Validate provided batch key
+#             if batch_key and batch_key not in adata.obs.columns:
+#                 available_batch = [col for col in adata.obs.columns
+#                                  if any(keyword in col.lower() for keyword in ['batch', 'sample', 'donor', 'replicate'])]
+#                 return f"❌ Batch key '{batch_key}' not found in modality observations.\n\n📋 Available batch-related columns: {available_batch}"
+            
+#             # Use provided batch_key or detected one
+#             final_batch_key = batch_key or detected_batch_key
+            
+#             # Log the operation
+#             data_manager.log_tool_usage(
+#                 tool_name="request_scvi_embedding",
+#                 parameters={
+#                     "modality_name": modality_name,
+#                     "n_latent": n_latent,
+#                     "batch_key": final_batch_key,
+#                     "max_epochs": max_epochs,
+#                     "use_gpu": use_gpu
+#                 },
+#                 description=f"Requested scVI embedding training for {modality_name} with {n_latent} latent dimensions"
+#             )
+
+#             # Store analysis context for tracking
+#             analysis_results["details"]["scvi_embedding_request"] = {
+#                 "modality_name": modality_name,
+#                 "n_latent": n_latent,
+#                 "batch_key": final_batch_key,
+#                 "use_gpu": use_gpu,
+#                 "requested_at": pd.Timestamp.now().isoformat(),
+#                 "data_shape": (adata.n_obs, adata.n_vars)
+#             }
+
+#             # Create request message for supervisor to delegate to ML Expert
+#             request_message = f"""🧠 **scVI Embedding Request for Single-Cell Data**
+
+# I need the Machine Learning Expert to train scVI embeddings for deep learning-based dimensionality reduction.
+
+# 📊 **Dataset Details:**
+# - Modality: '{modality_name}'
+# - Data shape: {adata.n_obs:,} cells × {adata.n_vars:,} genes
+# - Suitable for scVI: ✓ (meets size requirements)
+
+# 🔧 **Training Parameters:**
+# - Latent dimensions: {n_latent}
+# - Batch correction: {'✓ (using ' + final_batch_key + ')' if final_batch_key else '✗ (not needed)'}
+# - Max epochs: {max_epochs}
+# - GPU acceleration: {'✓ Requested' if use_gpu else '✗ CPU only'}
+
+# 📋 **Expected Outcome:**
+# The ML Expert should:
+# 1. Check scVI availability and install if needed
+# 2. Train scVI model on modality '{modality_name}'
+# 3. Store embeddings in adata.obsm['X_scvi']
+# 4. Report back when training is complete
+
+# 🎯 **Purpose:**
+# This will enable:
+# - State-of-the-art dimensionality reduction
+# - Better batch effect correction
+# - Improved clustering and cell type identification
+# - Handling of technical variation in multi-sample data
+
+# **Supervisor Action Required:** Please delegate this scVI training task to the Machine Learning Expert with the parameters specified above."""
+
+#             return request_message
+            
+#         except Exception as e:
+#             logger.error(f"Error in scVI embedding request: {e}")
+#             return f"❌ Error requesting scVI embedding: {str(e)}\n\nPlease ensure the modality exists and contains valid single-cell RNA-seq data."
 
     # -------------------------
     # TOOL REGISTRY
@@ -3732,7 +3759,7 @@ The Single-Cell Expert will use the scVI embeddings for:
         find_marker_genes_for_clusters,
         annotate_cell_types,
         # Deep learning embedding tools
-        request_scvi_embedding,
+        # request_scvi_embedding,
         # Manual annotation tools
         manually_annotate_clusters_interactive,
         manually_annotate_clusters,
@@ -3801,9 +3828,6 @@ You perform single-cell RNA-seq analysis following current best practices:
 - `find_marker_genes_for_clusters`: Professional differential expression analysis for single-cell clusters
 - `annotate_cell_types`: Automated cell type annotation using marker databases
 - `create_analysis_summary`: Comprehensive single-cell analysis report with modality tracking
-
-## Deep Learning Embedding Tools:
-- `request_scvi_embedding`: Request ML Expert to train scVI embeddings for state-of-the-art dimensionality reduction
 
 ## Visualization Tools:
 - `create_umap_plot`: Interactive UMAP plot colored by clusters, cell types, or gene expression
@@ -3940,24 +3964,29 @@ create_heatmap("geo_gse12345_clustered", groupby="leiden", n_top_genes=5)
 # Step 1: Verify data is suitable for scVI training
 check_data_status("geo_gse12345_filtered_normalized")
 
-# Step 2: Request scVI embedding from ML Expert (triggers handoff)
-request_scvi_embedding("geo_gse12345_filtered_normalized", n_latent=10, batch_key="sample")
+# Step 2: Request scVI embedding via supervisor message (NO direct handoff)
+Tell the supervisor that this is a task for the ML Expert to handle.
 
-# Step 3: Wait for ML Expert to complete training and return control
-# The ML Expert will check scVI availability, train the model, and store embeddings
+# Step 3: Report request message to supervisor
+# The supervisor will then delegate the scVI training task to the ML Expert
 
-# Step 4: Use scVI embeddings for advanced clustering (after handoff returns)
+# Step 4: Wait for supervisor to coordinate scVI training completion
+# After ML Expert completes training, supervisor will direct next steps
+
+# Step 5: Use scVI embeddings for clustering (when supervisor directs)
 cluster_modality("geo_gse12345_filtered_normalized", use_rep="X_scvi", resolution=0.5)
 
-# Step 5: Continue with standard workflow (marker genes, annotation)
+# Step 6: Continue with standard workflow (when supervisor directs)
 find_marker_genes_for_clusters("geo_gse12345_filtered_normalized_clustered", groupby="leiden")
 ```
 
-### When to Use scVI Embeddings (Deep Learning Decision Points)
+### When to Request scVI Embeddings (Deep Learning Decision Points)
 - **Large datasets (>5,000 cells)**: scVI provides superior dimensionality reduction
 - **Multi-batch data**: scVI offers state-of-the-art batch correction
 - **Complex cell type discovery**: Better separation of rare cell populations
 - **Publication-quality analysis**: scVI is the current gold standard for single-cell embeddings
+
+**Important:** Always request scVI through supervisor - never directly handoff to ML Expert.
 
 ## 5. COMPREHENSIVE ANALYSIS WORKFLOWS
 
@@ -3985,28 +4014,6 @@ find_marker_genes_for_clusters("geo_gse12345_clustered", groupby="leiden")
 annotate_cell_types("geo_gse12345_markers")
 
 # Step 8: Generate comprehensive report
-create_analysis_summary()
-```
-
-### Complete Deep Learning Pipeline (Supervisor Request: "Run analysis with scVI" or "Use deep learning")
-```bash
-# Step 1-4: Same as standard pipeline (QC, filter, normalize, doublet detection)
-check_data_status()
-assess_data_quality("geo_gse12345")
-filter_and_normalize_modality("geo_gse12345", min_genes_per_cell=200, target_sum=10000)
-detect_doublets_in_modality("geo_gse12345_filtered_normalized", expected_doublet_rate=0.06)
-
-# Step 5: Request deep learning embeddings (handoff to ML Expert)
-request_scvi_embedding("geo_gse12345_filtered_normalized", n_latent=15, batch_key="sample")
-
-# Step 6: Advanced clustering with scVI embeddings (after ML Expert returns control)
-cluster_modality("geo_gse12345_filtered_normalized", use_rep="X_scvi", resolution=0.5)
-
-# Step 7-8: Continue with standard workflow
-find_marker_genes_for_clusters("geo_gse12345_filtered_normalized_clustered", groupby="leiden")
-annotate_cell_types("geo_gse12345_filtered_normalized_markers")
-
-# Step 9: Generate comprehensive report
 create_analysis_summary()
 ```
 

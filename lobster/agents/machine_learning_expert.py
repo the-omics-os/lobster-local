@@ -847,10 +847,25 @@ After installation, restart your session and run this tool again."""
             
             # Validate batch key if provided
             if batch_key and batch_key not in adata.obs.columns:
-                available_cols = [col for col in adata.obs.columns 
+                available_cols = [col for col in adata.obs.columns
                                 if any(keyword in col.lower() for keyword in ['batch', 'sample', 'donor', 'replicate'])]
                 return f"❌ Batch key '{batch_key}' not found in modality observations.\n\n📋 Available batch-related columns: {available_cols}"
-            
+
+            # Generate workspace-compliant model save path
+            model_save_path = None
+            if save_model:
+                if data_manager.workspace_path:
+                    # Create models directory within workspace
+                    from pathlib import Path
+                    models_dir = Path(data_manager.workspace_path) / "models"
+                    models_dir.mkdir(exist_ok=True)
+                    model_save_path = str(models_dir / f"{modality_name}_scvi_model")
+                    logger.info(f"scVI model will be saved to workspace: {model_save_path}")
+                else:
+                    # Fallback to current directory if no workspace configured
+                    model_save_path = f"{modality_name}_scvi_model"
+                    logger.warning("No workspace configured, saving scVI model to current directory")
+
             # Train scVI model
             model, training_info = service.train_scvi_embedding(
                 adata=adata,
@@ -860,7 +875,7 @@ After installation, restart your session and run this tool again."""
                 n_hidden=n_hidden,
                 max_epochs=max_epochs,
                 force_cpu=not use_gpu,
-                save_path=f"{modality_name}_scvi_model" if save_model else None
+                save_path=model_save_path
             )
             
             # Update the modality in data manager
@@ -900,7 +915,10 @@ After installation, restart your session and run this tool again."""
                 response += f"\n- Batch correction: ✓ (using '{batch_key}')"
             
             if training_info["model_saved"]:
-                response += f"\n- Model saved: ✓ (for future inference)"
+                if data_manager.workspace_path:
+                    response += f"\n- Model saved: ✓ (workspace: models/{modality_name}_scvi_model/)"
+                else:
+                    response += f"\n- Model saved: ✓ (current directory: {modality_name}_scvi_model/)"
             
             response += f"""
 
@@ -1121,8 +1139,7 @@ check_scvi_availability()
 train_scvi_embedding("single_cell_modality", 
                     n_latent=10, 
                     batch_key="sample", 
-                    max_epochs=400, 
-                    use_gpu=False)
+                    max_epochs=400)
 
 # Step 3: Report training completion and embedding storage to supervisor
 # Embeddings will be stored in modality.obsm['X_scvi'] for downstream use
@@ -1140,22 +1157,6 @@ train_scvi_embedding("large_dataset", n_latent=15, batch_key="donor", max_epochs
 train_scvi_embedding("multi_batch_data", n_latent=12, batch_key="batch_id", max_epochs=300)
 ```
 
-### Agent Handoff Protocol for scVI (SingleCell Expert → ML Expert)
-```bash
-# When receiving handoff request from SingleCell Expert:
-
-# Step 1: Parse handoff message for parameters
-# Look for: modality_name, n_latent, batch_key, max_epochs, use_gpu
-
-# Step 2: Validate scVI availability
-check_scvi_availability()
-
-# Step 3: If available, train scVI with requested parameters
-train_scvi_embedding(modality_name, n_latent=n_latent, batch_key=batch_key, max_epochs=max_epochs, use_gpu=use_gpu)
-
-# Step 4: Report completion back to supervisor for handoff return
-# Message should confirm embeddings stored and ready for clustering
-```
 
 ## 6. COMPREHENSIVE ML PIPELINE (Supervisor Request: "Prepare complete ML dataset")
 
@@ -1191,13 +1192,14 @@ create_ml_analysis_summary()
 # Step 1: Check scVI availability and hardware
 check_scvi_availability()
 
-# Step 2: Train scVI embeddings for dimensionality reduction
+# Step 2: Train scVI embeddings for dimensionality reduction (always use gpu if awailable)
 train_scvi_embedding("single_cell_data", 
                     n_latent=15, 
                     batch_key="sample", 
-                    max_epochs=400)
+                    max_epochs=400,
+                    use_gpu=True)
 
-# Step 3: The embeddings are now available for clustering (handoff to SingleCell Expert)
+# Step 3: The embeddings are now available for clustering (report back to supervisor)
 # or for advanced ML workflows using the scVI latent space
 
 # Step 4: Optional - export scVI embeddings for external ML frameworks

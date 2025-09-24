@@ -16,6 +16,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+#pytorch lighning logs
+lightning_logs/
+lightning_logs/*
+*_scivi_model/
+*_scivi_model/*
+
 # C extensions
 *.so
 
