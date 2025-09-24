@@ -1404,21 +1404,35 @@ def chat(
             # Check if it's a shell command first
             if execute_shell_command(user_input):
                 continue
-            
-            # Process query with transient progress tracking
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True
-            ) as progress:
-                task = progress.add_task(
-                    f"🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}",
-                    total=None
-                )
 
-                # Run query
+            # Process query with appropriate progress indication
+            if reasoning or verbose:
+                # In verbose/reasoning mode, skip the progress spinner to avoid output pollution
+                # The callback handlers will provide detailed output instead
+                console.print(f"[dim grey50]🦞 Processing query...[/dim grey50]")
                 result = client.query(user_input, stream=False)
+            else:
+                # In normal mode, show a transient progress spinner
+                try:
+                    # Create separate console for progress to avoid interference
+                    progress_console = Console(stderr=True, force_terminal=True)
+                except Exception:
+                    # Fallback to main console if stderr console creation fails
+                    progress_console = console
+
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    console=progress_console,
+                    transient=True  # Make transient so it cleans up after completion
+                ) as progress:
+                    task = progress.add_task(
+                        f"🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}",
+                        total=None
+                    )
+
+                    # Run query
+                    result = client.query(user_input, stream=False)
             
             # Display response with enhanced theming
             if result["success"]:
@@ -1932,11 +1946,16 @@ when they are started by agents or analysis workflows.
                 try:
                     if file_category == 'bioinformatics' or (file_category == 'tabular' and file_type in ['delimited_data', 'spreadsheet_data', 'h5ad_data']):
                         # Load data file using existing logic
+                        try:
+                            progress_console = Console(stderr=True, force_terminal=True)
+                        except Exception:
+                            progress_console = console
+
                         with Progress(
                             SpinnerColumn(),
                             TextColumn("[progress.description]{task.description}"),
-                            console=console,
-                            transient=True
+                            console=progress_console,
+                            transient=True  # Make transient to avoid terminal pollution
                         ) as progress:
                             progress.add_task(f"Loading {file_name}...", total=None)
                             load_result = client.load_data_file(file_name)
@@ -2048,12 +2067,17 @@ when they are started by agents or analysis workflows.
         if file_category == 'bioinformatics' or (file_category == 'tabular' and file_type in ['delimited_data', 'spreadsheet_data']):
             # This is a data file - load it into DataManager
             console.print(f"[cyan]🧬 Loading data into workspace...[/cyan]")
-            
+
+            try:
+                progress_console = Console(stderr=True, force_terminal=True)
+            except Exception:
+                progress_console = console
+
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
-                console=console,
-                transient=True
+                console=progress_console,
+                transient=True  # Make transient to avoid terminal pollution
             ) as progress:
                 progress.add_task("Loading data...", total=None)
                 load_result = client.load_data_file(filename)
@@ -2451,12 +2475,17 @@ when they are started by agents or analysis workflows.
                 # Show what will be loaded
                 console.print(f"[yellow]Loading workspace datasets (pattern: {pattern})...[/yellow]")
 
+                try:
+                    progress_console = Console(stderr=True, force_terminal=True)
+                except Exception:
+                    progress_console = console
+
                 # Create progress bar
                 with Progress(
                     SpinnerColumn(),
                     TextColumn("[progress.description]{task.description}"),
-                    console=console,
-                    transient=True
+                    console=progress_console,
+                    transient=True  # Make transient to avoid terminal pollution
                 ) as progress:
                     task = progress.add_task(f"Loading datasets matching '{pattern}'...", total=None)
 
@@ -2979,13 +3008,21 @@ when they are started by agents or analysis workflows.
         console.print(f"[yellow]Restoring workspace (pattern: {pattern})...[/yellow]")
 
         # Create progress bar
-        with Progress() as progress:
-            task = progress.add_task("Restoring datasets...", total=100)
+        try:
+            progress_console = Console(stderr=True, force_terminal=True)
+        except Exception:
+            progress_console = console
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=progress_console,
+            transient=True  # Make transient to avoid terminal pollution
+        ) as progress:
+            task = progress.add_task("Restoring datasets...", total=None)
 
             # Perform restoration
             result = client.data_manager.restore_session(pattern)
-
-            progress.update(task, advance=100)
 
         # Display results
         if result["restored"]:
