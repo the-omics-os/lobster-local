@@ -672,6 +672,22 @@ def init_client(
         custom_callbacks=callbacks  # Pass the proper callback
     )
     
+    # Show graph visualization in debug mode
+    if debug:
+        try:
+            # Get the graph from the client
+            if hasattr(client, 'graph') and client.graph:
+                # Generate and save mermaid PNG to workspace
+                mermaid_png = client.graph.get_graph().draw_mermaid_png()
+                graph_file = workspace / "agent_graph.png"
+                
+                with open(graph_file, 'wb') as f:
+                    f.write(mermaid_png)
+                
+                console.print(f"[green]📊 Graph visualization saved to: {graph_file}[/green]")
+        except Exception as e:
+            console.print(f"[yellow]⚠️  Could not generate graph visualization: {e}[/yellow]")
+    
     return client
 
 
@@ -1307,7 +1323,8 @@ def init_client_with_animation(
         'method_expert_agent': '🔬',
         'ms_proteomics_expert_agent': '🧪',
         'affinity_proteomics_expert_agent': '🔗',
-        'machine_learning_expert_agent': '🤖'
+        'machine_learning_expert_agent': '🤖',
+        'visualization_expert_agent': '🌸',
     }
 
     console.print(f"[bold {LobsterTheme.PRIMARY_ORANGE}]🦞 Initializing Lobster AI...[/bold {LobsterTheme.PRIMARY_ORANGE}]")
@@ -2191,7 +2208,62 @@ when they are started by agents or analysis workflows.
             return f"Identified file '{filename}' as {file_description} ({file_category}) - not supported for loading or display"
     
     elif cmd == "/export":
-        export_path = client.export_session()
+        # Create progress bar
+        try:
+            progress_console = Console(stderr=True, force_terminal=True)
+        except Exception:
+            progress_console = console
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=progress_console,
+            transient=True  # Make transient to avoid terminal pollution
+        ) as progress:
+            task = progress.add_task("Preparing export...", total=None)
+
+            # Check if this is a local client with detailed export capabilities
+            if hasattr(client, 'data_manager') and hasattr(client.data_manager, 'create_data_package'):
+                # For local client, we can provide detailed progress
+                def update_progress(message):
+                    progress.update(task, description=message)
+
+                # Check what we're exporting to show appropriate progress messages
+                data_manager = client.data_manager
+                has_data = data_manager.has_data()
+                has_plots = bool(getattr(data_manager, 'latest_plots', []))
+
+                if has_data and has_plots:
+                    modality_count = len(getattr(data_manager, 'modalities', {}))
+                    plot_count = len(getattr(data_manager, 'latest_plots', []))
+                    update_progress(f"Exporting {modality_count} datasets and {plot_count} plots...")
+                elif has_data:
+                    modality_count = len(getattr(data_manager, 'modalities', {}))
+                    update_progress(f"Exporting {modality_count} datasets...")
+                elif has_plots:
+                    plot_count = len(getattr(data_manager, 'latest_plots', []))
+                    update_progress(f"Exporting {plot_count} plots...")
+
+                # Call export with progress callback if supported
+                if 'progress_callback' in client.data_manager.create_data_package.__code__.co_varnames:
+                    # Create a modified export that uses progress callback
+                    if has_data:
+                        export_path = data_manager.create_data_package(
+                            output_dir=str(data_manager.exports_dir),
+                            progress_callback=update_progress
+                        )
+                        export_path = Path(export_path)
+                    else:
+                        # Fallback to regular export_session for non-data exports
+                        export_path = client.export_session()
+                else:
+                    # Fallback to regular method
+                    export_path = client.export_session()
+            else:
+                # For cloud client or other clients, show generic progress
+                progress.update(task, description="Exporting session data and plots...")
+                export_path = client.export_session()
+
         console.print(f"[bold red]✓[/bold red] [white]Session exported to:[/white] [grey74]{export_path}[/grey74]")
         return f"Session exported to: {export_path}"
     
@@ -2443,9 +2515,40 @@ when they are started by agents or analysis workflows.
         subcommand = parts[1] if len(parts) > 1 else "info"
 
         if subcommand == "list":
+            # Re-scan workspace to ensure we have latest files
+            if hasattr(client.data_manager, '_scan_workspace'):
+                client.data_manager._scan_workspace()
+
             # Show available datasets without loading
             available = client.data_manager.available_datasets
             loaded = set(client.data_manager.modalities.keys())
+
+            if not available:
+                # Handle empty case with helpful information
+                workspace_path = client.data_manager.workspace_path
+                data_dir = workspace_path / "data"
+
+                console.print(f"[yellow]📂 No datasets found in workspace[/yellow]")
+                console.print(f"[grey70]Workspace: {workspace_path}[/grey70]")
+                console.print(f"[grey70]Data directory: {data_dir}[/grey70]")
+
+                if not data_dir.exists():
+                    console.print(f"[red]⚠️  Data directory doesn't exist[/red]")
+                    console.print(f"[cyan]💡 Create it with: mkdir -p {data_dir}[/cyan]")
+                else:
+                    # Check what files are actually in the data directory
+                    files = list(data_dir.glob("*"))
+                    if files:
+                        console.print(f"[cyan]Found {len(files)} files in data directory, but none are supported datasets (.h5ad)[/cyan]")
+                        console.print("[grey70]Files found:[/grey70]")
+                        for f in files[:5]:  # Show first 5 files
+                            console.print(f"  • {f.name}")
+                        if len(files) > 5:
+                            console.print(f"  • ... and {len(files) - 5} more")
+                    else:
+                        console.print(f"[cyan]💡 Add .h5ad files to {data_dir} to see them here[/cyan]")
+
+                return "No datasets found in workspace"
 
             table = Table(title="Available Datasets", box=box.ROUNDED)
             table.add_column("Status", style="green")
@@ -3114,7 +3217,7 @@ when they are started by agents or analysis workflows.
             raise KeyboardInterrupt
     
     else:
-        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Unknown command: {command}[/red]")
+        console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Unknown command: {cmd}[/red]")
 
 
 @app.command()

@@ -12,6 +12,7 @@ import json
 
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.store.memory import InMemoryStore
 
 from langfuse.langchain import CallbackHandler as LangfuseCallback
 
@@ -74,10 +75,12 @@ class AgentClient(BaseClient):
             self.callbacks.extend(custom_callbacks)
         
         self.checkpointer = InMemorySaver()
+        self.store = InMemoryStore()
         # Initialize graph - pass all callbacks
         self.graph = create_bioinformatics_graph(
             data_manager=self.data_manager,
             checkpointer=self.checkpointer,
+            store=self.store,
             callback_handler=self.callbacks,  # Pass the list of callbacks
             manual_model_params=manual_model_params  # Placeholder for future manual model params
         )        

@@ -597,7 +597,6 @@ You work closely with:
 **Pharma Context**: "We're developing a new PD-L1 inhibitor. I need single-cell RNA-seq datasets from NSCLC patients with anti-PD-1/PD-L1 treatment showing responders vs non-responders to identify predictive biomarkers."
 
 **Optimized Search Strategy**:
-```python
 # Step 1: Literature search for relevant studies
 search_literature(
     query='("single-cell RNA-seq" OR "scRNA-seq") AND ("NSCLC" OR "non-small cell lung cancer") AND ("anti-PD-1" OR "anti-PD-L1" OR "pembrolizumab" OR "nivolumab" OR "atezolizumab") AND ("responder" OR "response" OR "resistance")',

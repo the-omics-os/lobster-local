@@ -7,6 +7,8 @@
 
 from typing import Optional, List, Dict, Any
 from datetime import date
+import platform
+import psutil
 from lobster.utils.logger import get_logger
 from lobster.config.supervisor_config import SupervisorConfig
 from lobster.config.agent_capabilities import AgentCapabilityExtractor
@@ -91,7 +93,8 @@ def _build_role_section() -> str:
     <Your Role>
     - Interpret the user's request and decide whether to respond directly or delegate.
     - Maintain a coherent workflow across multiple agents.
-    - Always explain reasoning when taking or delegating actions.
+    - Provide concise, factual justification for decisions (1-3 sentences) describing the decision and objective.
+    - Always add the context and the task description when delegating to an expert.
     - ALWAYS return meaningful, content-rich responses — never empty acknowledgments.
     - NEVER LIE. NEVER"""
 
@@ -182,11 +185,11 @@ def _get_agent_delegation_rules(agent_name: str, agent_config) -> str:
 
         'data_expert_agent': """       - Use the list_available_modalities tool to check loaded data before proceeding to inform the data expert.
        - Questions about data structures like AnnData, Seurat, or Scanpy objects.
-       - Downloading datasets (e.g., from GEO using GSE IDs provided by research_agent).
+       - Fetching GEO metadata to preview datasets (always before any download).
+       - Downloading datasets (only after metadata preview and explicit user confirmation).
        - Loading raw count matrices (e.g., CSV, H5AD).
        - Managing or listing datasets already loaded.
-       - Providing summaries of available data.
-       - Fetching GEO metadata to preview datasets before download.""",
+       - Providing summaries of available data.""",
 
         'method_expert_agent': """       - Extracting computational parameters from specific publications (identified by research_agent).
        - Analyzing methodologies across multiple studies for parameter consensus.
@@ -286,8 +289,8 @@ def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) 
         section += """    **Machine Learning Workflow:**
     - Dataset independent:
       1. data_expert_agent loads and identifies data type.
-      2. domain expert does QC & concatination.
-      3. Machine learning expert runs tasks like scVI embedding training or export."""
+      2. Appropriate expert (singlecell_expert_agent, bulk_rnaseq_expert_agent, etc.) performs QC & concatenation.
+      3. machine_learning_expert_agent runs tasks like scVI embedding training or export."""
 
     return section.rstrip()
 
@@ -304,8 +307,8 @@ def _build_response_rules(config: SupervisorConfig) -> str:
     section = "<CRITICAL RESPONSE RULES>\n"
 
     if config.ask_clarification_questions:
-        section += f"    - To ensure precision when exploring datasets, ALWAYS ask the user 1-{config.max_clarification_questions} clarification questions to ensure that you understood the task correctly.\n"
-        section += "    - Once you understood the question confirm with the user if this is what they are looking for. Only then start with delegating the tasks.\n"
+        section += f"    - Ask clarifying questions (up to {config.max_clarification_questions}) only when essential to resolve ambiguity in the user's request.\n"
+        section += "    - If the task is unambiguous, summarize your interpretation in one sentence and proceed (user can opt-out if needed).\n"
     else:
         section += "    - Proceed with best interpretation without asking clarification questions unless absolutely necessary.\n"
 
@@ -317,8 +320,17 @@ def _build_response_rules(config: SupervisorConfig) -> str:
     else:
         section += "    - Proceed with downloads when context is clear and the user has expressed intent.\n"
 
-    section += """    - When you receive an expert's output:
-      1. Present the full expert result to the user.
+    # Expert output handling based on configuration
+    if config.summarize_expert_output:
+        section += """    - When you receive an expert's output:
+      1. Provide a concise summary of key findings and results (2-4 sentences).
+      2. Include specific metrics, file names, or important details as needed.
+      3. Add context or next-step suggestions.
+      4. NEVER just say "task completed" or "done".
+    - Always maintain conversation flow and scientific clarity."""
+    else:
+        section += """    - When you receive an expert's output:
+      1. Present the expert result to the user (redact sensitive information like file paths).
       2. Optionally add context or next-step suggestions.
       3. NEVER just say "task completed" or "done".
     - Always maintain conversation flow and scientific clarity."""
@@ -327,7 +339,7 @@ def _build_response_rules(config: SupervisorConfig) -> str:
         section += "\n    - Suggest logical next steps after each operation based on the workflow."
 
     if config.verbose_delegation:
-        section += "\n    - Explain delegation reasoning in detail, including why you chose a specific expert."
+        section += "\n    - Provide factual justification for expert selection, including task requirements and agent capabilities."
     else:
         section += "\n    - Be concise when delegating tasks to experts."
 
@@ -371,6 +383,30 @@ def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig
             sections.append(workspace_context)
         except Exception as e:
             logger.debug(f"Could not add workspace status: {e}")
+
+    # Add system information if enabled
+    if config.include_system_info:
+        try:
+            system_context = "<System Information>\n"
+            system_context += f"  - Platform: {platform.system()} {platform.release()}\n"
+            system_context += f"  - Architecture: {platform.machine()}\n"
+            system_context += f"  - Python: {platform.python_version()}\n"
+            system_context += f"  - CPU cores: {psutil.cpu_count(logical=False)} physical, {psutil.cpu_count(logical=True)} logical\n"
+            sections.append(system_context)
+        except Exception as e:
+            logger.debug(f"Could not add system info: {e}")
+
+    # Add memory statistics if enabled
+    if config.include_memory_stats:
+        try:
+            memory = psutil.virtual_memory()
+            memory_context = "<Memory Statistics>\n"
+            memory_context += f"  - Total: {memory.total / (1024**3):.1f} GB\n"
+            memory_context += f"  - Available: {memory.available / (1024**3):.1f} GB\n"
+            memory_context += f"  - Used: {memory.percent:.1f}%\n"
+            sections.append(memory_context)
+        except Exception as e:
+            logger.debug(f"Could not add memory stats: {e}")
 
     return "\n".join(sections) if sections else ""
 

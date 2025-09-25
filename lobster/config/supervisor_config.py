@@ -38,11 +38,11 @@ class SupervisorConfig:
     # Context inclusion
     include_data_context: bool = True
     include_workspace_status: bool = True
-    include_system_info: bool = False #FIXME is missing in supervisor
-    include_memory_stats: bool = False #FIXME is missing in supervisor
+    include_system_info: bool = False
+    include_memory_stats: bool = False
 
     # Workflow settings
-    workflow_guidance_level: str = "standard"  # minimal, standard, detailed
+    workflow_guidance_level: str = "detailed"  # minimal, standard, detailed
     show_available_tools: bool = True
     show_agent_capabilities: bool = True
 
@@ -52,7 +52,7 @@ class SupervisorConfig:
 
     # Agent discovery settings
     auto_discover_agents: bool = True
-    include_agent_tools: bool = False  # Whether to list individual agent tools
+    include_agent_tools: bool = True  # Whether to list individual agent tools
     max_tools_per_agent: int = 20  # Limit tools shown per agent for brevity
 
     @classmethod

@@ -162,6 +162,7 @@ data/exports/*
 geo_cache/
 *.soft
 *.txt.gz
+*.pt
 
 # IDE
 .vscode/

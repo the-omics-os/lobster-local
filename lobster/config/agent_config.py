@@ -1,5 +1,5 @@
 """
-Professional agent configuration system for Genie AI.
+Professional agent configuration system for Lobster AI.
 
 This module provides a flexible, type-safe configuration system that allows
 per-agent model configuration for easy testing and deployment.
@@ -77,7 +77,7 @@ class AgentModelConfig:
 
 class LobsterAgentConfigurator:
     """
-    Professional configuration manager for Genie AI agents.
+    Professional configuration manager for Lobster AI agents.
     
     Features:
     - Per-agent model configuration
@@ -211,13 +211,15 @@ class LobsterAgentConfigurator:
     DEFAULT_AGENTS = [
         "assistant",
         "supervisor",
-        "singlecell_expert", 
-        "bulk_rnaseq_expert",
-        "method_agent",
+        "singlecell_expert_agent",
+        "bulk_rnaseq_expert_agent",
+        "method_expert_agent",
         "research_agent",
-        "data_expert",
-        "ms_proteomics_expert",
-        "affinity_proteomics_expert"
+        "data_expert_agent",
+        "machine_learning_expert_agent",
+        "visualization_expert_agent",
+        "ms_proteomics_expert_agent",
+        "affinity_proteomics_expert_agent"
     ]
     
     # Thinking configuration presets
@@ -234,34 +236,36 @@ class LobsterAgentConfigurator:
         "development": {
             "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-3-7-sonnet",
-            "singlecell_expert": "claude-4-sonnet",
-            "bulk_rnaseq_expert": "claude-4-sonnet",
-            "method_agent": "claude-3-7-sonnet",
-            "data_expert": "claude-3-7-sonnet",
-            "machine_learning_expert": "claude-3-7-sonnet",
+            "singlecell_expert_agent": "claude-4-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "method_expert_agent": "claude-3-7-sonnet",
+            "data_expert_agent": "claude-3-7-sonnet",
+            "machine_learning_expert_agent": "claude-3-7-sonnet",
             "research_agent": "claude-3-7-sonnet",
-            "ms_proteomics_expert": "claude-4-sonnet",
-            "affinity_proteomics_expert": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-sonnet",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",            
             "thinking": {}  # No thinking in development mode for faster testing
         },
         
         "production": {
             "assistant": "claude-4-sonnet",
             "supervisor": "claude-4-sonnet",
-            "singlecell_expert": "claude-4-sonnet",
-            "bulk_rnaseq_expert": "claude-4-sonnet",
-            "method_agent": "claude-4-sonnet",
-            "data_expert": "claude-4-sonnet",
-            "machine_learning_expert": "claude-4-sonnet",
+            "singlecell_expert_agent": "claude-4-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "method_expert_agent": "claude-4-sonnet",
+            "data_expert_agent": "claude-4-sonnet",
+            "machine_learning_expert_agent": "claude-4-sonnet",
             "research_agent": "claude-4-sonnet",
-            "ms_proteomics_expert": "claude-4-sonnet",
-            "affinity_proteomics_expert": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-sonnet",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {
                 # # Supervisor doesn't support thinking with langgraph_supervisor
-                # "singlecell_expert": "standard",
-                # "bulk_rnaseq_expert": "standard",
-                # "method_agent": "standard",
-                # "data_expert": "standard",
+                # "singlecell_expert_agent": "standard",
+                # "bulk_rnaseq_expert_agent": "standard",
+                # "method_expert_agent": "standard",
+                # "data_expert_agent": "standard",
                 # "research_agent": "standard"
                 }
         },
@@ -269,90 +273,94 @@ class LobsterAgentConfigurator:
         "high-performance": {
             "assistant": "claude-3-7-sonnet",
             "supervisor": "claude-4-opus",
-            "singlecell_expert": "claude-3-7-sonnet",
-            "bulk_rnaseq_expert": "claude-4-opus",
-            "method_agent": "claude-4-sonnet",
-            "data_expert": "claude-3-5-haiku",
-            "machine_learning_expert": "claude-3-5-haiku",
+            "singlecell_expert_agent": "claude-3-7-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-opus",
+            "method_expert_agent": "claude-4-sonnet",
+            "data_expert_agent": "claude-3-5-haiku",
+            "machine_learning_expert_agent": "claude-3-5-haiku",
             "research_agent": "claude-3-5-haiku",
-            "ms_proteomics_expert": "claude-4-opus",
-            "affinity_proteomics_expert": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-opus",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": { #FIXME
                 # "supervisor": "extended",
-                "singlecell_expert": "standard",
-                "bulk_rnaseq_expert": "extended"
+                "singlecell_expert_agent": "standard",
+                "bulk_rnaseq_expert_agent": "extended"
             }
         },
         
         "ultra-performance": {
             "assistant": "claude-3-7-sonnet",
             # "supervisor": "claude-4-sonnet",
-            "singlecell_expert": "claude-4-sonnet",
-            "bulk_rnaseq_expert": "claude-4-sonnet",
-            "method_agent": "claude-4-sonnet",
-            "data_expert": "claude-4-sonnet",
-            "machine_learning_expert": "claude-4-sonnet",
+            "singlecell_expert_agent": "claude-4-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "method_expert_agent": "claude-4-sonnet",
+            "data_expert_agent": "claude-4-sonnet",
+            "machine_learning_expert_agent": "claude-4-sonnet",
             "research_agent": "claude-4-sonnet",
-            "ms_proteomics_expert": "claude-4-sonnet",
-            "affinity_proteomics_expert": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-sonnet",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {}  # Most models don't support thinking yet #FIXME
         },
         
         "cost-optimized": {
             "assistant": "claude-3-7-sonnet",
             # "supervisor": "claude-3-haiku",
-            "singlecell_expert": "claude-3-5-sonnet",
-            "bulk_rnaseq_expert": "claude-3-5-haiku",
-            "method_agent": "claude-3-haiku",
-            "data_expert": "claude-3-5-haiku",
-            "machine_learning_expert": "claude-3-5-haiku",
+            "singlecell_expert_agent": "claude-3-5-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-3-5-haiku",
+            "method_expert_agent": "claude-3-haiku",
+            "data_expert_agent": "claude-3-5-haiku",
+            "machine_learning_expert_agent": "claude-3-5-haiku",
             "research_agent": "claude-3-haiku",
-            "ms_proteomics_expert": "claude-3-5-sonnet",
-            "affinity_proteomics_expert": "claude-3-5-haiku",
+            "ms_proteomics_expert_agent": "claude-3-5-sonnet",
+            "affinity_proteomics_expert_agent": "claude-3-5-haiku",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {}  # No thinking for cost optimization
         },
         
         "heavyweight": {
             "assistant": "claude-3-7-sonnet",
             # "supervisor": "claude-4-1-opus",
-            "singlecell_expert": "claude-4-1-opus",
-            "bulk_rnaseq_expert": "claude-4-1-opus",
-            "method_agent": "claude-4-opus",
-            "data_expert": "claude-3-5-haiku",
+            "singlecell_expert_agent": "claude-4-1-opus",
+            "bulk_rnaseq_expert_agent": "claude-4-1-opus",
+            "method_expert_agent": "claude-4-opus",
+            "data_expert_agent": "claude-3-5-haiku",
             "research_agent": "claude-4-opus",
-            "ms_proteomics_expert": "claude-4-1-opus",
-            "affinity_proteomics_expert": "claude-4-opus",
+            "ms_proteomics_expert_agent": "claude-4-1-opus",
+            "affinity_proteomics_expert_agent": "claude-4-opus",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {}  # Opus models don't support thinking yet
         },
         
         "eu-compliant": {
             "assistant": "claude-3-7-sonnet",
             # "supervisor": "claude-3-5-sonnet-v2-eu",
-            "singlecell_expert": "claude-4-1-opus-eu",
-            "bulk_rnaseq_expert": "claude-3-5-sonnet-v2-eu",
-            "method_agent": "claude-3-5-sonnet-eu",
-            "data_expert": "claude-3-5-haiku",
-            "machine_learning_expert": "claude-3-5-haiku",
+            "singlecell_expert_agent": "claude-4-1-opus-eu",
+            "bulk_rnaseq_expert_agent": "claude-3-5-sonnet-v2-eu",
+            "method_expert_agent": "claude-3-5-sonnet-eu",
+            "data_expert_agent": "claude-3-5-haiku",
+            "machine_learning_expert_agent": "claude-3-5-haiku",
             "research_agent": "claude-3-5-sonnet-eu",
-            "ms_proteomics_expert": "claude-4-1-opus-eu",
-            "affinity_proteomics_expert": "claude-3-5-sonnet-v2-eu",
+            "ms_proteomics_expert_agent": "claude-4-1-opus-eu",
+            "affinity_proteomics_expert_agent": "claude-3-5-sonnet-v2-eu",
             "thinking": {}  # EU models configuration
         },
         
         "eu-high-performance": {
             "assistant": "claude-3-7-sonnet",
             # "supervisor": "claude-3-7-sonnet-eu",
-            "singlecell_expert": "claude-3-7-sonnet-eu",
-            "bulk_rnaseq_expert": "claude-4-opus-eu",
-            "method_agent": "claude-4-opus-eu",
-            "data_expert": "claude-3-5-haiku",
-            "machine_learning_expert": "claude-3-5-haiku",
+            "singlecell_expert_agent": "claude-3-7-sonnet-eu",
+            "bulk_rnaseq_expert_agent": "claude-4-opus-eu",
+            "method_expert_agent": "claude-4-opus-eu",
+            "data_expert_agent": "claude-3-5-haiku",
+            "machine_learning_expert_agent": "claude-3-5-haiku",
             "research_agent": "claude-3-5-sonnet-v2-eu",
-            "ms_proteomics_expert": "claude-3-7-sonnet-eu",
-            "affinity_proteomics_expert": "claude-4-opus-eu",
+            "ms_proteomics_expert_agent": "claude-3-7-sonnet-eu",
+            "affinity_proteomics_expert_agent": "claude-4-opus-eu",
             "thinking": {
                 "supervisor": "deep",
-                "singlecell_expert": "extended"
+                "singlecell_expert_agent": "extended"
             }
         }
     }
@@ -365,6 +373,7 @@ class LobsterAgentConfigurator:
             profile: Testing profile name (e.g., 'development', 'production')
             config_file: Path to custom configuration file
         """
+        # Note: Environment variables still use GENIE_ prefix for backward compatibility
         self.profile = profile or os.environ.get('GENIE_PROFILE', 'production')
         self._agent_configs = {}
         self._load_from_profile()
@@ -600,7 +609,7 @@ class LobsterAgentConfigurator:
     
     def print_current_config(self):
         """Print current configuration in a readable format."""
-        print("\n🔧 Genie AI Configuration")
+        print("\n🔧 Lobster AI Configuration")
         print(f"Profile: {self.profile}")
         print(f"{'='*60}")
         
@@ -626,7 +635,7 @@ def get_agent_configurator() -> LobsterAgentConfigurator:
     Get the global agent configurator instance.
     
     Returns:
-        GenieAgentConfigurator instance
+        LobsterAgentConfigurator instance
     """
     global _configurator
     if _configurator is None:
@@ -642,7 +651,7 @@ def initialize_configurator(profile: str = None) -> LobsterAgentConfigurator:
         config_file: Path to custom configuration file
         
     Returns:
-        GenieAgentConfigurator instance
+        LobsterAgentConfigurator instance
     """
     global _configurator
     _configurator = LobsterAgentConfigurator(profile=profile)

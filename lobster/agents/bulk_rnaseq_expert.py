@@ -44,7 +44,7 @@ def bulk_rnaseq_expert(
     """Create bulk RNA-seq expert agent using DataManagerV2 and modular services."""
     
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('bulk_rnaseq_expert')
+    model_params = settings.get_agent_llm_params('bulk_rnaseq_expert_agent')
     llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
@@ -616,7 +616,7 @@ You perform bulk RNA-seq analysis following current best practices:
 ## 1. BULK RNA-SEQ QC AND PREPROCESSING WORKFLOWS
 
 ### Basic Quality Control Assessment (Supervisor Request: "Run QC on bulk RNA-seq data")
-```bash
+bash
 # Step 1: Check what bulk RNA-seq data is available
 check_data_status()
 
@@ -625,10 +625,10 @@ assess_data_quality("bulk_gse12345", min_genes=1000, max_mt_pct=50.0)
 
 # Step 3: Report results back to supervisor with QC recommendations
 # DO NOT proceed to next steps unless supervisor specifically requests it
-```
+
 
 ### Bulk RNA-seq Preprocessing (Supervisor Request: "Filter and normalize bulk RNA-seq data")
-```bash
+bash
 # Step 1: Verify data status first
 check_data_status("bulk_gse12345")
 
@@ -637,12 +637,12 @@ filter_and_normalize_modality("bulk_gse12345", min_genes_per_sample=1000, target
 
 # Step 3: Report completion to supervisor
 # WAIT for supervisor instruction before proceeding
-```
+
 
 ## 2. BULK RNA-SEQ ANALYSIS WORKFLOWS
 
 ### Differential Expression Analysis (Supervisor Request: "Run differential expression analysis")
-```bash
+bash
 # Step 1: Check preprocessed data and experimental design
 check_data_status("bulk_gse12345_filtered_normalized")
 
@@ -655,10 +655,10 @@ run_differential_expression_analysis("bulk_gse12345_filtered_normalized",
 
 # Step 3: Report DE results to supervisor
 # DO NOT automatically proceed to pathway enrichment
-```
+
 
 ### Pathway Enrichment Analysis (Supervisor Request: "Run pathway enrichment analysis")
-```bash
+bash
 # Step 1: Check for DE results or use provided gene list
 check_data_status("bulk_gse12345_de_control_vs_treatment")
 
@@ -668,12 +668,12 @@ run_pathway_enrichment_analysis(gene_list=[],
                                modality_name="bulk_gse12345_de_control_vs_treatment")
 
 # Step 3: Report enrichment results to supervisor
-```
+
 
 ## 3. COMPREHENSIVE ANALYSIS WORKFLOWS
 
 ### Complete Bulk RNA-seq Pipeline (Supervisor Request: "Run full bulk RNA-seq analysis")
-```bash
+bash
 # Step 1: Check initial data
 check_data_status()
 
@@ -696,10 +696,10 @@ run_pathway_enrichment_analysis(gene_list=[],
 
 # Step 6: Generate comprehensive report
 create_analysis_summary()
-```
+
 
 ### Custom Group Comparison (Supervisor Request: "Compare group A vs group B")
-```bash
+bash
 # Step 1: Verify data and experimental design
 check_data_status("bulk_gse12345_filtered_normalized")
 
@@ -711,7 +711,7 @@ run_differential_expression_analysis("bulk_gse12345_filtered_normalized",
 
 # Step 3: Report results specific to requested comparison
 # WAIT for further instructions about pathway analysis
-```
+
 
 <Bulk RNA-seq Parameter Guidelines>
 

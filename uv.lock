@@ -2175,7 +2175,7 @@ wheels = [
 
 [[package]]
 name = "langgraph"
-version = "0.6.5"
+version = "0.6.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
@@ -2185,9 +2185,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/ea/ce85312450e98a01d0974da404fa7572f2a90ec01013f8d2dfd94b714b67/langgraph-0.6.5.tar.gz", hash = "sha256:59639927997457fe04f802b39f0e7179cedf8db1cf85f33db764de02ae23c2f0", size = 455213, upload-time = "2025-08-13T23:42:35.063Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/85/36feb25062da40ca395f6c44d0232a672842e5421885101f6faf4670b670/langgraph-0.6.7.tar.gz", hash = "sha256:ba7fd17b8220142d6a4269b6038f2b3dcbcef42cd5ecf4a4c8d9b60b010830a6", size = 465534, upload-time = "2025-09-07T16:49:42.895Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b4/09/93774886995cccb9110280887f7b489e5b951bbc928f078a9788254290be/langgraph-0.6.5-py3-none-any.whl", hash = "sha256:042b2ee7af6f308659520eea5ba6def50f2d109475691666045850d0661b1082", size = 153154, upload-time = "2025-08-13T23:42:33.263Z" },
+    { url = "https://files.pythonhosted.org/packages/67/06/f440922a58204dbfd10f7fdda0de0325529a159e9dc3d1038afe4b431a49/langgraph-0.6.7-py3-none-any.whl", hash = "sha256:c724dd8c24806b70faf4903e8e20c0234f8c0a356e0e96a88035cbecca9df2cf", size = 153329, upload-time = "2025-09-07T16:49:40.45Z" },
 ]
 
 [[package]]
@@ -2218,15 +2218,15 @@ wheels = [
 
 [[package]]
 name = "langgraph-sdk"
-version = "0.2.0"
+version = "0.2.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "orjson" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/3e/3dc45dc7682c9940db9edaf8773d2e157397c5bd6881f6806808afd8731e/langgraph_sdk-0.2.0.tar.gz", hash = "sha256:cd8b5f6595e5571be5cbffd04cf936978ab8f5d1005517c99715947ef871e246", size = 72510, upload-time = "2025-07-22T17:31:06.745Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/23/d8/40e01190a73c564a4744e29a6c902f78d34d43dad9b652a363a92a67059c/langgraph_sdk-0.2.9.tar.gz", hash = "sha256:b3bd04c6be4fa382996cd2be8fbc1e7cc94857d2bc6b6f4599a7f2a245975303", size = 99802, upload-time = "2025-09-20T18:49:14.734Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/03/a8ab0e8ea74be6058cb48bb1d85485b5c65d6ea183e3ee1aa8ca1ac73b3e/langgraph_sdk-0.2.0-py3-none-any.whl", hash = "sha256:150722264f225c4d47bbe7394676be102fdbf04c4400a0dd1bd41a70c6430cc7", size = 50569, upload-time = "2025-07-22T17:31:04.582Z" },
+    { url = "https://files.pythonhosted.org/packages/66/05/b2d34e16638241e6f27a6946d28160d4b8b641383787646d41a3727e0896/langgraph_sdk-0.2.9-py3-none-any.whl", hash = "sha256:fbf302edadbf0fb343596f91c597794e936ef68eebc0d3e1d358b6f9f72a1429", size = 56752, upload-time = "2025-09-20T18:49:13.346Z" },
 ]
 
 [[package]]
@@ -2499,7 +2499,7 @@ requires-dist = [
     { name = "langfuse", specifier = ">=3.2.6" },
     { name = "langfuse", marker = "extra == 'all'", specifier = ">=2.0.0" },
     { name = "langfuse", marker = "extra == 'dev'", specifier = ">=2.0.0" },
-    { name = "langgraph", specifier = ">=0.0.20" },
+    { name = "langgraph", specifier = "==0.6.7" },
     { name = "leidenalg", specifier = ">=0.9.0" },
     { name = "llvmlite", specifier = ">=0.39.0" },
     { name = "matplotlib", specifier = ">=3.7.0" },

@@ -47,7 +47,7 @@ def machine_learning_expert(
     """Create machine learning expert agent using DataManagerV2."""
     
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('machine_learning_expert')
+    model_params = settings.get_agent_llm_params('machine_learning_expert_agent')
     llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
@@ -807,14 +807,28 @@ After installation, restart your session and run this tool again."""
         n_latent: int = 10,
         n_layers: int = 2,
         n_hidden: int = 128,
-        max_epochs: int = 400,
+        max_epochs: int = 50,
         batch_key: Optional[str] = None,
-        use_gpu: bool = False,
-        save_model: bool = True
+        use_gpu: bool = True,
+        save_model: bool = True,
+        # Training parameters (limited by scVI API)
+        batch_size: int = 128,
+        early_stopping_patience: int = 10,
+        # Model architecture parameters
+        dropout_rate: float = 0.1,
+        gene_likelihood: str = "zinb",
+        dispersion: str = "gene",
+        use_observed_lib_size: bool = True,
+        gene_var_prior: Optional[float] = None,
+        latent_distribution: str = "normal",
+        encode_covariates: bool = True,
+        deeply_inject_covariates: bool = True,
+        use_layer_norm: str = "both",
+        use_batch_norm: str = "none"
     ) -> str:
         """
         Train scVI model for deep learning-based embedding and dimensionality reduction.
-        
+
         Args:
             modality_name: Name of the modality to process
             n_latent: Number of latent dimensions (embedding size, default: 10)
@@ -824,7 +838,27 @@ After installation, restart your session and run this tool again."""
             batch_key: Column name for batch correction (optional)
             use_gpu: Whether to use GPU if available (default: False for stability)
             save_model: Whether to save the trained model (default: True)
-            
+
+            # Training Parameters (limited by scVI API):
+            batch_size: Training batch size (default: 128)
+            early_stopping_patience: Epochs to wait before early stopping (default: 10)
+
+            # Model Architecture Parameters:
+            dropout_rate: Dropout rate for regularization (default: 0.1)
+            gene_likelihood: Gene expression likelihood ("nb", "zinb", "poisson", default: "nb")
+            dispersion: Dispersion parameter ("gene", "gene-batch", "gene-label", default: "gene")
+            use_observed_lib_size: Whether to use observed library size for normalization (default: True)
+            gene_var_prior: Prior on gene variance (default: None)
+            latent_distribution: Latent space distribution ("normal", "ln", default: "normal")
+            encode_covariates: Whether to encode covariates (default: True)
+            deeply_inject_covariates: Whether to deeply inject covariates (default: True)
+            use_layer_norm: Layer normalization ("both", "encoder", "decoder", "none", default: "both")
+            use_batch_norm: Batch normalization ("both", "encoder", "decoder", "none", default: "none")
+
+        Note:
+            scVI's train() method has limited parameter support. Advanced optimizer settings
+            like learning_rate, weight_decay, and optimizer type are not directly configurable.
+
         Returns:
             str: Summary of scVI training results with embedding information
         """
@@ -866,34 +900,176 @@ After installation, restart your session and run this tool again."""
                     model_save_path = f"{modality_name}_scvi_model"
                     logger.warning("No workspace configured, saving scVI model to current directory")
 
+            # Parameter validation for invalid combinations
+            if gene_likelihood == "normal" and dispersion != "gene":
+                return f"❌ Parameter validation error: Normal likelihood only supports 'gene' dispersion, got '{dispersion}'"
+            
+            if latent_distribution == "ln" and n_latent < 2:
+                return f"❌ Parameter validation error: Logistic normal distribution requires n_latent >= 2, got {n_latent}"
+            
+            if use_batch_norm != "none" and use_layer_norm != "none":
+                logger.warning("Using both batch normalization and layer normalization may impact training stability")
+
+            # Prepare model architecture parameters
+            model_kwargs = {
+                "n_layers": n_layers,
+                "n_hidden": n_hidden,
+                "max_epochs": max_epochs,
+                "early_stopping_patience": early_stopping_patience,
+                 "batch_size": batch_size,
+                "dropout_rate": dropout_rate,
+                "dispersion": dispersion,
+                "gene_likelihood": gene_likelihood,
+                "use_observed_lib_size": use_observed_lib_size,
+                "latent_distribution": latent_distribution,
+                "encode_covariates": encode_covariates,
+                "deeply_inject_covariates": deeply_inject_covariates,
+                "use_layer_norm": use_layer_norm,
+                "use_batch_norm": use_batch_norm
+            }
+
+            # Add optional parameters if provided
+            if gene_var_prior is not None:
+                model_kwargs["gene_var_prior"] = gene_var_prior
+
             # Train scVI model
             model, training_info = service.train_scvi_embedding(
                 adata=adata,
                 batch_key=batch_key,
-                n_latent=n_latent,
-                n_layers=n_layers,
-                n_hidden=n_hidden,
-                max_epochs=max_epochs,
                 force_cpu=not use_gpu,
-                save_path=model_save_path
+                save_path=model_save_path,
+                **model_kwargs
             )
-            
-            # Update the modality in data manager
+
+            # Check if training failed
+            if model is None:
+                error_type = training_info.get("error_type", "unknown_error")
+                error_msg = training_info.get("error", "Training failed")
+                device_info = training_info.get("device", "unknown")
+
+                logger.error(f"scVI training failed for '{modality_name}': {error_msg}")
+
+                # Create detailed error response based on error type
+                if error_type == "device_error":
+                    response = f"""❌ scVI training failed due to device issues:
+
+🚨 **Device Error:**
+- Attempted device: {device_info}
+- Error: {error_msg}
+
+💡 **Troubleshooting:**
+- Try using CPU-only training: `use_gpu=False`
+- Check GPU memory availability
+- Verify CUDA/MPS installation if using GPU
+- Consider reducing batch_size or model complexity
+
+🔧 **Recommended action:** Retry with `use_gpu=False` or check hardware setup."""
+
+                elif error_type == "convergence_error":
+                    response = f"""❌ scVI training failed due to convergence issues:
+
+🚨 **Convergence Error:**
+- Device: {device_info}
+- Error: {error_msg}
+
+💡 **Troubleshooting:**
+- Reduce learning rate (not directly configurable in scVI)
+- Decrease batch_size (current: {batch_size})
+- Increase early_stopping_patience (current: {early_stopping_patience})
+- Try different gene_likelihood (current: {gene_likelihood})
+- Check data quality and normalization
+
+🔧 **Recommended action:** Retry with smaller batch_size or different likelihood model."""
+
+                elif error_type == "parameter_validation_error":
+                    response = f"""❌ scVI training failed due to invalid parameters:
+
+🚨 **Parameter Validation Error:**
+- Error: {error_msg}
+
+💡 **Parameter Guidelines:**
+- n_latent: Usually 10-50 (current: {n_latent})
+- gene_likelihood: 'nb', 'zinb', 'poisson' (current: {gene_likelihood})
+- dispersion: 'gene', 'gene-batch', 'gene-label' (current: {dispersion})
+- batch_size: Typically 64-1024 (current: {batch_size})
+
+🔧 **Recommended action:** Check parameter compatibility and retry with corrected values."""
+
+                elif error_type == "device_and_cpu_failure":
+                    response = f"""❌ scVI training failed on both GPU and CPU:
+
+🚨 **Critical Training Failure:**
+- Error: {error_msg}
+
+💡 **This indicates a serious issue:**
+- Data compatibility problems
+- Memory constraints
+- Environment configuration issues
+- Potential data corruption
+
+🔧 **Recommended actions:**
+1. Check data quality and preprocessing
+2. Reduce dataset size for testing
+3. Verify scVI installation: `check_scvi_availability()`
+4. Consider different preprocessing parameters"""
+
+                else:
+                    response = f"""❌ scVI training failed:
+
+🚨 **Training Error:**
+- Error type: {error_type}
+- Device: {device_info}
+- Error: {error_msg}
+
+💡 **General troubleshooting:**
+- Verify data quality and preprocessing
+- Check scVI installation: `check_scvi_availability()`
+- Try with different parameters
+- Consider reducing dataset complexity
+
+🔧 **Recommended action:** Review error details and adjust training parameters."""
+
+                # Log the failed operation for debugging
+                data_manager.log_tool_usage(
+                    tool_name="train_scvi_embedding",
+                    parameters={
+                        "modality_name": modality_name,
+                        "n_latent": n_latent,
+                        "error_type": error_type,
+                        "error": error_msg,
+                        "attempted_device": device_info
+                    },
+                    description=f"scVI training failed: {error_type}"
+                )
+
+                return response
+
+            # Training succeeded - update modality and log success
             data_manager.modalities[modality_name] = adata
-            
-            # Log the operation
+
+            # Log the successful operation
+            log_parameters = {
+                "modality_name": modality_name,
+                "n_latent": n_latent,
+                "max_epochs": max_epochs,
+                "batch_key": batch_key,
+                "device": training_info.get("device"),
+                # Model architecture parameters
+                "n_layers": n_layers,
+                "n_hidden": n_hidden,
+                "dropout_rate": dropout_rate,
+                "gene_likelihood": gene_likelihood,
+                "dispersion": dispersion,
+                "latent_distribution": latent_distribution,
+                # Training parameters
+                "batch_size": batch_size,
+                "early_stopping_patience": early_stopping_patience
+            }
+
             data_manager.log_tool_usage(
                 tool_name="train_scvi_embedding",
-                parameters={
-                    "modality_name": modality_name,
-                    "n_latent": n_latent,
-                    "n_layers": n_layers,
-                    "n_hidden": n_hidden,
-                    "max_epochs": max_epochs,
-                    "batch_key": batch_key,
-                    "device": training_info["device"]
-                },
-                description=f"Trained scVI model with {n_latent} latent dimensions on {training_info['device']}"
+                parameters=log_parameters,
+                description=f"Trained scVI model with {n_latent} latent dimensions using {gene_likelihood} likelihood on {training_info['device']}"
             )
             
             # Generate response
@@ -903,9 +1079,16 @@ After installation, restart your session and run this tool again."""
 - Architecture: scVI (single-cell Variational Inference)
 - Latent dimensions: {training_info['n_latent']}
 - Hidden layers: {n_layers} × {n_hidden} units
+- Dropout rate: {dropout_rate}
+- Gene likelihood: {gene_likelihood.upper()}
+- Dispersion: {dispersion}
 - Training device: {training_info['device'].upper()}
 
-📊 **Training Results:**
+📊 **Training Configuration:**
+- Batch size: {batch_size}
+- Early stopping patience: {early_stopping_patience}
+
+📈 **Training Results:**
 - Dataset: {training_info['n_cells']:,} cells × {training_info['n_genes']:,} genes
 - Training epochs: {training_info['max_epochs']} (with early stopping)
 - Embedding shape: {training_info['embedding_shape']}
@@ -988,6 +1171,7 @@ You perform ML data preparation following best practices:
 4. **Framework export** - export data in formats suitable for PyTorch, TensorFlow, scikit-learn
 5. **Quality assurance** - ensure data integrity and proper ML formatting
 6. **Comprehensive reporting** - document all ML preparation steps with provenance tracking
+7. **Embedding training** - Using available tools to train embeddings (e.g., scVI for single-cell data)
 </Task>
 
 <Available ML Tools>
@@ -1008,7 +1192,7 @@ You perform ML data preparation following best practices:
 ## 1. ML READINESS ASSESSMENT (Supervisor Request: "Check if data is ready for ML")
 
 ### Basic ML Assessment
-```bash
+
 # Step 1: Check all modalities for ML readiness
 check_ml_ready_modalities()
 
@@ -1017,12 +1201,12 @@ check_ml_ready_modalities("transcriptomics")  # or "proteomics"
 
 # Step 3: Report findings to supervisor with recommendations
 # DO NOT proceed unless supervisor specifically requests next steps
-```
+
 
 ## 2. FEATURE PREPARATION (Supervisor Request: "Prepare features for ML")
 
 ### Standard Feature Engineering
-```bash
+
 # Step 1: Verify data availability
 check_ml_ready_modalities()
 
@@ -1034,10 +1218,10 @@ prepare_ml_features("modality_name",
 
 # Step 3: Report feature preparation results to supervisor
 # WAIT for supervisor instruction before proceeding
-```
+
 
 ### Advanced Feature Engineering
-```bash
+
 # Step 1: PCA-based dimensionality reduction
 prepare_ml_features("modality_name", 
                    feature_selection="pca", 
@@ -1049,12 +1233,12 @@ prepare_ml_features("clustered_modality",
                    feature_selection="marker_genes", 
                    n_features=500, 
                    scale=True)
-```
+
 
 ## 3. DATA SPLITTING (Supervisor Request: "Create train/test splits")
 
 ### Basic Splitting
-```bash
+
 # Step 1: Check prepared features exist
 check_ml_ready_modalities()
 
@@ -1065,10 +1249,10 @@ create_ml_splits("modality_ml_features",
                 random_state=42)
 
 # Step 3: Report split statistics to supervisor
-```
+
 
 ### Stratified Splitting
-```bash
+
 # Step 1: Verify stratification column exists
 check_ml_ready_modalities()
 
@@ -1078,12 +1262,12 @@ create_ml_splits("modality_ml_features",
                 validation_size=0.1, 
                 stratify_by="cell_type", 
                 random_state=42)
-```
+
 
 ## 4. FRAMEWORK EXPORT (Supervisor Request: "Export for [framework]")
 
 ### PyTorch Export
-```bash
+
 # Step 1: Verify splits exist
 check_ml_ready_modalities()
 
@@ -1098,70 +1282,109 @@ export_for_ml_framework("modality_ml_features_test",
                        format="pytorch", 
                        include_labels=True, 
                        label_column="cell_type")
-```
+
 
 ### TensorFlow Export
-```bash
+
 # Export for TensorFlow/Keras
 export_for_ml_framework("modality_ml_features_train", 
                        format="tensorflow", 
                        include_labels=True, 
                        label_column="condition")
-```
+
 
 ### Scikit-learn Export
-```bash
+
 # Export as numpy/CSV for scikit-learn
 export_for_ml_framework("modality_ml_features", 
                        format="numpy", 
                        include_labels=True, 
                        label_column="treatment")
-```
+
 
 ## 5. DEEP LEARNING & scVI WORKFLOWS (Single-cell Embedding Tasks)
 
 ### scVI Availability Check (Supervisor Request: "Check scVI" or handoff from SingleCell Expert)
-```bash
+
 # Step 1: Check if scVI dependencies are installed
 check_scvi_availability()
 
 # Step 2: Report availability status and installation guidance to supervisor
 # If not available, provide hardware-specific installation instructions
 # If available, confirm ready for deep learning embedding training
-```
+
 
 ### scVI Embedding Training (Supervisor/SingleCell Expert Request: "Train scVI embedding")
-```bash
+
 # Step 1: Verify scVI availability first
 check_scvi_availability()
 
-# Step 2: Train scVI model with specified parameters
-train_scvi_embedding("single_cell_modality", 
-                    n_latent=10, 
-                    batch_key="sample", 
+# Step 2: Train scVI model with basic parameters
+train_scvi_embedding("single_cell_modality",
+                    n_latent=10,
+                    batch_key="sample",
                     max_epochs=400)
 
-# Step 3: Report training completion and embedding storage to supervisor
+# Step 3: Advanced training with model architecture control and library size handling
+train_scvi_embedding("single_cell_modality",
+                    n_latent=15,
+                    n_layers=3,
+                    n_hidden=256,
+                    dropout_rate=0.2,
+                    batch_size=256,
+                    gene_likelihood="zinb",
+                    early_stopping_patience=15,
+                    dispersion="gene-batch",
+                    use_observed_lib_size=True,
+                    deeply_inject_covariates=True)
+
+# Step 4: Report training completion and embedding storage to supervisor
 # Embeddings will be stored in modality.obsm['X_scvi'] for downstream use
-```
+
 
 ### scVI Training Scenarios (Common Handoff Patterns)
-```bash
-# Small dataset (CPU recommended)
-train_scvi_embedding("filtered_data", n_latent=8, max_epochs=200, use_gpu=False)
 
-# Large dataset with batches (GPU if available)
-train_scvi_embedding("large_dataset", n_latent=15, batch_key="donor", max_epochs=400, use_gpu=True)
+# Small dataset (CPU, conservative parameters)
+train_scvi_embedding("filtered_data",
+                    n_latent=8,
+                    max_epochs=200,
+                    use_gpu=False,
+                    batch_size=64)
 
-# Multi-batch study (focus on batch correction)
-train_scvi_embedding("multi_batch_data", n_latent=12, batch_key="batch_id", max_epochs=300)
-```
+# Large dataset with batches (GPU, optimized for speed)
+train_scvi_embedding("large_dataset",
+                    n_latent=15,
+                    batch_key="donor",
+                    max_epochs=400,
+                    use_gpu=True,
+                    batch_size=512,
+                    n_layers=3,
+                    n_hidden=256)
+
+# Multi-batch study (focus on batch correction with ZINB)
+train_scvi_embedding("multi_batch_data",
+                    n_latent=12,
+                    batch_key="batch_id",
+                    max_epochs=300,
+                    gene_likelihood="zinb",
+                    dispersion="gene-batch",
+                    deeply_inject_covariates=True)
+
+# High-quality embeddings (deeper architecture for better results)
+train_scvi_embedding("preprocessed_data",
+                    n_latent=20,
+                    n_layers=4,
+                    n_hidden=512,
+                    dropout_rate=0.1,
+                    early_stopping_patience=30,
+                    max_epochs=800)
+
 
 
 ## 6. COMPREHENSIVE ML PIPELINE (Supervisor Request: "Prepare complete ML dataset")
 
 ### Full ML Preparation Pipeline
-```bash
+
 # Step 1: Assess ML readiness
 check_ml_ready_modalities()
 
@@ -1185,10 +1408,10 @@ export_for_ml_framework("preprocessed_modality_ml_features_train",
 
 # Step 5: Generate comprehensive report
 create_ml_analysis_summary()
-```
+
 
 ### Complete Deep Learning Pipeline (Supervisor Request: "Prepare data with scVI embeddings")
-```bash
+
 # Step 1: Check scVI availability and hardware
 check_scvi_availability()
 
@@ -1204,7 +1427,7 @@ train_scvi_embedding("single_cell_data",
 
 # Step 4: Optional - export scVI embeddings for external ML frameworks
 # The embeddings in obsm['X_scvi'] can be exported like any other features
-```
+
 
 <ML Parameter Guidelines>
 
@@ -1242,6 +1465,7 @@ train_scvi_embedding("single_cell_data",
 8. **Maintain class balance** in stratified splitting for supervised learning
 9. **Document all transformations** for model interpretability
 10. **Consider batch effects** when preparing multi-sample datasets
+11. **NEVER HALUCINATE OR LIE** you never make up tasks that you havent completed. 
 
 <Quality Assurance & Best Practices>
 - All tools include professional error handling with ML-specific exception types

@@ -56,7 +56,7 @@ def data_expert(
     """
     
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('data_expert')
+    model_params = settings.get_agent_llm_params('data_expert_agent')
     llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
@@ -646,7 +646,31 @@ The MuData object contains all selected modalities and is ready for cross-modal 
                 use_intersecting_genes_only=use_intersecting_genes_only,
                 batch_key="batch"
             )
-            
+
+            # Add concatenation metadata for provenance tracking
+            concatenated_adata.uns['concatenation_metadata'] = {
+                "dataset_type": "concatenated_samples",
+                "source_modalities": sample_modalities,
+                "processing_date": pd.Timestamp.now().isoformat(),
+                "concatenation_strategy": statistics.get('strategy_used', 'smart_sparse'),
+                "concatenation_info": statistics
+            }
+
+            # Store the concatenated result in DataManager (following tool pattern)
+            data_manager.modalities[output_modality_name] = concatenated_adata
+
+            # Log the concatenation operation for provenance
+            data_manager.log_tool_usage(
+                tool_name="concatenate_samples",
+                parameters={
+                    "sample_modalities": sample_modalities,
+                    "output_modality_name": output_modality_name,
+                    "use_intersecting_genes_only": use_intersecting_genes_only,
+                    "save_to_file": save_to_file
+                },
+                description=f"Concatenated {len(sample_modalities)} samples into modality '{output_modality_name}'"
+            )
+
             # Format results for user display
             if save_to_file:
                 save_path = f"{output_modality_name}.h5ad"
@@ -866,7 +890,7 @@ In the discovery workflow its crucial that you have a good understanding of the 
 your main guide will be the supervisor. You do not sequentially execute multiple tools without being instructed. ensure that the supervisor is updated about your progress and confirms tha you continue
 
 ### Starting with Dataset Accessions (Research Agent Discovery)
-```bash
+
 Step 1: Receive dataset accessions from supervisor
 
 Step 2: Check current workspace status  
@@ -925,10 +949,10 @@ once the dataset is downloaded you will see summary information about the downlo
 
 # Step 5: Verify and explore the loaded data
 get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
-```
+
 
 ### Sample Concatenation Workflow (After SAMPLES_FIRST Download)
-```bash
+
 # Step 1: Check what sample modalities were downloaded
 list_available_modalities()  # Look for patterns like geo_gse123456_sample_*
 
@@ -942,10 +966,10 @@ concatenate_samples(
 get_data_summary("geo_gse123456_concatenated")
 
 # Step 4: The concatenated data is now ready for analysis by other agents
-```
+
 
 ### Workspace Exploration
-```bash
+
 # Step 1: Check what's already loaded
 list_available_modalities()
 
@@ -954,10 +978,10 @@ get_adapter_info()
 
 # Step 3: Examine specific modality if exists
 get_data_summary("<existing_modality_name>")
-```
+
 
 ### Workspace Restoration (Session Continuation)
-```bash
+
 # Step 1: Check what's currently loaded vs what's available
 list_available_modalities()  # See what's currently in memory
 
@@ -975,12 +999,12 @@ restore_workspace_datasets("all")
 
 # Step 6: Verify restored data and continue analysis
 get_data_summary()
-```
+
 
 ## 2. DATA LOADING WORKFLOWS
 
 ### GEO Dataset Loading with Metadata-First Approach (Most Common)
-```bash
+
 # Step 1: Always check if data already exists first
 get_data_summary()
 
@@ -999,10 +1023,10 @@ get_data_summary("geo_gse67310")
 
 # Step 5: List all available modalities to confirm
 list_available_modalities()
-```
+
 
 ### Custom File Upload Workflow
-```bash
+
 
 Step 0: Ensure that you have the necessary information about the file type and modality type. Ask the supervisor if unclear.
 
@@ -1020,14 +1044,14 @@ get_data_summary("internal_liver_SC_01")
 
 # Step 5: List all to see the new modality
 list_available_modalities()
-```
+
 
 ## 4. WORKSPACE MANAGEMENT WORKFLOWS
 
 Onlt important if the supervisor instructs you to do so. 
 
 ### Cleaning and Organizing
-```bash
+
 # Step 1: Review all loaded modalities
 list_available_modalities()
 
@@ -1040,12 +1064,12 @@ list_available_modalities()
 
 # Step 4: Get workspace status
 get_data_summary()
-```
+
 
 ## 5. ERROR HANDLING & TROUBLESHOOTING WORKFLOWS
 
 ### When Download Fails
-```bash
+
 # Step 1: Check if modality already exists (common issue)
 get_data_summary()
 
@@ -1057,7 +1081,7 @@ get_adapter_info()
 
 # Step 4: Try manual loading with specific adapter
 load_modality_from_file("manual_load", "/path/to/file.csv", "transcriptomics_bulk")
-```
+
 
 ## 6. TOOL USAGE GUIDELINES
 

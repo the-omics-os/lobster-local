@@ -31,7 +31,7 @@ def method_expert(
     """Create method expert agent focused on parameter extraction using DataManagerV2."""
     
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('method_agent')
+    model_params = settings.get_agent_llm_params('method_expert_agent')
     llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
@@ -316,11 +316,11 @@ Given publications or research questions about computational methods, you will:
 <DataManagerV2 Integration>
 When working with DataManagerV2, you can provide modality-specific parameter recommendations:
 
-```python
+
 # Find parameters for a specific loaded modality
 find_method_parameters_for_modality("geo_gse12345", "quality_control")
 find_method_parameters_for_modality("proteomics_sample1", "normalization")
-```
+
 
 This provides context-aware parameter recommendations based on the actual data characteristics.
 
@@ -328,7 +328,7 @@ This provides context-aware parameter recommendations based on the actual data c
 
 ## Example 1: Single-cell RNA-seq Preprocessing Parameters
 
-```python
+
 # Initial broad search to understand landscape
 search_pubmed(
     query="single-cell RNA-seq quality control filtering parameters mitochondrial", 
@@ -342,11 +342,11 @@ search_pubmed(
     top_k_results=5,
     doc_content_chars_max=4000
 )
-```
+
 
 ## Example 2: Proteomics Method Parameters
 
-```python
+
 # Search for MS proteomics normalization methods
 search_pubmed(
     query="mass spectrometry proteomics normalization missing values imputation",
@@ -360,7 +360,7 @@ search_pubmed(
     top_k_results=4,
     doc_content_chars_max=4000
 )
-```
+
 
 <Parameter Extraction Guidelines>
 

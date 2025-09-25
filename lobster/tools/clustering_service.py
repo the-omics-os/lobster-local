@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 import scanpy as sc
 
 from lobster.utils.logger import get_logger
+from lobster.utils.progress_wrapper import with_periodic_progress
 
 logger = get_logger(__name__)
 
@@ -71,6 +72,18 @@ class ClusteringService:
             progress_percent = int((self.current_progress / self.total_steps) * 100)
             self.progress_callback(progress_percent, step_name)
             logger.info(f"Progress updated: {progress_percent}% - {step_name}")
+
+    def _create_progress_callback(self):
+        """
+        Create a progress callback wrapper for use with with_periodic_progress.
+
+        Returns:
+            Callable that adapts with_periodic_progress messages to the existing callback system
+        """
+        def progress_callback_wrapper(message: str):
+            if self.progress_callback:
+                self.progress_callback(None, message)
+        return progress_callback_wrapper
 
     def cluster_and_visualize(
         self,
@@ -303,24 +316,48 @@ class ClusteringService:
             # Compute neighborhood graph using custom embedding
             logger.info("Computing neighborhood graph from custom embedding")
             n_neighbors = 10 if demo_mode else 15
-            sc.pp.neighbors(
-                adata, 
-                use_rep=use_rep, 
-                n_neighbors=n_neighbors
-            )
+
+            with with_periodic_progress(
+                "Computing neighborhood graph from custom embedding",
+                self._create_progress_callback(),
+                update_interval=10,
+                show_elapsed=True
+            ):
+                sc.pp.neighbors(
+                    adata,
+                    use_rep=use_rep,
+                    n_neighbors=n_neighbors
+                )
+
             self._update_progress("Neighborhood graph computed from custom embedding")
             
             # Run Leiden clustering
             logger.info(f"Running Leiden clustering with resolution {resolution}")
-            sc.tl.leiden(adata, resolution=resolution, key_added="leiden")
+
+            with with_periodic_progress(
+                f"Running Leiden clustering (resolution={resolution})",
+                self._create_progress_callback(),
+                update_interval=10,
+                show_elapsed=True
+            ):
+                sc.tl.leiden(adata, resolution=resolution, key_added="leiden")
+
             self._update_progress("Leiden clustering completed")
             
             # UMAP for visualization using custom embedding
             logger.info("Computing UMAP coordinates from custom embedding")
-            if demo_mode:
-                sc.tl.umap(adata, min_dist=0.5, spread=1.5)
-            else:
-                sc.tl.umap(adata)
+
+            with with_periodic_progress(
+                "Computing UMAP coordinates from custom embedding",
+                self._create_progress_callback(),
+                update_interval=15,
+                show_elapsed=True
+            ):
+                if demo_mode:
+                    sc.tl.umap(adata, min_dist=0.5, spread=1.5)
+                else:
+                    sc.tl.umap(adata)
+
             self._update_progress("UMAP coordinates computed from custom embedding")
             
         else:
@@ -381,21 +418,45 @@ class ClusteringService:
             n_neighbors = (
                 10 if demo_mode else 15
             )  # Use fewer neighbors in demo mode for speed
-            sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
+
+            with with_periodic_progress(
+                "Computing neighborhood graph",
+                self._create_progress_callback(),
+                update_interval=10,
+                show_elapsed=True
+            ):
+                sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
+
             self._update_progress("Neighborhood graph computed")
 
             # Run Leiden clustering at specified resolution (similar to publication's approach)
             logger.info(f"Running Leiden clustering with resolution {resolution}")
-            sc.tl.leiden(adata_hvg, resolution=resolution, key_added="leiden")
+
+            with with_periodic_progress(
+                f"Running Leiden clustering (resolution={resolution})",
+                self._create_progress_callback(),
+                update_interval=10,
+                show_elapsed=True
+            ):
+                sc.tl.leiden(adata_hvg, resolution=resolution, key_added="leiden")
+
             self._update_progress("Leiden clustering completed")
 
             # UMAP for visualization
             logger.info("Computing UMAP coordinates")
-            if demo_mode:
-                # Use faster UMAP settings in demo mode
-                sc.tl.umap(adata_hvg, min_dist=0.5, spread=1.5)
-            else:
-                sc.tl.umap(adata_hvg)
+
+            with with_periodic_progress(
+                "Computing UMAP coordinates",
+                self._create_progress_callback(),
+                update_interval=15,
+                show_elapsed=True
+            ):
+                if demo_mode:
+                    # Use faster UMAP settings in demo mode
+                    sc.tl.umap(adata_hvg, min_dist=0.5, spread=1.5)
+                else:
+                    sc.tl.umap(adata_hvg)
+
             self._update_progress("UMAP coordinates computed")
 
             # Transfer clustering results and UMAP coordinates back to the original object
@@ -408,7 +469,18 @@ class ClusteringService:
             method = (
                 "t-test" if demo_mode else "wilcoxon"
             )  # t-test is faster than wilcoxon
-            sc.tl.rank_genes_groups(adata, "leiden", method=method)
+
+            # Wrap the slow marker gene operation with progress updates
+            operation_name = f"Finding marker genes using {method}"
+
+            with with_periodic_progress(
+                operation_name,
+                self._create_progress_callback(),
+                update_interval=15,
+                show_elapsed=True
+            ):
+                sc.tl.rank_genes_groups(adata, "leiden", method=method)
+
             self._update_progress("Marker genes identified")
         else:
             logger.info("Skipping marker gene identification (demo mode)")

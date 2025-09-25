@@ -33,7 +33,7 @@ def ms_proteomics_expert(
     """Create mass spectrometry proteomics expert agent using the modular DataManagerV2 system."""
     
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('ms_proteomics_expert')
+    model_params = settings.get_agent_llm_params('ms_proteomics_expert_agent')
     llm = ChatBedrockConverse(**model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):

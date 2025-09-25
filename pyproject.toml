@@ -42,7 +42,7 @@ dependencies = [
     "langchain-community>=0.0.10",
     "langchain-openai>=0.0.5",
     "langchain-aws>=0.1.0",
-    "langgraph>=0.0.20",
+    "langgraph==0.6.7",
     "openai>=1.0.0",
     # Bioinformatics (bumped versions for Python 3.12 support)
     "llvmlite>=0.39.0", # explicit to avoid old version being pulled

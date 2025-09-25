@@ -29,24 +29,24 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         display_name='Data Expert',
         description='Handles data fetching and download tasks',
         factory_function='lobster.agents.data_expert.data_expert',
-        handoff_tool_name='handoff_to_data_expert',
-        handoff_tool_description='Assign data fetching/download tasks to the data expert'
+        handoff_tool_name='handoff_to_data_expert_agent',
+        handoff_tool_description='Assign data related tasks (download, fetch, concat, clean) to the data expert agent'
     ),
     'singlecell_expert_agent': AgentRegistryConfig(
         name='singlecell_expert_agent',
         display_name='Single-Cell Expert',
         description='Handles single-cell RNA-seq analysis tasks',
         factory_function='lobster.agents.singlecell_expert.singlecell_expert',
-        handoff_tool_name='handoff_to_singlecell_expert',
-        handoff_tool_description='Assign single-cell RNA-seq analysis tasks to the single-cell expert'
+        handoff_tool_name='handoff_to_singlecell_expert_agent',
+        handoff_tool_description='Assign single-cell RNA-seq analysis (cluster, QC, filter/normalize, automatic and manual cell annotation, differential expression etc) tasks to the single-cell expert agent'
     ),
     'bulk_rnaseq_expert_agent': AgentRegistryConfig(
         name='bulk_rnaseq_expert_agent',
         display_name='Bulk RNA-seq Expert',
         description='Handles bulk RNA-seq analysis tasks',
         factory_function='lobster.agents.bulk_rnaseq_expert.bulk_rnaseq_expert',
-        handoff_tool_name='handoff_to_bulk_rnaseq_expert',
-        handoff_tool_description='Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert'
+        handoff_tool_name='handoff_to_bulk_rnaseq_expert_agent',
+        handoff_tool_description='Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert agent'
     ),
     'research_agent': AgentRegistryConfig(
         name='research_agent',
@@ -61,32 +61,40 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         display_name='Method Expert',
         description='Handles computational method extraction and parameter analysis from publications',
         factory_function='lobster.agents.method_expert.method_expert',
-        handoff_tool_name='handoff_to_method_expert',
-        handoff_tool_description='Assign computational parameter extraction tasks to the method expert'
+        handoff_tool_name='handoff_to_method_expert_agent',
+        handoff_tool_description='Assign computational parameter extraction tasks to the method expert agent'
     ),
-    'ms_proteomics_expert_agent': AgentRegistryConfig(
-        name='ms_proteomics_expert_agent',
-        display_name='MS Proteomics Expert',
-        description='Handles mass spectrometry proteomics data analysis including DDA/DIA workflows with database search artifact removal',
-        factory_function='lobster.agents.ms_proteomics_expert.ms_proteomics_expert',
-        handoff_tool_name='handoff_to_ms_proteomics_expert',
-        handoff_tool_description='Assign mass spectrometry proteomics analysis tasks to the MS proteomics expert'
-    ),
-    'affinity_proteomics_expert_agent': AgentRegistryConfig(
-        name='affinity_proteomics_expert_agent',
-        display_name='Affinity Proteomics Expert',
-        description='Handles affinity proteomics data analysis including Olink and targeted protein panels with antibody validation',
-        factory_function='lobster.agents.affinity_proteomics_expert.affinity_proteomics_expert',
-        handoff_tool_name='handoff_to_affinity_proteomics_expert',
-        handoff_tool_description='Assign affinity proteomics and targeted panel analysis tasks to the affinity proteomics expert'
-    ),
+    # 'ms_proteomics_expert_agent': AgentRegistryConfig(
+    #     name='ms_proteomics_expert_agent',
+    #     display_name='MS Proteomics Expert',
+    #     description='Handles mass spectrometry proteomics data analysis including DDA/DIA workflows with database search artifact removal',
+    #     factory_function='lobster.agents.ms_proteomics_expert.ms_proteomics_expert',
+    #     handoff_tool_name='handoff_to_ms_proteomics_expert_agent',
+    #     handoff_tool_description='Assign mass spectrometry proteomics analysis tasks to the MS proteomics expert agent'
+    # ),
+    # 'affinity_proteomics_expert_agent': AgentRegistryConfig(
+    #     name='affinity_proteomics_expert_agent',
+    #     display_name='Affinity Proteomics Expert',
+    #     description='Handles affinity proteomics data analysis including Olink and targeted protein panels with antibody validation',
+    #     factory_function='lobster.agents.affinity_proteomics_expert.affinity_proteomics_expert',
+    #     handoff_tool_name='handoff_to_affinity_proteomics_expert_agent',
+    #     handoff_tool_description='Assign affinity proteomics and targeted panel analysis tasks to the affinity proteomics expert agent'
+    # ),
     'machine_learning_expert_agent': AgentRegistryConfig(
         name='machine_learning_expert_agent',
         display_name='ML Expert',
         description='Handles Machine Learning related tasks like transforming the data in the desired format for downstream tasks',
         factory_function='lobster.agents.machine_learning_expert.machine_learning_expert',
-        handoff_tool_name='handoff_to_machine_learning_expert',
-        handoff_tool_description='Assign literature/method tasks to the machine learning expert'
+        handoff_tool_name='handoff_to_machine_learning_expert_agent',
+        handoff_tool_description='Assign all machine learning related tasks (scVI, classification etc) to the machine learning expert agent'
+    ),
+    'visualization_expert_agent': AgentRegistryConfig(
+        name='visualization_expert_agent',
+        display_name='Visualization Expert',
+        description='Creates publication-quality visualizations through supervisor-mediated workflows',
+        factory_function='lobster.agents.visualization_expert.visualization_expert',
+        handoff_tool_name='handoff_to_visualization_expert_agent',
+        handoff_tool_description='Delegate visualization tasks to the visualization expert agent'
     ),
 }
 

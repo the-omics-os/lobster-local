@@ -104,6 +104,19 @@ class DataManagerV2:
         self.plot_counter: int = 0  # Counter for generating unique IDs
         self.max_plots_history: int = 50  # Maximum number of plots to keep in history
 
+        # Visualization state management for Visualization Expert Agent
+        self.visualization_state = {
+            'history': [],          # List of created visualizations
+            'settings': {           # User preferences
+                'default_width': 800,
+                'default_height': 600,
+                'color_scheme': 'Set1',
+                'save_by_default': True,
+                'export_formats': ['html', 'png']
+            },
+            'plot_registry': {}     # UUID -> plot metadata mapping
+        }
+
         # Current dataset management (for legacy compatibility)
         self.current_dataset: Optional[str] = None  # Name of current active modality
         self.current_data: Optional[pd.DataFrame] = None  # Legacy compatibility
@@ -1130,6 +1143,90 @@ class DataManagerV2:
                 logger.error(f"Failed to save plot {plot_id}: {e}")
 
         return saved_files
+
+    # ========================================
+    # VISUALIZATION STATE MANAGEMENT (Visualization Expert Agent)
+    # ========================================
+    
+    def add_visualization_record(self, plot_id: str, metadata: Dict[str, Any]) -> None:
+        """
+        Track visualization creation in the visualization state.
+        
+        Args:
+            plot_id: Unique identifier for the plot
+            metadata: Metadata about the visualization
+        """
+        try:
+            # Add to history
+            self.visualization_state['history'].append({
+                'plot_id': plot_id,
+                'timestamp': pd.Timestamp.now(),
+                'metadata': metadata
+            })
+            
+            # Add to registry
+            self.visualization_state['plot_registry'][plot_id] = metadata
+            
+            logger.debug(f"Added visualization record for plot {plot_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to add visualization record: {e}")
+
+    def get_visualization_history(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get recent visualization history.
+        
+        Args:
+            limit: Maximum number of records to return
+            
+        Returns:
+            List[Dict[str, Any]]: List of recent visualizations
+        """
+        try:
+            return self.visualization_state['history'][-limit:]
+        except Exception as e:
+            logger.error(f"Failed to get visualization history: {e}")
+            return []
+
+    def get_visualization_settings(self) -> Dict[str, Any]:
+        """
+        Get current visualization settings.
+        
+        Returns:
+            Dict[str, Any]: Current visualization settings
+        """
+        return self.visualization_state['settings'].copy()
+
+    def update_visualization_settings(self, settings: Dict[str, Any]) -> None:
+        """
+        Update visualization settings.
+        
+        Args:
+            settings: Settings to update
+        """
+        try:
+            self.visualization_state['settings'].update(settings)
+            logger.debug(f"Updated visualization settings: {settings}")
+        except Exception as e:
+            logger.error(f"Failed to update visualization settings: {e}")
+
+    def get_plot_by_uuid(self, plot_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get plot metadata by UUID from visualization registry.
+        
+        Args:
+            plot_id: UUID of the plot
+            
+        Returns:
+            Optional[Dict[str, Any]]: Plot metadata if found, None otherwise
+        """
+        return self.visualization_state['plot_registry'].get(plot_id)
+
+    def clear_visualization_history(self) -> None:
+        """Clear visualization history and registry."""
+        self.visualization_state['history'] = []
+        self.visualization_state['plot_registry'] = {}
+        logger.info("Cleared visualization history and registry")
 
     # ========================================
     # CURRENT DATASET MANAGEMENT (Legacy Support)
@@ -2210,18 +2307,32 @@ class DataManagerV2:
 
         return summary
 
-    def create_data_package(self, output_dir: str = None) -> str:
+    def create_data_package(
+        self,
+        output_dir: str = None,
+        progress_callback=None,
+        include_png: bool = True,
+        compression: str = 'gzip',
+        include_provenance: bool = True
+    ) -> str:
         """
         Create a comprehensive data package with modalities, plots, and analysis summary.
 
         Args:
             output_dir: Directory to save the package (defaults to exports_dir)
+            progress_callback: Optional callback function to report progress (receives message string)
+            include_png: Whether to generate PNG versions of plots (default: True)
+            compression: H5AD compression method ('gzip', 'lzf', None) (default: 'gzip')
+            include_provenance: Whether to include provenance information (default: True)
 
         Returns:
             str: Path to the created zip file
         """
         if not self.has_data() and not self.latest_plots:
             raise ValueError("No data or plots to export")
+
+        if progress_callback:
+            progress_callback("Preparing export package...")
 
         # Use exports directory if not specified
         if output_dir is None:
@@ -2236,49 +2347,57 @@ class DataManagerV2:
         # Create a temporary directory for files
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            
+
+            if progress_callback:
+                progress_callback("Creating technical summary...")
+
             # Save technical summary
             with open(temp_path / "technical_summary.md", "w") as f:
                 f.write(self.get_technical_summary())
 
             # Save all modalities
             if self.modalities:
+                if progress_callback:
+                    progress_callback(f"Exporting {len(self.modalities)} data modalities...")
+
                 modalities_dir = temp_path / "modalities"
                 modalities_dir.mkdir()
-                
-                for name, adata in self.modalities.items():
+
+                for i, (name, adata) in enumerate(self.modalities.items(), 1):
+                    if progress_callback:
+                        progress_callback(f"Saving modality {i}/{len(self.modalities)}: {name}")
                     try:
-                        # Save as H5AD
+                        # Save as H5AD with configurable compression (professional standard for bioinformatics)
                         h5ad_path = modalities_dir / f"{name}.h5ad"
-                        adata.write_h5ad(h5ad_path)
-                        
-                        # Also save as CSV for broader compatibility
-                        csv_path = modalities_dir / f"{name}.csv"
-                        df = pd.DataFrame(
-                            adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X,
-                            index=adata.obs_names,
-                            columns=adata.var_names
-                        )
-                        df.to_csv(csv_path)
-                        
-                        # Save metadata
+                        adata.write_h5ad(h5ad_path, compression=compression)
+
+                        # Save metadata (optimized to avoid unnecessary list conversions)
                         metadata_path = modalities_dir / f"{name}_metadata.json"
                         modality_metadata = {
                             "shape": adata.shape,
-                            "obs_columns": list(adata.obs.columns),
-                            "var_columns": list(adata.var.columns),
+                            "n_obs": adata.n_obs,
+                            "n_vars": adata.n_vars,
+                            "obs_columns": adata.obs.columns.tolist(),
+                            "var_columns": adata.var.columns.tolist(),
                             "layers": list(adata.layers.keys()) if adata.layers else [],
-                            "obsm": list(adata.obsm.keys()) if adata.obsm else [],
-                            "uns": list(adata.uns.keys()) if adata.uns else []
+                            "obsm_keys": list(adata.obsm.keys()) if adata.obsm else [],
+                            "uns_keys": list(adata.uns.keys()) if adata.uns else [],
+                            "is_sparse": hasattr(adata.X, 'toarray'),
+                            "data_type": str(adata.X.dtype) if hasattr(adata.X, 'dtype') else 'unknown'
                         }
                         with open(metadata_path, "w") as f:
                             json.dump(modality_metadata, f, indent=2, default=str)
-                            
+
                     except Exception as e:
                         logger.error(f"Failed to save modality {name}: {e}")
+                        if progress_callback:
+                            progress_callback(f"Error saving {name}: {str(e)[:50]}...")
 
             # Save plots
             if self.latest_plots:
+                if progress_callback:
+                    progress_callback(f"Exporting {len(self.latest_plots)} visualizations...")
+
                 plots_dir = temp_path / "plots"
                 plots_dir.mkdir()
 
@@ -2286,6 +2405,9 @@ class DataManagerV2:
                 plots_index = []
 
                 for i, plot_entry in enumerate(self.latest_plots):
+                    if progress_callback:
+                        plot_title = plot_entry.get("title", f"Plot {i+1}")
+                        progress_callback(f"Saving plot {i+1}/{len(self.latest_plots)}: {plot_title}")
                     try:
                         plot = plot_entry["figure"]
                         plot_id = plot_entry["id"]
@@ -2298,12 +2420,18 @@ class DataManagerV2:
                         safe_title = safe_title.replace(" ", "_")
                         filename_base = f"{plot_id}_{safe_title}" if safe_title else plot_id
 
-                        # Save as HTML and PNG
+                        # Save as HTML (fast and reliable - primary format)
                         pio.write_html(plot, plots_dir / f"{filename_base}.html")
-                        try:
-                            pio.write_image(plot, plots_dir / f"{filename_base}.png")
-                        except Exception as e:
-                            logger.warning(f"Could not save PNG for {plot_id}: {e}")
+
+                        # Save as PNG (configurable, non-blocking)
+                        if include_png:
+                            try:
+                                # Use kaleido engine for better reliability
+                                pio.write_image(plot, plots_dir / f"{filename_base}.png", engine="kaleido", width=1200, height=800)
+                            except Exception as e:
+                                # PNG generation failed - continue without it (don't block export)
+                                logger.debug(f"Skipped PNG for {plot_id}: {type(e).__name__}: {e}")
+                                # Note: HTML version is still available and fully interactive
 
                         # Save plot metadata
                         with open(plots_dir / f"{filename_base}_info.txt", "w") as f:
@@ -2337,14 +2465,66 @@ class DataManagerV2:
                         f.write(f"- Source: {plot_info['source']}\n")
                         f.write(f"- Files: [{plot_info['filename']}.html]({plot_info['filename']}.html), [{plot_info['filename']}.png]({plot_info['filename']}.png)\n\n")
 
+            if progress_callback:
+                progress_callback("Saving workspace metadata...")
+
             # Save workspace status
             with open(temp_path / "workspace_status.json", "w") as f:
                 json.dump(self.get_workspace_status(), f, indent=2, default=str)
 
-            # Save provenance if available
-            if self.provenance:
+            # Save provenance if available and requested
+            if include_provenance and self.provenance:
                 with open(temp_path / "provenance.json", "w") as f:
                     json.dump(self.provenance.to_dict(), f, indent=2, default=str)
+
+            # Create professional README for the export package
+            readme_content = f"""# Lobster Analysis Export Package
+
+Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+## Contents
+
+### Data Files (H5AD Format)
+- **Format**: H5AD (HDF5-based AnnData format)
+- **Compression**: {compression or 'none'}
+- **Recommendation**: Open with scanpy, cellxgene, or other single-cell analysis tools
+
+### Visualizations
+- **HTML Files**: Interactive Plotly visualizations (recommended)
+- **PNG Files**: Static images for publications {'(included)' if include_png else '(not generated)'}
+
+### Metadata
+- **technical_summary.md**: Analysis overview and methods
+- **workspace_status.json**: System configuration and data provenance
+{'- **provenance.json**: Detailed analysis history (W3C-PROV compliant)' if include_provenance else ''}
+
+## Usage
+
+### Loading Data in Python
+```python
+import scanpy as sc
+adata = sc.read_h5ad('modalities/your_dataset.h5ad')
+```
+
+### Loading Data in R
+```r
+library(anndata)
+adata <- read_h5ad('modalities/your_dataset.h5ad')
+```
+
+### Viewing Plots
+Open HTML files in any web browser for interactive exploration.
+
+## Citation
+Generated with Lobster AI - Multi-Agent Bioinformatics Analysis Platform
+https://github.com/OmicsOS/lobster
+"""
+
+            with open(temp_path / "README.md", "w") as f:
+                f.write(readme_content)
+
+            if progress_callback:
+                progress_callback("Creating final package...")
 
             # Create the zip file
             with zipfile.ZipFile(zip_filename, "w") as zipf:

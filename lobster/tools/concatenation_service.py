@@ -585,39 +585,7 @@ class ConcatenationService:
                 **kwargs
             )
             
-            # Store as new modality if output_name provided
-            if output_name and output_name not in self.data_manager.list_modalities():
-                # Determine appropriate adapter
-                adapter_name = self._determine_adapter_from_data(concatenated_adata)
-                
-                # Create enhanced metadata
-                enhanced_metadata = {
-                    "dataset_id": "concatenated",
-                    "dataset_type": "concatenated_samples",
-                    "source_modalities": modality_names,
-                    "processing_date": pd.Timestamp.now().isoformat(),
-                    "concatenation_strategy": strategy.value,
-                    "concatenation_info": statistics
-                }
-                
-                # Store as modality (need to save to temp file first)
-                temp_path = self.cache_dir / f"{output_name}_temp.h5ad"
-                concatenated_adata.write_h5ad(temp_path)
-                
-                # Load as modality
-                self.data_manager.load_modality(
-                    name=output_name,
-                    source=temp_path,
-                    adapter=adapter_name,
-                    validate=True,
-                    **enhanced_metadata
-                )
-                
-                # Clean up temp file
-                temp_path.unlink(missing_ok=True)
-                
-                logger.info(f"Stored concatenated result as modality: {output_name}")
-            
+            # Service remains stateless - storage is handled by the calling agent tool
             return concatenated_adata, statistics
             
         except Exception as e:

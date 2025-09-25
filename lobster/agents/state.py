@@ -12,18 +12,18 @@ from langgraph.prebuilt.chat_agent_executor import AgentState
 
 class OverallState(AgentState):
     """
-    Master state that holds sub-states for each agent and conversation-level memory.
+    Supervisor state for coordinating agent workflows.
+
+    Note: Individual agents are subgraphs with their own state schemas.
+    The supervisor doesn't need to track agent-specific state fields.
     """
     # Meta routing information
-    last_active_agent: str
-    conversation_id: str
+    last_active_agent: str = ""
+    conversation_id: str = ""
 
-    # Sub-states for each agent
-    data_expert_state: "DataExpertState"
-    singlecell_expert_state: "SingleCellExpertState"
-    bulk_rnaseq_expert_state: "BulkRNASeqExpertState"
-    method_state: "MethodState"
-    machine_learning_expert_state: "MachineLearningExpertState"
+    # Optional: Task context for handoffs
+    current_task: str = ""
+    task_context: Dict[str, Any] = {}
     
 
 
@@ -66,6 +66,7 @@ class SingleCellExpertState(AgentState):
     next: str
 
     # Single-cell specific context
+    task_description: str            # Description of the current task
     analysis_results: Dict[str, Any]     # Single-cell analysis results, clustering, etc.
     clustering_parameters: Dict[str, Any] # Leiden resolution, batch correction settings
     cell_type_annotations: Dict[str, Any] # Cell type assignment results
@@ -85,6 +86,7 @@ class BulkRNASeqExpertState(AgentState):
     next: str
 
     # Bulk RNA-seq specific context
+    task_description: str            # Description of the current task
     analysis_results: Dict[str, Any]     # Bulk RNA-seq analysis results, DE genes, etc.
     differential_expression_results: Dict[str, Any] # DE analysis outcomes
     pathway_enrichment_results: Dict[str, Any] # Pathway analysis results
@@ -104,6 +106,7 @@ class DataExpertState(AgentState):
     next: str
 
     # Data management specific context
+    task_description: str            # Description of the current task    
     available_datasets: Dict[str, Any]   # Catalog of available datasets
     current_dataset_id: str              # Currently loaded dataset identifier
     dataset_metadata: Dict[str, Any]     # Metadata for current dataset
@@ -118,6 +121,7 @@ class MethodState(AgentState):
     next: str
 
     # Methodology-specific context
+    task_description: str            # Description of the current task
     methods_information: Dict[str, Any]  # Details about computational/experimental methods
     data_context: str
     evaluation_metrics: Dict[str, Any]   # Accuracy, runtime, reproducibility metrics
@@ -132,6 +136,7 @@ class MachineLearningExpertState(AgentState):
     next: str
 
     # Machine learning specific context
+    task_description: str            # Description of the current task
     ml_ready_modalities: Dict[str, Any]  # Assessment of modalities ready for ML
     feature_engineering_results: Dict[str, Any]  # Feature preparation outcomes
     data_splits: Dict[str, Any]         # Train/test/validation split information
@@ -142,3 +147,24 @@ class MachineLearningExpertState(AgentState):
     methodology_parameters: Dict[str, Any] # ML method parameters used
     data_context: str                   # ML data context and characteristics
     intermediate_outputs: Dict[str, Any] # For partial ML computations before returning to supervisor
+
+
+class VisualizationExpertState(AgentState):
+    """
+    State for the visualization expert agent.
+    """
+    next: str
+
+    # Visualization specific context
+    task_description: str            # Description of the current task
+    current_request: Dict[str, Any]      # Current visualization request details
+    last_plot_id: str                   # Last created plot ID for tracking
+    visualization_history: List[Dict[str, Any]]  # History of created visualizations
+    plot_metadata: Dict[str, Any]       # Metadata for current plot session
+    active_modalities: List[str]        # Modalities currently being visualized
+    visualization_parameters: Dict[str, Any]  # Current visualization parameters
+    plot_queue: List[Dict[str, Any]]    # Queue of pending visualization tasks
+    file_paths: List[str]               # Paths to saved visualization files
+    methodology_parameters: Dict[str, Any]  # Visualization method parameters
+    data_context: str                   # Visualization data context
+    intermediate_outputs: Dict[str, Any] # For partial visualization work before returning to supervisor

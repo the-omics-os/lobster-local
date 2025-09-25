@@ -5,6 +5,7 @@ Implementation using langgraph_supervisor package for hierarchical multi-agent c
 """
 
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.store.memory import InMemoryStore
 
 from langchain_core.tools import tool
  
@@ -15,12 +16,12 @@ from langchain_aws import ChatBedrockConverse
 
 from lobster.agents.supervisor import create_supervisor_prompt
 from lobster.agents.state import OverallState
+from lobster.tools.handoff_tool import create_custom_handoff_tool
 from lobster.config.settings import get_settings
 from lobster.config.supervisor_config import SupervisorConfig
 from lobster.config.agent_registry import get_worker_agents, import_agent_factory
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
-from lobster.tools.handoff_tool import create_custom_handoff_tool
 from typing import Optional
 
 logger = get_logger(__name__)
@@ -28,6 +29,7 @@ logger = get_logger(__name__)
 def create_bioinformatics_graph(
     data_manager: DataManagerV2,
     checkpointer: InMemorySaver = None,
+    store: InMemoryStore = None,
     callback_handler=None,
     manual_model_params: dict = None,
     supervisor_config: Optional[SupervisorConfig] = None
@@ -58,15 +60,15 @@ def create_bioinformatics_graph(
     
     # Create worker agents dynamically from registry
     agents = []
-    handoff_tools = []
-    
+    handoff_tools = []    
+
     # Get all worker agents from the registry
     worker_agents = get_worker_agents()
-    
+
     for agent_name, agent_config in worker_agents.items():
         # Import the factory function dynamically
         factory_function = import_agent_factory(agent_config.factory_function)
-        
+
         # Create the agent
         agent = factory_function(
             data_manager=data_manager,
@@ -75,7 +77,7 @@ def create_bioinformatics_graph(
             handoff_tools=None
         )
         agents.append(agent)
-        
+
         # Create handoff tool if configured
         if agent_config.handoff_tool_name and agent_config.handoff_tool_description:
             handoff_tool = create_custom_handoff_tool(
@@ -83,8 +85,8 @@ def create_bioinformatics_graph(
                 name=agent_config.handoff_tool_name,
                 description=agent_config.handoff_tool_description
             )
-            handoff_tools.append(handoff_tool)
-        
+            handoff_tools.append(handoff_tool)        
+
         logger.debug(f"Created agent: {agent_config.display_name} ({agent_config.name})")
 
 
@@ -148,17 +150,19 @@ def create_bioinformatics_graph(
         supervisor_name="supervisor",
         state_schema=OverallState,
         add_handoff_messages=True,
+        add_handoff_back_messages=True,        
         include_agent_name='inline',
         # Change from "full_history" to "messages" or "last_message"
         # output_mode="full_history",  # This ensures the actual messages are returned
         output_mode="last_message",  # This ensures the actual messages are returned
-        tools=handoff_tools.append(list_available_modalities) # Use dynamically created handoff tools
+        tools=handoff_tools + [list_available_modalities] + [forwarding_tool]  # Supervisor-only tools (handoff tools are auto-created)
               
     )
     
     # Compile the graph with the provided checkpointer
     graph = workflow.compile(
         checkpointer=checkpointer,
+        store=store
         # debug=True  # Enable debug mode for better visibility
     )
     
