@@ -4,11 +4,43 @@
 .PHONY: help install dev-install install-global uninstall-global test format lint clean docker-build docker-run release check-python setup-env
 
 # Configuration
-PYTHON := python3
 VENV_NAME := .venv
 VENV_PATH := $(VENV_NAME)
 PYTHON_VERSION_MIN := 3.12
 PROJECT_NAME := lobster-ai
+
+# Smart Python Discovery
+# Check for conda environment first (avoid conflicts)
+CONDA_ACTIVE := $(shell echo $$CONDA_DEFAULT_ENV)
+PYENV_VERSION := $(shell pyenv version-name 2>/dev/null || echo "")
+
+# Find best available Python (3.12+)
+PYTHON_CANDIDATES := python3.13 python3.12 python3 python
+PYTHON := $(shell for p in $(PYTHON_CANDIDATES); do \
+	if command -v $$p >/dev/null 2>&1; then \
+		if $$p -c "import sys; exit(0 if sys.version_info >= (3,12) else 1)" 2>/dev/null; then \
+			echo $$p; \
+			break; \
+		fi; \
+	fi; \
+done)
+
+# If no suitable Python found, default to python3 for error messages
+ifeq ($(PYTHON),)
+	PYTHON := python3
+endif
+
+# Detect Python environment type
+PYTHON_ENV_TYPE := $(shell \
+	if [ -n "$(CONDA_ACTIVE)" ]; then \
+		echo "conda"; \
+	elif [ -n "$(PYENV_VERSION)" ] && [ "$(PYENV_VERSION)" != "system" ]; then \
+		echo "pyenv"; \
+	elif command -v brew >/dev/null 2>&1 && $(PYTHON) -c "import sys; print('homebrew' if 'Cellar' in sys.executable or 'homebrew' in sys.executable else 'system')" 2>/dev/null; then \
+		echo "homebrew"; \
+	else \
+		echo "system"; \
+	fi)
 
 # Determine package manager (prefer uv > pip3 > pip)
 UV_EXISTS := $(shell which uv > /dev/null 2>&1 && echo "yes" || echo "no")
@@ -80,19 +112,70 @@ help:
 	@echo "  make uninstall     Remove virtual environment"
 	@echo "  make uninstall-global Remove global lobster command"
 
+# Environment detection and validation
+check-env-conflicts:
+	@if [ -n "$(CONDA_ACTIVE)" ]; then \
+		echo "$(YELLOW)⚠️  Conda environment '$(CONDA_ACTIVE)' is active$(NC)"; \
+		echo "$(YELLOW)   This may cause conflicts with the virtual environment.$(NC)"; \
+		echo "$(BLUE)   Recommended: deactivate conda before installing:$(NC)"; \
+		echo "$(YELLOW)   conda deactivate$(NC)"; \
+		echo ""; \
+	fi
+	@if [ -f "$(VENV_PATH)/bin/python" ] && [ -n "$(VIRTUAL_ENV)" ] && [ "$(VIRTUAL_ENV)" != "$(shell pwd)/$(VENV_PATH)" ]; then \
+		echo "$(YELLOW)⚠️  Another virtual environment is active: $(VIRTUAL_ENV)$(NC)"; \
+		echo "$(BLUE)   Recommended: deactivate it first:$(NC)"; \
+		echo "$(YELLOW)   deactivate$(NC)"; \
+		echo ""; \
+	fi
+
 # Python version check with platform guidance
-check-python:
-	@echo "🔍 Checking Python version..."
-	@if ! command -v $(PYTHON) >/dev/null 2>&1; then \
-		echo "$(RED)❌ $(PYTHON) command not found. Please install Python 3.12+.$(NC)"; \
-		echo "$(YELLOW)📋 Installation instructions:$(NC)"; \
-		if [ "$$(uname -s)" = "Darwin" ]; then \
-			echo "$(YELLOW)   macOS: brew install python@3.12$(NC)"; \
+check-python: check-env-conflicts
+	@echo "🔍 Checking Python environment..."
+	@echo "   Environment type: $(PYTHON_ENV_TYPE)"
+	@echo "   Python command: $(PYTHON)"
+	@if [ -z "$(PYTHON)" ] || ! command -v $(PYTHON) >/dev/null 2>&1; then \
+		echo "$(RED)❌ No suitable Python 3.12+ found$(NC)"; \
+		echo ""; \
+		echo "$(YELLOW)📋 Installation instructions based on your system:$(NC)"; \
+		if [ -n "$(CONDA_ACTIVE)" ]; then \
+			echo "$(BLUE)🐍 Conda environment detected$(NC)"; \
+			echo "$(YELLOW)   Option 1: Install in conda:$(NC)"; \
+			echo "     conda install python=3.12"; \
+			echo "$(YELLOW)   Option 2: Deactivate conda and use system Python:$(NC)"; \
+			echo "     conda deactivate"; \
+		elif command -v pyenv >/dev/null 2>&1; then \
+			echo "$(BLUE)🐍 pyenv detected$(NC)"; \
+			echo "$(YELLOW)   Install Python 3.12 with pyenv:$(NC)"; \
+			echo "     pyenv install 3.12.0"; \
+			echo "     pyenv global 3.12.0"; \
+			echo "     pyenv rehash"; \
+		elif [ "$$(uname -s)" = "Darwin" ]; then \
+			echo "$(BLUE)🍎 macOS detected$(NC)"; \
+			if ! command -v brew >/dev/null 2>&1; then \
+				echo "$(YELLOW)   First install Homebrew:$(NC)"; \
+				echo "     /bin/bash -c \"$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""; \
+				echo ""; \
+			fi; \
+			echo "$(YELLOW)   Install Python with Homebrew:$(NC)"; \
+			echo "     brew install python@3.12"; \
+			echo "     brew link python@3.12"; \
 			if [ "$$(uname -m)" = "arm64" ]; then \
-				echo "$(BLUE)   🍎 Apple Silicon detected - using optimized installation$(NC)"; \
+				echo "$(BLUE)   🍎 Apple Silicon optimizations will be applied$(NC)"; \
 			fi; \
 		else \
-			echo "$(YELLOW)   Ubuntu: sudo apt install python3.12 python3.12-dev$(NC)"; \
+			echo "$(BLUE)🐧 Linux detected$(NC)"; \
+			if command -v apt >/dev/null 2>&1; then \
+				echo "$(YELLOW)   Ubuntu/Debian - Install with apt:$(NC)"; \
+				echo "     sudo apt update"; \
+				echo "     sudo apt install python3.12 python3.12-dev python3.12-venv"; \
+			elif command -v yum >/dev/null 2>&1; then \
+				echo "$(YELLOW)   RHEL/CentOS - Install with yum:$(NC)"; \
+				echo "     sudo yum install python3.12 python3.12-devel"; \
+			else \
+				echo "$(YELLOW)   Generic Linux - Build from source or use pyenv:$(NC)"; \
+				echo "     curl https://pyenv.run | bash"; \
+				echo "     pyenv install 3.12.0"; \
+			fi; \
 		fi; \
 		exit 1; \
 	fi
@@ -101,22 +184,65 @@ check-python:
 		exit 1; \
 	}
 	@$(PYTHON) -c "import sys; exit(0 if sys.version_info >= (3,12) else 1)" || { \
-		echo "$(RED)❌ Python 3.12+ is required. Found: $$($(PYTHON) --version)$(NC)"; \
-		echo "$(YELLOW)📋 Upgrade instructions:$(NC)"; \
-		if [ "$$(uname -s)" = "Darwin" ]; then \
-			echo "$(YELLOW)   macOS: brew install python@3.12 && brew link python@3.12$(NC)"; \
+		echo "$(RED)❌ Python 3.12+ is required. Found: $$($(PYTHON) --version 2>&1)$(NC)"; \
+		echo ""; \
+		echo "$(YELLOW)📋 Upgrade instructions for your setup ($(PYTHON_ENV_TYPE)):$(NC)"; \
+		if [ "$(PYTHON_ENV_TYPE)" = "conda" ]; then \
+			echo "$(BLUE)🐍 Conda environment:$(NC)"; \
+			echo "$(YELLOW)   Update Python in current environment:$(NC)"; \
+			echo "     conda update python"; \
+			echo "$(YELLOW)   Or create new environment:$(NC)"; \
+			echo "     conda create -n lobster python=3.12"; \
+			echo "     conda activate lobster"; \
+		elif [ "$(PYTHON_ENV_TYPE)" = "pyenv" ]; then \
+			echo "$(BLUE)🐍 pyenv:$(NC)"; \
+			echo "$(YELLOW)   Install and set Python 3.12:$(NC)"; \
+			echo "     pyenv install 3.12.0"; \
+			echo "     pyenv local 3.12.0  # for this project"; \
+			echo "     # or"; \
+			echo "     pyenv global 3.12.0  # system-wide"; \
+		elif [ "$(PYTHON_ENV_TYPE)" = "homebrew" ]; then \
+			echo "$(BLUE)🍺 Homebrew Python:$(NC)"; \
+			echo "$(YELLOW)   Upgrade Python:$(NC)"; \
+			echo "     brew upgrade python@3.12"; \
+			echo "     brew link --overwrite python@3.12"; \
+			echo "$(YELLOW)   If link fails:$(NC)"; \
+			echo "     brew unlink python@3.11  # or current version"; \
+			echo "     brew link python@3.12"; \
 		else \
-			echo "$(YELLOW)   Ubuntu: sudo apt install python3.12$(NC)"; \
+			if [ "$$(uname -s)" = "Darwin" ]; then \
+				echo "$(YELLOW)   macOS: brew install python@3.12 && brew link python@3.12$(NC)"; \
+			else \
+				echo "$(YELLOW)   Ubuntu: sudo apt install python3.12 python3.12-dev python3.12-venv$(NC)"; \
+				echo "$(YELLOW)   RHEL: sudo yum install python3.12 python3.12-devel$(NC)"; \
+			fi; \
 		fi; \
 		exit 1; \
 	}
-	@echo "$(GREEN)✅ Python 3.12+ check passed: $$($(PYTHON) --version)$(NC)"
+	@echo "$(GREEN)✅ Python check passed: $$($(PYTHON) --version 2>&1)$(NC)"
+	@echo "   Path: $$(which $(PYTHON))"
 	@echo "🔍 Checking venv module..."
 	@$(PYTHON) -c "import venv" > /dev/null 2>&1 || { \
-		echo "$(RED)❌ Python venv module not found. Please install python3-venv package.$(NC)"; \
-		echo "$(YELLOW)📋 Fix instructions:$(NC)"; \
-		echo "$(YELLOW)  Ubuntu/Debian: sudo apt install python3.12-venv$(NC)"; \
-		echo "$(YELLOW)  macOS: brew reinstall python@3.12$(NC)"; \
+		echo "$(RED)❌ Python venv module not found$(NC)"; \
+		echo ""; \
+		echo "$(YELLOW)📋 Fix for your environment ($(PYTHON_ENV_TYPE)):$(NC)"; \
+		if [ "$(PYTHON_ENV_TYPE)" = "conda" ]; then \
+			echo "$(YELLOW)   Conda usually includes venv. Try:$(NC)"; \
+			echo "     conda install python=3.12"; \
+		elif [ "$(PYTHON_ENV_TYPE)" = "pyenv" ]; then \
+			echo "$(YELLOW)   Reinstall Python with proper configuration:$(NC)"; \
+			echo "     pyenv uninstall 3.12.0"; \
+			echo "     pyenv install 3.12.0"; \
+		elif [ "$$(uname -s)" = "Darwin" ]; then \
+			echo "$(YELLOW)   macOS - Reinstall Python:$(NC)"; \
+			echo "     brew reinstall python@3.12"; \
+		else \
+			PYTHON_VERSION=$$($(PYTHON) -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "3.12"); \
+			echo "$(YELLOW)   Ubuntu/Debian:$(NC)"; \
+			echo "     sudo apt install python$${PYTHON_VERSION}-venv"; \
+			echo "$(YELLOW)   RHEL/CentOS:$(NC)"; \
+			echo "     sudo yum install python$${PYTHON_VERSION}-venv"; \
+		fi; \
 		exit 1; \
 	}
 	@echo "$(GREEN)✅ Python venv module available$(NC)"
@@ -137,20 +263,31 @@ check-python:
 		fi; \
 	fi
 
-$(VENV_PATH):
-	@echo "🐍 Creating virtual environment with $(PYTHON)..."
-	@if ! command -v $(PYTHON) >/dev/null 2>&1; then \
-		echo "$(RED)❌ $(PYTHON) command not found. Please install Python 3.12+.$(NC)"; \
-		echo "$(YELLOW)   macOS: brew install python@3.12$(NC)"; \
-		echo "$(YELLOW)   Ubuntu/Debian: sudo apt install python3.12$(NC)"; \
-		exit 1; \
+$(VENV_PATH): check-python
+	@echo "🐍 Creating virtual environment..."
+	@echo "   Using: $(PYTHON) ($(PYTHON_ENV_TYPE))"
+	@if [ -n "$(CONDA_ACTIVE)" ]; then \
+		echo "$(YELLOW)⚠️  Note: Creating venv inside conda environment '$(CONDA_ACTIVE)'$(NC)"; \
+		echo "$(YELLOW)   This is usually fine, but if you have issues, try:$(NC)"; \
+		echo "$(YELLOW)   conda deactivate && make clean-install$(NC)"; \
 	fi
 	@if ! $(PYTHON) -c "import ensurepip" >/dev/null 2>&1; then \
-		echo "$(RED)❌ Python ensurepip module not found. Your Python might be missing venv support.$(NC)"; \
-		if [ "$$(uname -s)" = "Darwin" ]; then \
-			echo "$(YELLOW)   Try: brew reinstall python@3.12$(NC)"; \
+		echo "$(RED)❌ Python ensurepip module not found$(NC)"; \
+		echo ""; \
+		echo "$(YELLOW)📋 Fix for your environment ($(PYTHON_ENV_TYPE)):$(NC)"; \
+		if [ "$(PYTHON_ENV_TYPE)" = "conda" ]; then \
+			echo "$(YELLOW)   Update conda Python:$(NC)"; \
+			echo "     conda update python"; \
+		elif [ "$(PYTHON_ENV_TYPE)" = "pyenv" ]; then \
+			echo "$(YELLOW)   Reinstall Python:$(NC)"; \
+			echo "     pyenv install --force 3.12.0"; \
+		elif [ "$$(uname -s)" = "Darwin" ]; then \
+			echo "$(YELLOW)   macOS:$(NC)"; \
+			echo "     brew reinstall python@3.12"; \
 		else \
-			echo "$(YELLOW)   Try: sudo apt install python3.12-venv python3.12-distutils$(NC)"; \
+			PYTHON_VERSION=$$($(PYTHON) -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "3.12"); \
+			echo "$(YELLOW)   Linux:$(NC)"; \
+			echo "     sudo apt install python$${PYTHON_VERSION}-venv python$${PYTHON_VERSION}-distutils"; \
 		fi; \
 		exit 1; \
 	fi
@@ -159,18 +296,43 @@ $(VENV_PATH):
 		echo "$(BLUE)   🍎 Apple Silicon optimization enabled$(NC)"; \
 	fi
 	@$(PYTHON) -m venv $(VENV_PATH) || { \
-		echo "$(RED)❌ Failed to create virtual environment. Trying recovery options...$(NC)"; \
-		echo "$(YELLOW)🔄 Attempting recovery with --without-pip flag...$(NC)"; \
+		echo "$(RED)❌ Failed to create virtual environment$(NC)"; \
+		echo "$(YELLOW)🔄 Attempting recovery...$(NC)"; \
 		$(PYTHON) -m venv $(VENV_PATH) --without-pip || { \
-			echo "$(RED)❌ Virtual environment creation completely failed.$(NC)"; \
-			echo "$(YELLOW)📋 Troubleshooting steps:$(NC)"; \
-			if [ "$$(uname -s)" = "Darwin" ]; then \
-				echo "$(YELLOW)   1. brew uninstall python@3.12 && brew install python@3.12$(NC)"; \
-				echo "$(YELLOW)   2. Check Xcode Command Line Tools: xcode-select --install$(NC)"; \
+			echo "$(RED)❌ Virtual environment creation failed$(NC)"; \
+			echo ""; \
+			echo "$(YELLOW)📋 Troubleshooting for $(PYTHON_ENV_TYPE) environment:$(NC)"; \
+			if [ "$(PYTHON_ENV_TYPE)" = "conda" ]; then \
+				echo "$(YELLOW)   1. Exit conda and use system Python:$(NC)"; \
+				echo "      conda deactivate"; \
+				echo "      make clean-install"; \
+				echo "$(YELLOW)   2. Or create conda environment instead:$(NC)"; \
+				echo "      conda create -n lobster python=3.12"; \
+				echo "      conda activate lobster"; \
+				echo "      pip install -e ."; \
+			elif [ "$(PYTHON_ENV_TYPE)" = "pyenv" ]; then \
+				echo "$(YELLOW)   1. Reinstall Python with all components:$(NC)"; \
+				echo "      pyenv install --force 3.12.0"; \
+				echo "      pyenv rehash"; \
+				echo "$(YELLOW)   2. Check pyenv shims:$(NC)"; \
+				echo "      pyenv which python"; \
+			elif [ "$$(uname -s)" = "Darwin" ]; then \
+				echo "$(YELLOW)   1. Reinstall Python:$(NC)"; \
+				echo "      brew uninstall --ignore-dependencies python@3.12"; \
+				echo "      brew install python@3.12"; \
+				echo "$(YELLOW)   2. Check Xcode tools:$(NC)"; \
+				echo "      xcode-select --install"; \
+				echo "$(YELLOW)   3. Check disk space and permissions:$(NC)"; \
+				echo "      df -h ."; \
+				echo "      ls -la ."; \
 			else \
-				echo "$(YELLOW)   1. sudo apt update && sudo apt install python3.12-venv$(NC)"; \
+				echo "$(YELLOW)   1. Install venv package:$(NC)"; \
+				echo "      sudo apt update"; \
+				echo "      sudo apt install python3.12-venv python3.12-dev"; \
 				echo "$(YELLOW)   2. Check disk space: df -h$(NC)"; \
 				echo "$(YELLOW)   3. Check permissions: ls -la .$(NC)"; \
+				echo "$(YELLOW)   4. Try with --system-site-packages:$(NC)"; \
+				echo "      $(PYTHON) -m venv $(VENV_PATH) --system-site-packages"; \
 			fi; \
 			exit 1; \
 		}; \
@@ -217,7 +379,7 @@ setup-env: $(VENV_PATH)
 	fi
 
 # Installation targets
-install: check-python $(VENV_PATH) setup-env
+install: $(VENV_PATH) setup-env
 	@echo "🦞 Installing Lobster AI..."
 	@if [ "$(USE_UV)" = "true" ]; then \
 		echo "📦 Using uv for faster installation..."; \
@@ -261,7 +423,7 @@ install: check-python $(VENV_PATH) setup-env
 	@echo ""
 	@echo "$(BLUE)💡 Tip: Try asking 'Download GSE109564 and perform single-cell analysis'$(NC)"
 
-dev-install: check-python $(VENV_PATH) setup-env
+dev-install: $(VENV_PATH) setup-env
 	@echo "🦞 Installing Lobster AI with development dependencies..."
 	@if [ "$(USE_UV)" = "true" ]; then \
 		echo "📦 Using uv for faster installation..."; \
@@ -303,6 +465,11 @@ clean-install:
 activate:
 	@echo "To activate the virtual environment, run:"
 	@echo "$(YELLOW)source $(VENV_PATH)/bin/activate$(NC)"
+	@if [ -n "$(CONDA_ACTIVE)" ]; then \
+		echo ""; \
+		echo "$(YELLOW)⚠️  Note: You're in conda environment '$(CONDA_ACTIVE)'$(NC)"; \
+		echo "$(YELLOW)   Consider: conda deactivate$(NC)"; \
+	fi
 
 # Global installation (macOS/Linux)
 install-global: $(VENV_PATH)
@@ -458,6 +625,33 @@ docs: $(VENV_PATH)
 docs-serve: $(VENV_PATH)
 	@echo "📚 Serving documentation..."
 	cd docs && ../$(VENV_PATH)/bin/mkdocs serve
+
+# Python info for debugging
+python-info:
+	@echo "🐍 Python Environment Information"
+	@echo "================================"
+	@echo "Environment Type: $(PYTHON_ENV_TYPE)"
+	@echo "Python Command: $(PYTHON)"
+	@echo "Python Path: $$(which $(PYTHON) 2>/dev/null || echo 'not found')"
+	@echo "Python Version: $$($(PYTHON) --version 2>&1 || echo 'N/A')"
+	@if [ -n "$(CONDA_ACTIVE)" ]; then \
+		echo "Conda Environment: $(CONDA_ACTIVE)"; \
+		echo "Conda Python: $$(which python)"; \
+	fi
+	@if [ -n "$(PYENV_VERSION)" ]; then \
+		echo "Pyenv Version: $(PYENV_VERSION)"; \
+		echo "Pyenv Root: $$(pyenv root 2>/dev/null)"; \
+	fi
+	@if [ -n "$(VIRTUAL_ENV)" ]; then \
+		echo "Active Venv: $(VIRTUAL_ENV)"; \
+	fi
+	@echo ""
+	@echo "Available Python versions:"
+	@for p in python python3 python3.12 python3.13; do \
+		if command -v $$p >/dev/null 2>&1; then \
+			echo "  $$p: $$($$p --version 2>&1) at $$(which $$p)"; \
+		fi; \
+	done
 
 # Utility targets
 check-env: $(VENV_PATH)
