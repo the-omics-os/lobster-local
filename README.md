@@ -151,6 +151,7 @@ Analysis complete! Results saved to workspace.
 Lobster AI requires an LLM provider (fill these lines in the newly created `.env` file). Choose one:
 
 **Option 1: Claude API (Recommended)**
+No cost output yet, be aware! You can always switch to cost efficient mode
 ```bash
 # Get your key from https://console.anthropic.com/
 ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
