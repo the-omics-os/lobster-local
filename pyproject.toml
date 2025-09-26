@@ -89,6 +89,7 @@ dependencies = [
     "scvi-tools>=1.4.0",
     # PyTorch support (required by scvi-tools)
     "torch>=2.0.0",
+    "langchain-anthropic>=0.3.20",
 ]
 
 [project.optional-dependencies]
