@@ -16,11 +16,10 @@ Templates include:
 - Tumor microenvironment
 """
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-import pandas as pd
 import numpy as np
 
 

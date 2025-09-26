@@ -9,7 +9,6 @@ import re
 import urllib.parse
 from typing import Dict, List, Optional, Union, Any
 from enum import Enum
-from datetime import datetime
 
 
 class NCBIDatabase(Enum):

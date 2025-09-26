@@ -13,10 +13,8 @@ from typing import Dict, List, Optional, Tuple, Any
 import anndata
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 
-from lobster.core import PseudobulkError, FormulaError, DesignMatrixError
+from lobster.core import FormulaError
 from lobster.tools.differential_formula_service import DifferentialFormulaService
 from lobster.utils.logger import get_logger
 

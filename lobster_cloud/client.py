@@ -256,7 +256,7 @@ class CloudLobsterClient(BaseClient):
             
             return response.json().get("files", [])
             
-        except Exception as e:
+        except Exception:
             # Fallback to empty list on error
             return []
     

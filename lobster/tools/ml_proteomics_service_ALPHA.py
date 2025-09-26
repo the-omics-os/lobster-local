@@ -6,11 +6,9 @@ including protein biomarker discovery, disease classification, and drug target i
 These are template tools that demonstrate ML workflows but are not yet integrated as agent tools.
 """
 
-from typing import Dict, List, Tuple, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 import numpy as np
-import pandas as pd
 import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -314,7 +312,7 @@ class MLProteomicsService:
             logger.info(f"Data: {protein_expression.shape[0]} samples × {protein_expression.shape[1]} proteins")
             
             if drug_response.ndim == 1:
-                logger.info(f"Single drug response analysis")
+                logger.info("Single drug response analysis")
                 n_drugs = 1
             else:
                 logger.info(f"Multi-drug analysis: {drug_response.shape[1]} drugs")

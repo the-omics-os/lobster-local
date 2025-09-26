@@ -9,7 +9,7 @@ progress tracking with orange theming.
 import time
 import psutil
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from threading import Thread, Event
 import queue
@@ -19,11 +19,8 @@ from rich.live import Live
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 from rich.text import Text
 from rich.align import Align
-from rich.columns import Columns
-from rich.console import Group
 from rich import box
 
 from .themes import LobsterTheme
@@ -324,7 +321,7 @@ class LiveDashboard:
             if len(self.system_metrics) > 60:
                 self.system_metrics.pop(0)
 
-        except Exception as e:
+        except Exception:
             # Fallback to dummy metrics if psutil fails
             self.system_metrics.append(SystemMetrics())
 
@@ -346,7 +343,7 @@ class LiveDashboard:
                 # Sleep until next update
                 self.stop_event.wait(self.refresh_rate)
 
-            except Exception as e:
+            except Exception:
                 # Continue monitoring even if there are errors
                 time.sleep(self.refresh_rate)
 

@@ -7,7 +7,7 @@ progress reporting using a simple threading approach.
 
 import threading
 import time
-from typing import Callable, Optional, Any
+from typing import Callable, Optional
 from contextlib import contextmanager
 
 from lobster.utils.logger import get_logger

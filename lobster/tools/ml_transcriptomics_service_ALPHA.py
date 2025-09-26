@@ -6,11 +6,9 @@ including cell type classification, disease prediction, and drug response modeli
 These are template tools that demonstrate ML workflows but are not yet integrated as agent tools.
 """
 
-from typing import Dict, List, Tuple, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 import numpy as np
-import pandas as pd
 import logging
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +67,7 @@ class MLTranscriptomicsService:
         """
         try:
             # Template implementation - would use PyTorch or TensorFlow in practice
-            logger.debug(f"Training deep learning model for cell type classification")
+            logger.debug("Training deep learning model for cell type classification")
             logger.info(f"Data: {X_train.shape[0]} train, {X_test.shape[0]} test samples")
             logger.info(f"Features: {X_train.shape[1]} genes")
             logger.info(f"Classes: {len(np.unique(y_train))} cell types")
@@ -188,7 +186,6 @@ class MLTranscriptomicsService:
             top_features_idx = np.argsort(feature_importance)[-20:]  # Top 20 features
             
             # Simulate additional metrics
-            from sklearn.metrics import precision_recall_fscore_support, roc_auc_score
             
             # Mock balanced metrics
             precision = 0.8 + np.random.random() * 0.15

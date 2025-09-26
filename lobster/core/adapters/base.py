@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Union
 import anndata
 import numpy as np
 import pandas as pd
-import scanpy as sc
 
 from lobster.core.interfaces.adapter import IModalityAdapter
 from lobster.core.interfaces.validator import ValidationResult

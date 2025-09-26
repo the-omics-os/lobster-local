@@ -5,10 +5,9 @@ This module provides sophisticated multi-task progress tracking with
 live updates, concurrent operation monitoring, and orange theming.
 """
 
-import asyncio
 import time
 import uuid
-from typing import Dict, List, Optional, Callable, Any, Set
+from typing import Dict, List, Optional, Any, Set
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import Thread, Event, Lock
@@ -20,14 +19,10 @@ from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
 from rich.progress import (
-    Progress, TaskID, SpinnerColumn, TextColumn, BarColumn,
-    TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn,
-    FileSizeColumn, TransferSpeedColumn, DownloadColumn,
-    MofNCompleteColumn
+    TaskID
 )
 from rich.text import Text
 from rich.align import Align
-from rich.columns import Columns
 from rich.console import Group
 from rich import box
 

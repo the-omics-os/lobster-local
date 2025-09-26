@@ -6,17 +6,9 @@ data from the Gene Expression Omnibus (GEO) database when the standard GEOparse 
 It includes TAR processing, supplementary file handling, and alternative download strategies.
 """
 
-import json
-import os
-import re
-import tarfile
-import urllib.request
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List, Union
+from typing import Any, Dict, Optional
 
-import numpy as np
 import pandas as pd
 
 try:
@@ -24,12 +16,9 @@ try:
 except ImportError:
     GEOparse = None
 
-from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
 # Import helper modules for fallback functionality
-from lobster.tools.geo_downloader import GEODownloadManager
-from lobster.tools.geo_parser import GEOParser
 
 # Import the main service classes and enums
 from lobster.tools.geo_service import GEODataSource, GEOResult

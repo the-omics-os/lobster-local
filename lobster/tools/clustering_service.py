@@ -6,10 +6,9 @@ and generating visualizations of the results.
 """
 
 import time
-from typing import Callable, Dict, Optional, Tuple, Any, Union
+from typing import Callable, Dict, Optional, Tuple, Any
 
 import anndata
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc

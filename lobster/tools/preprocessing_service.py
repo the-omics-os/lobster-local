@@ -5,18 +5,15 @@ This service implements professional-grade preprocessing methods including ambie
 correction, cell filtering, normalization, and batch correction/integration.
 """
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import anndata
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
 import scipy.sparse as spr
 from plotly.subplots import make_subplots
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 
 from lobster.utils.logger import get_logger
 

@@ -8,21 +8,18 @@ and implements comprehensive literature search and dataset discovery workflows.
 from typing import Any, Dict, List, Optional, Union
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from lobster.tools.providers.base_provider import (
     BasePublicationProvider,
     PublicationSource,
     DatasetType,
-    PublicationMetadata,
-    DatasetMetadata
+    PublicationMetadata
 )
 from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
 from lobster.tools.providers.geo_provider import GEOProvider, GEOProviderConfig
 from lobster.tools.providers.geo_utils import (
-    is_direct_accession,
     is_geo_sample_accession,
-    detect_accession_type,
     extract_accession_info
 )
 from lobster.core.data_manager_v2 import DataManagerV2

@@ -1848,7 +1848,7 @@ class DataManagerV2:
                 X = adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X
                 X = X / np.sum(X, axis=1, keepdims=True) * 1e6
                 adata.X = X
-            processing_steps.append(f"Applied CPM normalization")
+            processing_steps.append("Applied CPM normalization")
         
         # Step 2: Feature Selection
         X = adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X

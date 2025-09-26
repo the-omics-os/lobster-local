@@ -3,16 +3,13 @@ Lobster AI - File Metadata Analyzer
 Efficiently extract file metadata without loading full content for performance optimization.
 """
 
-import os
 import gzip
 import h5py
-import pandas as pd
 import scanpy as sc
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, Union, Tuple, List
+from typing import Dict, Any, Optional, Union, List
 import tempfile
-import shutil
 from openpyxl import load_workbook
 
 from lobster.utils.logger import get_logger

@@ -9,8 +9,7 @@ S3 integration without API changes.
 import logging
 import collections
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlparse
+from typing import Any, Dict, Optional, Union
 
 import anndata
 import numpy as np

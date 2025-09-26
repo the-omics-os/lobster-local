@@ -231,7 +231,7 @@ class BasePublicationProvider(ABC):
         if not datasets:
             return f"No datasets found for publication: {publication_id}"
         
-        formatted = f"## Dataset Discovery Results\n\n"
+        formatted = "## Dataset Discovery Results\n\n"
         formatted += f"**Publication**: {publication_id}\n"
         formatted += f"**Datasets Found**: {len(datasets)}\n\n"
         

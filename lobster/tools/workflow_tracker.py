@@ -8,10 +8,9 @@ criteria through conversational agent interaction.
 
 import json
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 import pandas as pd
 import numpy as np
-from pathlib import Path
 
 from lobster.utils.logger import get_logger
 
@@ -563,12 +562,12 @@ class WorkflowTracker:
         try:
             comparison = self.compare_iterations(modality_name, iteration_1, iteration_2)
             
-            report = f"# DE Iteration Comparison Report\n\n"
+            report = "# DE Iteration Comparison Report\n\n"
             report += f"**Modality**: {modality_name}\n"
             report += f"**Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             
             # Iteration details
-            report += f"## Iterations Compared\n\n"
+            report += "## Iterations Compared\n\n"
             report += f"**Iteration 1**: {comparison['iteration_1']['name']}\n"
             report += f"• Formula: `{comparison['iteration_1']['formula']}`\n"
             report += f"• Significant genes: {comparison['iteration_1']['n_significant']:,}\n\n"
@@ -579,14 +578,14 @@ class WorkflowTracker:
             
             # Overlap statistics
             overlap_stats = comparison['overlap_stats']
-            report += f"## Overlap Analysis\n\n"
+            report += "## Overlap Analysis\n\n"
             report += f"• **Overlapping genes**: {overlap_stats['overlapping_genes']:,} ({overlap_stats['overlap_percentage']:.1f}%)\n"
             report += f"• **Unique to iteration 1**: {overlap_stats['unique_to_1']:,}\n"
             report += f"• **Unique to iteration 2**: {overlap_stats['unique_to_2']:,}\n"
             report += f"• **Total unique genes**: {overlap_stats['total_unique_genes']:,}\n\n"
             
             # Interpretation
-            report += f"## Interpretation\n\n"
+            report += "## Interpretation\n\n"
             if overlap_stats['overlap_percentage'] > 70:
                 report += f"**High overlap** ({overlap_stats['overlap_percentage']:.1f}%) indicates formulas capture similar biology.\n"
             elif overlap_stats['overlap_percentage'] > 40:
@@ -599,7 +598,7 @@ class WorkflowTracker:
                 gene_lists = comparison['gene_lists']
                 
                 if gene_lists['overlap']:
-                    report += f"\n### Overlapping Genes\n"
+                    report += "\n### Overlapping Genes\n"
                     overlap_genes = gene_lists['overlap'][:max_genes_per_list]
                     report += f"{', '.join(overlap_genes)}\n"
                     
@@ -612,7 +611,7 @@ class WorkflowTracker:
                     report += f"{', '.join(unique1_genes)}\n"
                     
                     if len(gene_lists['unique_to_1']) > max_genes_per_list:
-                        report += f"... and more\n"
+                        report += "... and more\n"
                 
                 if gene_lists['unique_to_2']:
                     report += f"\n### Unique to {comparison['iteration_2']['name']}\n"
@@ -620,7 +619,7 @@ class WorkflowTracker:
                     report += f"{', '.join(unique2_genes)}\n"
                     
                     if len(gene_lists['unique_to_2']) > max_genes_per_list:
-                        report += f"... and more\n"
+                        report += "... and more\n"
             
             return report
             

@@ -14,13 +14,11 @@ import re
 import tarfile
 import urllib.request
 import urllib.parse
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, List, Union, Callable
 from enum import Enum
 from dataclasses import dataclass
-from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -38,7 +36,6 @@ from lobster.tools.geo_downloader import GEODownloadManager
 from lobster.tools.geo_parser import GEOParser
 from lobster.tools.pipeline_strategy import (
     PipelineStrategyEngine,
-    PipelineContext,
     PipelineType,
     create_pipeline_context
 )
@@ -543,7 +540,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             
             return GEOResult(
                 success=False,
-                error_message=f"All pipeline steps failed after enough attempts",
+                error_message="All pipeline steps failed after enough attempts",
                 metadata=cached_metadata,
                 source=GEODataSource.GEOPARSE
             )
@@ -1661,7 +1658,7 @@ The actual expression data download will be much faster now that metadata is pre
             else:
                 # Use all genes, filling missing with zeros
                 combined_matrix = pd.concat(matrices_list, axis=0, sort=False).fillna(0)
-                logger.debug(f"Concatenated with all genes, filled missing with zeros")
+                logger.debug("Concatenated with all genes, filled missing with zeros")
             
             logger.info(f"Final combined matrix shape: {combined_matrix.shape}")
             return combined_matrix
@@ -1779,7 +1776,7 @@ The actual expression data download will be much faster now that metadata is pre
                 df = self._download_and_combine_single_cell_files(suppl_files_mapped, gsm_id)
                 return df
                 
-        except Exception as e:
+        except Exception:
             # Fallback to expression table
             if hasattr(gsm, "table") and gsm.table is not None:
                 matrix = gsm.table
@@ -2280,7 +2277,7 @@ The actual expression data download will be much faster now that metadata is pre
             if not local_path.exists():
                 logger.info(f"Downloading H5 file: {url}")
                 if not self.geo_downloader.download_file(url, local_path):
-                    logger.error(f"Failed to download H5 file")
+                    logger.error("Failed to download H5 file")
                     return None
             else:
                 logger.info(f"Using cached H5 file: {local_path}")
@@ -2320,7 +2317,7 @@ The actual expression data download will be much faster now that metadata is pre
             if not local_path.exists():
                 logger.info(f"Downloading expression file: {url}")
                 if not self.geo_downloader.download_file(url, local_path):
-                    logger.error(f"Failed to download expression file")
+                    logger.error("Failed to download expression file")
                     return None
             else:
                 logger.info(f"Using cached expression file: {local_path}")

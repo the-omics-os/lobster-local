@@ -10,7 +10,6 @@ from typing import Dict, Optional, Any
 from enum import Enum
 import os
 import json
-from pathlib import Path
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -539,7 +538,7 @@ class LobsterAgentConfigurator:
             if agent_config.thinking_config and agent_config.thinking_config.enabled:
                 print(f"   🧠 Thinking: Enabled (Budget: {agent_config.thinking_config.budget_tokens} tokens)")
             elif model.supports_thinking:
-                print(f"   🧠 Thinking: Available but disabled")
+                print("   🧠 Thinking: Available but disabled")
 
 # Singleton instance
 _configurator = None

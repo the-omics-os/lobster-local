@@ -7,8 +7,8 @@ through environment variables while maintaining backward compatibility.
 """
 
 import os
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from dataclasses import dataclass
+from typing import Dict, Any
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)

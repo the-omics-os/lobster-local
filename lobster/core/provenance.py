@@ -187,7 +187,7 @@ class ProvenanceTracker:
         agent_id = self.create_agent(
             name=adapter_name,
             agent_type="software",
-            description=f"Data adapter for loading biological data"
+            description="Data adapter for loading biological data"
         )
 
         # Create loading activity
@@ -229,7 +229,7 @@ class ProvenanceTracker:
         agent_id = self.create_agent(
             name=agent_name,
             agent_type="software",
-            description=f"Data processing agent"
+            description="Data processing agent"
         )
 
         # Create processing activity
@@ -274,7 +274,7 @@ class ProvenanceTracker:
         agent_id = self.create_agent(
             name=backend_name,
             agent_type="software",
-            description=f"Data storage backend"
+            description="Data storage backend"
         )
 
         # Create saving activity

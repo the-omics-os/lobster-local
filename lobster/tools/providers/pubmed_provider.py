@@ -13,22 +13,15 @@ import urllib.request
 import re
 import random
 import socket
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
-from datetime import datetime
+from typing import Any, Dict, Iterator, List, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from lobster.tools.providers.base_provider import (
     BasePublicationProvider, 
     PublicationSource, 
     DatasetType, 
-    PublicationMetadata, 
-    DatasetMetadata
-)
-from lobster.tools.providers.ncbi_query_builder import (
-    NCBIDatabase,
-    PubMedQueryBuilder as QueryBuilder,
-    build_pubmed_query
+    PublicationMetadata
 )
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
@@ -1041,7 +1034,7 @@ class PubMedProvider(BasePublicationProvider):
         if total_datasets == 0:
             response += "**No datasets found**. Check supplementary materials or contact authors.\n"
         else:
-            response += f"**Found dataset(s)**:\n\n"
+            response += "**Found dataset(s)**:\n\n"
             
             dataset_lines = []
             

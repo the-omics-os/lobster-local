@@ -7,7 +7,7 @@ restoration, and multi-omics data integration with proper modality handling and
 schema validation.
 """
 
-from typing import List, Dict
+from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 from lobster.config.llm_factory import create_llm
@@ -16,7 +16,7 @@ import pandas as pd
 from datetime import date
 
 from lobster.agents.state import DataExpertState
-from lobster.agents.data_expert_assistant import DataExpertAssistant, StrategyConfig
+from lobster.agents.data_expert_assistant import DataExpertAssistant
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
@@ -338,9 +338,9 @@ Use this modality for quality control, filtering, or downstream analysis."""
                 return f"File not found: {file_path}"
             
             if not isinstance(adapter, str):
-                return f"Modality type must be a string"
+                return "Modality type must be a string"
             elif not adapter:
-                return f"Modality type can not be None"            
+                return "Modality type can not be None"            
             
             # Auto-detect modality type if requested
             if adapter == "auto_detect":
@@ -415,7 +415,6 @@ The dataset is now available as modality '{modality_name}' for analysis."""
             str: Status of loading operation
         """
         try:
-            from pathlib import Path
             file_path = data_manager.data_dir / file_path
             
             if not file_path.exists():
@@ -755,7 +754,7 @@ To save, run again with save_to_file=True"""
                 if result.get("skipped"):
                     response += f"\n⚠️ **Skipped**: {len(result['skipped'])} datasets (size limits)\n"
 
-                response += f"\n✅ All restored datasets are now available as modalities for analysis."
+                response += "\n✅ All restored datasets are now available as modalities for analysis."
 
                 # Log the operation
                 data_manager.log_tool_usage(

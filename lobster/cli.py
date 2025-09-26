@@ -9,11 +9,8 @@ from typing import Optional
 import os
 os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = '900000'
 import subprocess
-import shutil
 
 import typer
-import tabulate
-from tabulate import tabulate
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -21,19 +18,16 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from rich.prompt import Prompt, Confirm
-from rich import get_console as rich_get_console
 from rich import box
 from rich import console
 
 from lobster.core.client import AgentClient
 # Import new UI system
-from lobster.ui import LobsterTheme, get_console, setup_logging, get_progress_manager
+from lobster.ui import LobsterTheme
 from lobster.ui.console_manager import get_console_manager
-from lobster.ui.live_dashboard import get_dashboard
 from lobster.ui.components import (
     create_file_tree, create_workspace_tree,
-    create_system_dashboard, create_workspace_dashboard, create_analysis_dashboard,
-    create_multi_progress_layout, get_multi_progress_manager, get_status_display
+    get_multi_progress_manager, get_status_display
 )
 # Import the proper callback handler and system utilities
 from lobster.utils import TerminalCallbackHandler, SimpleTerminalCallback, open_path
@@ -245,7 +239,7 @@ class CloudAwareCache:
                     # For cloud connection errors, return stale cache if available
                     if key in self.cache:
                         console = console_manager.get_console()
-                        console.print(f"[dim yellow]Using cached data due to connection issue[/dim yellow]")
+                        console.print("[dim yellow]Using cached data due to connection issue[/dim yellow]")
                         return self.cache[key]['data']
                 raise e
 
@@ -280,7 +274,7 @@ def _add_command_to_history(client: AgentClient, command: str, summary: str, is_
             )
         else:
             # Fallback for other client types (cloud, API, etc.)
-            console.print(f"[dim yellow]Command history not supported for this client type[/dim yellow]", style="dim")
+            console.print("[dim yellow]Command history not supported for this client type[/dim yellow]", style="dim")
 
     except Exception as e:
         # Never break CLI functionality for history logging
@@ -1014,7 +1008,6 @@ def execute_shell_command(command: str) -> bool:
                     content = file_path.read_text(encoding='utf-8', errors='replace')
                     
                     # Try to guess syntax from extension for highlighting
-                    import mimetypes
                     ext = file_path.suffix.lower()
                     
                     # Map common extensions to syntax highlighting
@@ -1151,7 +1144,7 @@ def display_welcome():
     elif PROMPT_TOOLKIT_AVAILABLE:
         input_status = f"[dim {LobsterTheme.PRIMARY_ORANGE}]✨ Enhanced input: Tab autocomplete enabled[/dim {LobsterTheme.PRIMARY_ORANGE}]"
     else:
-        input_status = f"[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
+        input_status = "[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
 
     welcome_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
 
@@ -1433,7 +1426,7 @@ def init_client_with_animation(
     console.print(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🔧 Starting multi-agent system...[/{LobsterTheme.PRIMARY_ORANGE}]")
     client = init_client(workspace, reasoning, verbose, debug)
     
-    console.print(f"[bold green]✅ Lobster is cooked and ready![/bold green]\n")
+    console.print("[bold green]✅ Lobster is cooked and ready![/bold green]\n")
     return client
 
 
@@ -2110,10 +2103,10 @@ when they are started by agents or analysis workflows.
                 console.print(summary_table)
                 
                 # Show next steps
-                console.print(f"\n[bold white]🎯 Ready for Analysis![/bold white]")
-                console.print(f"[white]Use these commands to work with your data:[/white]")
-                console.print(f"  • [yellow]/data[/yellow] - View data summary for all loaded datasets")
-                console.print(f"  • [yellow]/modalities[/yellow] - View detailed information for each modality")
+                console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
+                console.print("[white]Use these commands to work with your data:[/white]")
+                console.print("  • [yellow]/data[/yellow] - View data summary for all loaded datasets")
+                console.print("  • [yellow]/modalities[/yellow] - View detailed information for each modality")
                 console.print(f"  • [yellow]Compare the {loaded_files[0]['modality_name']} and {loaded_files[-1]['modality_name']} datasets[/yellow] - Start comparative analysis")
             
             if failed_files:
@@ -2160,7 +2153,7 @@ when they are started by agents or analysis workflows.
         # Handle different file types
         if file_category == 'bioinformatics' or (file_category == 'tabular' and file_type in ['delimited_data', 'spreadsheet_data']):
             # This is a data file - load it into DataManager
-            console.print(f"[cyan]🧬 Loading data into workspace...[/cyan]")
+            console.print("[cyan]🧬 Loading data into workspace...[/cyan]")
 
             with create_progress(client_arg=client) as progress:
                 progress.add_task("Loading data...", total=None)
@@ -2199,9 +2192,9 @@ when they are started by agents or analysis workflows.
                 console.print(info_table)
                 
                 # Provide next step suggestions
-                console.print(f"\n[bold white]🎯 Ready for Analysis![/bold white]")
-                console.print(f"[white]Use these commands to analyze your data:[/white]")
-                console.print(f"  • [yellow]/data[/yellow] - View data summary")
+                console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
+                console.print("[white]Use these commands to analyze your data:[/white]")
+                console.print("  • [yellow]/data[/yellow] - View data summary")
                 console.print(f"  • [yellow]Analyze the {load_result['modality_name']} dataset[/yellow] - Start analysis")
                 console.print(f"  • [yellow]Generate a quality control report for {load_result['modality_name']}[/yellow] - QC analysis")
                 console.print(f"  • [yellow]Show me the first few rows of {load_result['modality_name']}[/yellow] - Data preview")
@@ -2252,7 +2245,7 @@ when they are started by agents or analysis workflows.
                     # Return summary for conversation history
                     return f"Displayed text file '{filename}' ({file_description}, {len(content.splitlines())} lines)"
                 else:
-                    console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]")
+                    console.print("[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]")
                     return f"Failed to read text file '{filename}'"
             except Exception as e:
                 console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {e}[/red]")
@@ -2260,16 +2253,16 @@ when they are started by agents or analysis workflows.
         
         else:
             # Binary file or unsupported type
-            console.print(f"[bold yellow on black] ℹ️  File Info [/bold yellow on black]")
+            console.print("[bold yellow on black] ℹ️  File Info [/bold yellow on black]")
             console.print(f"[white]File type '[yellow]{file_description}[/yellow]' is not supported for reading or loading.[/white]")
-            console.print(f"[grey50]This appears to be a binary file or unsupported format.[/grey50]")
+            console.print("[grey50]This appears to be a binary file or unsupported format.[/grey50]")
             
             if file_category == 'image':
-                console.print(f"[cyan]💡 This is an image file. Use your system's image viewer to open it.[/cyan]")
+                console.print("[cyan]💡 This is an image file. Use your system's image viewer to open it.[/cyan]")
             elif file_category == 'archive':
-                console.print(f"[cyan]💡 This is an archive file. Extract it first to access the contents.[/cyan]")
+                console.print("[cyan]💡 This is an archive file. Extract it first to access the contents.[/cyan]")
             else:
-                console.print(f"[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]")
+                console.print("[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]")
 
             # Return summary for conversation history
             return f"Identified file '{filename}' as {file_description} ({file_category}) - not supported for loading or display"
@@ -2421,7 +2414,7 @@ when they are started by agents or analysis workflows.
             
             # Show individual modality details if multiple modalities are loaded
             if summary.get("modalities"):
-                console.print(f"\n[bold red]🧬 Individual Modality Details[/bold red]")
+                console.print("\n[bold red]🧬 Individual Modality Details[/bold red]")
                 
                 modalities_table = Table(
                     box=box.SIMPLE,
@@ -2585,12 +2578,12 @@ when they are started by agents or analysis workflows.
                 workspace_path = client.data_manager.workspace_path
                 data_dir = workspace_path / "data"
 
-                console.print(f"[yellow]📂 No datasets found in workspace[/yellow]")
+                console.print("[yellow]📂 No datasets found in workspace[/yellow]")
                 console.print(f"[grey70]Workspace: {workspace_path}[/grey70]")
                 console.print(f"[grey70]Data directory: {data_dir}[/grey70]")
 
                 if not data_dir.exists():
-                    console.print(f"[red]⚠️  Data directory doesn't exist[/red]")
+                    console.print("[red]⚠️  Data directory doesn't exist[/red]")
                     console.print(f"[cyan]💡 Create it with: mkdir -p {data_dir}[/cyan]")
                 else:
                     # Check what files are actually in the data directory
@@ -2683,22 +2676,22 @@ when they are started by agents or analysis workflows.
             # Show directories
             if workspace_status.get("directories"):
                 dirs = workspace_status["directories"]
-                console.print(f"\n[bold white]📁 Directories:[/bold white]")
+                console.print("\n[bold white]📁 Directories:[/bold white]")
                 for dir_type, path in dirs.items():
                     console.print(f"  • {dir_type.title()}: [grey74]{path}[/grey74]")
             
             # Show loaded modalities
             if workspace_status.get("modality_names"):
-                console.print(f"\n[bold white]🧬 Loaded Modalities:[/bold white]")
+                console.print("\n[bold white]🧬 Loaded Modalities:[/bold white]")
                 for modality in workspace_status["modality_names"]:
                     console.print(f"  • {modality}")
             
             # Show available backends and adapters
-            console.print(f"\n[bold white]🔧 Available Backends:[/bold white]")
+            console.print("\n[bold white]🔧 Available Backends:[/bold white]")
             for backend in workspace_status.get("registered_backends", []):
                 console.print(f"  • {backend}")
             
-            console.print(f"\n[bold white]🔌 Available Adapters:[/bold white]")
+            console.print("\n[bold white]🔌 Available Adapters:[/bold white]")
             for adapter in workspace_status.get("registered_adapters", []):
                 console.print(f"  • {adapter}")
     
@@ -2804,7 +2797,7 @@ when they are started by agents or analysis workflows.
 
                 # Basic Information
                 matrix_info = _get_matrix_info(adata.X)
-                console.print(f"\n[bold white]📊 Basic Information[/bold white]")
+                console.print("\n[bold white]📊 Basic Information[/bold white]")
                 basic_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
                 basic_table.add_column("Property", style="grey70")
                 basic_table.add_column("Value", style="white")
@@ -2821,8 +2814,8 @@ when they are started by agents or analysis workflows.
                 console.print(basic_table)
 
                 # Data Matrix (X) Preview
-                console.print(f"\n[bold white]📈 Data Matrix (X)[/bold white]")
-                console.print(f"[grey70]Preview (first 5×5 cells):[/grey70]")
+                console.print("\n[bold white]📈 Data Matrix (X)[/bold white]")
+                console.print("[grey70]Preview (first 5×5 cells):[/grey70]")
                 x_preview = _format_data_preview(adata.X)
                 console.print(x_preview)
 
@@ -2842,7 +2835,7 @@ when they are started by agents or analysis workflows.
 
                     # Preview table
                     if len(adata.obs) > 0:
-                        console.print(f"[grey70]Preview:[/grey70]")
+                        console.print("[grey70]Preview:[/grey70]")
                         obs_preview = _format_dataframe_preview(adata.obs)
                         console.print(obs_preview)
 
@@ -2862,12 +2855,12 @@ when they are started by agents or analysis workflows.
 
                     # Preview table
                     if len(adata.var) > 0:
-                        console.print(f"[grey70]Preview:[/grey70]")
+                        console.print("[grey70]Preview:[/grey70]")
                         var_preview = _format_dataframe_preview(adata.var)
                         console.print(var_preview)
 
                 # Additional Data Structures
-                console.print(f"\n[bold white]📦 Additional Data Structures[/bold white]")
+                console.print("\n[bold white]📦 Additional Data Structures[/bold white]")
 
                 # Layers
                 if adata.layers:
@@ -2878,35 +2871,35 @@ when they are started by agents or analysis workflows.
 
                 # Obsm (observation matrices)
                 if adata.obsm:
-                    console.print(f"\n[cyan]Observation Matrices (obsm):[/cyan]")
+                    console.print("\n[cyan]Observation Matrices (obsm):[/cyan]")
                     obsm_table = _format_array_info(dict(adata.obsm))
                     if obsm_table:
                         console.print(obsm_table)
 
                 # Varm (variable matrices)
                 if adata.varm:
-                    console.print(f"\n[cyan]Variable Matrices (varm):[/cyan]")
+                    console.print("\n[cyan]Variable Matrices (varm):[/cyan]")
                     varm_table = _format_array_info(dict(adata.varm))
                     if varm_table:
                         console.print(varm_table)
 
                 # Obsp (observation pairwise)
                 if adata.obsp:
-                    console.print(f"\n[cyan]Observation Pairwise (obsp):[/cyan]")
+                    console.print("\n[cyan]Observation Pairwise (obsp):[/cyan]")
                     for key in adata.obsp.keys():
                         matrix = adata.obsp[key]
                         console.print(f"  • {key}: {matrix.shape[0]}×{matrix.shape[1]}")
 
                 # Varp (variable pairwise)
                 if adata.varp:
-                    console.print(f"\n[cyan]Variable Pairwise (varp):[/cyan]")
+                    console.print("\n[cyan]Variable Pairwise (varp):[/cyan]")
                     for key in adata.varp.keys():
                         matrix = adata.varp[key]
                         console.print(f"  • {key}: {matrix.shape[0]}×{matrix.shape[1]}")
 
                 # Unstructured data (uns)
                 if adata.uns:
-                    console.print(f"\n[cyan]Unstructured Data (uns):[/cyan]")
+                    console.print("\n[cyan]Unstructured Data (uns):[/cyan]")
                     uns_items = []
                     for key, value in adata.uns.items():
                         if isinstance(value, dict):
@@ -2929,7 +2922,7 @@ when they are started by agents or analysis workflows.
                 # Metadata from DataManager if available
                 if hasattr(client.data_manager, 'metadata_store') and modality_name in client.data_manager.metadata_store:
                     metadata = client.data_manager.metadata_store[modality_name]
-                    console.print(f"\n[bold white]📋 Metadata[/bold white]")
+                    console.print("\n[bold white]📋 Metadata[/bold white]")
                     meta_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
                     meta_table.add_column("Property", style="grey70")
                     meta_table.add_column("Value", style="white")
@@ -3071,7 +3064,7 @@ when they are started by agents or analysis workflows.
                         console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Failed to open plot: {message}[/red]")
                         console.print(f"[white]Plot file:[/white] [grey74]{file_to_open}[/grey74]")
                 else:
-                    console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot file not found. Try running /save first.[/red]")
+                    console.print("[bold red on white] ⚠️  Error [/bold red on white] [red]Plot file not found. Try running /save first.[/red]")
             else:
                 console.print(f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot not found: {plot_identifier}[/red]")
                 console.print("[grey50]Use /plots to see available plot IDs and titles[/grey50]")
@@ -3139,7 +3132,7 @@ when they are started by agents or analysis workflows.
         saved_items = client.data_manager.auto_save_state()
 
         if saved_items:
-            console.print(f"[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
+            console.print("[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
             for item in saved_items:
                 console.print(f"  • {item}")
             return f"Saved {len(saved_items)} items to workspace: {', '.join(saved_items[:3])}{'...' if len(saved_items) > 3 else ''}"

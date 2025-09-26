@@ -148,7 +148,7 @@ def ms_proteomics_expert(
             
             # Generate comprehensive response
             response = f"MS Proteomics Quality Assessment for '{modality_name}':\n\n"
-            response += f"**Dataset Characteristics:**\n"
+            response += "**Dataset Characteristics:**\n"
             response += f"- Samples: {final_adata.n_obs}\n"
             response += f"- Proteins: {final_adata.n_vars}\n"
             
@@ -186,7 +186,7 @@ def ms_proteomics_expert(
                 response += f"- Dynamic range: {combined_stats['dynamic_range_log10']:.1f} log10 units\n"
             
             # MS-specific quality recommendations
-            response += f"\n**MS-Specific Quality Recommendations:**\n"
+            response += "\n**MS-Specific Quality Recommendations:**\n"
             
             if combined_stats.get('samples_high_missing', 0) > 0:
                 response += "- Consider filtering samples with excessive missing values\n"
@@ -383,7 +383,7 @@ def ms_proteomics_expert(
             
             if combined_stats.get('imputation_applied', False):
                 response += f"\n- Applied {combined_stats.get('imputation_method', 'unknown')} imputation"
-                response += f"\n  Note: MS data missing values often reflect true biological absence"
+                response += "\n  Note: MS data missing values often reflect true biological absence"
                 if 'n_imputed_values' in combined_stats:
                     response += f" ({combined_stats['n_imputed_values']} values imputed)"
             else:
@@ -393,7 +393,7 @@ def ms_proteomics_expert(
                 response += f"\n- Median normalization factor: {combined_stats['normalization_factor_median']:.2f}"
             
             if combined_stats.get('log_transform_applied', False):
-                response += f"\n- Log2 transformation applied (essential for MS intensity data)"
+                response += "\n- Log2 transformation applied (essential for MS intensity data)"
                 if 'pseudocount' in combined_stats:
                     response += f" (pseudocount: {combined_stats['pseudocount']:.2e})"
             
@@ -560,21 +560,21 @@ def ms_proteomics_expert(
             
             # Show top significant proteins
             if 'top_significant_proteins' in de_stats and de_stats['top_significant_proteins']:
-                response += f"\n\n🧬 **Top Significant Proteins (MS Analysis):**"
+                response += "\n\n🧬 **Top Significant Proteins (MS Analysis):**"
                 for protein_info in de_stats['top_significant_proteins'][:5]:
                     response += f"\n- {protein_info['protein']}: log2FC={protein_info['log2_fold_change']:.2f}, FDR={protein_info['p_adjusted']:.2e}"
             
             # Add volcano plot data info
             if 'volcano_plot_data' in de_stats:
-                response += f"\n\n📈 **Volcano Plot Data:** Available in uns['differential_analysis']['volcano_plot_data']"
+                response += "\n\n📈 **Volcano Plot Data:** Available in uns['differential_analysis']['volcano_plot_data']"
             
             response += f"\n\n💾 **Results stored in modality**: '{de_modality_name}'"
-            response += f"\n📈 **Access results via**: adata.uns['differential_analysis']"
+            response += "\n📈 **Access results via**: adata.uns['differential_analysis']"
             
             # MS-specific notes
-            response += f"\n\n🔬 **MS-Specific Notes:**"
-            response += f"\n- Results account for missing value patterns typical in MS data"
-            response += f"\n- Consider protein groups and peptide evidence when interpreting results"
+            response += "\n\n🔬 **MS-Specific Notes:**"
+            response += "\n- Results account for missing value patterns typical in MS data"
+            response += "\n- Consider protein groups and peptide evidence when interpreting results"
             
             analysis_results["details"]["ms_differential_analysis"] = response
             return response
@@ -646,10 +646,10 @@ def ms_proteomics_expert(
                 response += f"\n💾 **Saved to**: {save_path}"
             
             # MS-specific notes
-            response += f"\n\n🔬 **MS-Specific Notes:**"
-            response += f"\n- Peptide mapping is crucial for MS data quality assessment"
-            response += f"\n- Use peptide counts for protein filtering and quality control"
-            response += f"\n- Consider unique peptides for reliable protein quantification"
+            response += "\n\n🔬 **MS-Specific Notes:**"
+            response += "\n- Peptide mapping is crucial for MS data quality assessment"
+            response += "\n- Use peptide counts for protein filtering and quality control"
+            response += "\n- Consider unique peptides for reliable protein quantification"
             
             analysis_results["details"]["ms_peptide_mapping"] = response
             return response
@@ -673,7 +673,7 @@ def ms_proteomics_expert(
         # Add current MS proteomics modality status
         modalities = data_manager.list_modalities()
         ms_modalities = [m for m in modalities if any(term in m.lower() for term in ['proteomics', 'protein', 'ms', 'mass_spec'])]
-        summary += f"## Current MS Proteomics Modalities\n"
+        summary += "## Current MS Proteomics Modalities\n"
         summary += f"MS Proteomics modalities: {', '.join(ms_modalities)}\n\n"
         
         analysis_results["summary"] = summary

@@ -189,7 +189,6 @@ def get_handoff_tools_for_agent(agent_name: str, available_agents: List[str]) ->
     Returns:
         List of handoff tools that this agent can use
     """
-    from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
 
     # Normalize agent name
     if agent_name.endswith('_agent'):

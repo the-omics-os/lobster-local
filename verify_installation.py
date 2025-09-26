@@ -34,7 +34,7 @@ def test_imports():
 
     except ImportError as e:
         print(f"❌ lobster-core: Core component import failed - {e}")
-        print(f"   This indicates a dependency issue. Try: pip install -e .")
+        print("   This indicates a dependency issue. Try: pip install -e .")
         success = False
 
     # Test CLI functionality
@@ -66,7 +66,6 @@ def test_imports():
 def test_cli_detection():
     """Test CLI cloud detection logic"""
     try:
-        from lobster.cli import init_client
         
         # Mock environment without cloud key
         old_key = os.environ.get('LOBSTER_CLOUD_KEY')

@@ -7,13 +7,11 @@ cell type, enabling proper differential expression analysis at the sample level.
 """
 
 import datetime
-import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import anndata
 import numpy as np
 import pandas as pd
-import scanpy as sc
 from scipy import sparse
 
 from lobster.core import (

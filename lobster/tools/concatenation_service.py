@@ -7,16 +7,12 @@ and geo_service.py, implementing a strategy pattern for different data types
 with advanced memory management and progress tracking.
 """
 
-import os
 import psutil
-import gc
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
-from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd

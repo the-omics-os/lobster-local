@@ -21,17 +21,13 @@ from lobster.tools.providers.base_provider import (
     BasePublicationProvider, 
     PublicationSource, 
     DatasetType, 
-    PublicationMetadata, 
-    DatasetMetadata
+    PublicationMetadata
 )
 from lobster.tools.providers.ncbi_query_builder import (
-    NCBIDatabase,
-    GEOQueryBuilder,
-    build_geo_query
+    GEOQueryBuilder
 )
 from lobster.tools.providers.geo_utils import (
     is_geo_sample_accession,
-    is_geo_series_accession,
     detect_geo_accession_subtype,
     GEOAccessionType,
     get_ncbi_geo_url
@@ -741,7 +737,7 @@ class GEOProvider(BasePublicationProvider):
         response += "\n### 💾 Access Options\n"
         response += f"- **GEO Browser**: [View dataset]({f'https://www.ncbi.nlm.nih.gov/sites/GDSbrowser?acc={accession}'})\n"
         response += f"- **Download**: Use `download_geo_dataset('{accession}')` command\n"
-        response += f"- **FTP Access**: Check GEO FTP site for raw files\n"
+        response += "- **FTP Access**: Check GEO FTP site for raw files\n"
         
         return response
     
@@ -870,7 +866,7 @@ class GEOProvider(BasePublicationProvider):
         Returns:
             Formatted response with sample and parent series info
         """
-        response = f"## GEO Sample Search Results\n\n"
+        response = "## GEO Sample Search Results\n\n"
         response += f"**Sample Accession**: [{gsm_accession}]({get_ncbi_geo_url(gsm_accession)})\n\n"
         
         try:

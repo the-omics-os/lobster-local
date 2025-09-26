@@ -9,8 +9,6 @@ for different data types and contexts.
 import os
 from typing import Dict, Any, Optional
 from rich.theme import Theme
-from rich.style import Style
-from rich.color import Color
 from rich import box
 from rich.panel import Panel
 from rich.text import Text

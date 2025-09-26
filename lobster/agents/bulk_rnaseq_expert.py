@@ -296,7 +296,7 @@ Proceed with filtering and normalization for differential expression analysis.""
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
             
-            response += f"\n\nNext recommended steps: differential expression analysis between experimental groups."
+            response += "\n\nNext recommended steps: differential expression analysis between experimental groups."
             
             analysis_results["details"]["filter_normalize"] = response
             return response
@@ -405,7 +405,7 @@ Proceed with filtering and normalization for differential expression analysis.""
             for gene in de_stats['top_upregulated'][:5]:
                 response += f"\n- {gene}"
             
-            response += f"\n\n🧬 **Top Downregulated Genes:**"
+            response += "\n\n🧬 **Top Downregulated Genes:**"
             for gene in de_stats['top_downregulated'][:5]:
                 response += f"\n- {gene}"
             
@@ -415,7 +415,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                 response += f"\n💾 **Saved to**: {save_path}"
             
             response += f"\n📈 **Access detailed results**: adata.uns['{de_stats['de_results_key']}']"
-            response += f"\n\nUse the significant genes for pathway enrichment analysis or gene set analysis."
+            response += "\n\nUse the significant genes for pathway enrichment analysis or gene set analysis."
             
             analysis_results["details"]["differential_expression"] = response
             return response
@@ -501,7 +501,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                 remaining = len(enrichment_stats['top_terms']) - 8
                 response += f"\n... and {remaining} more pathways"
             
-            response += f"\n\nPathway enrichment reveals biological processes and pathways associated with bulk RNA-seq differential expression."
+            response += "\n\nPathway enrichment reveals biological processes and pathways associated with bulk RNA-seq differential expression."
             
             analysis_results["details"]["pathway_enrichment"] = response
             return response
@@ -534,7 +534,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                                  'bulk' in mod.lower() or 
                                  data_manager._detect_modality_type(mod) == 'bulk_rna_seq']
                 
-                summary += f"## Current Bulk RNA-seq Modalities\n"
+                summary += "## Current Bulk RNA-seq Modalities\n"
                 summary += f"Bulk RNA-seq modalities ({len(bulk_modalities)}): {', '.join(bulk_modalities)}\n\n"
                 
                 # Add modality details
@@ -548,7 +548,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                         key_cols = [col for col in adata.obs.columns if col.lower() in ['condition', 'treatment', 'group', 'batch', 'time_point']]
                         if key_cols:
                             summary += f"  - Experimental design: {', '.join(key_cols)}\n"
-                    except Exception as e:
+                    except Exception:
                         summary += f"- **{mod_name}**: Error accessing modality\n"
             
             analysis_results["summary"] = summary

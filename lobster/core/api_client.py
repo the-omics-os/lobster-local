@@ -11,13 +11,12 @@ Enhanced AgentClient specifically designed for API usage with WebSocket streamin
 ##########################################
 ##########################################
 
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 import asyncio
 
-from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
 from lobster.core.client import AgentClient
 from lobster.core.websocket_callback import APICallbackManager

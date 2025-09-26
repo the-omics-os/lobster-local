@@ -7,7 +7,7 @@ including the new professional agent configuration system.
 
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from dotenv import load_dotenv
 from lobster.config.agent_config import initialize_configurator
 from lobster.config.supervisor_config import SupervisorConfig

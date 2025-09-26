@@ -6,7 +6,6 @@ scientific publications, focusing on best practice parameter identification and
 methodological analysis using the modular DataManagerV2 and publication service.
 """
 
-import re
 from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -246,7 +245,7 @@ def method_expert(
                 results.append(f"### Analysis of {identifier}\n{methods}\n")
             
             # Combine results with analysis header
-            combined_results = f"## Comparative Methodology Analysis\n"
+            combined_results = "## Comparative Methodology Analysis\n"
             combined_results += f"**Publications analyzed**: {len(identifier_list)}\n"
             combined_results += f"**Analysis focus**: {analysis_focus}\n\n"
             combined_results += "\n---\n\n".join(results)

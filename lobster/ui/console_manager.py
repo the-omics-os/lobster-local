@@ -5,9 +5,8 @@ This module provides centralized console management with orange theming,
 enhanced logging integration, and session capture capabilities.
 """
 
-import os
 import logging
-from typing import Optional, Any, Dict, TextIO
+from typing import Optional, Any, Dict
 from pathlib import Path
 from getpass import getpass
 from rich.console import Console, Capture

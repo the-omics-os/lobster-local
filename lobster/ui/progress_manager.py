@@ -8,27 +8,21 @@ and parallel processing visualization with orange theming.
 
 import time
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Callable, Union
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from threading import Lock
-from pathlib import Path
 
 from rich.progress import (
     Progress, TaskID, SpinnerColumn, TextColumn, BarColumn,
     TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn,
-    FileSizeColumn, TransferSpeedColumn, DownloadColumn,
+    TransferSpeedColumn, DownloadColumn,
     MofNCompleteColumn
 )
-from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
 from rich.live import Live
 from rich.layout import Layout
-from rich.align import Align
-from rich.columns import Columns
-from rich import box
 
 from .themes import LobsterTheme
 from .console_manager import get_console_manager

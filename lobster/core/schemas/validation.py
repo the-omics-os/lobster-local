@@ -6,11 +6,10 @@ This module provides validators that can operate in both strict mode
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, Optional, Set
 
 import anndata
 import numpy as np
-import pandas as pd
 
 from lobster.core.interfaces.validator import IValidator, ValidationResult
 

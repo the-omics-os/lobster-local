@@ -158,7 +158,7 @@ def affinity_proteomics_expert(
             
             # Generate comprehensive response
             response = f"Affinity Proteomics Quality Assessment for '{modality_name}':\n\n"
-            response += f"**Dataset Characteristics:**\n"
+            response += "**Dataset Characteristics:**\n"
             response += f"- Samples: {final_adata.n_obs}\n"
             response += f"- Proteins: {final_adata.n_vars} (targeted panel)\n"
             
@@ -184,14 +184,14 @@ def affinity_proteomics_expert(
             if 'plate_correlation' in combined_stats:
                 response += f"- Inter-plate correlation: {combined_stats['plate_correlation']:.3f}\n"
             if 'plate_effect_detected' in combined_stats and combined_stats['plate_effect_detected']:
-                response += f"- Plate effects detected: requires correction\n"
+                response += "- Plate effects detected: requires correction\n"
             
             # Dynamic range
             if 'dynamic_range_log10' in combined_stats:
                 response += f"- Dynamic range: {combined_stats['dynamic_range_log10']:.1f} log10 units\n"
             
             # Affinity-specific quality recommendations
-            response += f"\n**Affinity Platform Quality Recommendations:**\n"
+            response += "\n**Affinity Platform Quality Recommendations:**\n"
             
             if combined_stats.get('missing_value_percentage', 0) > 30:
                 response += "- High missing values unusual for affinity platforms - check assay quality\n"
@@ -403,19 +403,19 @@ def affinity_proteomics_expert(
                 response += f"\n- Applied {combined_stats.get('imputation_method', 'unknown')} imputation"
                 if 'n_imputed_values' in combined_stats:
                     response += f" ({combined_stats['n_imputed_values']} values)"
-                response += f"\n  Note: Imputation appropriate for affinity data with low missing rates"
+                response += "\n  Note: Imputation appropriate for affinity data with low missing rates"
             else:
                 response += "\n- No imputation applied"
             
             if combined_stats.get('batch_correction_applied', False):
-                response += f"\n- Plate effect correction applied"
+                response += "\n- Plate effect correction applied"
                 if 'n_batches_corrected' in combined_stats:
                     response += f" ({combined_stats['n_batches_corrected']} plates)"
             
             if 'normalization_factor_median' in combined_stats:
                 response += f"\n- Median normalization factor: {combined_stats['normalization_factor_median']:.2f}"
             
-            response += f"\n- No log transformation (NPX values already log-scale)"
+            response += "\n- No log transformation (NPX values already log-scale)"
             
             response += f"\n\n💾 **New modality created**: '{normalized_modality_name}'"
 
@@ -584,22 +584,22 @@ def affinity_proteomics_expert(
             
             # Show top significant proteins
             if 'top_significant_proteins' in de_stats and de_stats['top_significant_proteins']:
-                response += f"\n\n🧬 **Top Significant Proteins (Affinity Analysis):**"
+                response += "\n\n🧬 **Top Significant Proteins (Affinity Analysis):**"
                 for protein_info in de_stats['top_significant_proteins'][:5]:
                     response += f"\n- {protein_info['protein']}: log2FC={protein_info['log2_fold_change']:.2f}, FDR={protein_info['p_adjusted']:.2e}"
             
             # Add volcano plot data info
             if 'volcano_plot_data' in de_stats:
-                response += f"\n\n📈 **Volcano Plot Data:** Available in uns['differential_analysis']['volcano_plot_data']"
+                response += "\n\n📈 **Volcano Plot Data:** Available in uns['differential_analysis']['volcano_plot_data']"
             
             response += f"\n\n💾 **Results stored in modality**: '{de_modality_name}'"
-            response += f"\n📈 **Access results via**: adata.uns['differential_analysis']"
+            response += "\n📈 **Access results via**: adata.uns['differential_analysis']"
             
             # Affinity-specific notes
-            response += f"\n\n🔬 **Affinity Platform Notes:**"
-            response += f"\n- Results from targeted protein panel - consider selection bias"
-            response += f"\n- Lower fold change thresholds appropriate for controlled measurements"
-            response += f"\n- Antibody cross-reactivity may affect some results"
+            response += "\n\n🔬 **Affinity Platform Notes:**"
+            response += "\n- Results from targeted protein panel - consider selection bias"
+            response += "\n- Lower fold change thresholds appropriate for controlled measurements"
+            response += "\n- Antibody cross-reactivity may affect some results"
             
             analysis_results["details"]["affinity_differential_analysis"] = response
             return response
@@ -629,7 +629,6 @@ def affinity_proteomics_expert(
         
         try:
             import numpy as np
-            import pandas as pd
             
             # Create working copy
             adata_validated = adata.copy()
@@ -676,19 +675,19 @@ def affinity_proteomics_expert(
 🔬 **Cross-Reactivity Details:**"""
             
             if cross_reactive_proteins:
-                response += f"\n**Potential Cross-Reactive Pairs:**"
+                response += "\n**Potential Cross-Reactive Pairs:**"
                 for protein_i, protein_j, correlation in cross_reactive_proteins[:5]:
                     response += f"\n- {protein_i} ↔ {protein_j}: r={correlation:.3f}"
                 
                 if len(cross_reactive_proteins) > 5:
                     response += f"\n- ... and {len(cross_reactive_proteins) - 5} more pairs"
                 
-                response += f"\n\n**Recommendations:**"
-                response += f"\n- Review antibody specificity documentation"
-                response += f"\n- Consider removing highly cross-reactive antibodies"
-                response += f"\n- Validate results with orthogonal methods"
+                response += "\n\n**Recommendations:**"
+                response += "\n- Review antibody specificity documentation"
+                response += "\n- Consider removing highly cross-reactive antibodies"
+                response += "\n- Validate results with orthogonal methods"
             else:
-                response += f"\nNo significant cross-reactivity detected"
+                response += "\nNo significant cross-reactivity detected"
             
             response += f"\n\n💾 **New modality created**: '{validated_modality_name}'"
             
@@ -717,7 +716,7 @@ def affinity_proteomics_expert(
         # Add current affinity proteomics modality status
         modalities = data_manager.list_modalities()
         affinity_modalities = [m for m in modalities if any(term in m.lower() for term in ['proteomics', 'protein', 'olink', 'soma', 'affinity', 'panel'])]
-        summary += f"## Current Affinity Proteomics Modalities\n"
+        summary += "## Current Affinity Proteomics Modalities\n"
         summary += f"Affinity Proteomics modalities: {', '.join(affinity_modalities)}\n\n"
         
         analysis_results["summary"] = summary

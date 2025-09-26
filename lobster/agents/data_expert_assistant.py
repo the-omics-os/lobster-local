@@ -8,7 +8,7 @@ on data operations.
 
 import json
 import re
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from langchain_aws import ChatBedrockConverse
 from pydantic import Field, BaseModel
 
