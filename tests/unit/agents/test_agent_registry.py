@@ -304,7 +304,8 @@ class TestAgentRegistryManagement:
         # Try to register again - should raise error
         with pytest.raises(ValueError, match="Agent 'test_agent' is already registered"):
             # register_agent(mock_agent_config)  # Function not implemented
-    
+            pass
+
     @pytest.mark.skip(reason="register_agent function not implemented yet")
     def test_register_agent_override(self, temp_agent_registry, mock_agent_config):
         """Test registering agent with override flag."""
@@ -348,6 +349,7 @@ class TestAgentRegistryManagement:
         
         with pytest.raises(ValueError):
             # validate_agent_config(invalid_config)  # Function not implemented
+            pass
 
 
 # ===============================================================================

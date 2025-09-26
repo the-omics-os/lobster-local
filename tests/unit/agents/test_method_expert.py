@@ -15,7 +15,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from lobster.agents.method_expert import method_expert_agent
+from lobster.agents.method_expert import method_expert
 from lobster.core.data_manager_v2 import DataManagerV2
 
 from tests.mock_data.factories import SingleCellDataFactory, BulkRNASeqDataFactory

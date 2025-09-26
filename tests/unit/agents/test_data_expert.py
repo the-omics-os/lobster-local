@@ -15,7 +15,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
-from lobster.agents.data_expert import data_expert_agent
+from lobster.agents.data_expert import data_expert
 from lobster.core.data_manager_v2 import DataManagerV2
 
 from tests.mock_data.factories import SingleCellDataFactory, BulkRNASeqDataFactory

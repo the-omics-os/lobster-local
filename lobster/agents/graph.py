@@ -12,7 +12,7 @@ from langchain_core.tools import tool
 from lobster.agents.langgraph_supervisor import create_supervisor
 from lobster.agents.langgraph_supervisor import create_forward_message_tool
 
-from langchain_aws import ChatBedrockConverse
+from lobster.config.llm_factory import create_llm
 
 from lobster.agents.supervisor import create_supervisor_prompt
 from lobster.agents.state import OverallState
@@ -53,7 +53,7 @@ def create_bioinformatics_graph(
     else:
         model_params = settings.get_agent_llm_params('supervisor')
 
-    supervisor_model = ChatBedrockConverse(**model_params)
+    supervisor_model = create_llm('supervisor', model_params)
     
     if callback_handler and hasattr(supervisor_model, 'with_config'):
         supervisor_model = supervisor_model.with_config(callbacks=[callback_handler])

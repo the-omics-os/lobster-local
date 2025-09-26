@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_aws import ChatBedrockConverse
+from lobster.config.llm_factory import create_llm
 
 from lobster.agents.state import VisualizationExpertState
 from lobster.config.settings import get_settings
@@ -44,7 +44,7 @@ def visualization_expert(
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('visualization_expert_agent')
-    llm = ChatBedrockConverse(**model_params)
+    llm = create_llm('visualization_expert_agent', model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])

@@ -7,10 +7,10 @@ Welcome to Lobster AI! This quick start guide will have you analyzing bioinforma
 ### 1. Prerequisites
 - **Python 3.11+** (Python 3.12+ recommended)
 - **Git** for cloning the repository
-- **API Keys** (get these while installation completes):
-  - [OpenAI API Key](https://platform.openai.com/api-keys) (required)
-  - [AWS Bedrock Access](https://console.aws.amazon.com/) (required)
-  - [NCBI API Key](https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/) (optional, for enhanced literature search)
+- **LLM Provider** (choose one):
+  - [Claude API Key](https://console.anthropic.com/) (Recommended - simpler setup)
+  - [AWS Bedrock Access](https://console.aws.amazon.com/) (For AWS users)
+- **NCBI API Key** (optional, for enhanced literature search)
 
 ### 2. One-Command Installation
 
@@ -35,12 +35,17 @@ Edit the `.env` file created during installation:
 nano .env
 ```
 
-Add your API keys:
+Add your API keys (choose ONE provider):
 ```env
-# Required
-OPENAI_API_KEY=your-openai-api-key-here
+# Option 1: Claude API (Recommended for simplicity)
+ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
+
+# Option 2: AWS Bedrock (For AWS users)
 AWS_BEDROCK_ACCESS_KEY=your-aws-access-key
 AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret-key
+
+# Optional: Force a specific provider (auto-detected by default)
+# LOBSTER_LLM_PROVIDER=anthropic  # or "bedrock"
 
 # Optional (enhances literature search)
 NCBI_API_KEY=your-ncbi-api-key-here

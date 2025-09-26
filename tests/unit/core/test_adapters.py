@@ -23,12 +23,12 @@ from pytest_mock import MockerFixture
 from scipy import sparse
 
 from lobster.core.adapters.base import BaseAdapter
-from lobster.core.adapters.transcriptomics import TranscriptomicsAdapter
-from lobster.core.adapters.proteomics import ProteomicsAdapter
+from lobster.core.adapters.transcriptomics_adapter import TranscriptomicsAdapter
+from lobster.core.adapters.proteomics_adapter import ProteomicsAdapter
 from lobster.core.interfaces.adapter import IModalityAdapter
 from lobster.core.interfaces.validator import ValidationResult
-from lobster.core.schemas.transcriptomics import TRANSCRIPTOMICS_SCHEMA
-from lobster.core.schemas.proteomics import PROTEOMICS_SCHEMA
+from lobster.core.schemas.transcriptomics import TranscriptomicsSchema
+from lobster.core.schemas.proteomics import ProteomicsSchema
 
 from tests.mock_data.factories import (
     SingleCellDataFactory, 
@@ -93,7 +93,7 @@ class TestBaseAdapter:
         """Test BaseAdapter initialization."""
         adapter = BaseAdapter()
         
-        assert adapter.modality_name == "generic"
+        assert adapter.get_modality_name() == "generic"
         assert adapter.supported_formats == ["csv", "tsv", "xlsx", "h5ad"]
         assert isinstance(adapter.schema, dict)
         
@@ -107,7 +107,7 @@ class TestBaseAdapter:
         
         adapter = BaseAdapter(config=config)
         
-        assert adapter.modality_name == "custom"
+        assert adapter.get_modality_name() == "custom"
         assert adapter.supported_formats == ["csv", "h5ad"]
         assert adapter.schema == {"custom": "schema"}
     
@@ -276,7 +276,7 @@ class TestInterfaceCompliance:
     
     def test_transcriptomics_adapter_interface_compliance(self):
         """Test TranscriptomicsAdapter implements IModalityAdapter."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
         # Test that adapter is instance of interface
         assert isinstance(adapter, IModalityAdapter)
@@ -293,7 +293,7 @@ class TestInterfaceCompliance:
     
     def test_proteomics_adapter_interface_compliance(self):
         """Test ProteomicsAdapter implements IModalityAdapter."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         
         # Test that adapter is instance of interface
         assert isinstance(adapter, IModalityAdapter)
@@ -309,8 +309,8 @@ class TestInterfaceCompliance:
         assert callable(adapter.get_supported_formats)
     
     @pytest.mark.parametrize("adapter_class,init_kwargs", [
-        (TranscriptomicsAdapter, {"modality_type": "single_cell"}),
-        (TranscriptomicsAdapter, {"modality_type": "bulk"}),
+        (TranscriptomicsAdapter, {"data_type": "single_cell"}),
+        (TranscriptomicsAdapter, {"data_type": "bulk"}),
         (ProteomicsAdapter, {"proteomics_type": "mass_spectrometry"}),
         (ProteomicsAdapter, {"proteomics_type": "affinity"})
     ])
@@ -360,24 +360,24 @@ class TestTranscriptomicsAdapter:
     
     def test_initialization_single_cell(self):
         """Test TranscriptomicsAdapter initialization for single-cell."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
-        assert adapter.modality_type == "single_cell"
-        assert adapter.modality_name == "transcriptomics_single_cell"
-        assert adapter.schema == TRANSCRIPTOMICS_SCHEMA
+        assert adapter.data_type == "single_cell"
+        assert adapter.get_modality_name() == "transcriptomics"
+        assert adapter.get_schema() == TranscriptomicsSchema.get_single_cell_schema()
     
     def test_initialization_bulk(self):
         """Test TranscriptomicsAdapter initialization for bulk RNA-seq."""
-        adapter = TranscriptomicsAdapter(modality_type="bulk")
-        
-        assert adapter.modality_type == "bulk"
-        assert adapter.modality_name == "transcriptomics_bulk"
-        assert adapter.schema == TRANSCRIPTOMICS_SCHEMA
+        adapter = TranscriptomicsAdapter(data_type="bulk")
+
+        assert adapter.data_type == "bulk"
+        assert adapter.get_modality_name() == "transcriptomics"
+        assert adapter.get_schema() == TranscriptomicsSchema.get_bulk_rna_seq_schema()
     
     def test_initialization_invalid_type(self):
         """Test initialization with invalid modality type."""
-        with pytest.raises(ValueError, match="Invalid modality_type"):
-            TranscriptomicsAdapter(modality_type="invalid")
+        with pytest.raises(ValueError, match="Invalid data_type"):
+            TranscriptomicsAdapter(data_type="invalid")
     
     def test_detect_data_type_single_cell(self):
         """Test automatic single-cell detection."""
@@ -409,7 +409,7 @@ class TestTranscriptomicsAdapter:
     
     def test_preprocess_single_cell_data(self, sample_csv_data):
         """Test preprocessing for single-cell data."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         adata = ad.AnnData(sample_csv_data.T)  # Transpose for genes as variables
         
         processed = adapter._preprocess_data(adata)
@@ -427,7 +427,7 @@ class TestTranscriptomicsAdapter:
     
     def test_preprocess_bulk_data(self, sample_csv_data):
         """Test preprocessing for bulk RNA-seq data."""
-        adapter = TranscriptomicsAdapter(modality_type="bulk")
+        adapter = TranscriptomicsAdapter(data_type="bulk")
         adata = ad.AnnData(sample_csv_data.T)
         
         processed = adapter._preprocess_data(adata)
@@ -497,7 +497,7 @@ class TestTranscriptomicsAdapter:
     
     def test_from_source_csv(self, mock_file_operations, sample_csv_data):
         """Test loading from CSV file."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         mock_file_operations['csv'].return_value = sample_csv_data
         
         result = adapter.from_source("test.csv")
@@ -509,7 +509,7 @@ class TestTranscriptomicsAdapter:
     
     def test_from_source_h5ad(self, mock_file_operations):
         """Test loading from H5AD file.""" 
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         mock_adata = SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
         mock_file_operations['h5ad'].return_value = mock_adata
         
@@ -519,7 +519,7 @@ class TestTranscriptomicsAdapter:
     
     def test_validation_success(self):
         """Test validation with compliant data."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
         # Create compliant data
         test_data = SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
@@ -531,7 +531,7 @@ class TestTranscriptomicsAdapter:
     
     def test_validation_missing_required_obs(self):
         """Test validation with missing required observation metadata."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
         # Create data missing required obs columns
         test_data = ad.AnnData(X=np.random.randint(0, 100, (50, 100)))
@@ -544,7 +544,7 @@ class TestTranscriptomicsAdapter:
     
     def test_validation_warnings_mode(self):
         """Test validation in warnings mode (non-strict)."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
         # Create data with some issues but not critical
         test_data = ad.AnnData(X=np.random.randint(0, 100, (50, 100)))
@@ -556,7 +556,7 @@ class TestTranscriptomicsAdapter:
     
     def test_get_quality_metrics(self):
         """Test quality metrics extraction."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         test_data = SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
         
         metrics = adapter.get_quality_metrics(test_data)
@@ -580,26 +580,26 @@ class TestProteomicsAdapter:
     
     def test_initialization_mass_spectrometry(self):
         """Test ProteomicsAdapter initialization for mass spectrometry."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         
-        assert adapter.proteomics_type == "mass_spectrometry"
-        assert adapter.modality_name == "proteomics_ms"
-        assert adapter.schema == PROTEOMICS_SCHEMA
+        assert adapter.data_type == "mass_spectrometry"
+        assert adapter.get_modality_name() == "proteomics"
+        assert adapter.get_schema() == ProteomicsSchema.get_mass_spectrometry_schema()
     
     def test_initialization_affinity(self):
         """Test ProteomicsAdapter initialization for affinity proteomics."""
-        adapter = ProteomicsAdapter(proteomics_type="affinity")
+        adapter = ProteomicsAdapter(data_type="affinity")
         
-        assert adapter.proteomics_type == "affinity"
-        assert adapter.modality_name == "proteomics_affinity"
-        assert adapter.schema == PROTEOMICS_SCHEMA
+        assert adapter.data_type == "affinity"
+        assert adapter.get_modality_name() == "proteomics"
+        assert adapter.get_schema() == ProteomicsSchema.get_affinity_proteomics_schema()
     
     def test_initialization_invalid_type(self):
         """Test initialization with invalid proteomics type."""
         with pytest.raises(ValueError, match="Invalid proteomics_type"):
-            ProteomicsAdapter(proteomics_type="invalid")
+            ProteomicsAdapter(data_type="invalid")
     
-    def test_detect_proteomics_type_mass_spec(self, sample_proteomics_data):
+    def testdetect_data_type_mass_spec(self, sample_proteomics_data):
         """Test automatic mass spectrometry detection."""
         adapter = ProteomicsAdapter()
         
@@ -607,10 +607,10 @@ class TestProteomicsAdapter:
         ms_data = sample_proteomics_data.copy()
         ms_data.columns = ['P12345', 'Q67890', 'CON_TRYP', 'REV_P11111', 'O98765']
         
-        detected_type = adapter._detect_proteomics_type(ms_data)
+        detected_type = adapter.detect_data_type(ms_data)
         assert detected_type == "mass_spectrometry"
     
-    def test_detect_proteomics_type_affinity(self):
+    def testdetect_data_type_affinity(self):
         """Test automatic affinity proteomics detection."""
         adapter = ProteomicsAdapter()
         
@@ -622,12 +622,12 @@ class TestProteomicsAdapter:
             'EGFR': [800, 1200, 900]
         })
         
-        detected_type = adapter._detect_proteomics_type(affinity_data)
+        detected_type = adapter.detect_data_type(affinity_data)
         assert detected_type == "affinity"
     
     def test_preprocess_mass_spec_data(self, sample_proteomics_data):
         """Test preprocessing for mass spectrometry data."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         adata = ad.AnnData(sample_proteomics_data.T)
         
         processed = adapter._preprocess_data(adata)
@@ -645,7 +645,7 @@ class TestProteomicsAdapter:
     
     def test_preprocess_affinity_data(self):
         """Test preprocessing for affinity proteomics data."""
-        adapter = ProteomicsAdapter(proteomics_type="affinity")
+        adapter = ProteomicsAdapter(data_type="affinity")
         
         # Create clean affinity data
         affinity_df = pd.DataFrame({
@@ -763,7 +763,7 @@ class TestProteomicsAdapter:
     
     def test_from_source_csv(self, mock_file_operations, sample_proteomics_data):
         """Test loading proteomics data from CSV."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         mock_file_operations['csv'].return_value = sample_proteomics_data
         
         result = adapter.from_source("test.csv")
@@ -775,7 +775,7 @@ class TestProteomicsAdapter:
     
     def test_validation_success(self):
         """Test validation with compliant proteomics data."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         
         test_data = ProteomicsDataFactory(config=SMALL_DATASET_CONFIG)
         
@@ -786,7 +786,7 @@ class TestProteomicsAdapter:
     
     def test_validation_missing_required_var(self):
         """Test validation with missing required variable metadata."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         
         # Create data missing protein_ids
         test_data = ad.AnnData(X=np.random.randn(20, 100))
@@ -799,7 +799,7 @@ class TestProteomicsAdapter:
     
     def test_get_quality_metrics(self):
         """Test proteomics quality metrics extraction."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         test_data = ProteomicsDataFactory(config=SMALL_DATASET_CONFIG)
         
         metrics = adapter.get_quality_metrics(test_data)
@@ -924,8 +924,8 @@ class TestErrorHandlingEdgeCases:
 @pytest.mark.benchmark
 class TestPerformanceBenchmarking:
     """Test performance characteristics of adapters."""
-    
-def test_csv_loading_performance(self, benchmark, mock_file_operations):
+
+    def test_csv_loading_performance(self, benchmark, mock_file_operations):
         """Benchmark CSV file loading performance."""
         adapter = TranscriptomicsAdapter()
         
@@ -944,7 +944,7 @@ def test_csv_loading_performance(self, benchmark, mock_file_operations):
     
     def test_preprocessing_performance(self, benchmark):
         """Benchmark data preprocessing performance."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
         # Create realistic single-cell dataset
         sc_data = SingleCellDataFactory(config=MEDIUM_DATASET_CONFIG)
@@ -956,7 +956,7 @@ def test_csv_loading_performance(self, benchmark, mock_file_operations):
     
     def test_validation_performance(self, benchmark):
         """Benchmark data validation performance."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         
         # Create large proteomics dataset
         large_proteomics = ProteomicsDataFactory(config=MEDIUM_DATASET_CONFIG)
@@ -976,7 +976,7 @@ class TestIntegrationScenarios:
     
     def test_complete_single_cell_workflow(self, mock_file_operations):
         """Test complete single-cell analysis workflow."""
-        adapter = TranscriptomicsAdapter(modality_type="single_cell")
+        adapter = TranscriptomicsAdapter(data_type="single_cell")
         
         # Create realistic single-cell CSV data
         sc_csv = pd.DataFrame(
@@ -1013,7 +1013,7 @@ class TestIntegrationScenarios:
     
     def test_complete_proteomics_workflow(self, mock_file_operations):
         """Test complete proteomics analysis workflow."""
-        adapter = ProteomicsAdapter(proteomics_type="mass_spectrometry")
+        adapter = ProteomicsAdapter(data_type="mass_spectrometry")
         
         # Create realistic MS proteomics data
         protein_names = (

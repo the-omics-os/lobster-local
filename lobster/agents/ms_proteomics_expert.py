@@ -9,7 +9,7 @@ database searching artifacts, and MS-specific quality control methods.
 from typing import List, Union
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
-from langchain_aws import ChatBedrockConverse
+from lobster.config.llm_factory import create_llm
 
 from datetime import date
 
@@ -34,7 +34,7 @@ def ms_proteomics_expert(
     
     settings = get_settings()
     model_params = settings.get_agent_llm_params('ms_proteomics_expert_agent')
-    llm = ChatBedrockConverse(**model_params)
+    llm = create_llm('ms_proteomics_expert_agent', model_params)
     
     if callback_handler and hasattr(llm, 'with_config'):
         llm = llm.with_config(callbacks=[callback_handler])

@@ -238,3 +238,10 @@ disallow_incomplete_defs = true
 current_version = "0.1.0"
 commit = true
 tag = true
+
+[dependency-groups]
+dev = [
+    "psutil>=7.0.0",
+    "pytest-asyncio>=1.1.0",
+    "pytest-cov>=6.2.1",
+]

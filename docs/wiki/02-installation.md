@@ -38,17 +38,21 @@ Lobster AI automatically detects and uses the best available package manager:
 
 ### Required API Keys
 
-Before installation, obtain these API keys:
+Choose ONE of the following LLM providers:
 
-1. **OpenAI API Key** (Required)
-   - Visit [OpenAI Platform](https://platform.openai.com/api-keys)
+1. **Claude API Key** (Recommended for most users)
+   - Visit [Anthropic Console](https://console.anthropic.com/)
    - Create account and generate API key
-   - Note: Usage-based billing applies
+   - Add to `.env`: `ANTHROPIC_API_KEY=sk-ant-...`
 
-2. **AWS Bedrock Access** (Required)
+2. **AWS Bedrock Access** (For AWS users)
    - AWS account with Bedrock access
    - Create IAM user with Bedrock permissions
-   - Generate access key and secret key
+   - Add to `.env`:
+     ```
+     AWS_BEDROCK_ACCESS_KEY=...
+     AWS_BEDROCK_SECRET_ACCESS_KEY=...
+     ```
 
 3. **NCBI API Key** (Optional)
    - Visit [NCBI E-utilities](https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/)
@@ -366,11 +370,17 @@ docker build -t lobster-ai:latest .
 # Run interactive container
 make docker-run
 
-# Or manually with custom settings
+# Or manually with custom settings (Claude API example)
 docker run -it --rm \
   -v ~/.lobster:/root/.lobster \
   -v $(pwd)/data:/app/data \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+  -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+  lobster-ai:latest
+
+# Or with AWS Bedrock
+docker run -it --rm \
+  -v ~/.lobster:/root/.lobster \
+  -v $(pwd)/data:/app/data \
   -e AWS_BEDROCK_ACCESS_KEY=$AWS_BEDROCK_ACCESS_KEY \
   -e AWS_BEDROCK_SECRET_ACCESS_KEY=$AWS_BEDROCK_SECRET_ACCESS_KEY \
   lobster-ai:latest
@@ -514,7 +524,8 @@ make install
 **Solutions:**
 ```bash
 # Check environment variables
-echo $OPENAI_API_KEY
+echo $ANTHROPIC_API_KEY    # For Claude API
+echo $AWS_BEDROCK_ACCESS_KEY  # For AWS Bedrock
 source .env  # Load from file
 
 # Test API connectivity

@@ -61,6 +61,7 @@ class Settings:
         self.OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
         self.AWS_BEDROCK_ACCESS_KEY = os.environ.get('AWS_BEDROCK_ACCESS_KEY', '')
         self.AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get('AWS_BEDROCK_SECRET_ACCESS_KEY', '')
+        self.ANTHROPIC_API_KEY = os.environ.get('ANTHROPIC_API_KEY', '')
         self.NCBI_API_KEY = os.environ.get('NCBI_API_KEY', '')
 
         # AWS region (fallback for backward compatibility)
@@ -78,6 +79,18 @@ class Settings:
         # GEO database settings
         self.GEO_CACHE_DIR = os.path.join(self.CACHE_DIR, 'geo')
         Path(self.GEO_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+    
+    @property
+    def llm_provider(self) -> str:
+        """Detect which LLM provider to use based on available credentials."""
+        if os.environ.get('LOBSTER_LLM_PROVIDER'):
+            return os.environ.get('LOBSTER_LLM_PROVIDER')
+        elif self.ANTHROPIC_API_KEY:
+            return 'anthropic'
+        elif self.AWS_BEDROCK_ACCESS_KEY and self.AWS_BEDROCK_SECRET_ACCESS_KEY:
+            return 'bedrock'
+        else:
+            return 'bedrock'  # Default for backward compatibility
     
     def get_all_settings(self) -> Dict[str, Any]:
         """
@@ -116,7 +129,10 @@ class Settings:
             Dictionary of LLM initialization parameters
         """
         try:
-            return self.agent_configurator.get_llm_params(agent_name)
+            params = self.agent_configurator.get_llm_params(agent_name)
+            # Add provider information
+            params['provider'] = self.llm_provider
+            return params
         except KeyError as k:
             # Fallback to legacy settings if agent not configured
             print(f'FAILED TO GET PARAMS: {k}')

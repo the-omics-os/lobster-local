@@ -19,11 +19,18 @@ Lobster AI uses environment variables for configuration. These can be set in a `
 
 ### Required Variables
 
+Choose ONE of the following LLM providers:
+
 ```env
-# Essential API Keys (Required for core functionality)
-OPENAI_API_KEY=your-openai-api-key-here
+# Option 1: Claude API (Recommended for simplicity)
+ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
+
+# Option 2: AWS Bedrock (For AWS users)
 AWS_BEDROCK_ACCESS_KEY=your-aws-access-key-here
 AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret-key-here
+
+# Optional: Force a specific provider (auto-detected by default)
+# LOBSTER_LLM_PROVIDER=anthropic  # or "bedrock"
 ```
 
 ### Optional Variables
@@ -96,33 +103,35 @@ SUPERVISOR_INCLUDE_AGENT_TOOLS=false      # List agent tools (default: false)
 SUPERVISOR_MAX_TOOLS_PER_AGENT=5          # Tools shown per agent (default: 5)
 ```
 
-## API Key Management
+## LLM Provider Management
 
-### OpenAI API Key
+Lobster AI supports multiple LLM providers with automatic detection. Choose ONE of the following providers:
 
-**Required for**: Core AI functionality, natural language processing
+### Claude API (Recommended)
+
+**Best for**: Simple setup, direct billing, most users
 
 **How to get it:**
-1. Visit [OpenAI Platform](https://platform.openai.com/api-keys)
+1. Visit [Anthropic Console](https://console.anthropic.com/)
 2. Create an account or sign in
 3. Navigate to API Keys section
-4. Create new secret key
+4. Create new API key
 5. Copy the key (it won't be shown again)
 
 **Configuration:**
 ```env
-OPENAI_API_KEY=sk-proj-abcd1234...
+ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
 ```
 
 **Usage considerations:**
-- Pay-per-use billing
-- Monitor usage in OpenAI dashboard
-- Set usage limits if needed
-- Keep the key secure and private
+- Pay-per-use billing directly with Anthropic
+- Simple setup with just one API key
+- Global availability
+- Automatic model updates
 
 ### AWS Bedrock Access
 
-**Required for**: Advanced AI models, specific analysis features
+**Best for**: AWS users, enterprise compliance, specific regions
 
 **How to get it:**
 1. Create [AWS account](https://aws.amazon.com/console/)
@@ -152,6 +161,30 @@ OPENAI_API_KEY=sk-proj-abcd1234...
 AWS_BEDROCK_ACCESS_KEY=AKIA...
 AWS_BEDROCK_SECRET_ACCESS_KEY=abc123...
 AWS_REGION=us-east-1  # Optional: defaults to us-east-1
+```
+
+### Provider Auto-Detection
+
+Lobster AI automatically detects which provider to use based on available environment variables:
+
+**Priority Order:**
+1. **Manual Override**: `LOBSTER_LLM_PROVIDER=anthropic` or `=bedrock`
+2. **Claude API**: If `ANTHROPIC_API_KEY` is set
+3. **AWS Bedrock**: If `AWS_BEDROCK_ACCESS_KEY` and `AWS_BEDROCK_SECRET_ACCESS_KEY` are set
+
+**Manual Provider Selection:**
+```env
+# Force specific provider (overrides auto-detection)
+LOBSTER_LLM_PROVIDER=anthropic  # or "bedrock"
+```
+
+**Check Current Provider:**
+```bash
+# Lobster will show detected provider on startup
+lobster chat
+
+# Or check configuration
+lobster config show-config
 ```
 
 ### NCBI API Key (Optional)
@@ -320,11 +353,14 @@ Lobster AI automatically detects whether to run locally or in the cloud based on
 
 **When**: No `LOBSTER_CLOUD_KEY` is set
 
-**Configuration**: Standard environment variables
+**Configuration**: Choose ONE LLM provider
 ```env
-OPENAI_API_KEY=your-key
-AWS_BEDROCK_ACCESS_KEY=your-key
-AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret
+# Option 1: Claude API
+ANTHROPIC_API_KEY=your-claude-key
+
+# Option 2: AWS Bedrock
+AWS_BEDROCK_ACCESS_KEY=your-aws-key
+AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret
 ```
 
 **Characteristics:**
@@ -359,8 +395,9 @@ LOBSTER_ENDPOINT=https://api.lobster.homara.ai
 You can maintain both configurations and switch between them:
 
 ```env
-# Local mode keys
-OPENAI_API_KEY=your-openai-key
+# Local mode keys (choose ONE provider)
+ANTHROPIC_API_KEY=your-claude-key
+# OR
 AWS_BEDROCK_ACCESS_KEY=your-aws-key
 AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret
 
@@ -473,8 +510,7 @@ Expected output:
 ```
 🦞 Configuration Status
 ├── ✅ Environment: .env loaded from ./
-├── ✅ OpenAI API: Connected
-├── ✅ AWS Bedrock: Connected
+├── ✅ LLM Provider: Claude API (or AWS Bedrock)
 ├── ✅ NCBI API: Connected (optional)
 ├── ✅ Profile: production
 └── ✅ Mode: Local processing
@@ -516,13 +552,18 @@ echo ".env" >> .gitignore
 
 ```bash
 # Use system environment variables in production
-export OPENAI_API_KEY="$VAULT_OPENAI_KEY"
+export ANTHROPIC_API_KEY="$VAULT_ANTHROPIC_KEY"
+# OR
 export AWS_BEDROCK_ACCESS_KEY="$VAULT_AWS_KEY"
 
-# Or use secrets management
+# Or use secrets management (choose ONE provider)
 kubectl create secret generic lobster-secrets \
-  --from-literal=openai-key="$OPENAI_API_KEY" \
-  --from-literal=aws-key="$AWS_BEDROCK_ACCESS_KEY"
+  --from-literal=anthropic-key="$ANTHROPIC_API_KEY"
+
+# OR for AWS Bedrock
+kubectl create secret generic lobster-secrets \
+  --from-literal=aws-key="$AWS_BEDROCK_ACCESS_KEY" \
+  --from-literal=aws-secret="$AWS_BEDROCK_SECRET_ACCESS_KEY"
 ```
 
 ### Cloud Security
@@ -547,17 +588,18 @@ LOBSTER_CLOUD_KEY=your-secure-cloud-key
 ```bash
 # Check environment loading
 source .env
-echo $OPENAI_API_KEY
+echo $ANTHROPIC_API_KEY    # For Claude API
+echo $AWS_BEDROCK_ACCESS_KEY  # For AWS Bedrock
 
 # Verify key format
-# OpenAI: sk-proj-... or sk-...
+# Claude API: sk-ant-...
 # AWS: AKIA... (20 chars)
 
 # Test connectivity
 lobster config test
 
 # Check usage limits
-# Visit OpenAI/AWS dashboards
+# Visit Anthropic Console or AWS dashboards
 ```
 
 #### Profile Issues
@@ -650,20 +692,22 @@ For different environments:
 
 **Development template:**
 ```env
-# Development configuration
+# Development configuration (choose ONE provider)
 GENIE_PROFILE=development
-OPENAI_API_KEY=your-dev-key
-AWS_BEDROCK_ACCESS_KEY=your-dev-aws-key
-AWS_BEDROCK_SECRET_ACCESS_KEY=your-dev-aws-secret
+ANTHROPIC_API_KEY=your-claude-key
+# OR
+AWS_BEDROCK_ACCESS_KEY=your-aws-key
+AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret
 DEBUG=True
 LOBSTER_LOG_LEVEL=DEBUG
 ```
 
 **Production template:**
 ```env
-# Production configuration
+# Production configuration (choose ONE provider)
 GENIE_PROFILE=production
-OPENAI_API_KEY=${VAULT_OPENAI_KEY}
+ANTHROPIC_API_KEY=${VAULT_ANTHROPIC_KEY}
+# OR
 AWS_BEDROCK_ACCESS_KEY=${VAULT_AWS_KEY}
 AWS_BEDROCK_SECRET_ACCESS_KEY=${VAULT_AWS_SECRET}
 DEBUG=False

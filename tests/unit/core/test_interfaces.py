@@ -67,23 +67,40 @@ class MockModalityAdapter(IModalityAdapter):
 
 class MockDataBackend(IDataBackend):
     """Mock implementation of IDataBackend for testing."""
-    
+
     def __init__(self, backend_type="mock_backend"):
         self.backend_type = backend_type
         self.storage_info = {"type": backend_type, "compression": True}
-    
-    def load(self, path: Union[str, Path]) -> ad.AnnData:
+
+    def load(self, path: Union[str, Path], **kwargs) -> ad.AnnData:
         """Mock load implementation."""
         return SingleCellDataFactory(config=SMALL_DATASET_CONFIG)
-    
-    def save(self, adata: ad.AnnData, path: Union[str, Path]) -> None:
+
+    def save(self, adata: ad.AnnData, path: Union[str, Path], **kwargs) -> None:
         """Mock save implementation."""
         pass  # Mock save does nothing
-    
+
     def exists(self, path: Union[str, Path]) -> bool:
         """Mock exists implementation."""
         return True  # Always return True for testing
-    
+
+    def delete(self, path: Union[str, Path]) -> None:
+        """Mock delete implementation."""
+        pass  # Mock delete does nothing
+
+    def list_files(self, directory: Union[str, Path], pattern: str = "*") -> list[str]:
+        """Mock list_files implementation."""
+        return ["file1.h5ad", "file2.csv", "file3.h5mu"]
+
+    def get_metadata(self, path: Union[str, Path]) -> Dict[str, Any]:
+        """Mock get_metadata implementation."""
+        return {
+            "size": 1024,
+            "modified": "2023-01-01T00:00:00Z",
+            "checksum": "abc123",
+            "format": "h5ad"
+        }
+
     def get_storage_info(self) -> Dict[str, Any]:
         """Mock get_storage_info implementation."""
         return self.storage_info
@@ -91,11 +108,18 @@ class MockDataBackend(IDataBackend):
 
 class MockValidator(IValidator):
     """Mock implementation of IValidator for testing."""
-    
+
     def __init__(self, schema=None):
         self.schema = schema or {"required_obs": ["sample_id"], "required_var": ["feature_id"]}
-    
-    def validate(self, adata: ad.AnnData) -> ValidationResult:
+
+    def validate(
+        self,
+        adata: ad.AnnData,
+        strict: bool = False,
+        check_types: bool = True,
+        check_ranges: bool = True,
+        check_completeness: bool = True
+    ) -> ValidationResult:
         """Mock validate implementation."""
         result = ValidationResult()
         if adata.n_obs < 10:
@@ -103,7 +127,21 @@ class MockValidator(IValidator):
         if adata.n_vars < 100:
             result.warnings.append("Low feature count")
         return result
-    
+
+    def validate_schema_compliance(
+        self,
+        adata: ad.AnnData,
+        schema: Dict[str, Any]
+    ) -> ValidationResult:
+        """Mock validate_schema_compliance implementation."""
+        result = ValidationResult()
+        # Simple mock validation - check if required keys exist
+        required_obs = schema.get("required_obs", [])
+        for col in required_obs:
+            if col not in adata.obs.columns:
+                result.add_error(f"Missing required obs column: {col}")
+        return result
+
     def get_schema(self) -> Dict[str, Any]:
         """Mock get_schema implementation."""
         return self.schema
@@ -111,28 +149,62 @@ class MockValidator(IValidator):
 
 class MockBaseClient(BaseClient):
     """Mock implementation of BaseClient for testing."""
-    
+
     def __init__(self):
         self.session_id = "mock_session_123"
         self.query_count = 0
-        
+        self.conversation_history = []
+        self.workspace_files = [
+            {"name": "test1.csv", "path": "/workspace/test1.csv", "size": 1024, "modified": "2023-01-01T00:00:00Z"},
+            {"name": "test2.h5ad", "path": "/workspace/test2.h5ad", "size": 2048, "modified": "2023-01-02T00:00:00Z"}
+        ]
+
     def query(self, user_input: str, stream: bool = False) -> Dict[str, Any]:
         """Mock query implementation."""
         self.query_count += 1
+        response = f"Mock response to: {user_input}"
+        self.conversation_history.append({"role": "user", "content": user_input})
+        self.conversation_history.append({"role": "assistant", "content": response})
         return {
-            "response": f"Mock response to: {user_input}",
+            "response": response,
             "session_id": self.session_id,
-            "query_count": self.query_count
+            "query_count": self.query_count,
+            "success": True,
+            "has_data": False,
+            "plots": []
         }
-    
+
     def get_status(self) -> Dict[str, Any]:
         """Mock get_status implementation."""
         return {
             "status": "active",
             "session_id": self.session_id,
-            "query_count": self.query_count
+            "query_count": self.query_count,
+            "has_data": False,
+            "workspace": "/mock/workspace"
         }
-    
+
+    def list_workspace_files(self, pattern: str = "*") -> List[Dict[str, Any]]:
+        """Mock list_workspace_files implementation."""
+        return self.workspace_files
+
+    def read_file(self, filename: str) -> Optional[str]:
+        """Mock read_file implementation."""
+        return f"Mock content of {filename}"
+
+    def write_file(self, filename: str, content: str) -> bool:
+        """Mock write_file implementation."""
+        return True
+
+    def get_conversation_history(self) -> List[Dict[str, str]]:
+        """Mock get_conversation_history implementation."""
+        return self.conversation_history
+
+    def reset(self) -> None:
+        """Mock reset implementation."""
+        self.conversation_history = []
+        self.query_count = 0
+
     def export_session(self, export_path: Optional[Path] = None) -> Path:
         """Mock export_session implementation."""
         if export_path is None:
