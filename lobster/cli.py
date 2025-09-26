@@ -61,6 +61,99 @@ except ImportError:
 
 
 # ============================================================================
+# Progress Management
+# ============================================================================
+
+class NoOpProgress:
+    """No-operation progress context manager for verbose/reasoning modes."""
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+    def add_task(self, *args, **kwargs):
+        """No-op task addition."""
+        return None
+
+    def update(self, *args, **kwargs):
+        """No-op update."""
+        pass
+
+
+def should_show_progress(client_arg: Optional['AgentClient'] = None) -> bool:
+    """
+    Determine if progress indicators should be shown based on current mode.
+
+    Returns False (no progress) when:
+    - Reasoning mode is enabled
+    - Verbose mode is enabled
+    - Any callback has verbose/show_tools enabled
+
+    Returns True (show progress) otherwise.
+    """
+    global client
+
+    # Use provided client or global client
+    c = client_arg or client
+    if not c:
+        return True  # Default to showing progress if no client
+
+    # Don't show progress if reasoning mode is enabled
+    if hasattr(c, 'enable_reasoning') and c.enable_reasoning:
+        return False
+
+    # Check callbacks for verbose settings
+    if hasattr(c, 'callbacks') and c.callbacks:
+        for callback in c.callbacks:
+            if hasattr(callback, 'verbose') and callback.verbose:
+                return False
+            if hasattr(callback, 'show_tools') and callback.show_tools:
+                return False
+
+    # Check custom_callbacks for verbose settings
+    if hasattr(c, 'custom_callbacks') and c.custom_callbacks:
+        for callback in c.custom_callbacks:
+            if hasattr(callback, 'verbose') and callback.verbose:
+                return False
+            if hasattr(callback, 'show_tools') and callback.show_tools:
+                return False
+
+    return True
+
+
+def create_progress(description: str = "", client_arg: Optional['AgentClient'] = None):
+    """
+    Create a progress indicator that respects verbose/reasoning mode.
+
+    In verbose/reasoning mode: Returns no-op progress manager
+    In normal mode: Returns actual Progress spinner
+
+    Args:
+        description: Initial progress description
+        client_arg: Optional client to check mode (uses global if not provided)
+
+    Returns:
+        Either a Progress object or NoOpProgress based on mode
+    """
+    if not should_show_progress(client_arg):
+        return NoOpProgress()
+
+    # Create actual progress spinner for normal mode
+    try:
+        progress_console = Console(stderr=True, force_terminal=True)
+    except Exception:
+        progress_console = console
+
+    return Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=progress_console,
+        transient=True  # Always transient to clean up properly
+    )
+
+
+# ============================================================================
 # Autocomplete Infrastructure
 # ============================================================================
 
@@ -1423,33 +1516,18 @@ def chat(
                 continue
 
             # Process query with appropriate progress indication
-            if reasoning or verbose:
-                # In verbose/reasoning mode, skip the progress spinner to avoid output pollution
-                # The callback handlers will provide detailed output instead
-                console.print(f"[dim grey50]🦞 Processing query...[/dim grey50]")
-                result = client.query(user_input, stream=False)
-            else:
-                # In normal mode, show a transient progress spinner
-                try:
-                    # Create separate console for progress to avoid interference
-                    progress_console = Console(stderr=True, force_terminal=True)
-                except Exception:
-                    # Fallback to main console if stderr console creation fails
-                    progress_console = console
-
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=progress_console,
-                    transient=True  # Make transient so it cleans up after completion
-                ) as progress:
+            if should_show_progress(client):
+                # Normal mode: show progress spinner
+                with create_progress(client_arg=client) as progress:
                     task = progress.add_task(
                         f"🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}",
                         total=None
                     )
-
-                    # Run query
                     result = client.query(user_input, stream=False)
+            else:
+                # Verbose/reasoning mode: no progress indication at all
+                # The callback handlers will provide detailed output
+                result = client.query(user_input, stream=False)
             
             # Display response with enhanced theming
             if result["success"]:
@@ -1972,17 +2050,7 @@ when they are started by agents or analysis workflows.
                 try:
                     if file_category == 'bioinformatics' or (file_category == 'tabular' and file_type in ['delimited_data', 'spreadsheet_data', 'h5ad_data']):
                         # Load data file using existing logic
-                        try:
-                            progress_console = Console(stderr=True, force_terminal=True)
-                        except Exception:
-                            progress_console = console
-
-                        with Progress(
-                            SpinnerColumn(),
-                            TextColumn("[progress.description]{task.description}"),
-                            console=progress_console,
-                            transient=True  # Make transient to avoid terminal pollution
-                        ) as progress:
+                        with create_progress(client_arg=client) as progress:
                             progress.add_task(f"Loading {file_name}...", total=None)
                             load_result = client.load_data_file(file_name)
                         
@@ -2094,17 +2162,7 @@ when they are started by agents or analysis workflows.
             # This is a data file - load it into DataManager
             console.print(f"[cyan]🧬 Loading data into workspace...[/cyan]")
 
-            try:
-                progress_console = Console(stderr=True, force_terminal=True)
-            except Exception:
-                progress_console = console
-
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=progress_console,
-                transient=True  # Make transient to avoid terminal pollution
-            ) as progress:
+            with create_progress(client_arg=client) as progress:
                 progress.add_task("Loading data...", total=None)
                 load_result = client.load_data_file(filename)
             
@@ -2218,17 +2276,7 @@ when they are started by agents or analysis workflows.
     
     elif cmd == "/export":
         # Create progress bar
-        try:
-            progress_console = Console(stderr=True, force_terminal=True)
-        except Exception:
-            progress_console = console
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=progress_console,
-            transient=True  # Make transient to avoid terminal pollution
-        ) as progress:
+        with create_progress(client_arg=client) as progress:
             task = progress.add_task("Preparing export...", total=None)
 
             # Check if this is a local client with detailed export capabilities
@@ -3168,24 +3216,14 @@ when they are started by agents or analysis workflows.
         table.add_column("Description", style="grey50")
         
         for profile in sorted(available_profiles.keys()):
-            # Add descriptions for each mode
+            # Add descriptions for each mode based on actual configurations
             description = ""
             if profile == "development":
-                description = "Fast, lightweight models for development"
+                description = "Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - fast development"
             elif profile == "production":
-                description = "Balanced performance and cost"
-            elif profile == "high-performance":
-                description = "Enhanced performance for complex tasks"
-            elif profile == "ultra-performance":
-                description = "Maximum capability for demanding analyses"
+                description = "Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant - production ready"
             elif profile == "cost-optimized":
-                description = "Efficient models to minimize costs"
-            elif profile == "heavyweight":
-                description = "Most capable models for all agents"
-            elif profile == "eu-compliant":
-                description = "EU region models for compliance"
-            elif profile == "eu-high-performance":
-                description = "High-performance EU region models"
+                description = "Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - cost optimized"
             
             status = "[bold green]ACTIVE[/bold green]" if profile == current_mode else ""
             table.add_row(profile, status, description)
@@ -3490,12 +3528,12 @@ def create_custom():
     
     console.print(f"\n[green]✅ Custom configuration saved to: {config_file}[/green]")
     console.print("[yellow]To use this configuration, set:[/yellow]")
-    console.print(f"   export GENIE_CONFIG_FILE={config_file}", style="yellow")
+    console.print(f"   export LOBSTER_CONFIG_FILE={config_file}", style="yellow")
 
 @config_app.command(name="generate-env")
 def generate_env():
     """Generate .env template with all available options."""
-    template = """# Genie AI Configuration Template
+    template = """# LOBSTER AI Configuration Template
 # Copy this file to .env and configure as needed
 
 # =============================================================================
@@ -3511,26 +3549,26 @@ NCBI_API_KEY="your-ncbi-api-key-here"
 # =============================================================================
 
 # Profile-based configuration (recommended)
-# Available profiles: development, production, high-performance, cost-optimized, eu-compliant
-GENIE_PROFILE=production
+# Available profiles: development, production, cost-optimized
+LOBSTER_PROFILE=production
 
 # OR use custom configuration file
-# GENIE_CONFIG_FILE=config/custom_agent_config.json
+# LOBSTER_CONFIG_FILE=config/custom_agent_config.json
 
 # Per-agent model overrides (optional)
 # Available models: claude-haiku, claude-sonnet, claude-sonnet-eu, claude-opus, claude-opus-eu, claude-3-7-sonnet, claude-3-7-sonnet-eu
-# GENIE_SUPERVISOR_MODEL=claude-haiku
-# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
-# GENIE_METHOD_AGENT_MODEL=claude-sonnet
-# GENIE_GENERAL_CONVERSATION_MODEL=claude-haiku
+# LOBSTER_SUPERVISOR_MODEL=claude-haiku
+# LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
+# LOBSTER_METHOD_AGENT_MODEL=claude-sonnet
+# LOBSTER_GENERAL_CONVERSATION_MODEL=claude-haiku
 
 # Global model override (overrides all agents)
-# GENIE_GLOBAL_MODEL=claude-sonnet
+# LOBSTER_GLOBAL_MODEL=claude-sonnet
 
 # Per-agent temperature overrides
-# GENIE_SUPERVISOR_TEMPERATURE=0.5
-# GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
-# GENIE_METHOD_AGENT_TEMPERATURE=0.3
+# LOBSTER_SUPERVISOR_TEMPERATURE=0.5
+# LOBSTER_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
+# LOBSTER_METHOD_AGENT_TEMPERATURE=0.3
 
 # =============================================================================
 # APPLICATION SETTINGS
@@ -3542,30 +3580,22 @@ HOST=0.0.0.0
 DEBUG=False
 
 # Data processing
-GENIE_MAX_FILE_SIZE_MB=500
-GENIE_CLUSTER_RESOLUTION=0.5
-GENIE_CACHE_DIR=data/cache
+LOBSTER_MAX_FILE_SIZE_MB=500
+LOBSTER_CLUSTER_RESOLUTION=0.5
+LOBSTER_CACHE_DIR=data/cache
 
 # =============================================================================
 # EXAMPLE CONFIGURATIONS
 # =============================================================================
 
-# Example 1: Lightweight development setup
-# GENIE_PROFILE=development
-# GENIE_SUPERVISOR_MODEL=claude-haiku
-# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-sonnet
+# Example 1: Development setup (Claude 3.7 Sonnet for all agents)
+# LOBSTER_PROFILE=development
 
-# Example 2: High-performance research setup
-# GENIE_PROFILE=high-performance
-# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-3-7-sonnet
+# Example 2: Production setup (Claude 4 Sonnet for all agents except assistant)
+# LOBSTER_PROFILE=production
 
-# Example 3: EU compliance
-# GENIE_PROFILE=eu-compliant
-# AWS_REGION=eu-central-1
-
-# Example 4: Cost-optimized setup
-# GENIE_PROFILE=cost-optimized
-# GENIE_GLOBAL_MODEL=claude-haiku
+# Example 3: Cost-optimized setup (Claude 3.7 Sonnet for all agents)
+# LOBSTER_PROFILE=cost-optimized
 """
     
     with open('.env.template', 'w') as f:

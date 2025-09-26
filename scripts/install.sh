@@ -322,7 +322,7 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=
 
 # Optional
 NCBI_API_KEY=
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 EOF
         
         print_message "✓ Configuration file created at $CONFIG_DIR/.env" "$GREEN"

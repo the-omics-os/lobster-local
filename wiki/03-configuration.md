@@ -40,15 +40,15 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret-key-here
 NCBI_API_KEY=your-ncbi-api-key-here
 
 # Model Configuration
-GENIE_PROFILE=production                    # Model preset configuration
-GENIE_SUPERVISOR_TEMPERATURE=0.5            # Supervisor agent temperature
-GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7 # Analysis agent temperature
-GENIE_METHOD_AGENT_TEMPERATURE=0.3          # Method agent temperature
+LOBSTER_PROFILE=production                    # Model preset configuration
+LOBSTER_SUPERVISOR_TEMPERATURE=0.5            # Supervisor agent temperature
+LOBSTER_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7 # Analysis agent temperature
+LOBSTER_METHOD_AGENT_TEMPERATURE=0.3          # Method agent temperature
 
 # Application Settings
-GENIE_MAX_FILE_SIZE_MB=500                  # Maximum file size for uploads
-GENIE_CLUSTER_RESOLUTION=0.5                # Default clustering resolution
-GENIE_CACHE_DIR=data/cache                  # Cache directory location
+LOBSTER_MAX_FILE_SIZE_MB=500                  # Maximum file size for uploads
+LOBSTER_CLUSTER_RESOLUTION=0.5                # Default clustering resolution
+LOBSTER_CACHE_DIR=data/cache                  # Cache directory location
 
 # Server Configuration (for web interface)
 PORT=8501                                   # Web interface port
@@ -211,67 +211,40 @@ Lobster AI uses predefined model profiles to optimize performance, cost, and com
 **Use case**: Testing, development, lightweight analysis
 
 ```env
-GENIE_PROFILE=development
+LOBSTER_PROFILE=development
 ```
 
 **Characteristics:**
-- Lightweight models (Claude Haiku)
-- Faster response times
-- Lower costs
+- Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant
+- Fast development cycle
+- Balanced performance and cost
 - Suitable for prototyping
 
 #### `production` Profile (Default)
 **Use case**: Standard research and analysis
 
 ```env
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 ```
 
 **Characteristics:**
-- Balanced performance and cost
-- Standard Claude Sonnet models
-- Good for most research tasks
-- Recommended for general use
-
-#### `high-performance` Profile
-**Use case**: Complex analyses, large datasets, research publications
-
-```env
-GENIE_PROFILE=high-performance
-```
-
-**Characteristics:**
-- Premium models (Claude Sonnet 4)
-- Highest accuracy and reasoning
-- Better handling of complex queries
-- Higher costs but best results
+- Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant
+- Production-ready quality
+- Best performance for analysis
+- Recommended for research use
 
 #### `cost-optimized` Profile
 **Use case**: Budget-conscious usage, routine analyses
 
 ```env
-GENIE_PROFILE=cost-optimized
+LOBSTER_PROFILE=cost-optimized
 ```
 
 **Characteristics:**
-- Lightweight models across all agents
-- Minimal API usage
+- Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant
+- Minimal API usage costs
 - Good for batch processing
 - Budget-friendly option
-
-#### `eu-compliant` Profile
-**Use case**: European compliance, data residency requirements
-
-```env
-GENIE_PROFILE=eu-compliant
-AWS_REGION=eu-central-1
-```
-
-**Characteristics:**
-- EU region models only
-- GDPR-compliant processing
-- European data residency
-- Suitable for sensitive data
 
 ### Custom Model Configuration
 
@@ -279,17 +252,17 @@ For fine-tuned control, override individual agent settings:
 
 ```env
 # Base profile
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 
 # Custom overrides
-GENIE_SUPERVISOR_MODEL=claude-sonnet-4
-GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-3-7-sonnet
-GENIE_METHOD_AGENT_MODEL=claude-haiku
+LOBSTER_SUPERVISOR_MODEL=claude-sonnet-4
+LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-3-7-sonnet
+LOBSTER_METHOD_AGENT_MODEL=claude-haiku
 
 # Temperature controls (0.0 = deterministic, 1.0 = creative)
-GENIE_SUPERVISOR_TEMPERATURE=0.3        # Conservative coordination
-GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7  # Balanced analysis
-GENIE_METHOD_AGENT_TEMPERATURE=0.1      # Precise parameter extraction
+LOBSTER_SUPERVISOR_TEMPERATURE=0.3        # Conservative coordination
+LOBSTER_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7  # Balanced analysis
+LOBSTER_METHOD_AGENT_TEMPERATURE=0.1      # Precise parameter extraction
 ```
 
 ### Supervisor Operation Modes (v2.3+)
@@ -405,7 +378,7 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret
 # LOBSTER_CLOUD_KEY=your-cloud-key
 
 # Shared settings
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 NCBI_API_KEY=your-ncbi-key
 ```
 
@@ -421,18 +394,18 @@ lobster chat  # Will use cloud mode
 
 ```env
 # File handling
-GENIE_MAX_FILE_SIZE_MB=500              # Maximum upload size
-GENIE_CLUSTER_RESOLUTION=0.5            # Default clustering resolution
-GENIE_CACHE_DIR=data/cache              # Cache location
+LOBSTER_MAX_FILE_SIZE_MB=500              # Maximum upload size
+LOBSTER_CLUSTER_RESOLUTION=0.5            # Default clustering resolution
+LOBSTER_CACHE_DIR=data/cache              # Cache location
 
 # Memory management
-GENIE_MAX_MEMORY_GB=8                   # Memory limit for processing
-GENIE_PARALLEL_JOBS=4                   # Number of parallel jobs
+LOBSTER_MAX_MEMORY_GB=8                   # Memory limit for processing
+LOBSTER_PARALLEL_JOBS=4                   # Number of parallel jobs
 
 # Quality thresholds
-GENIE_MIN_CELLS_PER_GENE=3              # Gene filtering threshold
-GENIE_MIN_GENES_PER_CELL=200            # Cell filtering threshold
-GENIE_MAX_MITO_PERCENT=20               # Mitochondrial content limit
+LOBSTER_MIN_CELLS_PER_GENE=3              # Gene filtering threshold
+LOBSTER_MIN_GENES_PER_CELL=200            # Cell filtering threshold
+LOBSTER_MAX_MITO_PERCENT=20               # Mitochondrial content limit
 ```
 
 ### Web Interface Configuration
@@ -479,7 +452,7 @@ lobster config show-config
 lobster config test
 
 # Test specific profile
-lobster config test --profile high-performance
+lobster config test --profile production
 
 # List available models
 lobster config list-models
@@ -612,7 +585,7 @@ lobster config test
 lobster config list-profiles
 
 # Reset to default
-export GENIE_PROFILE=production
+export LOBSTER_PROFILE=production
 
 # Clear profile cache
 rm -rf .lobster_workspace/cache/profiles/
@@ -650,7 +623,7 @@ echo $AWS_REGION
 aws bedrock list-foundation-models --region us-east-1
 
 # Test with different profile
-export GENIE_PROFILE=cost-optimized
+export LOBSTER_PROFILE=cost-optimized
 ```
 
 ### Configuration Debugging
@@ -693,7 +666,7 @@ For different environments:
 **Development template:**
 ```env
 # Development configuration (choose ONE provider)
-GENIE_PROFILE=development
+LOBSTER_PROFILE=development
 ANTHROPIC_API_KEY=your-claude-key
 # OR
 AWS_BEDROCK_ACCESS_KEY=your-aws-key
@@ -705,21 +678,21 @@ LOBSTER_LOG_LEVEL=DEBUG
 **Production template:**
 ```env
 # Production configuration (choose ONE provider)
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 ANTHROPIC_API_KEY=${VAULT_ANTHROPIC_KEY}
 # OR
 AWS_BEDROCK_ACCESS_KEY=${VAULT_AWS_KEY}
 AWS_BEDROCK_SECRET_ACCESS_KEY=${VAULT_AWS_SECRET}
 DEBUG=False
 LOBSTER_LOG_LEVEL=INFO
-GENIE_MAX_FILE_SIZE_MB=1000
+LOBSTER_MAX_FILE_SIZE_MB=1000
 ```
 
 **Cloud template:**
 ```env
 # Cloud configuration
 LOBSTER_CLOUD_KEY=your-cloud-key
-GENIE_PROFILE=high-performance
+LOBSTER_PROFILE=production
 NCBI_API_KEY=your-ncbi-key
 ```
 

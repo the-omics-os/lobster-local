@@ -175,7 +175,7 @@ lobster config test  # Test API connectivity
 
 **Memory issues?**
 ```bash
-export GENIE_PROFILE=cost-optimized  # Use lighter models
+export LOBSTER_PROFILE=cost-optimized  # Use lighter models
 ```
 
 **Need help?**

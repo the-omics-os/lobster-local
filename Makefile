@@ -371,7 +371,7 @@ setup-env: $(VENV_PATH)
 			echo "" >> .env; \
 			echo "# Optional" >> .env; \
 			echo "NCBI_API_KEY=your-ncbi-api-key-here" >> .env; \
-			echo "GENIE_PROFILE=production" >> .env; \
+			echo "LOBSTER_PROFILE=production" >> .env; \
 			echo "$(YELLOW)📋 Created .env file. Please edit it with your API keys.$(NC)"; \
 		fi; \
 	else \

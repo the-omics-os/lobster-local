@@ -234,22 +234,22 @@ class LobsterAgentConfigurator:
     # Pre-defined testing profiles - automatically includes all agents
     TESTING_PROFILES = {
         "development": {
-            "assistant": "claude-3-7-sonnet",
+            "assistant": "claude-3-5-sonnet-v2",
             "supervisor": "claude-3-7-sonnet",
-            "singlecell_expert_agent": "claude-4-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "singlecell_expert_agent": "claude-3-7-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-3-7-sonnet",
             "method_expert_agent": "claude-3-7-sonnet",
             "data_expert_agent": "claude-3-7-sonnet",
             "machine_learning_expert_agent": "claude-3-7-sonnet",
             "research_agent": "claude-3-7-sonnet",
-            "ms_proteomics_expert_agent": "claude-4-sonnet",
-            "affinity_proteomics_expert_agent": "claude-4-sonnet",
-            "visualization_expert_agent": "claude-4-sonnet",            
+            "ms_proteomics_expert_agent": "claude-3-7-sonnet",
+            "affinity_proteomics_expert_agent": "claude-3-7-sonnet",
+            "visualization_expert_agent": "claude-3-7-sonnet",
             "thinking": {}  # No thinking in development mode for faster testing
         },
-        
+
         "production": {
-            "assistant": "claude-4-sonnet",
+            "assistant": "claude-3-5-sonnet-v2",
             "supervisor": "claude-4-sonnet",
             "singlecell_expert_agent": "claude-4-sonnet",
             "bulk_rnaseq_expert_agent": "claude-4-sonnet",
@@ -260,108 +260,22 @@ class LobsterAgentConfigurator:
             "ms_proteomics_expert_agent": "claude-4-sonnet",
             "affinity_proteomics_expert_agent": "claude-4-sonnet",
             "visualization_expert_agent": "claude-4-sonnet",
-            "thinking": {
-                # # Supervisor doesn't support thinking with langgraph_supervisor
-                # "singlecell_expert_agent": "standard",
-                # "bulk_rnaseq_expert_agent": "standard",
-                # "method_expert_agent": "standard",
-                # "data_expert_agent": "standard",
-                # "research_agent": "standard"
-                }
+            "thinking": {}  # No thinking configured for production
         },
-        
-        "high-performance": {
-            "assistant": "claude-3-7-sonnet",
-            "supervisor": "claude-4-opus",
-            "singlecell_expert_agent": "claude-3-7-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-4-opus",
-            "method_expert_agent": "claude-4-sonnet",
-            "data_expert_agent": "claude-3-5-haiku",
-            "machine_learning_expert_agent": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-haiku",
-            "ms_proteomics_expert_agent": "claude-4-opus",
-            "affinity_proteomics_expert_agent": "claude-4-sonnet",
-            "visualization_expert_agent": "claude-4-sonnet",
-            "thinking": { #FIXME
-                # "supervisor": "extended",
-                "singlecell_expert_agent": "standard",
-                "bulk_rnaseq_expert_agent": "extended"
-            }
-        },
-        
-        "ultra-performance": {
-            "assistant": "claude-3-7-sonnet",
-            # "supervisor": "claude-4-sonnet",
-            "singlecell_expert_agent": "claude-4-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
-            "method_expert_agent": "claude-4-sonnet",
-            "data_expert_agent": "claude-4-sonnet",
-            "machine_learning_expert_agent": "claude-4-sonnet",
-            "research_agent": "claude-4-sonnet",
-            "ms_proteomics_expert_agent": "claude-4-sonnet",
-            "affinity_proteomics_expert_agent": "claude-4-sonnet",
-            "visualization_expert_agent": "claude-4-sonnet",
-            "thinking": {}  # Most models don't support thinking yet #FIXME
-        },
-        
+
         "cost-optimized": {
-            "assistant": "claude-3-7-sonnet",
-            # "supervisor": "claude-3-haiku",
-            "singlecell_expert_agent": "claude-3-5-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-3-5-haiku",
-            "method_expert_agent": "claude-3-haiku",
-            "data_expert_agent": "claude-3-5-haiku",
-            "machine_learning_expert_agent": "claude-3-5-haiku",
-            "research_agent": "claude-3-haiku",
-            "ms_proteomics_expert_agent": "claude-3-5-sonnet",
-            "affinity_proteomics_expert_agent": "claude-3-5-haiku",
-            "visualization_expert_agent": "claude-4-sonnet",
+            "assistant": "claude-3-5-sonnet-v2",
+            "supervisor": "claude-3-7-sonnet",
+            "singlecell_expert_agent": "claude-3-7-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-3-7-sonnet",
+            "method_expert_agent": "claude-3-7-sonnet",
+            "data_expert_agent": "claude-3-7-sonnet",
+            "machine_learning_expert_agent": "claude-3-7-sonnet",
+            "research_agent": "claude-3-7-sonnet",
+            "ms_proteomics_expert_agent": "claude-3-7-sonnet",
+            "affinity_proteomics_expert_agent": "claude-3-7-sonnet",
+            "visualization_expert_agent": "claude-3-7-sonnet",
             "thinking": {}  # No thinking for cost optimization
-        },
-        
-        "heavyweight": {
-            "assistant": "claude-3-7-sonnet",
-            # "supervisor": "claude-4-1-opus",
-            "singlecell_expert_agent": "claude-4-1-opus",
-            "bulk_rnaseq_expert_agent": "claude-4-1-opus",
-            "method_expert_agent": "claude-4-opus",
-            "data_expert_agent": "claude-3-5-haiku",
-            "research_agent": "claude-4-opus",
-            "ms_proteomics_expert_agent": "claude-4-1-opus",
-            "affinity_proteomics_expert_agent": "claude-4-opus",
-            "visualization_expert_agent": "claude-4-sonnet",
-            "thinking": {}  # Opus models don't support thinking yet
-        },
-        
-        "eu-compliant": {
-            "assistant": "claude-3-7-sonnet",
-            # "supervisor": "claude-3-5-sonnet-v2-eu",
-            "singlecell_expert_agent": "claude-4-1-opus-eu",
-            "bulk_rnaseq_expert_agent": "claude-3-5-sonnet-v2-eu",
-            "method_expert_agent": "claude-3-5-sonnet-eu",
-            "data_expert_agent": "claude-3-5-haiku",
-            "machine_learning_expert_agent": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-sonnet-eu",
-            "ms_proteomics_expert_agent": "claude-4-1-opus-eu",
-            "affinity_proteomics_expert_agent": "claude-3-5-sonnet-v2-eu",
-            "thinking": {}  # EU models configuration
-        },
-        
-        "eu-high-performance": {
-            "assistant": "claude-3-7-sonnet",
-            # "supervisor": "claude-3-7-sonnet-eu",
-            "singlecell_expert_agent": "claude-3-7-sonnet-eu",
-            "bulk_rnaseq_expert_agent": "claude-4-opus-eu",
-            "method_expert_agent": "claude-4-opus-eu",
-            "data_expert_agent": "claude-3-5-haiku",
-            "machine_learning_expert_agent": "claude-3-5-haiku",
-            "research_agent": "claude-3-5-sonnet-v2-eu",
-            "ms_proteomics_expert_agent": "claude-3-7-sonnet-eu",
-            "affinity_proteomics_expert_agent": "claude-4-opus-eu",
-            "thinking": {
-                "supervisor": "deep",
-                "singlecell_expert_agent": "extended"
-            }
         }
     }
     
@@ -373,8 +287,8 @@ class LobsterAgentConfigurator:
             profile: Testing profile name (e.g., 'development', 'production')
             config_file: Path to custom configuration file
         """
-        # Note: Environment variables still use GENIE_ prefix for backward compatibility
-        self.profile = profile or os.environ.get('GENIE_PROFILE', 'production')
+        # Note: Environment variables still use LOBSTER_ prefix for backward compatibility
+        self.profile = profile or os.environ.get('LOBSTER_PROFILE', 'production')
         self._agent_configs = {}
         self._load_from_profile()
         
@@ -420,15 +334,15 @@ class LobsterAgentConfigurator:
     def _apply_env_overrides(self):
         """Apply environment variable overrides."""
         # Global overrides
-        if os.environ.get('GENIE_GLOBAL_MODEL'):
-            model_preset = os.environ.get('GENIE_GLOBAL_MODEL')
+        if os.environ.get('LOBSTER_GLOBAL_MODEL'):
+            model_preset = os.environ.get('LOBSTER_GLOBAL_MODEL')
             if model_preset in self.MODEL_PRESETS:
                 for agent_config in self._agent_configs.values():
                     agent_config.model_config = self.MODEL_PRESETS[model_preset]
         
         # Per-agent overrides
         for agent_name in self._agent_configs:
-            env_key = f'GENIE_{agent_name.upper()}_MODEL'
+            env_key = f'LOBSTER_{agent_name.upper()}_MODEL'
             if os.environ.get(env_key):
                 model_preset = os.environ.get(env_key)
                 if model_preset in self.MODEL_PRESETS:
@@ -436,7 +350,7 @@ class LobsterAgentConfigurator:
         
         # Temperature overrides
         for agent_name in self._agent_configs:
-            env_key = f'GENIE_{agent_name.upper()}_TEMPERATURE'
+            env_key = f'LOBSTER_{agent_name.upper()}_TEMPERATURE'
             if os.environ.get(env_key):
                 try:
                     temperature = float(os.environ.get(env_key))
@@ -447,7 +361,7 @@ class LobsterAgentConfigurator:
         # Thinking configuration overrides
         for agent_name in self._agent_configs:
             # Enable/disable thinking
-            env_key = f'GENIE_{agent_name.upper()}_THINKING_ENABLED'
+            env_key = f'LOBSTER_{agent_name.upper()}_THINKING_ENABLED'
             if os.environ.get(env_key):
                 enabled = os.environ.get(env_key).lower() == 'true'
                 if enabled and self._agent_configs[agent_name].model_config.supports_thinking:
@@ -456,7 +370,7 @@ class LobsterAgentConfigurator:
                     self._agent_configs[agent_name].thinking_config.enabled = True
             
             # Thinking token budget
-            env_key = f'GENIE_{agent_name.upper()}_THINKING_BUDGET'
+            env_key = f'LOBSTER_{agent_name.upper()}_THINKING_BUDGET'
             if os.environ.get(env_key):
                 try:
                     budget = int(os.environ.get(env_key))
@@ -466,8 +380,8 @@ class LobsterAgentConfigurator:
                     pass
         
         # Global thinking preset
-        if os.environ.get('GENIE_GLOBAL_THINKING'):
-            thinking_preset = os.environ.get('GENIE_GLOBAL_THINKING')
+        if os.environ.get('LOBSTER_GLOBAL_THINKING'):
+            thinking_preset = os.environ.get('LOBSTER_GLOBAL_THINKING')
             if thinking_preset in self.THINKING_PRESETS:
                 for agent_config in self._agent_configs.values():
                     if agent_config.model_config.supports_thinking:

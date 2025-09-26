@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration Manager CLI Tool for Genie AI.
+Configuration Manager CLI Tool for LOBSTER AI.
 
 This tool provides command-line utilities to manage agent configurations,
 view available models, switch profiles, and test different setups.
@@ -185,11 +185,11 @@ def create_custom_config():
     
     print_colored(f"\n✅ Custom configuration saved to: {config_file}", "green")
     print_colored("To use this configuration, set:", "yellow")
-    print_colored(f"   export GENIE_CONFIG_FILE={config_file}", "yellow")
+    print_colored(f"   export LOBSTER_CONFIG_FILE={config_file}", "yellow")
 
 def generate_env_template():
     """Generate .env template with all available options."""
-    template = """# Genie AI Configuration Template
+    template = """# LOBSTER AI Configuration Template
 # Copy this file to .env and configure as needed
 
 # =============================================================================
@@ -217,26 +217,26 @@ NCBI_API_KEY="your-ncbi-api-key-here"
 # =============================================================================
 
 # Profile-based configuration (recommended)
-# Available profiles: development, production, high-performance, cost-optimized, eu-compliant
-GENIE_PROFILE=production
+# Available profiles: development, production, cost-optimized
+LOBSTER_PROFILE=production
 
 # OR use custom configuration file
-# GENIE_CONFIG_FILE=config/custom_agent_config.json
+# LOBSTER_CONFIG_FILE=config/custom_agent_config.json
 
 # Per-agent model overrides (optional)
 # Available models: claude-haiku, claude-sonnet, claude-sonnet-eu, claude-opus, claude-opus-eu, claude-3-7-sonnet, claude-3-7-sonnet-eu
-# GENIE_SUPERVISOR_MODEL=claude-haiku
-# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
-# GENIE_METHOD_AGENT_MODEL=claude-sonnet
-# GENIE_GENERAL_CONVERSATION_MODEL=claude-haiku
+# LOBSTER_SUPERVISOR_MODEL=claude-haiku
+# LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
+# LOBSTER_METHOD_AGENT_MODEL=claude-sonnet
+# LOBSTER_GENERAL_CONVERSATION_MODEL=claude-haiku
 
 # Global model override (overrides all agents)
-# GENIE_GLOBAL_MODEL=claude-sonnet
+# LOBSTER_GLOBAL_MODEL=claude-sonnet
 
 # Per-agent temperature overrides
-# GENIE_SUPERVISOR_TEMPERATURE=0.5
-# GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
-# GENIE_METHOD_AGENT_TEMPERATURE=0.3
+# LOBSTER_SUPERVISOR_TEMPERATURE=0.5
+# LOBSTER_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
+# LOBSTER_METHOD_AGENT_TEMPERATURE=0.3
 
 # =============================================================================
 # APPLICATION SETTINGS
@@ -248,30 +248,22 @@ HOST=0.0.0.0
 DEBUG=False
 
 # Data processing
-GENIE_MAX_FILE_SIZE_MB=500
-GENIE_CLUSTER_RESOLUTION=0.5
-GENIE_CACHE_DIR=data/cache
+LOBSTER_MAX_FILE_SIZE_MB=500
+LOBSTER_CLUSTER_RESOLUTION=0.5
+LOBSTER_CACHE_DIR=data/cache
 
 # =============================================================================
 # EXAMPLE CONFIGURATIONS
 # =============================================================================
 
-# Example 1: Lightweight development setup
-# GENIE_PROFILE=development
-# GENIE_SUPERVISOR_MODEL=claude-haiku
-# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-sonnet
+# Example 1: Development setup (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# LOBSTER_PROFILE=development
 
-# Example 2: High-performance research setup
-# GENIE_PROFILE=high-performance
-# GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-3-7-sonnet
+# Example 2: Production setup (Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# LOBSTER_PROFILE=production
 
-# Example 3: EU compliance
-# GENIE_PROFILE=eu-compliant
-# AWS_REGION=eu-central-1
-
-# Example 4: Cost-optimized setup
-# GENIE_PROFILE=cost-optimized
-# GENIE_GLOBAL_MODEL=claude-haiku
+# Example 3: Cost-optimized setup (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# LOBSTER_PROFILE=cost-optimized
 """
     
     with open('.env.template', 'w') as f:
@@ -283,7 +275,7 @@ GENIE_CACHE_DIR=data/cache
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Genie AI Configuration Manager",
+        description="LOBSTER AI Configuration Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -16,17 +16,17 @@ Currently, only the following models support thinking:
 
 ### 1. Profile-Based Configuration
 
-The easiest way to enable thinking is through the testing profiles in `agent_config.py`. Several profiles already have thinking configured:
+The easiest way to enable thinking is through the testing profiles in `agent_config.py`. The available profiles are:
 
 ```python
-# Production profile with thinking enabled
-GENIE_PROFILE=production
+# Development profile (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+LOBSTER_PROFILE=development
 
-# High-performance profile with extended thinking
-GENIE_PROFILE=high-performance  
+# Production profile (Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+LOBSTER_PROFILE=production
 
-# EU high-performance with deep thinking
-GENIE_PROFILE=eu-high-performance
+# Cost-optimized profile (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+LOBSTER_PROFILE=cost-optimized
 ```
 
 ### 2. Environment Variable Configuration
@@ -35,15 +35,15 @@ You can enable thinking for specific agents using environment variables:
 
 ```bash
 # Enable thinking for the supervisor agent
-export GENIE_SUPERVISOR_THINKING_ENABLED=true
-export GENIE_SUPERVISOR_THINKING_BUDGET=2000
+export LOBSTER_SUPERVISOR_THINKING_ENABLED=true
+export LOBSTER_SUPERVISOR_THINKING_BUDGET=2000
 
 # Enable thinking for single-cell expert
-export GENIE_SINGLECELL_EXPERT_THINKING_ENABLED=true
-export GENIE_SINGLECELL_EXPERT_THINKING_BUDGET=5000
+export LOBSTER_SINGLECELL_EXPERT_THINKING_ENABLED=true
+export LOBSTER_SINGLECELL_EXPERT_THINKING_BUDGET=5000
 
 # Global thinking preset (applies to all agents with thinking-capable models)
-export GENIE_GLOBAL_THINKING=extended  # Options: disabled, light, standard, extended, deep
+export LOBSTER_GLOBAL_THINKING=extended  # Options: disabled, light, standard, extended, deep
 ```
 
 ### 3. Programmatic Configuration
@@ -89,11 +89,11 @@ When thinking is enabled for an agent:
 
 ```bash
 # Set profile with thinking configuration
-export GENIE_PROFILE=production
+export LOBSTER_PROFILE=production
 
 # Or enable thinking for specific agents
-export GENIE_SUPERVISOR_THINKING_ENABLED=true
-export GENIE_SUPERVISOR_THINKING_BUDGET=3000
+export LOBSTER_SUPERVISOR_THINKING_ENABLED=true
+export LOBSTER_SUPERVISOR_THINKING_BUDGET=3000
 
 # Run the application
 python -m lobster
@@ -149,15 +149,16 @@ If thinking isn't working:
 ## Example Configuration in Code
 
 ```python
-# agent_config.py - Adding thinking to a custom profile
+# agent_config.py - Adding thinking to a custom profile based on existing patterns
 TESTING_PROFILES = {
     "my-custom-profile": {
+        "assistant": "claude-3-5-sonnet-v2",
         "supervisor": "claude-3-7-sonnet",
         "singlecell_expert": "claude-3-7-sonnet",
-        "bulk_rnaseq_expert": "claude-4-sonnet",
+        "bulk_rnaseq_expert": "claude-3-7-sonnet",
         "method_agent": "claude-3-7-sonnet",
-        "data_expert": "claude-3-5-haiku",
-        "research_agent": "claude-3-5-haiku",
+        "data_expert": "claude-3-7-sonnet",
+        "research_agent": "claude-3-7-sonnet",
         "thinking": {
             "supervisor": "extended",      # 5000 tokens
             "singlecell_expert": "deep",   # 10000 tokens

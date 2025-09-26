@@ -340,22 +340,17 @@ List available operation modes with descriptions.
 ```
 
 **Available Modes**:
-- `development`: Fast, lightweight models
-- `production`: Balanced performance and cost
-- `high-performance`: Enhanced capability models
-- `ultra-performance`: Maximum capability
-- `cost-optimized`: Efficient budget-friendly models
-- `heavyweight`: Most capable models for all agents
-- `eu-compliant`: EU region models for compliance
-- `eu-high-performance`: High-performance EU models
+- `development`: Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - fast development
+- `production`: Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant - production ready
+- `cost-optimized`: Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - cost optimized
 
 #### `/mode <name>`
 Change operation mode and agent configurations.
 
 ```
 /mode production                   # Switch to production mode
-/mode high-performance            # Use enhanced models
-/mode eu-compliant               # Switch to EU compliance mode
+/mode development                 # Use development models
+/mode cost-optimized             # Switch to cost-optimized mode
 ```
 
 **Effects**:
@@ -583,8 +578,8 @@ lobster chat
 # Check available modes
 /modes
 
-# Switch for high-performance analysis
-/mode high-performance
+# Switch for production analysis
+/mode production
 
 # Verify change
 /status
@@ -647,7 +642,7 @@ lobster chat --verbose --debug
 /dashboard
 
 # Switch to lighter mode
-/mode development
+/mode cost-optimized
 
 # Monitor active operations
 /progress

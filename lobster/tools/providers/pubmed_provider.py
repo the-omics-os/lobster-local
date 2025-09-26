@@ -11,6 +11,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import re
+import random
+import socket
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 from datetime import datetime
 
@@ -46,8 +48,14 @@ class PubMedProviderConfig(BaseModel):
     # NCBI API settings
     email: str = "kevin.yar@omics-os.com"
     api_key: Optional[str] = None
+
+    # Rate limiting and retry settings
     max_retry: int = Field(default=5, ge=1, le=10)
-    sleep_time: float = Field(default=0.3, ge=0.1, le=5.0)
+    base_sleep_time: float = Field(default=0.34, ge=0.1, le=2.0)  # Base delay between requests
+    max_backoff_delay: int = Field(default=30, ge=5, le=120)  # Max backoff delay (seconds)
+    requests_per_second_no_key: float = Field(default=3.0, ge=1.0, le=5.0)  # NCBI limit without key
+    requests_per_second_with_key: float = Field(default=10.0, ge=5.0, le=15.0)  # NCBI limit with key
+    circuit_breaker_threshold: int = Field(default=10, ge=3, le=20)  # Consecutive failures before circuit break
     
     # Dataset discovery settings
     include_geo_datasets: bool = True
@@ -111,6 +119,12 @@ class PubMedProvider(BasePublicationProvider):
         self.base_url_efetch = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?"
         self.base_url_esummary = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?"
         self.base_url_elink = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?"
+
+        # Request tracking and rate limiting
+        self._last_request_time = 0.0
+        self._consecutive_failures = 0
+        self._circuit_breaker_until = 0.0
+        self._api_key_notified = False
     
     @property
     def source(self) -> PublicationSource:
@@ -366,11 +380,11 @@ class PubMedProvider(BasePublicationProvider):
     def build_ncbi_url(self, endpoint: str, params: Dict[str, Any]) -> str:
         """
         Build NCBI URL with proper parameter encoding and API key.
-        
+
         Args:
             endpoint: The NCBI endpoint (esearch, efetch, elink, esummary)
             params: Dictionary of parameters
-            
+
         Returns:
             str: Properly formatted URL
         """
@@ -378,10 +392,187 @@ class PubMedProvider(BasePublicationProvider):
         # Filter out None values
         params = {k: v for k, v in params.items() if v is not None}
         query = urllib.parse.urlencode(params)
-        
+
         if self.config.api_key:
             return f"{base}{query}&api_key={self.config.api_key}"
         return f"{base}{query}"
+
+    def _make_ncbi_request(self, url: str, operation_name: str = "NCBI request") -> bytes:
+        """
+        Centralized NCBI request handler with comprehensive error handling and rate limiting.
+
+        Args:
+            url: The NCBI API URL to request
+            operation_name: Human-readable name for the operation (for logging/errors)
+
+        Returns:
+            bytes: Response content
+
+        Raises:
+            Exception: For permanent failures or after exhausting retries
+        """
+        # Check circuit breaker
+        current_time = time.time()
+        if current_time < self._circuit_breaker_until:
+            remaining_time = int(self._circuit_breaker_until - current_time)
+            raise Exception(
+                f"NCBI requests temporarily disabled due to repeated failures. "
+                f"Try again in {remaining_time} seconds. "
+                f"Consider using an NCBI API key for better reliability."
+            )
+
+        # Apply request throttling
+        self._apply_request_throttling()
+
+        attempt = 0
+        last_exception = None
+
+        while attempt < self.config.max_retry:
+            try:
+                # Add email to all requests (NCBI requirement)
+                separator = "&" if "?" in url and "=" in url else "?"
+                url_with_email = f"{url}{separator}email={urllib.parse.quote(self.config.email)}"
+
+                logger.debug(f"NCBI {operation_name} attempt {attempt + 1}/{self.config.max_retry}: {url_with_email[:100]}...")
+
+                # Make the request
+                response = urllib.request.urlopen(url_with_email, timeout=30)
+                content = response.read()
+
+                # Reset failure counter on success
+                self._consecutive_failures = 0
+                logger.debug(f"NCBI {operation_name} successful")
+
+                return content
+
+            except urllib.error.HTTPError as e:
+                last_exception = e
+                attempt += 1
+
+                if e.code == 429:  # Too Many Requests
+                    logger.warning(f"NCBI rate limit hit for {operation_name} (attempt {attempt})")
+                    self._handle_rate_limit_error(attempt, operation_name)
+
+                elif e.code in [500, 502, 503, 504]:  # Server errors
+                    logger.warning(f"NCBI server error {e.code} for {operation_name} (attempt {attempt})")
+                    self._handle_server_error(e.code, attempt, operation_name)
+
+                elif e.code in [400, 404]:  # Client errors (don't retry)
+                    logger.error(f"NCBI client error {e.code} for {operation_name}: {str(e)}")
+                    self._consecutive_failures += 1
+                    raise Exception(f"NCBI request failed: {str(e)}")
+
+                else:  # Other HTTP errors
+                    logger.warning(f"NCBI HTTP error {e.code} for {operation_name} (attempt {attempt}): {str(e)}")
+                    if attempt >= self.config.max_retry:
+                        break
+                    self._apply_backoff_delay(attempt)
+
+            except (socket.timeout, socket.error, urllib.error.URLError) as e:
+                last_exception = e
+                attempt += 1
+                logger.warning(f"NCBI network error for {operation_name} (attempt {attempt}): {str(e)}")
+
+                if attempt < self.config.max_retry:
+                    self._apply_backoff_delay(attempt)
+
+            except Exception as e:
+                last_exception = e
+                logger.error(f"NCBI unexpected error for {operation_name}: {str(e)}")
+                self._consecutive_failures += 1
+                raise
+
+        # All retries exhausted
+        self._consecutive_failures += 1
+        self._maybe_activate_circuit_breaker()
+
+        error_msg = f"NCBI {operation_name} failed after {self.config.max_retry} attempts"
+        if last_exception:
+            error_msg += f": {str(last_exception)}"
+
+        # Add API key suggestion for rate limiting issues
+        if isinstance(last_exception, urllib.error.HTTPError) and last_exception.code == 429:
+            error_msg += self._get_api_key_suggestion()
+
+        raise Exception(error_msg)
+
+    def _apply_request_throttling(self) -> None:
+        """Apply rate limiting between requests."""
+        current_time = time.time()
+        time_since_last = current_time - self._last_request_time
+
+        # Determine appropriate delay based on API key presence
+        if self.config.api_key:
+            min_delay = 1.0 / self.config.requests_per_second_with_key
+        else:
+            min_delay = 1.0 / self.config.requests_per_second_no_key
+
+        if time_since_last < min_delay:
+            sleep_time = min_delay - time_since_last
+            logger.debug(f"Rate limiting: sleeping {sleep_time:.2f}s")
+            time.sleep(sleep_time)
+
+        self._last_request_time = time.time()
+
+    def _handle_rate_limit_error(self, attempt: int, operation_name: str) -> None:
+        """Handle rate limiting errors with progressive backoff."""
+        if not self._api_key_notified:
+            self._notify_about_api_key()
+
+        if attempt < self.config.max_retry:
+            # Progressive backoff with jitter for rate limits
+            base_delay = self.config.base_sleep_time * (2 ** attempt)
+            jitter = random.uniform(0, base_delay * 0.1)
+            delay = min(base_delay + jitter, self.config.max_backoff_delay)
+
+            logger.info(f"Rate limited by NCBI, waiting {delay:.1f}s before retry...")
+            time.sleep(delay)
+
+    def _handle_server_error(self, status_code: int, attempt: int, operation_name: str) -> None:
+        """Handle server errors with appropriate backoff."""
+        if attempt < self.config.max_retry:
+            # Shorter delays for server errors (they often resolve quickly)
+            delay = min(2 ** attempt, 10)
+            logger.info(f"NCBI server error {status_code}, waiting {delay}s before retry...")
+            time.sleep(delay)
+
+    def _apply_backoff_delay(self, attempt: int) -> None:
+        """Apply exponential backoff delay."""
+        delay = min(self.config.base_sleep_time * (2 ** attempt), self.config.max_backoff_delay)
+        jitter = random.uniform(0, delay * 0.1)
+        total_delay = delay + jitter
+        logger.debug(f"Applying backoff delay: {total_delay:.2f}s")
+        time.sleep(total_delay)
+
+    def _maybe_activate_circuit_breaker(self) -> None:
+        """Activate circuit breaker if too many consecutive failures."""
+        if self._consecutive_failures >= self.config.circuit_breaker_threshold:
+            self._circuit_breaker_until = time.time() + 300  # 5 minutes
+            logger.warning(
+                f"NCBI circuit breaker activated after {self._consecutive_failures} failures. "
+                f"Requests disabled for 5 minutes."
+            )
+
+    def _notify_about_api_key(self) -> None:
+        """Notify user about API key benefits (once per session)."""
+        if not self._api_key_notified:
+            if not self.config.api_key:
+                logger.warning(
+                    "🔑 NCBI API Key Recommended: You're hitting rate limits. "
+                    "Get a free API key at https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/ "
+                    "to increase your rate limit from 3 to 10 requests/second."
+                )
+            self._api_key_notified = True
+
+    def _get_api_key_suggestion(self) -> str:
+        """Get API key suggestion message."""
+        if not self.config.api_key:
+            return (
+                "\n\n💡 To avoid rate limits, get a free NCBI API key at: "
+                "https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/ "
+                "and set NCBI_API_KEY environment variable."
+            )
+        return "\n\nYour API key is active, but NCBI servers may be overloaded. Try again later."
     
     def extract_computational_methods(
         self,
@@ -500,17 +691,18 @@ class PubMedProvider(BasePublicationProvider):
             'retmax': top_k_results,
             'usehistory': 'y'
         })
-        
-        result = urllib.request.urlopen(url)
-        text = result.read().decode("utf-8")
+
+        # Use centralized request handler
+        content = self._make_ncbi_request(url, "PubMed search")
+        text = content.decode("utf-8")
         json_text = json.loads(text)
-        
+
         if int(json_text["esearchresult"].get("count", "0")) == 0:
             return
-        
+
         webenv = json_text["esearchresult"]["webenv"]
         idlist = json_text["esearchresult"]["idlist"]
-        
+
         # Batch fetch articles for efficiency
         if idlist:
             yield from self._batch_fetch_articles(idlist, webenv)
@@ -518,11 +710,11 @@ class PubMedProvider(BasePublicationProvider):
     def _batch_fetch_articles(self, idlist: List[str], webenv: str) -> Iterator[dict]:
         """
         Batch fetch multiple articles in a single request.
-        
+
         Args:
             idlist: List of PMIDs to fetch
             webenv: Web environment for the search
-            
+
         Yields:
             dict: Parsed article data
         """
@@ -534,30 +726,17 @@ class PubMedProvider(BasePublicationProvider):
             'id': ids,
             'webenv': webenv
         })
-        
-        retry = 0
-        delay = self.config.sleep_time
-        
-        while True:
-            try:
-                result = urllib.request.urlopen(url)
-                break
-            except urllib.error.HTTPError as e:
-                if e.code == 429 and retry < self.config.max_retry:
-                    time.sleep(delay)
-                    delay *= 2
-                    retry += 1
-                else:
-                    raise e
-        
-        xml_text = result.read().decode("utf-8")
+
+        # Use centralized request handler
+        xml_content = self._make_ncbi_request(url, f"batch fetch {len(idlist)} articles")
+        xml_text = xml_content.decode("utf-8")
         text_dict = self.parse(xml_text)
-        
+
         # Handle multiple articles in response
         articles = []
         if "PubmedArticleSet" in text_dict:
             article_set = text_dict["PubmedArticleSet"]
-            
+
             # Check if it's a single article or multiple
             if "PubmedArticle" in article_set:
                 if isinstance(article_set["PubmedArticle"], list):
@@ -569,7 +748,7 @@ class PubMedProvider(BasePublicationProvider):
                     articles = article_set["PubmedBookArticle"]
                 else:
                     articles = [article_set["PubmedBookArticle"]]
-        
+
         # Process each article
         for idx, article_data in enumerate(articles):
             uid = idlist[idx] if idx < len(idlist) else f"unknown_{idx}"
@@ -583,23 +762,10 @@ class PubMedProvider(BasePublicationProvider):
             'id': uid,
             'webenv': webenv
         })
-        
-        retry = 0
-        delay = self.config.sleep_time  # Use local variable for retry delay
-        
-        while True:
-            try:
-                result = urllib.request.urlopen(url)
-                break
-            except urllib.error.HTTPError as e:
-                if e.code == 429 and retry < self.config.max_retry:
-                    time.sleep(delay)
-                    delay *= 2  # Exponential backoff on local variable
-                    retry += 1
-                else:
-                    raise e
-        
-        xml_text = result.read().decode("utf-8")
+
+        # Use centralized request handler
+        xml_content = self._make_ncbi_request(url, f"retrieve article {uid}")
+        xml_text = xml_content.decode("utf-8")
         text_dict = self.parse(xml_text)
         return self._parse_article(uid, text_dict)
     
@@ -794,8 +960,9 @@ class PubMedProvider(BasePublicationProvider):
             })
             
             try:
-                result = urllib.request.urlopen(url)
-                text = result.read().decode("utf-8")
+                # Use centralized request handler
+                content = self._make_ncbi_request(url, f"find linked {config['key']} datasets")
+                text = content.decode("utf-8")
                 json_response = json.loads(text)
                 
                 if "linksets" in json_response:
@@ -837,8 +1004,9 @@ class PubMedProvider(BasePublicationProvider):
                 'id': uid,
                 'retmode': 'json'
             })
-            result = urllib.request.urlopen(url)
-            text = result.read().decode("utf-8")
+            # Use centralized request handler
+            content = self._make_ncbi_request(url, f"fetch GEO accession {uid}")
+            text = content.decode("utf-8")
             summary = json.loads(text)
             docsum = summary.get("result", {}).get(uid, {})
             return docsum.get("accession")

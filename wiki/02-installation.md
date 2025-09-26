@@ -511,7 +511,7 @@ sudo swapon /swapfile
 pip install -e . --no-build-isolation
 
 # Use lighter installation
-export GENIE_PROFILE=cost-optimized
+export LOBSTER_PROFILE=cost-optimized
 make install
 ```
 
@@ -555,10 +555,10 @@ python -c "import sys; print(sys.path)"
 **Solutions:**
 ```bash
 # Use lighter model profile
-export GENIE_PROFILE=cost-optimized
+export LOBSTER_PROFILE=cost-optimized
 
 # Reduce file size limits
-export GENIE_MAX_FILE_SIZE_MB=100
+export LOBSTER_MAX_FILE_SIZE_MB=100
 
 # Monitor memory usage
 htop  # Linux/macOS

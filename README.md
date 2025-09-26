@@ -1,6 +1,7 @@
 # 🦞 Lobster AI
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Documentation: CC BY 4.0](https://img.shields.io/badge/Documentation-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
 **Transform your bioinformatics research with AI agents that understand your data and provide expert analysis insights.**
@@ -18,7 +19,7 @@
 
 ## ✨ What is Lobster AI?
 
-Lobster AI is a bioinformatics platform that combines specialized AI agents with open-source tools to analyze complex multi-omics data. Simply describe your analysis needs in natural language - no coding required.
+Lobster AI is a bioinformatics platform that combines specialized AI agents with open-source tools to analyze complex multi-omics data (starting with transcriptomics). Simply describe your analysis needs in natural language - no coding required.
 
 **Perfect for:**
 - Bioinformatics researchers analyzing RNA-seq data
@@ -187,7 +188,8 @@ Need custom integrations or dedicated support? [Contact us](mailto:info@omics-os
 
 ## 📄 License
 
-Open source under [MIT License](LICENSE) - Use freely in academic and commercial projects.
+Lobster AI is open source under the Apache License 2.0 (see `LICENSE`). Documentation is licensed CC-BY-4.0.
+Contributions are accepted under a Contributor License Agreement to preserve future licensing flexibility.
 
 ---
 

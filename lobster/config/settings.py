@@ -43,7 +43,7 @@ class Settings:
         self.MEMORY = 24576
         self.CPU = 8192
         # Initialize agent configurator based on environment
-        profile = os.environ.get('GENIE_PROFILE', 'production')
+        profile = os.environ.get('LOBSTER_PROFILE', 'production')
         self.agent_configurator = initialize_configurator(profile=profile)
 
         # Initialize supervisor configuration
@@ -51,7 +51,7 @@ class Settings:
 
         # Base directories
         self.BASE_DIR = Path(__file__).resolve().parent.parent
-        self.CACHE_DIR = os.environ.get('GENIE_CACHE_DIR', 
+        self.CACHE_DIR = os.environ.get('LOBSTER_CACHE_DIR', 
                                       str(self.BASE_DIR / 'data' / 'cache'))
         
         # Create cache directory if it doesn't exist
@@ -73,8 +73,8 @@ class Settings:
         self.DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
         
         # Data processing settings
-        self.MAX_FILE_SIZE_MB = int(os.environ.get('GENIE_MAX_FILE_SIZE_MB', '500'))
-        self.DEFAULT_CLUSTER_RESOLUTION = float(os.environ.get('GENIE_CLUSTER_RESOLUTION', '0.5'))
+        self.MAX_FILE_SIZE_MB = int(os.environ.get('LOBSTER_MAX_FILE_SIZE_MB', '500'))
+        self.DEFAULT_CLUSTER_RESOLUTION = float(os.environ.get('LOBSTER_CLUSTER_RESOLUTION', '0.5'))
         
         # GEO database settings
         self.GEO_CACHE_DIR = os.path.join(self.CACHE_DIR, 'geo')

@@ -664,14 +664,9 @@ class CommandProcessor:
         output = "## 🎮 Available Modes\n\n"
         
         descriptions = {
-            "development": "Fast, lightweight models for development",
-            "production": "Balanced performance and cost",
-            "high-performance": "Enhanced performance for complex tasks",
-            "ultra-performance": "Maximum capability for demanding analyses",
-            "cost-optimized": "Efficient models to minimize costs",
-            "heavyweight": "Most capable models for all agents",
-            "eu-compliant": "EU region models for compliance",
-            "eu-high-performance": "High-performance EU region models"
+            "development": "Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - fast development",
+            "production": "Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant - production ready",
+            "cost-optimized": "Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - cost optimized"
         }
         
         for profile in sorted(profiles.keys()):

@@ -70,31 +70,26 @@ The system will automatically:
 ### 1. Set Your Profile
 ```bash
 # Set in your .env file
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 ```
 
 Available profiles:
-- `development` - Lightweight models for development
-- `production` - Balanced models for production use  
-- `high-performance` - Heavy models for complex analysis
-- `ultra-performance` - Ultra models for maximum capability
-- `cost-optimized` - Lightweight models to minimize costs
-- `heavyweight` - Heavy models across all agents
-- `eu-compliant` - EU region models for compliance
-- `eu-high-performance` - EU region high-performance models
+- `development` - Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - fast development
+- `production` - Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant - production ready
+- `cost-optimized` - Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - cost optimized
 
 ### 2. Override Specific Agents (Optional)
 ```bash
 # Use different models for different agents
-GENIE_SUPERVISOR_MODEL=claude-haiku              # Lightweight supervisor
-GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus   # Heavy model for complex analysis  
-GENIE_METHOD_AGENT_MODEL=claude-sonnet           # Balanced model for literature search
+LOBSTER_SUPERVISOR_MODEL=claude-haiku              # Lightweight supervisor
+LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus   # Heavy model for complex analysis  
+LOBSTER_METHOD_AGENT_MODEL=claude-sonnet           # Balanced model for literature search
 ```
 
 ### 3. Global Override (Optional)
 ```bash
 # Override all agents with the same model
-GENIE_GLOBAL_MODEL=claude-sonnet
+LOBSTER_GLOBAL_MODEL=claude-sonnet
 ```
 
 ## Available Models
@@ -136,44 +131,19 @@ GENIE_GLOBAL_MODEL=claude-sonnet
 ## Configuration Profiles
 
 ### Development Profile
-- **Supervisor**: `claude-3-5-haiku` (lightweight, fast feedback)
-- **Transcriptomics Expert**: `claude-3-5-sonnet` (balanced capability)
-- **Method Agent**: `claude-3-5-haiku` (lightweight literature search)
+- **Assistant**: `claude-3-5-sonnet-v2` (cost-effective interface)
+- **Supervisor**: `claude-3-7-sonnet` (development coordination)
+- **All Expert Agents**: `claude-3-7-sonnet` (balanced capability for development)
 
-### Production Profile  
-- **Supervisor**: `claude-3-5-sonnet-v2` (reliable coordination)
-- **Transcriptomics Expert**: `claude-4-opus` (maximum analysis capability)
-- **Method Agent**: `claude-3-5-sonnet` (good literature understanding)
-
-### High-Performance Profile
-- **Supervisor**: `claude-4-sonnet` (efficient coordination)
-- **Transcriptomics Expert**: `claude-3-7-sonnet` (cutting-edge analysis)
-- **Method Agent**: `claude-4-opus` (thorough literature analysis)
-
-### Ultra-Performance Profile
-- **Supervisor**: `claude-3-7-sonnet` (ultra-high performance coordination)
-- **Transcriptomics Expert**: `claude-3-7-sonnet` (maximum capability analysis)
-- **Method Agent**: `claude-4-1-opus` (most advanced literature analysis)
+### Production Profile
+- **Assistant**: `claude-3-5-sonnet-v2` (cost-effective interface)
+- **Supervisor**: `claude-4-sonnet` (reliable production coordination)
+- **All Expert Agents**: `claude-4-sonnet` (maximum production capability)
 
 ### Cost-Optimized Profile
-- **Supervisor**: `claude-3-haiku` (minimal overhead)
-- **Transcriptomics Expert**: `claude-3-5-sonnet` (necessary capability)
-- **Method Agent**: `claude-3-haiku` (basic literature search)
-
-### Heavyweight Profile
-- **Supervisor**: `claude-4-1-opus` (heavy coordination)
-- **Transcriptomics Expert**: `claude-4-1-opus` (maximum analysis power)
-- **Method Agent**: `claude-4-opus` (heavy literature analysis)
-
-### EU-Compliant Profile
-- **Supervisor**: `claude-3-5-sonnet-v2-eu` (EU region coordination)
-- **Transcriptomics Expert**: `claude-4-1-opus-eu` (EU region maximum capability)
-- **Method Agent**: `claude-3-5-sonnet-eu` (EU region literature search)
-
-### EU High-Performance Profile
-- **Supervisor**: `claude-3-7-sonnet-eu` (EU region ultra performance)
-- **Transcriptomics Expert**: `claude-3-7-sonnet-eu` (EU region cutting-edge analysis)
-- **Method Agent**: `claude-4-opus-eu` (EU region heavy literature analysis)
+- **Assistant**: `claude-3-5-sonnet-v2` (cost-effective interface)
+- **Supervisor**: `claude-3-7-sonnet` (cost-effective coordination)
+- **All Expert Agents**: `claude-3-7-sonnet` (cost-effective analysis)
 
 ## Environment Variables Reference
 
@@ -181,23 +151,23 @@ GENIE_GLOBAL_MODEL=claude-sonnet
 
 ```bash
 # Profile selection (recommended approach)
-GENIE_PROFILE=production
+LOBSTER_PROFILE=production
 
 # Custom configuration file
-GENIE_CONFIG_FILE=config/custom_agent_config.json
+LOBSTER_CONFIG_FILE=config/custom_agent_config.json
 
 # Per-agent model overrides
-GENIE_SUPERVISOR_MODEL=claude-haiku
-GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
-GENIE_METHOD_AGENT_MODEL=claude-sonnet
+LOBSTER_SUPERVISOR_MODEL=claude-haiku
+LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
+LOBSTER_METHOD_AGENT_MODEL=claude-sonnet
 
 # Global model override (overrides all agents)
-GENIE_GLOBAL_MODEL=claude-sonnet
+LOBSTER_GLOBAL_MODEL=claude-sonnet
 
 # Per-agent temperature overrides
-GENIE_SUPERVISOR_TEMPERATURE=0.5
-GENIE_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
-GENIE_METHOD_AGENT_TEMPERATURE=0.3
+LOBSTER_SUPERVISOR_TEMPERATURE=0.5
+LOBSTER_TRANSCRIPTOMICS_EXPERT_TEMPERATURE=0.7
+LOBSTER_METHOD_AGENT_TEMPERATURE=0.3
 ```
 
 ### Required API Keys (unchanged)
@@ -243,37 +213,29 @@ python config/config_manager.py generate-env
 ### Scenario 1: Development Testing
 ```bash
 # In your .env file
-GENIE_PROFILE=development
-GENIE_SUPERVISOR_MODEL=claude-haiku    # Fast supervisor for development
+LOBSTER_PROFILE=development
+# Uses Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant
 ```
 
-### Scenario 2: High-Performance Research
+### Scenario 2: Production Deployment
 ```bash
-# In your .env file  
-GENIE_PROFILE=high-performance
-GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-3-7-sonnet  # Latest model for analysis
+# In your .env file
+LOBSTER_PROFILE=production
+# Uses Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant
 ```
 
 ### Scenario 3: Cost Optimization
 ```bash
 # In your .env file
-GENIE_PROFILE=cost-optimized
-GENIE_GLOBAL_MODEL=claude-haiku  # All agents use lightweight model
+LOBSTER_PROFILE=cost-optimized
+# Uses Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant
 ```
 
-### Scenario 4: EU Compliance
+### Scenario 4: Custom Agent Override
 ```bash
 # In your .env file
-GENIE_PROFILE=eu-compliant
-AWS_REGION=eu-central-1
-```
-
-### Scenario 5: Custom Mix
-```bash
-# In your .env file
-GENIE_SUPERVISOR_MODEL=claude-haiku              # Lightweight supervisor
-GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus   # Heavy analysis model
-GENIE_METHOD_AGENT_MODEL=claude-sonnet           # Balanced literature search
+LOBSTER_PROFILE=development
+LOBSTER_SINGLECELL_EXPERT_AGENT_MODEL=claude-4-sonnet  # Override specific agent
 ```
 
 ## Custom Configuration Files
@@ -285,7 +247,7 @@ Create custom configurations using JSON:
 python config/config_manager.py create-custom
 
 # Use custom config
-export GENIE_CONFIG_FILE=config/custom_agent_config.json
+export LOBSTER_CONFIG_FILE=config/custom_agent_config.json
 ```
 
 Example custom configuration file:
@@ -330,9 +292,9 @@ The new system is backward compatible. Your existing `.env` configuration will c
 
 ### New way (recommended):
 ```bash
-GENIE_PROFILE=production
-GENIE_SUPERVISOR_MODEL=claude-haiku
-GENIE_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
+LOBSTER_PROFILE=production
+LOBSTER_SUPERVISOR_MODEL=claude-haiku
+LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus
 ```
 
 ## Troubleshooting

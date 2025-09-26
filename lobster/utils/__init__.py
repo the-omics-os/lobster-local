@@ -1,5 +1,5 @@
 """
-Utilities module for the Genie AI bioinformatics platform.
+Utilities module for the LOBSTER AI bioinformatics platform.
 
 This module contains various utility functions and classes:
 - Logging configuration
