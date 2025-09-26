@@ -749,7 +749,7 @@ Need custom integrations, dedicated support, or on-premise deployment?
 
 ## 📄 **License**
 
-Open source under [MIT License](LICENSE) - Use freely in academic and commercial projects.
+Open source under [Apache 2.0 License](LICENSE) - Use freely in academic and commercial projects.
 
 ---
 

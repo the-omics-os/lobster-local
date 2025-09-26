@@ -44,11 +44,11 @@ This comprehensive FAQ addresses common questions about Lobster AI, covering eve
 
 ### Q: Is Lobster AI free to use?
 
-**A:** Yes, Lobster AI is open source under the MIT license. You can use it freely for academic and commercial projects. Cloud services may require a subscription for enhanced computing resources.
+**A:** Yes, Lobster AI is open source under the Apache 2.0 License. You can use it freely for academic and commercial projects. Cloud services may require a subscription for enhanced computing resources.
 
 ### Q: Can I use Lobster AI for commercial research?
 
-**A:** Yes, the MIT license allows commercial use. For enterprise deployments, custom integrations, or dedicated support, contact the enterprise team.
+**A:** Yes, the Apache 2.0 License allows commercial use. For enterprise deployments, custom integrations, or dedicated support, contact the enterprise team.
 
 ---
 

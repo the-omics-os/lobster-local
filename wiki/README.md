@@ -190,7 +190,7 @@ def example():
 
 ## 📄 License
 
-This documentation is part of the Lobster AI project and is licensed under the MIT License.
+This documentation is part of the Lobster AI project and is licensed under the Apache 2.0 License.
 
 ---
 

@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Lobster AI! We welcome contributi
 ## 🌟 Ways to Contribute
 
 ### 🐛 Bug Reports
-- Use [GitHub Issues](https://github.com/the-omics-os/lobster/issues) with the "bug" label
+- Use [GitHub Issues](https://github.com/the-omics-os/lobster-local/issues) with the "bug" label
 - Include steps to reproduce, expected vs actual behavior
 - Add relevant system information (OS, Python version)
 
@@ -31,32 +31,56 @@ Thank you for your interest in contributing to Lobster AI! We welcome contributi
 - Python 3.12+
 - Git
 - Virtual environment (recommended)
+- An LLM API key (Claude or AWS Bedrock)
 
 ### Setup Process
 ```bash
 # 1. Fork the repository on GitHub
 
 # 2. Clone your fork
-git clone https://github.com/YOUR-USERNAME/lobster.git
-cd lobster
+git clone https://github.com/YOUR-USERNAME/lobster-local.git
+cd lobster-local
 
-# 3. Set up development environment  
+# 3. Set up development environment
 make dev-install
 
-# 4. Create a branch for your changes
+# 4. Configure your API keys
+# The .env file is automatically created during installation
+# Edit it with your API keys:
+nano .env
+
+# Required: Add one of these API configurations:
+# Option 1: Claude API (Recommended)
+ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+
+# Option 2: AWS Bedrock
+AWS_BEDROCK_ACCESS_KEY=AKIA...
+AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
+
+# Optional: Enhanced literature search
+NCBI_API_KEY=your-ncbi-api-key
+
+# 5. Test your setup
+lobster --help  # Verify installation
+lobster chat    # Start interactive mode
+
+# 6. Create a branch for your changes
 git checkout -b feature/your-feature-name
 
-# 5. Make your changes and test
+# 7. Make your changes and test
 make test
 make format  # Auto-format code
 make lint    # Check code quality
 
-# 6. Commit and push
+# 8. Test your changes
+lobster chat  # Test the CLI interface
+
+# 9. Commit and push
 git add .
 git commit -m "Add: your feature description"
 git push origin feature/your-feature-name
 
-# 7. Create Pull Request on GitHub
+# 10. Create Pull Request on GitHub
 ```
 
 ## 📋 Development Guidelines
@@ -83,35 +107,41 @@ git push origin feature/your-feature-name
 - Update README.md if adding major features
 - Add docstrings to all public functions
 - Include examples for complex functionality
-- Update INSTALLATION.md for setup changes
+- Update installation guides for setup changes
 
 ## 🏗️ Architecture Overview
 
 ### Core Components
 - **lobster/agents/**: AI agents for different analysis types
-- **lobster/core/**: Data management and client infrastructure  
+- **lobster/core/**: Data management and client infrastructure
 - **lobster/tools/**: Analysis services and bioinformatics tools
 - **lobster/config/**: Configuration management
-- **lobster-core/**: Shared interfaces and utilities
+- **lobster/cli.py**: Command-line interface with enhanced autocomplete
+- **lobster/api/**: API endpoints and web services
 
 ### Key Design Principles
 1. **Modular**: Each component has clear responsibilities
 2. **Extensible**: Easy to add new analysis methods
 3. **Testable**: Services are stateless and unit testable
-4. **User-friendly**: Natural language interface
+4. **User-friendly**: Natural language interface with smart autocomplete
 5. **Reproducible**: Complete provenance tracking
+6. **Multi-modal**: Support for transcriptomics, proteomics, and multi-omics data
+7. **Cloud-ready**: Hybrid local/cloud execution capabilities
 
 ## 🔬 Adding New Analysis Methods
 
 ### Example: Adding a New Tool
 ```python
-# lobster/tools/new_analysis_service.py
+# lobster/tools/providers/new_analysis_service.py
 from typing import Dict, Any, Tuple
 import anndata
+import logging
+
+logger = logging.getLogger(__name__)
 
 class NewAnalysisService:
     """Service for new bioinformatics analysis."""
-    
+
     def analyze_data(
         self,
         adata: anndata.AnnData,
@@ -120,28 +150,43 @@ class NewAnalysisService:
     ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Perform new analysis on AnnData.
-        
+
         Args:
             adata: Input AnnData object
             parameter1: Description of parameter
             parameter2: Another parameter
-            
+
         Returns:
             Tuple of (processed_adata, analysis_statistics)
         """
+        logger.info(f"Starting analysis with parameters: {parameter1}, {parameter2}")
+
         # 1. Create working copy
         adata_processed = adata.copy()
-        
-        # 2. Perform analysis
+
+        # 2. Validate input data
+        if adata_processed.n_obs == 0:
+            raise ValueError("Input data contains no observations")
+
+        # 3. Perform analysis
         # ... your analysis logic here ...
-        
-        # 3. Return results with statistics
+
+        # 4. Add analysis metadata
+        adata_processed.uns['analysis_params'] = {
+            "parameter1": parameter1,
+            "parameter2": parameter2
+        }
+
+        # 5. Return results with statistics
         stats = {
             "analysis_type": "new_analysis",
             "parameters_used": {"parameter1": parameter1, "parameter2": parameter2},
+            "n_cells_processed": adata_processed.n_obs,
+            "n_genes_processed": adata_processed.n_vars,
             "results_summary": "Analysis completed successfully"
         }
-        
+
+        logger.info(f"Analysis complete: {stats['results_summary']}")
         return adata_processed, stats
 ```
 
@@ -223,22 +268,53 @@ Brief description of changes
 # Run all tests
 make test
 
+# Run tests in parallel (faster)
+make test-fast
+
 # Run specific test file
 pytest tests/test_specific.py -v
 
-# Run with coverage
-make test-coverage
-
 # Run integration tests
 make test-integration
+
+# Run type checking
+make type-check
 ```
+
+## 🧬 Current Capabilities
+
+### Single-Cell RNA-seq Analysis
+- Quality control and filtering
+- Normalization and scaling
+- Clustering and UMAP visualization
+- Cell type annotation
+- Marker gene identification
+- Pseudobulk aggregation
+
+### Bulk RNA-seq Analysis
+- Differential expression with pyDESeq2
+- R-style formula-based statistics
+- Complex experimental designs
+- Batch effect correction
+
+### Proteomics Analysis (In Development)
+- Mass spectrometry proteomics (DDA/DIA workflows)
+- Affinity proteomics (Olink panels, antibody arrays)
+- Missing value handling and normalization
+- Pathway enrichment analysis
+
+### Data Management
+- Support for CSV, Excel, H5AD, 10X formats
+- GEO dataset downloading
+- Literature mining via PubMed
+- Automatic visualization generation
 
 ## 💬 Community & Support
 
 ### Getting Help
-** - Chat with other contributors
 - 📚 **[Documentation](docs/)** - Comprehensive guides
-- 🐛 **[GitHub Issues](https://github.com/the-omics-os/lobster/issues)** - Bug reports and feature requests
+- 🐛 **[GitHub Issues](https://github.com/the-omics-os/lobster-local/issues)** - Bug reports and feature requests
+- 📧 **[Email Support](mailto:info@omics-os.com)** - Direct help from our team
 
 ### Code of Conduct
 We follow a simple principle: **Be kind, be constructive, be scientific.**
@@ -250,7 +326,7 @@ We follow a simple principle: **Be kind, be constructive, be scientific.**
 
 ## 📄 License
 
-By contributing to Lobster AI, you agree that your contributions will be licensed under the MIT License.
+By contributing to Lobster AI, you agree that your contributions will be licensed under the Apache 2.0 License.
 
 ## 🙏 Recognition
 

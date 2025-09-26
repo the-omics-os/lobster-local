@@ -251,15 +251,9 @@ check-python: check-env-conflicts
 		if ! command -v brew >/dev/null 2>&1; then \
 			echo "$(YELLOW)⚠️ Homebrew not found. Install: /bin/bash -c \"$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"$(NC)"; \
 		fi; \
-		if ! brew list hdf5 >/dev/null 2>&1; then \
-			echo "$(YELLOW)⚠️ HDF5 not found. Install: brew install hdf5$(NC)"; \
-		fi; \
 	else \
 		if ! dpkg -l python3.12-dev >/dev/null 2>&1; then \
 			echo "$(YELLOW)⚠️ python3.12-dev not found. Install: sudo apt install python3.12-dev$(NC)"; \
-		fi; \
-		if ! dpkg -l libhdf5-dev >/dev/null 2>&1; then \
-			echo "$(YELLOW)⚠️ libhdf5-dev not found. Install: sudo apt install libhdf5-dev$(NC)"; \
 		fi; \
 	fi
 
@@ -510,7 +504,7 @@ uninstall-global:
 # Testing targets (require virtual environment)
 test: $(VENV_PATH)
 	@echo "🧪 Running tests..."
-	$(VENV_PATH)/bin/pytest tests/test_lobster.py -v --cov=lobster --cov-report=html --cov-report=term
+	$(VENV_PATH)/bin/pytest tests/ -v --cov=lobster --cov-report=html --cov-report=term
 
 test-fast: $(VENV_PATH)
 	@echo "🧪 Running tests in parallel..."
