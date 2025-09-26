@@ -3,6 +3,8 @@ Expert Handoff Patterns for standardized expert-to-expert collaborations.
 
 This module defines common handoff patterns and provides automatic tool registration
 based on available agents in the system.
+
+Coming soon
 """
 
 from typing import Dict, List, Any, Type, Optional

@@ -31,7 +31,7 @@ from lobster.core.provenance import ProvenanceTracker
 # Import available backends and adapters
 from lobster.core.backends.h5ad_backend import H5ADBackend
 from lobster.core.adapters.transcriptomics_adapter import TranscriptomicsAdapter
-from lobster.core.adapters.proteomics_adapter import ProteomicsAdapter
+# from lobster.core.adapters.proteomics_adapter import ProteomicsAdapter
 
 # Import MuData backend if available
 try:
@@ -208,16 +208,16 @@ class DataManagerV2:
             TranscriptomicsAdapter(data_type="bulk", strict_validation=False)
         )
         
-        # Proteomics adapters
-        self.register_adapter(
-            "proteomics_ms", 
-            ProteomicsAdapter(data_type="mass_spectrometry", strict_validation=False)
-        )
+        # Proteomics adapters  #NOTE coming soon
+        # self.register_adapter(
+        #     "proteomics_ms", 
+        #     ProteomicsAdapter(data_type="mass_spectrometry", strict_validation=False)
+        # )
         
-        self.register_adapter(
-            "proteomics_affinity",
-            ProteomicsAdapter(data_type="affinity", strict_validation=False)
-        )
+        # self.register_adapter(
+        #     "proteomics_affinity",
+        #     ProteomicsAdapter(data_type="affinity", strict_validation=False)
+        # )
 
     def register_backend(self, name: str, backend: IDataBackend) -> None:
         """
