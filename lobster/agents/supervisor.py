@@ -36,7 +36,7 @@ def create_supervisor_prompt(
     # Use default config if not provided
     if config is None:
         config = SupervisorConfig.from_env()
-        logger.info(f"Using supervisor config mode: {config.get_prompt_mode()}")
+        logger.debug(f"Using supervisor config mode: {config.get_prompt_mode()}")
 
     # Get active agents from registry if not provided
     if active_agents is None:

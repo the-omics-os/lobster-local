@@ -50,6 +50,8 @@ echo "ANTHROPIC_API_KEY=sk-ant-api03-your-key-here" >> .env
 
 # 4. Start analyzing!
 lobster chat
+# or if you want to see the reasoning
+lobster chat --reasoning 
 ```
 
 ## 💡 Example Usage

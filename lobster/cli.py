@@ -2635,18 +2635,8 @@ when they are started by agents or analysis workflows.
                 # Show what will be loaded
                 console.print(f"[yellow]Loading workspace datasets (pattern: {pattern})...[/yellow]")
 
-                try:
-                    progress_console = Console(stderr=True, force_terminal=True)
-                except Exception:
-                    progress_console = console
-
                 # Create progress bar
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    console=progress_console,
-                    transient=True  # Make transient to avoid terminal pollution
-                ) as progress:
+                with create_progress(client_arg=client) as progress:
                     task = progress.add_task(f"Loading datasets matching '{pattern}'...", total=None)
 
                     # Perform workspace loading
@@ -3168,17 +3158,7 @@ when they are started by agents or analysis workflows.
         console.print(f"[yellow]Restoring workspace (pattern: {pattern})...[/yellow]")
 
         # Create progress bar
-        try:
-            progress_console = Console(stderr=True, force_terminal=True)
-        except Exception:
-            progress_console = console
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=progress_console,
-            transient=True  # Make transient to avoid terminal pollution
-        ) as progress:
+        with create_progress(client_arg=client) as progress:
             task = progress.add_task("Restoring datasets...", total=None)
 
             # Perform restoration
@@ -3293,9 +3273,13 @@ def query(
     """
     # Initialize client
     client = init_client(workspace, reasoning, verbose)
-    
+
     # Process query
-    with console.status("[red]🦞 Processing query...[/red]"):
+    if should_show_progress(client):
+        with console.status("[red]🦞 Processing query...[/red]"):
+            result = client.query(question)
+    else:
+        # In verbose/reasoning mode, no progress indication
         result = client.query(question)
     
     # Display or save result
