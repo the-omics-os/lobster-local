@@ -9,9 +9,9 @@ Transform your bioinformatics research with intelligent AI agents that understan
 
 ## ✨ What is Lobster AI?
 
-Lobster AI is a revolutionary bioinformatics platform that combines the power of **specialized AI agents** with proven scientific tools to analyze complex multi-omics data. Instead of wrestling with command-line tools and scripts, simply describe your analysis needs in natural language.
+Lobster AI is a bioinformatics platform that combines the power of **specialized AI agents** with open-source tools to analyze complex multi-omics data. Instead of wrestling with command-line tools and scripts, simply describe your analysis needs in natural language.
 
-**✨ Now featuring a stunning Rich CLI interface with professional orange branding, multi-panel dashboards, and real-time progress monitoring!**
+**✨ Now featuring a Rich CLI interface with professional orange branding, multi-panel dashboards, and real-time progress monitoring!**
 
 ### 🎯 **Perfect For**
 - **Bioinformatics Researchers** analyzing RNA-seq, proteomics, and multi-omics data
