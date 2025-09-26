@@ -66,7 +66,7 @@ LANGFUSE_HOST=https://cloud.langfuse.com    # Optional: custom instance
 ```env
 # Lobster Cloud Integration (Optional)
 LOBSTER_CLOUD_KEY=your-cloud-api-key-here
-LOBSTER_ENDPOINT=https://api.lobster.homara.ai  # Optional: defaults to production
+LOBSTER_ENDPOINT=https://api.lobster.omics-os.com  # Optional: defaults to production
 ```
 
 ### Supervisor Configuration (v2.3+)
@@ -379,7 +379,7 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=your-aws-secret
 LOBSTER_CLOUD_KEY=your-cloud-api-key-here
 
 # Optional: custom endpoint
-LOBSTER_ENDPOINT=https://api.lobster.homara.ai
+LOBSTER_ENDPOINT=https://api.lobster.omics-os.com
 
 # Local API keys not required in cloud mode
 ```

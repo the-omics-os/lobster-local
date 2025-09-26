@@ -374,7 +374,7 @@ type-check: $(VENV_PATH)
 # Docker targets
 docker-build:
 	@echo "🐳 Building Docker image..."
-	docker build -t homaraai/lobster:latest .
+	docker build -t omicsos/lobster:latest .
 	@echo "$(GREEN)✅ Docker image built!$(NC)"
 
 docker-run:
@@ -384,11 +384,11 @@ docker-run:
 		-e ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY} \
 		-e AWS_BEDROCK_ACCESS_KEY=${AWS_BEDROCK_ACCESS_KEY} \
 		-e AWS_BEDROCK_SECRET_ACCESS_KEY=${AWS_BEDROCK_SECRET_ACCESS_KEY} \
-		homaraai/lobster:latest
+		omicsos/lobster:latest
 
 docker-push:
 	@echo "🐳 Pushing to Docker Hub..."
-	docker push homaraai/lobster:latest
+	docker push omicsos/lobster:latest
 
 # Release targets
 version: $(VENV_PATH)

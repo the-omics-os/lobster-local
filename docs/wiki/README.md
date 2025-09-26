@@ -21,7 +21,7 @@ The documentation is organized into 30 comprehensive markdown files covering:
 1. Enable Wiki in your GitHub repository settings
 2. Clone the wiki repository:
    ```bash
-   git clone https://github.com/homara-ai/lobster.wiki.git
+   git clone https://github.com/the-omics-os/lobster.wiki.git
    cd lobster.wiki
    ```
 
@@ -183,10 +183,10 @@ def example():
 
 ## 🔗 Additional Resources
 
-- [Main Repository](https://github.com/homara-ai/lobster)
-- [Issue Tracker](https://github.com/homara-ai/lobster/issues)
-- [Discord Community](https://discord.gg/homaraai)
-- [Enterprise Support](mailto:enterprise@homara.ai)
+- [Main Repository](https://github.com/the-omics-os/lobster)
+- [Issue Tracker](https://github.com/the-omics-os/lobster/issues)
+- [Discord Community](https://discord.gg/HDTRbWJ8omicsos)
+- [Enterprise Support](mailto:info@omics-os.com)
 
 ## 📄 License
 

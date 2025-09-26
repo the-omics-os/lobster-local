@@ -37,8 +37,8 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/homara-ai/lobster.git
-cd lobster
+git clone https://github.com/the-omics-os/lobster-local.git
+cd lobster-local
 
 # 2. Install with make (handles all dependencies)
 make install

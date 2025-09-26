@@ -150,7 +150,7 @@ def main():
         print("   1. Configure API keys in .env file")
         print("   2. Start Lobster: lobster chat")
         print("   3. Try: 'Download GSE109564 and perform single-cell analysis'")
-        print("\n📚 Documentation: https://github.com/homara-ai/lobster")
+        print("\n📚 Documentation: https://github.com/the-omics-os/lobster")
         return True
     else:
         print("\n⚠️  Some tests failed. Installation may be incomplete.")

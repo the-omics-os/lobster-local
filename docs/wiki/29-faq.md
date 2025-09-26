@@ -69,7 +69,7 @@ This comprehensive FAQ addresses common questions about Lobster AI, covering eve
 
 ```bash
 # Option 1: Quick install from GitHub
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster && make install
 
 # Option 2: Development install
@@ -405,7 +405,7 @@ Use local for:
 ### Q: How do I get cloud access?
 
 **A:** Cloud access:
-1. **Request API key** - Contact cloud@homara.ai
+1. **Request API key** - Contact info@omics-os.com
 2. **Set environment variable** - `export LOBSTER_CLOUD_KEY="your-key"`
 3. **Start Lobster** - Automatically detects and uses cloud mode
 

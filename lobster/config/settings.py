@@ -28,7 +28,7 @@ class Settings:
 
         #CDK variables
         self.STACK_NAME = 'LobsterStack'
-        self.CUSTOM_HEADER_VALUE = 'HomaraBeatsKepler'
+        self.CUSTOM_HEADER_VALUE = 'omics-osBeatsKepler'
         self.SECRETS_MANAGER_ID = f"{self.STACK_NAME}ParamCognitoSecret"
         self.CDK_DEPLY_ACCOUNT = '649207544517'
         # AWS Fargate CPU/Memory options summary:

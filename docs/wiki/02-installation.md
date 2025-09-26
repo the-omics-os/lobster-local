@@ -66,7 +66,7 @@ The easiest and most reliable installation method:
 
 ```bash
 # Clone repository
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 
 # One-command installation
@@ -85,7 +85,7 @@ make install
 For contributors and developers:
 
 ```bash
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 
 # Install with development dependencies
@@ -104,7 +104,7 @@ For full control over the installation process:
 
 ```bash
 # Clone and enter directory
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 
 # Create virtual environment
@@ -160,7 +160,7 @@ brew install python@3.12
 brew install uv
 
 # Clone and install Lobster
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 make install
 ```
@@ -188,7 +188,7 @@ sudo apt install python3.12 python3.12-venv python3.12-dev
 sudo apt install build-essential
 
 # Clone and install
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 make install
 ```
@@ -202,7 +202,7 @@ sudo dnf install python3.12 python3.12-devel
 sudo dnf groupinstall "Development Tools"
 
 # Clone and install
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 make install
 ```
@@ -215,7 +215,7 @@ make install
 # Ensure Python is in PATH
 
 # Clone repository
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 
 # Create virtual environment
@@ -301,7 +301,7 @@ lobster config test
 ### Full Development Setup
 
 ```bash
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 
 # Development installation
@@ -594,9 +594,9 @@ export LOBSTER_LOG_LEVEL=DEBUG
 
 #### Community Support
 
-- **GitHub Issues**: [Report bugs](https://github.com/homara-ai/lobster/issues)
-- **Discord**: [Join community](https://discord.gg/homaraai)
-- **Email**: [Direct support](mailto:support@homara.ai)
+- **GitHub Issues**: [Report bugs](https://github.com/the-omics-os/lobster/issues)
+- **Discord**: [Join community](https://discord.gg/HDTRbWJ8omicsos)
+- **Email**: [Direct support](mailto:info@omics-os.com)
 - **Documentation**: [Full docs](../README.md)
 
 ### Clean Reinstallation

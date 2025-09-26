@@ -41,7 +41,7 @@ You'll see the welcome screen with orange branding:
 🦞 lobster chat
 
 ┌─ Welcome ────────────────────────────────────────────────────────────┐
-│  🦞 LOBSTER by homara AI                                             │
+│  🦞 LOBSTER by Omics-OS                                             │
 │  Multi-Agent Bioinformatics Analysis System v2.0                    │
 │                                                                      │
 │  🧬 Key Tasks:                                                       │

@@ -128,10 +128,10 @@ Help and additional resources
 
 ## 🔗 Quick Links
 
-- **GitHub Repository**: [github.com/homara-ai/lobster](https://github.com/homara-ai/lobster)
-- **Issue Tracker**: [Report bugs or request features](https://github.com/homara-ai/lobster/issues)
-- **Discord Community**: [Join our community](https://discord.gg/homaraai)
-- **Enterprise Support**: [enterprise@homara.ai](mailto:enterprise@homara.ai)
+- **GitHub Repository**: [github.com/the-omics-os/lobster](https://github.com/the-omics-os/lobster)
+- **Issue Tracker**: [Report bugs or request features](https://github.com/the-omics-os/lobster/issues)
+- **Discord Community**: [Join our community](https://discord.gg/HDTRbWJ8omicsos)
+- **Enterprise Support**: [info@omics-os.com](mailto:info@omics-os.com)
 
 ## 📝 Documentation Standards
 
@@ -153,4 +153,4 @@ Found an issue or want to improve the documentation?
 
 *Documentation for Lobster AI v2.2+ | Last updated: 2025*
 
-*Made with ❤️ by [Homara AI](https://homara.ai)*
+*Made with ❤️ by [Omics-OS](https://omics-os.com)*

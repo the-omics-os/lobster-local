@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 print_logo() {
     echo -e "${RED}"
     echo "    🦞 LOBSTER AI"
-    echo "    by Homara AI"
+    echo "    by Omics-OS"
     echo -e "${NC}"
 }
 
@@ -422,7 +422,7 @@ main() {
     print_message "2. Run 'lobster chat' to start" "$NC"
     print_message "3. Visit https://docs.lobster-ai.com for documentation" "$NC"
     echo
-    print_message "Need help? Join our Discord: https://discord.gg/homaraai" "$BLUE"
+    print_message "Need help? Join our Discord: https://discord.gg/HDTRbWJ8omicsos" "$BLUE"
     echo
     
     # ZSH warning

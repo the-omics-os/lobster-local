@@ -70,7 +70,7 @@ class GEOProviderConfig(BaseModel):
     default_entry_types: List[str] = Field(default=["gse", "gds"])
     
     # NCBI API settings
-    email: str = "kevin.yar@homara.ai"
+    email: str = "kevin.yar@omics-os.com"
     api_key: Optional[str] = ""
     max_retry: int = Field(default=3, ge=1, le=10)
     sleep_time: float = Field(default=0.5, ge=0.1, le=5.0)

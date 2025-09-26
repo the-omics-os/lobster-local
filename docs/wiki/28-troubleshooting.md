@@ -44,7 +44,7 @@ conda activate lobster
 pip uninstall lobster-ai
 
 # Clean install with development dependencies
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 make clean-install
 ```
@@ -760,7 +760,7 @@ When reporting issues, provide:
 
 ### Community Resources
 
-- **GitHub Issues**: [Report bugs and feature requests](https://github.com/homara-ai/lobster/issues)
+- **GitHub Issues**: [Report bugs and feature requests](https://github.com/the-omics-os/lobster/issues)
 - **Discord Community**: Real-time help and discussion
 - **Documentation**: [Complete guide and tutorials](../README.md)
 - **Example Notebooks**: Working examples and best practices

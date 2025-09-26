@@ -39,17 +39,17 @@ graph TB
     CLI --> INIT
     STREAMLIT --> INIT
     API --> INIT
-    
+
     INIT --> DETECT
     DETECT --> |Cloud Key Present| CLOUD_CLIENT
     DETECT --> |No Key/Fallback| LOCAL_CLIENT
-    
+
     CLOUD_CLIENT --> |HTTP/REST| CLOUD_API
     CLOUD_API --> AWS_INFRA
-    
+
     LOCAL_CLIENT --> LOCAL_AGENTS
     LOCAL_CLIENT --> LOCAL_DATA
-    
+
     CLOUD_CLIENT -.-> |Implements| BASE_CLIENT
     LOCAL_CLIENT -.-> |Implements| BASE_CLIENT
     BASE_CLIENT --> METHODS
@@ -80,13 +80,13 @@ sequenceDiagram
 
     User->>CLI: lobster chat
     CLI->>init_client: Initialize client
-    
+
     Note over init_client: Check LOBSTER_CLOUD_KEY
-    
+
     alt Cloud Key Present
         init_client->>CloudClient: new CloudLobsterClient(api_key)
         CloudClient->>CloudAPI: Test connection (get_status)
-        
+
         alt Connection Success
             CloudAPI-->>CloudClient: ✅ Status OK
             CloudClient-->>init_client: ✅ Cloud client ready
@@ -106,10 +106,10 @@ sequenceDiagram
         init_client-->>CLI: AgentClient instance
         CLI-->>User: 💻 "Using local mode"
     end
-    
+
     User->>CLI: "Analyze my RNA-seq data"
     CLI->>init_client: client.query(user_input)
-    
+
     alt Using Cloud Client
         init_client->>CloudAPI: POST /query
         CloudAPI-->>init_client: Analysis response
@@ -117,7 +117,7 @@ sequenceDiagram
         init_client->>LocalClient: Process with local agents
         LocalClient-->>init_client: Analysis response
     end
-    
+
     init_client-->>CLI: Standardized response
     CLI-->>User: 🦞 Analysis results
 ```
@@ -128,7 +128,7 @@ sequenceDiagram
 graph TB
     subgraph "Lobster AI Open Source"
         MAIN[lobster/<br/>🦞 Complete Bioinformatics Platform<br/>All Features Included]
-        
+
         subgraph "Core Components"
             CLI[cli.py<br/>🔄 Smart CLI with Cloud Detection]
             AGENTS[agents/<br/>🤖 All AI Agents]
@@ -137,7 +137,7 @@ graph TB
             UTILS[utils/<br/>🛠️ Utilities & Callbacks]
             CONFIG[config/<br/>⚙️ Configuration System]
         end
-        
+
         MAIN --> CLI
         MAIN --> AGENTS
         MAIN --> CORE
@@ -163,7 +163,7 @@ graph TB
     DETECT --> |Cloud Key Set| WITH_KEY
     NO_KEY --> CLIENT
     WITH_KEY --> CLIENT
-    
+
     CLIENT --> DM
     CLIENT --> AI_PIPELINE
 
@@ -185,12 +185,12 @@ graph LR
     LOCAL[🖥️ Local Installation<br/>Free & Open Source] --> UPGRADE{Want Cloud?}
     UPGRADE --> |Yes| CLOUD[☁️ Lobster Cloud<br/>Managed Platform]
     UPGRADE --> |No| LOCAL
-    
+
     CLOUD --> FEATURES[🚀 Scalable Computing<br/>👥 Team Collaboration<br/>💾 Persistent Storage]
 
     classDef free fill:#4caf50,stroke:#2e7d32,stroke-width:2px
     classDef cloud fill:#2196f3,stroke:#1976d2,stroke-width:3px
-    
+
     class LOCAL free
     class CLOUD,FEATURES cloud
 ```
@@ -241,14 +241,14 @@ graph TB
         BULK[BulkRNASeqService<br/>📈 Bulk Analysis & pyDESeq2]
         GEO_SVC[GEOService<br/>💾 Data Download]
         CONCAT_SVC[ConcatenationService<br/>🔗 Sample Concatenation & Code Deduplication<br/>Memory-Efficient Multi-Modal Merging]
-        
+
         subgraph "Pseudobulk & Differential Expression Services"
             PBULK[PseudobulkService<br/>🧬 Single-cell to Pseudobulk Aggregation]
             FORMULA[DifferentialFormulaService<br/>📊 R-style Formula Parsing & Design Matrix<br/>🤖 Agent-Guided Formula Construction<br/>🔄 Iterative Analysis Support]
             PBADAP[PseudobulkAdapter<br/>🔄 Schema Validation & QC]
             WFLOW[WorkflowTracker<br/>🔄 DE Iteration Management<br/>📊 Result Comparison & Analytics]
         end
-        
+
         subgraph "Proteomics Services - Professional Grade"
             PPREP[ProteomicsPreprocessingService<br/>🧪 MS/Affinity Filtering & Normalization]
             PQUAL[ProteomicsQualityService<br/>📊 Missing Value & CV Analysis]
@@ -257,7 +257,7 @@ graph TB
             PVIS[ProteomicsVisualizationService<br/>📊 Volcano Plots & Networks]
         end
     end
-    
+
     %% NEW: Publication Services Layer
     subgraph "Publication & Literature Services"
         PUBSVC[PublicationService<br/>🎯 Multi-Provider Orchestrator]
@@ -278,17 +278,17 @@ graph TB
     subgraph "Modality Adapters"
         TRA[TranscriptomicsAdapter<br/>🧬 RNA-seq Loading]
         PRA[ProteomicsAdapter<br/>🧪 Protein Loading]
-        
+
         subgraph "Transcriptomics Types"
             TRSC[Single-cell RNA-seq<br/>Schema & Validation]
             TRBL[Bulk RNA-seq<br/>Schema & Validation]
         end
-        
+
         subgraph "Proteomics Types"
             PRMS[Mass Spectrometry<br/>Missing Value Handling]
             PRAF[Affinity Proteomics<br/>Antibody Arrays]
         end
-        
+
         TRA --> TRSC
         TRA --> TRBL
         PRA --> PRMS
@@ -317,7 +317,7 @@ graph TB
 
     %% Data Flow Connections
     GEO --> DE
-    CSV --> DE  
+    CSV --> DE
     EXCEL --> DE
     H5AD --> DE
     MTX --> DE
@@ -334,7 +334,7 @@ graph TB
     TE --> PBULK
     TE --> FORMULA
     TE --> BULK
-    
+
     %% Proteomics Agent to Service connections
     MSPE --> PPREP
     MSPE --> PQUAL
@@ -357,7 +357,7 @@ graph TB
     PBULK --> |Pseudobulk Matrices| DM2
     FORMULA --> |Design Matrices| DM2
     BULK --> |DE Results| DM2
-    
+
     %% Proteomics Service to DataManager connections
     PPREP --> |Proteomics Processing| DM2
     PQUAL --> |Proteomics QC| DM2
@@ -423,13 +423,13 @@ sequenceDiagram
     %% Data Loading Flow
     User->>DataExpert: "Download GSE12345"
     DataExpert->>DM2: load_modality("geo_gse12345", source, "transcriptomics_single_cell")
-    
+
     DM2->>Adapter: from_source(source_data)
     Adapter->>Adapter: Detect format, load data
     Adapter->>Schema: validate(adata)
     Schema-->>Adapter: ValidationResult (warnings/errors)
     Adapter-->>DM2: AnnData with schema compliance
-    
+
     DM2->>DM2: Store as modality
     DM2-->>DataExpert: Modality loaded successfully
     DataExpert-->>User: "Loaded geo_gse12345: 5000 cells × 20000 genes"
@@ -438,12 +438,12 @@ sequenceDiagram
     User->>TransExpert: "Filter and normalize the data"
     TransExpert->>DM2: get_modality("geo_gse12345")
     DM2-->>TransExpert: AnnData object
-    
+
     TransExpert->>Service: PreprocessingService.filter_and_normalize_cells(adata, params)
     Service->>Service: Professional QC filtering
     Service->>Service: Scanpy normalization
     Service-->>TransExpert: (processed_adata, processing_stats)
-    
+
     TransExpert->>DM2: Store new modality("geo_gse12345_filtered_normalized")
     TransExpert->>DM2: log_tool_usage(operation_details)
     TransExpert-->>User: "Filtering complete: 4500 cells retained (90%)"
@@ -451,12 +451,12 @@ sequenceDiagram
     User->>TransExpert: "Run clustering analysis"
     TransExpert->>DM2: get_modality("geo_gse12345_filtered_normalized")
     DM2-->>TransExpert: Processed AnnData
-    
+
     TransExpert->>Service: ClusteringService.cluster_and_visualize(adata, params)
     Service->>Service: HVG detection, PCA, neighbors graph
     Service->>Service: Leiden clustering, UMAP embedding
     Service-->>TransExpert: (clustered_adata, clustering_stats)
-    
+
     TransExpert->>DM2: Store new modality("geo_gse12345_clustered")
     TransExpert->>DM2: log_tool_usage(clustering_results)
     TransExpert-->>User: "Clustering complete: 8 clusters identified"
@@ -466,7 +466,7 @@ sequenceDiagram
     TransExpert->>Service: EnhancedSingleCellService.find_marker_genes(adata, params)
     Service->>Service: Differential expression analysis
     Service-->>TransExpert: (marker_adata, marker_stats)
-    
+
     TransExpert->>DM2: Store new modality("geo_gse12345_markers")
     TransExpert-->>User: "Marker genes identified for all clusters"
 
@@ -662,16 +662,16 @@ sequenceDiagram
     Note over AREG: System Startup
     GRAPH->>AREG: get_worker_agents()
     AREG-->>GRAPH: Dict[agent_name, AgentConfig]
-    
+
     loop For each agent config
         GRAPH->>AREG: import_agent_factory(config.factory_function)
         AREG-->>GRAPH: Agent factory function
         GRAPH->>GRAPH: Create agent instance
         GRAPH->>GRAPH: Create handoff tool
     end
-    
+
     Note over GRAPH: All agents loaded dynamically
-    
+
     Note over CB: Runtime Execution
     CB->>AREG: get_all_agent_names()
     AREG-->>CB: List of all agent names
@@ -794,12 +794,12 @@ def test_agent_registry():
     # Test 1: Verify all agents are registered
     worker_agents = get_worker_agents()
     assert len(worker_agents) > 0
-    
+
     # Test 2: Validate factory function imports
     for agent_name, config in worker_agents.items():
         factory = import_agent_factory(config.factory_function)
         assert callable(factory)
-    
+
     # Test 3: Check agent name consistency
     all_agents = get_all_agent_names()
     assert 'supervisor' in all_agents
@@ -827,24 +827,24 @@ graph TB
         DE_OLD[data_expert.py<br/>concatenate_samples()<br/>200+ lines of code]
         GEO_OLD[geo_service.py<br/>_concatenate_stored_samples()<br/>300+ lines of code]
         DUPLICATION[❌ 450+ lines of duplicated logic<br/>❌ Memory inefficiency<br/>❌ Maintenance overhead]
-        
+
         DE_OLD -.-> DUPLICATION
         GEO_OLD -.-> DUPLICATION
     end
-    
+
     subgraph "After: Centralized Service"
         CONCAT_SERVICE[ConcatenationService<br/>🔗 Single Source of Truth<br/>810 lines of professional code]
-        
+
         subgraph "Strategy Pattern"
             SMART[SmartSparseStrategy<br/>🧬 Single-cell optimized]
             MEMORY[MemoryEfficientStrategy<br/>💾 Large dataset chunked processing]
         end
-        
+
         subgraph "Refactored Clients"
             DE_NEW[data_expert.py<br/>concatenate_samples()<br/>30 lines (delegates to service)]
             GEO_NEW[geo_service.py<br/>_concatenate_stored_samples()<br/>20 lines (delegates to service)]
         end
-        
+
         CONCAT_SERVICE --> SMART
         CONCAT_SERVICE --> MEMORY
         DE_NEW --> CONCAT_SERVICE
@@ -931,13 +931,13 @@ sequenceDiagram
     DE->>CS: concatenate_from_modalities(modality_names)
     CS->>DM2: get_modality() for each sample
     DM2-->>CS: List of AnnData objects
-    
+
     CS->>Strategy: concatenate(sample_adatas, **kwargs)
     Strategy->>Strategy: Apply concatenation algorithm
     Strategy->>Strategy: Add batch information
     Strategy->>Strategy: Monitor memory usage
     Strategy-->>CS: ConcatenationResult
-    
+
     CS->>DM2: load_modality(output_name, concatenated_data)
     DM2->>DM2: Store as new modality
     DM2-->>CS: Confirmation
@@ -973,7 +973,7 @@ This architecture improvement ensures **reliable, maintainable, and efficient** 
 - **Cost**: Completely free (you pay only for your own API keys)
 
 ### ☁️ **Interested in Cloud?**
-For teams needing scalable infrastructure, managed services, or collaborative features, we're developing a cloud platform. 
+For teams needing scalable infrastructure, managed services, or collaborative features, we're developing a cloud platform.
 
 **[Join the Waitlist →](mailto:info@omics-os.com)**
 
@@ -990,7 +990,7 @@ The Lobster AI system has been successfully migrated from a dual-system architec
 - **After**: Clean separation with stateless analysis services and orchestration agents
 
 #### **2. Professional Error Handling**
-- **Custom Exception Hierarchy**: 
+- **Custom Exception Hierarchy**:
   - `TranscriptomicsError`, `PreprocessingError`, `QualityError`, etc.
   - `ModalityNotFoundError` for specific validation
 - **Comprehensive Logging**: All operations tracked with parameters and results
@@ -1015,23 +1015,23 @@ def tool_name(modality_name: str, **params) -> str:
         # 1. Validate modality exists
         if modality_name not in data_manager.list_modalities():
             raise ModalityNotFoundError(f"Modality '{modality_name}' not found")
-        
+
         # 2. Get AnnData from modality
         adata = data_manager.get_modality(modality_name)
-        
+
         # 3. Call stateless service
         result_adata, stats = service.method_name(adata, **params)
-        
+
         # 4. Save new modality with descriptive name
         new_modality_name = f"{modality_name}_processed"
         data_manager.modalities[new_modality_name] = result_adata
-        
+
         # 5. Log operation for provenance
         data_manager.log_tool_usage(tool_name, params, description)
-        
+
         # 6. Format professional response
         return format_professional_response(stats, new_modality_name)
-        
+
     except ServiceError as e:
         logger.error(f"Service error: {e}")
         return f"Service error: {str(e)}"
@@ -1049,26 +1049,27 @@ def service_method(
 ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
     """
     Stateless service method working with AnnData directly.
-    
+
     Returns:
         Tuple of (processed_adata, processing_statistics)
+
     """
     try:
         # 1. Create working copy
         adata_processed = adata.copy()
-        
+
         # 2. Apply analysis algorithms
         # ... processing logic ...
-        
+
         # 3. Calculate comprehensive statistics
         processing_stats = {
             "analysis_type": "method_type",
             "parameters_used": parameters,
             "results": {...}
         }
-        
+
         return adata_processed, processing_stats
-        
+
     except Exception as e:
         raise ServiceError(f"Method failed: {str(e)}")
 ```
@@ -1147,7 +1148,7 @@ geo_gse12345                    # Raw downloaded data
 transcriptomics_expert.py: 450+ lines
 ├── Dual code paths (is_v2 checks everywhere)
 ├── Mixed responsibilities (orchestration + analysis)
-├── Redundant implementations 
+├── Redundant implementations
 ├── Complex error handling
 └── Maintenance overhead
 ```
@@ -1201,27 +1202,27 @@ graph LR
     subgraph "Agent Layer"
         TE[Transcriptomics Expert<br/>🤖 Enhanced with Formula Tools]
     end
-    
+
     subgraph "New Agent Tools (5)"
         T1[suggest_formula_for_design<br/>📊 Metadata Analysis]
-        T2[construct_de_formula_interactive<br/>🔧 Formula Building]  
+        T2[construct_de_formula_interactive<br/>🔧 Formula Building]
         T3[run_differential_expression_with_formula<br/>🧬 pyDESeq2 Execution]
         T4[iterate_de_analysis<br/>🔄 Iterative Workflows]
         T5[compare_de_iterations<br/>📈 Result Comparison]
     end
-    
+
     subgraph "Enhanced Services"
         FORMULA[DifferentialFormulaService<br/>📊 3 New Methods Added]
         WFLOW[WorkflowTracker<br/>🔄 New Iteration Management]
         BULK[BulkRNASeqService<br/>📈 pyDESeq2 Integration]
     end
-    
+
     TE --> T1
-    TE --> T2  
+    TE --> T2
     TE --> T3
     TE --> T4
     TE --> T5
-    
+
     T1 --> FORMULA
     T2 --> FORMULA
     T3 --> BULK
@@ -1229,7 +1230,7 @@ graph LR
     T5 --> WFLOW
 
     classDef agent fill:#e1f5fe,stroke:#01579b,stroke-width:2px
-    classDef tool fill:#f3e5f5,stroke:#4a148c,stroke-width:2px  
+    classDef tool fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     classDef service fill:#e8f5e8,stroke:#2e7d32,stroke-width:2px
 
     class TE agent

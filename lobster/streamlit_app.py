@@ -1001,7 +1001,7 @@ def display_sidebar():
 def display_chat_interface():
     """Display enhanced chat interface with command support."""
     st.markdown("## 🦞 **Lobster AI** – Multi-Agent Bioinformatics System")
-    st.caption("by homara AI | Type `/help` for commands")
+    st.caption("by Omics-OS | Type `/help` for commands")
     st.markdown("---")
 
     client = init_client()
@@ -1121,7 +1121,7 @@ def main():
     st.markdown(
         """
         <div style='text-align:center;color:#666'>
-        🦞 <b>Lobster AI</b> v2.0 | Multi-Agent Bioinformatics System | © 2025 homara AI
+        🦞 <b>Lobster AI</b> v2.0 | Multi-Agent Bioinformatics System | © 2025 Omics-OS
         </div>
         """,
         unsafe_allow_html=True

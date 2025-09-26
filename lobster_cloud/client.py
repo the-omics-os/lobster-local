@@ -34,7 +34,7 @@ class CloudLobsterClient(BaseClient):
         self.api_key = api_key
         self.endpoint = endpoint or os.getenv(
             'LOBSTER_ENDPOINT', 
-            'https://api.lobster.homara.ai'
+            'https://api.lobster.omics-os.com'
         )
         self.timeout = timeout
         self.workspace_path = workspace_path or Path.cwd()

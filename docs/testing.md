@@ -572,9 +572,9 @@ tox -e py312-ubuntu  # Requires tox configuration
 
 ### Getting Help
 
-- **🐛 Test Issues**: [Report on GitHub Issues](https://github.com/homara-ai/lobster/issues)
-- **💬 General Questions**: [Discord Community](https://discord.gg/homaraai)
-- **📧 Direct Support**: [Email Testing Team](mailto:testing@homara.ai)
+- **🐛 Test Issues**: [Report on GitHub Issues](https://github.com/the-omics-os/lobster/issues)
+- **💬 General Questions**: [Discord Community](https://discord.gg/HDTRbWJ8omicsos)
+- **📧 Direct Support**: [Email Testing Team](mailto:info@omics-os.com)
 
 ## 🎯 **Contributing to Tests**
 

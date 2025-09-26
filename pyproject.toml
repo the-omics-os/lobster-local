@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "lobster"
 dynamic = ["version"]
 authors = [
-    {name = "Homara AI", email = "support@homara.ai"}
+    {name = "Omics-OS", email = "info@omics-os.com"}
 ]
 description = "Multi-Agent Bioinformatics Analysis System powered by LangGraph"
 readme = "README.md"
@@ -165,11 +165,10 @@ all = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/homara-ai/lobster"
-"Bug Tracker" = "https://github.com/homara-ai/lobster/issues"
+"Homepage" = "https://github.com/the-omics-os/lobster"
+"Bug Tracker" = "https://github.com/the-omics-os/lobster/issues"
 "Documentation" = "https://docs.lobster-ai.com"
-"Source Code" = "https://github.com/homara-ai/lobster"
-"Discord" = "https://discord.gg/homaraai"
+"Source Code" = "https://github.com/the-omics-os/lobster"
 
 [project.scripts]
 lobster = "lobster.cli:app"

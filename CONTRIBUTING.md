@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Lobster AI! We welcome contributi
 ## 🌟 Ways to Contribute
 
 ### 🐛 Bug Reports
-- Use [GitHub Issues](https://github.com/homara-ai/lobster/issues) with the "bug" label
+- Use [GitHub Issues](https://github.com/the-omics-os/lobster/issues) with the "bug" label
 - Include steps to reproduce, expected vs actual behavior
 - Add relevant system information (OS, Python version)
 
@@ -236,9 +236,9 @@ make test-integration
 ## 💬 Community & Support
 
 ### Getting Help
-- 💬 **[Discord Community](https://discord.gg/homaraai)** - Chat with other contributors
+** - Chat with other contributors
 - 📚 **[Documentation](docs/)** - Comprehensive guides
-- 🐛 **[GitHub Issues](https://github.com/homara-ai/lobster/issues)** - Bug reports and feature requests
+- 🐛 **[GitHub Issues](https://github.com/the-omics-os/lobster/issues)** - Bug reports and feature requests
 
 ### Code of Conduct
 We follow a simple principle: **Be kind, be constructive, be scientific.**

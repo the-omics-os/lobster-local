@@ -104,6 +104,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 CMD ["streamlit", "run", "lobster/streamlit_app.py"]
 
 # Labels for metadata
-LABEL maintainer="Homara AI <support@homara.ai>"
+LABEL maintainer="Omics-OS <info@omics-os.com>"
 LABEL description="Lobster AI - Multi-Agent Bioinformatics Streamlit App"
 LABEL version="2.0.0"

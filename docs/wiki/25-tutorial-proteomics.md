@@ -39,7 +39,7 @@ lobster chat
 ```
 
 ```
-🦞 LOBSTER by homara AI
+🦞 LOBSTER by Omics-OS
 Multi-Agent Bioinformatics Analysis System v2.0
 
 Ready for comprehensive proteomics analysis!

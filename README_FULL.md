@@ -57,7 +57,7 @@ Lobster AI is a bioinformatics platform that combines the power of **specialized
 ### Single-Cell RNA-seq Analysis
 ```bash
 # Install Lobster AI
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster && make install
 
 # Start analyzing in seconds
@@ -320,7 +320,7 @@ This comprehensive proteomics platform ensures publication-ready results with pr
 ### Local Installation
 ```bash
 # Prerequisites: Python 3.12+ and system dependencies (see Requirements section)
-git clone https://github.com/homara-ai/lobster.git
+git clone https://github.com/the-omics-os/lobster.git
 cd lobster
 make install
 lobster chat  # Start with enhanced Rich CLI experience!
@@ -333,7 +333,7 @@ When you start Lobster AI, you'll be greeted with a professional orange-branded 
 🦞 lobster chat
 
 ┌─ Welcome ────────────────────────────────────────────────────────────┐
-│  🦞 LOBSTER by homara AI                                             │
+│  🦞 LOBSTER by Omics-OS                                             │
 │  Multi-Agent Bioinformatics Analysis System v2.0                    │
 │                                                                      │
 │  🧬 Key Tasks:                                                       │
@@ -489,7 +489,7 @@ Experience the power of cloud computing with **automatic cloud detection**:
 
 ### **Getting Started with Cloud**
 
-1. **Get your cloud API key** from [cloud.lobster.ai](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)
+1. **Get your cloud API key** from [cloud.lobster.ai](mailto:info@omics-os.com?subject=Lobster%20Cloud%20API%20Key%20Request)
 2. **Set your environment variables**:
    ```bash
    # Add to your .env file
@@ -508,7 +508,7 @@ Experience the power of cloud computing with **automatic cloud detection**:
 - **Cloud Unavailable?** → Automatically falls back to local mode
 - **Same Experience** → Identical interface whether cloud or local
 
-**[Request Cloud Access →](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)**
+**[Request Cloud Access →](mailto:info@omics-os.com?subject=Lobster%20Cloud%20API%20Key%20Request)**
 
 ## 🧪 **Testing Framework**
 
@@ -630,7 +630,7 @@ python tests/run_integration_tests.py --performance-monitoring --categories adva
 - 📖 **[Full Documentation](docs/)** - Complete guides and tutorials
 - 🏗️ **[Architecture Overview](docs/architecture_diagram.md)** - Technical deep-dive
 - 🧪 **[Example Analyses](examples/)** - Real-world use cases
-- 🎓 **[Video Tutorials](https://youtube.com/@homaraai)** - Step-by-step walkthroughs including new Rich CLI features
+- 🎓 **[Video Tutorials](https://youtube.com/@omicsos)** - Step-by-step walkthroughs including new Rich CLI features
 - ⚗️ **[Testing Guide](tests/README.md)** - Comprehensive testing documentation
 - 🎨 **[CLI Enhancement Guide](CLAUDE.md)** - Rich CLI features and orange theming details
 
@@ -736,16 +736,16 @@ We extend our gratitude to:
 
 ## 🤝 **Community & Support**
 
-- 💬 **[Discord Community](https://discord.gg/homaraai)** - Chat with users and developers
-- 🐛 **[Report Issues](https://github.com/homara-ai/lobster/issues)** - Bug reports and feature requests
-- 📧 **[Email Support](mailto:support@homara.ai)** - Direct help from our team
-- 🐦 **[Follow Updates](https://twitter.com/homaraai)** - Latest news and releases
+- 💬 **[Discord Community](https://discord.gg/HDTRbWJ8omicsos)** - Chat with users and developers
+- 🐛 **[Report Issues](https://github.com/the-omics-os/lobster/issues)** - Bug reports and feature requests
+- 📧 **[Email Support](mailto:info@omics-os.com)** - Direct help from our team
+- 🐦 **[Follow Updates](https://twitter.com/omicsos)** - Latest news and releases
 
 ## 🏢 **Enterprise Solutions**
 
 Need custom integrations, dedicated support, or on-premise deployment?
 
-**[Contact Enterprise Sales →](mailto:enterprise@homara.ai)**
+**[Contact Enterprise Sales →](mailto:info@omics-os.com)**
 
 ## 📄 **License**
 
@@ -757,8 +757,8 @@ Open source under [MIT License](LICENSE) - Use freely in academic and commercial
 
 **🦞 Transform Your Bioinformatics Research Today**
 
-[Get Started](https://github.com/homara-ai/lobster) • [Documentation](docs/) • [Community](https://discord.gg/homaraai)
+[Get Started](https://github.com/the-omics-os/lobster) • [Documentation](docs/) • [Community](https://discord.gg/HDTRbWJ8omicsos)
 
-*Made with ❤️ by [Homara AI](https://homara.ai)*
+*Made with ❤️ by [Omics-OS](https://omics-os.com)*
 
 </div>

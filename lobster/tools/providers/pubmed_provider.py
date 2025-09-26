@@ -44,7 +44,7 @@ class PubMedProviderConfig(BaseModel):
     doc_content_chars_max: int = Field(default=6000, ge=1000, le=20000)
     
     # NCBI API settings
-    email: str = "kevin.yar@homara.ai"
+    email: str = "kevin.yar@omics-os.com"
     api_key: Optional[str] = None
     max_retry: int = Field(default=5, ge=1, le=10)
     sleep_time: float = Field(default=0.3, ge=0.1, le=5.0)
