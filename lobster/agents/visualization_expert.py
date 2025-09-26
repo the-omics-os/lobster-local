@@ -224,7 +224,7 @@ def visualization_expert(
             # Create QC plots using service
             fig = visualization_service.create_qc_plots(
                 adata=adata,
-                metrics=metrics
+                title=f"QC Plots - {modality_name}"
             )
             
             # Generate unique plot ID

@@ -319,6 +319,7 @@ This comprehensive proteomics platform ensures publication-ready results with pr
 
 ### Local Installation
 ```bash
+# Prerequisites: Python 3.12+ and system dependencies (see Requirements section)
 git clone https://github.com/homara-ai/lobster.git
 cd lobster
 make install
@@ -350,11 +351,133 @@ When you start Lobster AI, you'll be greeted with a professional orange-branded 
 🦞 ~/projects ▸
 ```
 
+### Environment Setup
+
+**Quick Setup (Recommended)**
+```bash
+# Copy the example environment file
+cp .env.example .env
+
+# Option 1: Claude API (Recommended for simplicity)
+echo "ANTHROPIC_API_KEY=sk-ant-api03-your-key-here" >> .env
+
+# Option 2: AWS Bedrock (For AWS users)
+echo "AWS_BEDROCK_ACCESS_KEY=AKIA..." >> .env
+echo "AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key" >> .env
+```
+
+**Complete Environment Example**
+```bash
+############################################################
+# LLM Provider Configuration (Choose ONE option)
+############################################################
+
+# Option 1: Claude API (Recommended)
+ANTHROPIC_API_KEY=sk-ant-api03-xxxxx
+
+# Option 2: AWS Bedrock (For AWS users)
+AWS_BEDROCK_ACCESS_KEY=AKIA...
+AWS_BEDROCK_SECRET_ACCESS_KEY=xxx...
+
+# Optional: Force specific provider (auto-detected by default)
+# LOBSTER_LLM_PROVIDER=anthropic  # or "bedrock"
+
+# Optional: Enhanced literature search
+NCBI_API_KEY=your-ncbi-api-key-here
+```
+
 ### Requirements
 - Python 3.12+
 - 4GB+ RAM recommended
 - Modern terminal with Unicode support (for Rich CLI features)
-- API keys for LLM providers (OpenAI, AWS Bedrock)
+- LLM Provider credentials (choose one):
+  - [Claude API Key](https://console.anthropic.com/) (Recommended - simpler setup)
+  - [AWS Bedrock Access](https://console.aws.amazon.com/) (For AWS users)
+- Optional: NCBI API Key for enhanced literature search
+
+### ⚠️ **Critical System Dependencies**
+
+**Before installation**, ensure these system libraries are available (required for scientific computing packages):
+
+#### **macOS (via Homebrew)**
+```bash
+# Essential build tools and libraries
+brew install python@3.12 hdf5 openblas lapack pkg-config
+
+# Optional: For faster package installation
+brew install uv
+```
+
+#### **Ubuntu/Debian**
+```bash
+# Update package list
+sudo apt update
+
+# Essential development tools and libraries
+sudo apt install -y \
+    python3.12 python3.12-dev python3.12-venv \
+    build-essential gfortran \
+    libhdf5-dev libhdf5-serial-dev \
+    libblas-dev liblapack-dev \
+    libxml2-dev libxslt-dev \
+    pkg-config
+
+# For scientific computing optimization
+sudo apt install -y \
+    libopenblas-dev \
+    libatlas-base-dev
+```
+
+#### **Why These Are Critical**
+- **HDF5 libraries**: Required by h5py, tables (single-cell data storage)
+- **BLAS/LAPACK**: Required by scipy, numpy, scikit-learn (mathematical operations)
+- **Build tools**: Required for compiling scientific Python packages
+- **Development headers**: Required for linking against system libraries
+
+**⚠️ Missing these dependencies will cause installation failures with cryptic error messages.**
+
+## 🔧 **Provider Configuration**
+
+Lobster AI supports multiple LLM providers with **automatic provider detection**. Choose the option that works best for you:
+
+### **Option 1: Claude API (Recommended)**
+Simple setup with just one API key:
+
+1. **Get your Claude API key** from [Anthropic Console](https://console.anthropic.com/)
+2. **Add to your environment**:
+   ```bash
+   # Add to your .env file
+   ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+   ```
+3. **Start using Lobster** - it automatically detects and uses Claude API
+
+### **Option 2: AWS Bedrock**
+For users who prefer AWS infrastructure:
+
+1. **AWS account** with Bedrock access enabled
+2. **Create IAM user** with Bedrock permissions
+3. **Add to your environment**:
+   ```bash
+   # Add to your .env file
+   AWS_BEDROCK_ACCESS_KEY=AKIA...
+   AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
+   ```
+
+### **Smart Provider Selection**
+- **Automatic Detection**: Lobster automatically selects the best available provider
+- **Priority Order**: Claude API → AWS Bedrock → Error if none found
+- **Provider Override**: Use `LOBSTER_LLM_PROVIDER=anthropic` or `bedrock` to force a specific provider
+- **Seamless Switching**: Change providers by updating environment variables
+
+### **Provider Comparison**
+
+| Feature | Claude API | AWS Bedrock |
+|---------|------------|-------------|
+| **Setup Complexity** | ✅ Simple (1 API key) | ⚠️ Complex (AWS account, IAM) |
+| **Cost Model** | Pay-per-token | Pay-per-token + AWS fees |
+| **Region Support** | 🌍 Global | 📍 Limited AWS regions |
+| **Rate Limits** | Generous | AWS account limits |
+| **Best For** | Individual researchers, simple setup | Enterprise AWS users |
 
 ## ☁️ **Lobster Cloud: Seamless Cloud Integration**
 
@@ -366,11 +489,14 @@ Experience the power of cloud computing with **automatic cloud detection**:
 
 ### **Getting Started with Cloud**
 
-1. **Get your API key** from [cloud.lobster.ai](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)
-2. **Set your environment variable**:
+1. **Get your cloud API key** from [cloud.lobster.ai](mailto:cloud@homara.ai?subject=Lobster%20Cloud%20API%20Key%20Request)
+2. **Set your environment variables**:
    ```bash
    # Add to your .env file
-   LOBSTER_CLOUD_KEY=your-api-key-here
+   LOBSTER_CLOUD_KEY=your-cloud-api-key-here
+
+   # Also set your LLM provider (same as local mode)
+   ANTHROPIC_API_KEY=sk-ant-api03-xxxxx  # or AWS Bedrock credentials
    ```
 3. **Run Lobster as usual** - it automatically detects and uses cloud mode:
    ```bash
@@ -572,7 +698,7 @@ Lobster AI stands on the shoulders of incredible open-source projects. We deeply
 ### 🤖 **AI & Machine Learning Framework**
 - **[LangChain](https://python.langchain.com/)** - Framework for developing applications powered by language models
 - **[LangGraph](https://langchain-ai.github.io/langgraph/)** - Library for building stateful, multi-actor applications with LLMs
-- **[OpenAI](https://openai.com/)** - AI research and deployment company providing GPT models
+- **[Anthropic](https://www.anthropic.com/)** - AI safety company providing Claude language models
 - **[AWS Bedrock](https://aws.amazon.com/bedrock/)** - Fully managed service for foundation models
 
 ### 🎨 **User Interface & Experience**

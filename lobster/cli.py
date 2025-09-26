@@ -1476,9 +1476,18 @@ def chat(
         
         except KeyboardInterrupt:
             if Confirm.ask(f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Exit Lobster?[/{LobsterTheme.PRIMARY_ORANGE}]"):
+                goodbye_message = f"""👋 Thank you for using Lobster by Omics-OS!
+
+[bold white]🌟 Help us improve Lobster![/bold white]
+Your feedback matters! Please take 1 minute to share your experience:
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]📝 Quick Survey:[/bold {LobsterTheme.PRIMARY_ORANGE}] [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]https://forms.cloud.microsoft/e/AkNk8J8nE8[/link]
+
+[dim grey50]Happy analyzing! 🧬🦞[/dim grey50]"""
+
                 exit_panel = LobsterTheme.create_panel(
-                    "👋 Thank you for using Lobster by Omics-OS",
-                    title="Goodbye"
+                    goodbye_message,
+                    title="🦞 Goodbye & Thank You!"
                 )
                 console_manager.print(exit_panel)
                 break
@@ -2970,20 +2979,11 @@ when they are started by agents or analysis workflows.
         else:
             # /plot <ID or name> - open specific plot
             plot_identifier = parts[1].strip()
-            
-            # First, ensure plots are saved to workspace
-            plots_dir = client.data_manager.workspace_path / "plots"
-            if not plots_dir.exists():
-                plots_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Save plots if needed
-            if client.data_manager.latest_plots:
-                saved_files = client.data_manager.save_plots_to_workspace()
-            
-            # Find the plot by ID or partial title match
+
+            # FIRST: Find the plot by ID or partial title match (before expensive operations)
             found_plot = None
             plot_info = None
-            
+
             for plot_entry in client.data_manager.latest_plots:
                 # Check ID match
                 if plot_entry["id"] == plot_identifier:
@@ -2995,8 +2995,17 @@ when they are started by agents or analysis workflows.
                     found_plot = plot_entry
                     plot_info = plot_entry
                     break
-            
+
             if found_plot:
+                # ONLY if plot exists: ensure plots are saved to workspace
+                plots_dir = client.data_manager.workspace_path / "plots"
+                if not plots_dir.exists():
+                    plots_dir.mkdir(parents=True, exist_ok=True)
+
+                # Save plots if needed
+                if client.data_manager.latest_plots:
+                    saved_files = client.data_manager.save_plots_to_workspace()
+
                 # Construct the filename
                 plot_id = plot_info["id"]
                 plot_title = plot_info["title"]
@@ -3213,7 +3222,20 @@ when they are started by agents or analysis workflows.
     
     elif cmd == "/exit":
         if Confirm.ask("[red]🦞 Exit Lobster?[/red]"):
-            console.print("\n[bold white on red] 👋 Thank you for using Lobster by Omics-OS [/bold white on red]\n")
+            goodbye_message = f"""👋 Thank you for using Lobster by Omics-OS!
+
+[bold white]🌟 Help us improve Lobster![/bold white]
+Your feedback matters! Please take 1 minute to share your experience:
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]📝 Quick Survey:[/bold {LobsterTheme.PRIMARY_ORANGE}] [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]https://forms.cloud.microsoft/e/AkNk8J8nE8[/link]
+
+[dim grey50]Happy analyzing! 🧬🦞[/dim grey50]"""
+
+            exit_panel = LobsterTheme.create_panel(
+                goodbye_message,
+                title="🦞 Goodbye & Thank You!"
+            )
+            console_manager.print(exit_panel)
             raise KeyboardInterrupt
     
     else:

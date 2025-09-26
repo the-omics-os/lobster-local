@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import tempfile
+import threading
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +49,23 @@ except ImportError:
     mudata = None
 
 logger = logging.getLogger(__name__)
+
+
+class SuppressKaleidoLogging:
+    """Context manager to temporarily suppress verbose Kaleido logging during image generation."""
+
+    def __init__(self):
+        self.kaleido_logger = logging.getLogger('kaleido')
+        self.original_level = None
+
+    def __enter__(self):
+        self.original_level = self.kaleido_logger.level
+        self.kaleido_logger.setLevel(logging.WARNING)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.original_level is not None:
+            self.kaleido_logger.setLevel(self.original_level)
 
 
 class DataManagerV2:
@@ -103,6 +122,12 @@ class DataManagerV2:
         self.latest_plots: List[Dict[str, Any]] = []  # Store plots with metadata
         self.plot_counter: int = 0  # Counter for generating unique IDs
         self.max_plots_history: int = 50  # Maximum number of plots to keep in history
+
+        # Safety mechanisms to prevent infinite loops and concurrent saves
+        self._save_lock = threading.Lock()  # Prevent concurrent saves
+        self._save_in_progress = False  # Track if save is currently running
+        self._last_save_time = 0  # Track last save timestamp for rate limiting
+        self._min_save_interval = 2.0  # Minimum seconds between saves
 
         # Visualization state management for Visualization Expert Agent
         self.visualization_state = {
@@ -967,6 +992,12 @@ class DataManagerV2:
             ValueError: If plot is not a Plotly Figure
         """
         try:
+            # DIAGNOSTIC: Track add_plot calls (should NOT happen during /plot command)
+            import traceback
+            call_stack = ''.join(traceback.format_stack()[-3:-1])  # Get caller info
+            logger.info(f"🔍 DIAGNOSTIC: add_plot() called - creating plot_{self.plot_counter + 1}")
+            logger.debug(f"🔍 DIAGNOSTIC: add_plot called from:\n{call_stack.strip()}")
+
             if not isinstance(plot, go.Figure):
                 raise ValueError("Plot must be a plotly Figure object.")
 
@@ -1041,7 +1072,10 @@ class DataManagerV2:
             if len(self.latest_plots) > self.max_plots_history:
                 self.latest_plots.pop(0)  # Remove oldest plot
 
+            # DIAGNOSTIC: Show current state after adding plot
+            plot_ids = [p.get("id", "unknown") for p in self.latest_plots]
             logger.info(f"Plot added: '{enhanced_title}' with ID {plot_id} from {source}")
+            logger.info(f"🔍 DIAGNOSTIC: add_plot() completed. Current plots: {plot_ids}")
             return plot_id
 
         except Exception as e:
@@ -1101,48 +1135,87 @@ class DataManagerV2:
 
     def save_plots_to_workspace(self) -> List[str]:
         """Save all current plots to the workspace directory."""
-        if not self.latest_plots:
-            logger.info("No plots to save")
+        # DIAGNOSTIC: Track save_plots_to_workspace calls
+        import traceback
+        call_stack = ''.join(traceback.format_stack()[-3:-1])  # Get caller info
+        logger.info(f"🔍 DIAGNOSTIC: save_plots_to_workspace() called with {len(self.latest_plots)} plots")
+        logger.debug(f"🔍 DIAGNOSTIC: Called from:\n{call_stack.strip()}")
+
+        # SAFETY: Prevent concurrent saves and rate limiting
+        current_time = time.time()
+
+        # Check if save is already in progress
+        if self._save_in_progress:
+            logger.warning("🔒 SAFETY: save_plots_to_workspace already in progress, skipping")
             return []
 
-        # Create plots directory in workspace
-        plots_dir = self.workspace_path / "plots"
-        plots_dir.mkdir(exist_ok=True)
+        # Check rate limiting (prevent saves closer than minimum interval)
+        if current_time - self._last_save_time < self._min_save_interval:
+            logger.warning(f"🔒 SAFETY: Rate limited - last save was {current_time - self._last_save_time:.1f}s ago (min: {self._min_save_interval}s)")
+            return []
 
-        saved_files = []
+        # Acquire lock to prevent concurrent saves
+        if not self._save_lock.acquire(blocking=False):
+            logger.warning("🔒 SAFETY: Could not acquire save lock, another save in progress")
+            return []
 
-        for plot_entry in self.latest_plots:
-            try:
-                plot = plot_entry["figure"]
-                plot_id = plot_entry["id"]
-                plot_title = plot_entry["title"]
+        try:
+            self._save_in_progress = True
+            self._last_save_time = current_time
 
-                # Create sanitized filename
-                safe_title = "".join(
-                    c for c in plot_title if c.isalnum() or c in [" ", "_", "-"]
-                ).rstrip()
-                safe_title = safe_title.replace(" ", "_")
-                filename_base = f"{plot_id}_{safe_title}" if safe_title else plot_id
+            if not self.latest_plots:
+                logger.info("No plots to save")
+                return []
 
-                # Save as HTML (interactive)
-                html_path = plots_dir / f"{filename_base}.html"
-                pio.write_html(plot, html_path)
-                saved_files.append(str(html_path))
+            # Create plots directory in workspace
+            plots_dir = self.workspace_path / "plots"
+            plots_dir.mkdir(exist_ok=True)
 
-                # Save as PNG (static)
-                png_path = plots_dir / f"{filename_base}.png"
+            saved_files = []
+
+            for plot_entry in self.latest_plots:
                 try:
-                    pio.write_image(plot, png_path)
-                    saved_files.append(str(png_path))
+                    plot = plot_entry["figure"]
+                    plot_id = plot_entry["id"]
+                    plot_title = plot_entry["title"]
+
+                    # Create sanitized filename
+                    safe_title = "".join(
+                        c for c in plot_title if c.isalnum() or c in [" ", "_", "-"]
+                    ).rstrip()
+                    safe_title = safe_title.replace(" ", "_")
+                    filename_base = f"{plot_id}_{safe_title}" if safe_title else plot_id
+
+                    # Save as HTML (interactive)
+                    html_path = plots_dir / f"{filename_base}.html"
+                    pio.write_html(plot, html_path)
+                    saved_files.append(str(html_path))
+
+                    # Save as PNG (static)
+                    png_path = plots_dir / f"{filename_base}.png"
+                    try:
+                        with SuppressKaleidoLogging():
+                            pio.write_image(plot, png_path)
+                        saved_files.append(str(png_path))
+                    except Exception as e:
+                        logger.warning(f"Could not save PNG for {plot_id}: {e}")
+
+                    logger.info(f"Saved plot {plot_id} to workspace")
+
                 except Exception as e:
-                    logger.warning(f"Could not save PNG for {plot_id}: {e}")
+                    logger.error(f"Failed to save plot {plot_id}: {e}")
 
-                logger.info(f"Saved plot {plot_id} to workspace")
+            # DIAGNOSTIC: Show final state
+            plot_ids = [p.get("id", "unknown") for p in self.latest_plots]
+            logger.info(f"🔍 DIAGNOSTIC: save_plots_to_workspace() completed. Current plots: {plot_ids}")
 
-            except Exception as e:
-                logger.error(f"Failed to save plot {plot_id}: {e}")
+            return saved_files
 
-        return saved_files
+        finally:
+            # SAFETY: Always release lock and reset progress flag
+            self._save_in_progress = False
+            self._save_lock.release()
+            logger.debug("🔒 SAFETY: Released save lock and reset progress flag")
 
     # ========================================
     # VISUALIZATION STATE MANAGEMENT (Visualization Expert Agent)
@@ -2427,7 +2500,8 @@ class DataManagerV2:
                         if include_png:
                             try:
                                 # Use kaleido engine for better reliability
-                                pio.write_image(plot, plots_dir / f"{filename_base}.png", engine="kaleido", width=1200, height=800)
+                                with SuppressKaleidoLogging():
+                                    pio.write_image(plot, plots_dir / f"{filename_base}.png", engine="kaleido", width=1200, height=800)
                             except Exception as e:
                                 # PNG generation failed - continue without it (don't block export)
                                 logger.debug(f"Skipped PNG for {plot_id}: {type(e).__name__}: {e}")

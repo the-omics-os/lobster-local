@@ -113,7 +113,7 @@ setup(
             "lobster=lobster.cli:app",
         ],
     },
-    python_requires=">=3.9",
+    python_requires=">=3.12",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",

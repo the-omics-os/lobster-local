@@ -8,6 +8,7 @@ regardless of the underlying provider (Claude API, AWS Bedrock, etc.).
 from typing import Dict, Any, Optional
 from enum import Enum
 import os
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -102,7 +103,7 @@ class LLMFactory:
         
         # Log provider selection if agent_name provided
         if agent_name:
-            print(f"Creating LLM for agent '{agent_name}' using provider: {provider.value}")
+            logging.debug(f"Creating LLM for agent '{agent_name}' using provider: {provider.value}")
         
         # Get model ID from config
         model_id = model_config.get('model_id')
