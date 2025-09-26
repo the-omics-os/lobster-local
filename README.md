@@ -86,7 +86,8 @@ Analysis complete! Results saved to workspace.
 | `/plots` | List generated visualizations |
 | `/workspace` | Show workspace information |
 | `/workspace list` | List available datasets |
-| `/workspace load <name>` | Load specific dataset |
+| `/workspace load <name>` | Load specific dataset (works with regex) |
+| `/restore` | Restore your last session |
 
 ### Natural Language Examples
 
