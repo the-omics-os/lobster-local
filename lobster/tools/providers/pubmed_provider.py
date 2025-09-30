@@ -32,6 +32,7 @@ from lobster.tools.providers.ncbi_query_builder import (
 )
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
+from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 from lobster.config.settings import get_settings
 
 logger = get_logger(__name__)
@@ -424,6 +425,9 @@ class PubMedProvider(BasePublicationProvider):
         # Apply request throttling
         self._apply_request_throttling()
 
+        # Create SSL context for secure connections
+        ssl_context = create_ssl_context()
+
         attempt = 0
         last_exception = None
 
@@ -435,8 +439,8 @@ class PubMedProvider(BasePublicationProvider):
 
                 logger.debug(f"NCBI {operation_name} attempt {attempt + 1}/{self.config.max_retry}: {url_with_email[:100]}...")
 
-                # Make the request
-                response = urllib.request.urlopen(url_with_email, timeout=30)
+                # Make the request with SSL context
+                response = urllib.request.urlopen(url_with_email, context=ssl_context, timeout=30)
                 content = response.read()
 
                 # Reset failure counter on success
@@ -471,6 +475,18 @@ class PubMedProvider(BasePublicationProvider):
             except (socket.timeout, socket.error, urllib.error.URLError) as e:
                 last_exception = e
                 attempt += 1
+
+                # Check for SSL certificate errors
+                error_str = str(e)
+                if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                    handle_ssl_error(e, url_with_email, logger)
+                    self._consecutive_failures += 1
+                    raise Exception(
+                        f"SSL certificate verification failed for NCBI {operation_name}. "
+                        f"See error message above for solutions. "
+                        f"Original error: {error_str}"
+                    )
+
                 logger.warning(f"NCBI network error for {operation_name} (attempt {attempt}): {str(e)}")
 
                 if attempt < self.config.max_retry:

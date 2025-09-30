@@ -38,6 +38,7 @@ from lobster.tools.providers.geo_utils import (
 )
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
+from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 from lobster.config.settings import get_settings
 
 logger = get_logger(__name__)
@@ -578,20 +579,40 @@ class GEOProvider(BasePublicationProvider):
     # Helper methods
     
     def _execute_request_with_retry(self, url: str) -> str:
-        """Execute HTTP request with retry logic."""
+        """Execute HTTP request with retry logic and SSL support."""
         retry = 0
         sleep_time = self.config.sleep_time
-        
+
+        # Create SSL context once for all retries
+        ssl_context = create_ssl_context()
+
         while retry <= self.config.max_retry:
             try:
-                with urllib.request.urlopen(url) as response:
+                with urllib.request.urlopen(url, context=ssl_context) as response:
                     return response.read().decode("utf-8")
-                    
+
             except urllib.error.HTTPError as e:
                 if e.code == 429 and retry < self.config.max_retry:
                     logger.warning(f"Rate limit hit, retrying in {sleep_time}s...")
                     time.sleep(sleep_time)
                     sleep_time *= 2
+                    retry += 1
+                else:
+                    raise e
+            except urllib.error.URLError as e:
+                # Check if this is an SSL certificate error
+                error_str = str(e.reason)
+                if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                    handle_ssl_error(e, url, logger)
+                    raise Exception(
+                        f"SSL certificate verification failed. "
+                        f"See error message above for solutions. "
+                        f"Original error: {error_str}"
+                    )
+                # For other URLErrors, retry if attempts remain
+                if retry < self.config.max_retry:
+                    logger.warning(f"Request failed, retrying: {e}")
+                    time.sleep(sleep_time)
                     retry += 1
                 else:
                     raise e
@@ -602,7 +623,7 @@ class GEOProvider(BasePublicationProvider):
                     retry += 1
                 else:
                     raise e
-        
+
         raise Exception(f"Request failed after {self.config.max_retry} retries")
     
     def _convert_filters(self, filters: Dict[str, Any]) -> GEOSearchFilters:

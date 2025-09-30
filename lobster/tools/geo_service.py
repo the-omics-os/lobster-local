@@ -32,6 +32,7 @@ except ImportError:
 
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
+from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 
 # Import helper modules for fallback functionality
 from lobster.tools.geo_downloader import GEODownloadManager
@@ -248,11 +249,24 @@ class GEOService:
             url = f"{base_url}?{url_params}"
             
             logger.debug(f"Fetching GDS metadata from: {url}")
-            
-            # Make the request
-            response = urllib.request.urlopen(url, timeout=30)
-            response_data = response.read().decode('utf-8')
-            
+
+            # Create SSL context for secure connection
+            ssl_context = create_ssl_context()
+
+            # Make the request with SSL support
+            try:
+                response = urllib.request.urlopen(url, context=ssl_context, timeout=30)
+                response_data = response.read().decode('utf-8')
+            except Exception as e:
+                error_str = str(e)
+                if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                    handle_ssl_error(e, url, logger)
+                    raise Exception(
+                        f"SSL certificate verification failed when fetching GDS metadata. "
+                        f"See error message above for solutions."
+                    )
+                raise
+
             # Parse JSON response
             gds_data = json.loads(response_data)
             

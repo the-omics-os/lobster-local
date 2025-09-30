@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 
 from lobster.utils.logger import get_logger
+from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 
 logger = get_logger(__name__)
 
@@ -1197,33 +1198,42 @@ class GEOParser:
         """
         import tempfile
         import urllib.request
-        import ssl
         from pathlib import Path
-        
+
         temp_dir = None
         try:
             # Create temporary directory for download
             temp_dir = tempfile.mkdtemp()
             temp_path = Path(temp_dir)
-            
+
             # Extract filename from URL
             filename = target_url.split('/')[-1].split('?')[0]
             if not filename:
                 filename = "downloaded_file"
-            
+
             local_file = temp_path / filename
-            
+
             # Download file (handle both HTTP and FTP)
             logger.info(f"Downloading file from: {target_url}")
-            
+
             if target_url.startswith('ftp://'):
                 urllib.request.urlretrieve(target_url, local_file)
             else:
-                # For HTTPS, create unverified context to handle certificate issues
-                context = ssl._create_unverified_context()
-                with urllib.request.urlopen(target_url, context=context) as response:
-                    with open(local_file, 'wb') as out_file:
-                        out_file.write(response.read())
+                # For HTTPS, use proper SSL context with certificate verification
+                ssl_context = create_ssl_context()
+                try:
+                    with urllib.request.urlopen(target_url, context=ssl_context) as response:
+                        with open(local_file, 'wb') as out_file:
+                            out_file.write(response.read())
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, target_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading file. "
+                            f"See error message above for solutions."
+                        )
+                    raise
             
             logger.debug(f"Downloaded to: {local_file}")
             

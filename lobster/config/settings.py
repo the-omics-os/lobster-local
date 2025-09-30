@@ -79,6 +79,10 @@ class Settings:
         # GEO database settings
         self.GEO_CACHE_DIR = os.path.join(self.CACHE_DIR, 'geo')
         Path(self.GEO_CACHE_DIR).mkdir(parents=True, exist_ok=True)
+
+        # SSL/HTTPS settings
+        self.SSL_VERIFY = os.environ.get('LOBSTER_SSL_VERIFY', 'true').lower() == 'true'
+        self.SSL_CERT_PATH = os.environ.get('LOBSTER_SSL_CERT_PATH', None)
     
     @property
     def llm_provider(self) -> str:
