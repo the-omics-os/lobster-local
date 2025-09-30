@@ -353,9 +353,9 @@ $(VENV_PATH): check-python
 setup-env: $(VENV_PATH)
 	@echo "⚙️  Setting up environment configuration..."
 	@if [ ! -f .env ]; then \
-		if [ -f .env.template ]; then \
-			cp .env.template .env; \
-			echo "$(YELLOW)📋 Created .env from template. Please edit it with your API keys.$(NC)"; \
+		if [ -f .env.example ]; then \
+			cp .env.example .env; \
+			echo "$(YELLOW)📋 Created .env from .env.example. Please edit it with your API keys.$(NC)"; \
 		else \
 			echo "# Lobster AI Environment Variables" > .env; \
 			echo "# Required API Keys" >> .env; \
