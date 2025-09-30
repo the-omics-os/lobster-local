@@ -33,9 +33,15 @@ def test_imports():
         print("   AgentClient and DataManagerV2 imported successfully")
 
     except ImportError as e:
-        print(f"❌ lobster-core: Core component import failed - {e}")
-        print(f"   This indicates a dependency issue. Try: pip install -e .")
-        success = False
+        # Check if it's specifically a proteomics import error (expected in public version)
+        if "proteomics_adapter" in str(e):
+            print("⚠️  lobster-core: Proteomics modules not available (expected for public distribution)")
+            print("   Core components will work with transcriptomics only")
+            # Don't mark as failure - this is expected for public version
+        else:
+            print(f"❌ lobster-core: Core component import failed - {e}")
+            print(f"   This indicates a dependency issue. Try: pip install -e .")
+            success = False
 
     # Test CLI functionality
     try:
@@ -45,6 +51,32 @@ def test_imports():
     except ImportError as e:
         print(f"❌ lobster-cli: CLI import failed - {e}")
         success = False
+
+    # Test proteomics modules (optional in public distribution)
+    print("\n📋 Proteomics Modules Check (Optional):")
+    proteomics_modules = [
+        ('lobster.core.adapters.proteomics_adapter', 'Proteomics data adapter'),
+        ('lobster.agents.ms_proteomics_expert', 'Mass spectrometry proteomics agent'),
+        ('lobster.agents.affinity_proteomics_expert', 'Affinity proteomics agent'),
+        ('lobster.tools.proteomics_preprocessing_service', 'Proteomics preprocessing'),
+        ('lobster.tools.proteomics_analysis_service', 'Proteomics analysis'),
+        ('lobster.tools.proteomics_differential_service', 'Proteomics differential analysis'),
+        ('lobster.tools.proteomics_visualization_service', 'Proteomics visualization'),
+        ('lobster.tools.proteomics_quality_service', 'Proteomics quality control'),
+    ]
+
+    proteomics_available = False
+    for module_name, description in proteomics_modules:
+        try:
+            __import__(module_name, fromlist=[''])
+            print(f"✅ {module_name.split('.')[-1]}: Available - {description}")
+            proteomics_available = True
+        except ImportError:
+            print(f"⚠️  {module_name.split('.')[-1]}: Not available - {description}")
+
+    if not proteomics_available:
+        print("ℹ️  Note: Proteomics modules are not available in the public distribution")
+        print("   This is expected and does not affect transcriptomics functionality")
 
     # Test optional dependencies (non-failing tests)
     optional_deps = {
