@@ -15,7 +15,8 @@ CONDA_ACTIVE := $(shell echo $$CONDA_DEFAULT_ENV)
 PYENV_VERSION := $(shell pyenv version-name 2>/dev/null || echo "")
 
 # Find best available Python (3.12+)
-PYTHON_CANDIDATES := python3.13 python3.12 python3 python
+# Prioritize Homebrew installations to avoid broken system Python
+PYTHON_CANDIDATES := /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 python3.13 python3.12 python3 python
 PYTHON := $(shell for p in $(PYTHON_CANDIDATES); do \
 	if command -v $$p >/dev/null 2>&1; then \
 		if $$p -c "import sys; exit(0 if sys.version_info >= (3,12) else 1)" 2>/dev/null; then \

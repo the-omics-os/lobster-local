@@ -42,7 +42,9 @@ git clone https://github.com/the-omics-os/lobster-local.git
 cd lobster-local
 
 # 2. Install with make (handles all dependencies)
-make install
+make install 
+#and if you want to access lobster from other directories later you can add:
+make install-global
 
 # 3. Set up your API key
 cp .env.example .env
