@@ -164,11 +164,14 @@ class AgentClient(BaseClient):
             }
             
         except Exception as e:
+            # Enhanced error information for better debugging
             return {
                 "success": False,
                 "error": str(e),
+                "error_type": type(e).__name__,
                 "response": f"I encountered an error: {str(e)}",
-                "session_id": self.session_id
+                "session_id": self.session_id,
+                "hint": "Run with --debug flag for detailed error information"
             }
     
     def _stream_query(self, graph_input: Dict, config: Dict) -> Generator[Dict[str, Any], None, None]:

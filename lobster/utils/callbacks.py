@@ -22,6 +22,7 @@ from rich.layout import Layout
 from rich import box
 
 from lobster.config.agent_registry import get_all_agent_names
+from lobster.utils.error_handlers import get_error_registry, ErrorGuidance
 
 
 class EventType(Enum):
@@ -242,8 +243,66 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         self._display_agent_event(event)
     
     def on_llm_error(self, error: Union[Exception, KeyboardInterrupt], **kwargs) -> None:
-        """Called when an LLM errors."""
-        self.console.print(f"[red]❌ Agent error: {str(error)}[/red]")
+        """Called when an LLM errors - now with modular error handling."""
+        # Get error guidance from registry
+        registry = get_error_registry()
+        guidance = registry.handle_error(error)
+
+        # Format and display based on guidance
+        self._display_error_guidance(guidance)
+
+    def _display_error_guidance(self, guidance: ErrorGuidance):
+        """
+        Display error guidance with rich formatting.
+
+        Args:
+            guidance: ErrorGuidance object with structured error information
+        """
+        # Choose color based on severity
+        severity_colors = {
+            "warning": "yellow",
+            "error": "red",
+            "critical": "bold red on white"
+        }
+        border_color = severity_colors.get(guidance.severity, "red")
+
+        # Build content
+        content_lines = [f"[bold white]{guidance.description}[/bold white]", ""]
+
+        # Add solutions
+        if guidance.solutions:
+            content_lines.append("[bold]Solutions:[/bold]")
+            for i, solution in enumerate(guidance.solutions, 1):
+                content_lines.append(f"  {i}. {solution}")
+            content_lines.append("")
+
+        # Add retry info
+        if guidance.can_retry:
+            retry_msg = "You can retry this operation"
+            if guidance.retry_delay:
+                retry_msg += f" (recommended wait: {guidance.retry_delay}s)"
+            content_lines.append(f"[dim]{retry_msg}[/dim]")
+
+        # Add documentation link
+        if guidance.documentation_url:
+            content_lines.append(f"[dim]📚 Documentation: {guidance.documentation_url}[/dim]")
+
+        # Add support contact
+        if guidance.support_email:
+            content_lines.append(f"[dim]📧 Support: {guidance.support_email}[/dim]")
+
+        content = "\n".join(content_lines)
+
+        # Display as panel
+        panel = Panel(
+            content,
+            title=guidance.title,
+            border_style=border_color,
+            box=box.ROUNDED,
+            expand=False,
+            padding=(1, 2)
+        )
+        self.console.print(panel)
     
     def on_tool_start(
         self, serialized: Dict[str, Any], input_str: str, **kwargs

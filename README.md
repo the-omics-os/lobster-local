@@ -53,8 +53,30 @@ echo "ANTHROPIC_API_KEY=sk-ant-api03-your-key-here" >> .env
 # 4. Start analyzing!
 lobster chat
 # or if you want to see the reasoning
-lobster chat --reasoning 
+lobster chat --reasoning
 ```
+
+### ⚠️ Important: API Keys & Rate Limits
+
+**Rate Limits**
+
+Anthropic's API has conservative rate limits for new accounts. If you encounter rate limit errors:
+
+1. **Wait and retry** - Limits reset after a short period (typically 60 seconds)
+2. **Request increase** - Visit [Anthropic Rate Limits Documentation](https://docs.anthropic.com/en/api/rate-limits)
+3. **Use AWS Bedrock** - Recommended for production use with higher limits
+4. **Contact us** - Email [info@omics-os.com](mailto:info@omics-os.com) for assistance
+
+**Recommended Setup by Use Case:**
+
+| Use Case | Recommended Provider | Notes |
+|----------|---------------------|-------|
+| **Quick Testing** | Claude API | May encounter rate limits |
+| **Development** | Claude API + Rate Increase | Request higher limits from Anthropic |
+| **Production** | AWS Bedrock | Enterprise-grade limits |
+| **Heavy Analysis** | AWS Bedrock | Required for large datasets |
+
+For AWS Bedrock setup, see the [Configuration Guide](wiki/03-configuration.md).
 
 ## 💡 Example Usage
 
