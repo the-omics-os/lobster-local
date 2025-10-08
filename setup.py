@@ -7,12 +7,15 @@ from setuptools import setup, find_packages
 this_directory = Path(__file__).parent
 long_description = (this_directory / "README.md").read_text()
 
-# Read version from version.py
+# Read version from version.py safely using regex
+import re
 version_file = this_directory / "lobster" / "version.py"
-version_dict = {}
-with open(version_file) as f:
-    exec(f.read(), version_dict)
-version = version_dict["__version__"]
+version_content = version_file.read_text()
+match = re.search(r'^__version__\s*=\s*["\']([^"\']*)["\']', version_content, re.MULTILINE)
+if match:
+    version = match.group(1)
+else:
+    raise RuntimeError("Unable to find version string in lobster/version.py")
 
 # Core requirements
 install_requires = [

@@ -1082,30 +1082,108 @@ def execute_shell_command(command: str) -> bool:
 
             return True
 
-        elif cmd in ["cp", "mv", "mkdir", "touch", "rm"]:
-            # Execute other shell commands with improved output formatting
-            result = subprocess.run(command, shell=True, cwd=current_directory, 
-                                  capture_output=True, text=True)
-            
-            # Format success messages
-            if result.returncode == 0:
-                if cmd == "mkdir" and len(parts) > 1:
-                    console.print(f"[green]📁 Created directory: {parts[1]}[/green]")
-                elif cmd == "touch" and len(parts) > 1:
-                    console.print(f"[green]📄 Created file: {parts[1]}[/green]")
-                elif cmd == "cp" and len(parts) > 2:
-                    console.print(f"[green]📋 Copied: {parts[1]} → {parts[2]}[/green]")
-                elif cmd == "mv" and len(parts) > 2:
-                    console.print(f"[green]📦 Moved: {parts[1]} → {parts[2]}[/green]")
-                elif cmd == "rm" and len(parts) > 1:
+        elif cmd == "mkdir":
+            # Create directory using pathlib (safe, no shell injection)
+            if len(parts) < 2:
+                console.print("[red]mkdir: missing operand[/red]")
+                return True
+
+            dir_path = " ".join(parts[1:])  # Handle paths with spaces
+            target_dir = current_directory / dir_path if not Path(dir_path).is_absolute() else Path(dir_path)
+
+            try:
+                target_dir.mkdir(parents=True, exist_ok=False)
+                console.print(f"[green]📁 Created directory: {parts[1]}[/green]")
+            except FileExistsError:
+                console.print(f"[red]mkdir: cannot create directory '{parts[1]}': File exists[/red]")
+            except Exception as e:
+                console.print(f"[red]mkdir: {e}[/red]")
+
+            return True
+
+        elif cmd == "touch":
+            # Create file using pathlib (safe, no shell injection)
+            if len(parts) < 2:
+                console.print("[red]touch: missing file operand[/red]")
+                return True
+
+            file_path = " ".join(parts[1:])  # Handle paths with spaces
+            target_file = current_directory / file_path if not Path(file_path).is_absolute() else Path(file_path)
+
+            try:
+                target_file.touch()
+                console.print(f"[green]📄 Created file: {parts[1]}[/green]")
+            except Exception as e:
+                console.print(f"[red]touch: {e}[/red]")
+
+            return True
+
+        elif cmd == "cp":
+            # Copy file using shutil (safe, no shell injection)
+            if len(parts) < 3:
+                console.print("[red]cp: missing file operand[/red]")
+                return True
+
+            src = parts[1]
+            dst = parts[2]
+            src_path = current_directory / src if not Path(src).is_absolute() else Path(src)
+            dst_path = current_directory / dst if not Path(dst).is_absolute() else Path(dst)
+
+            try:
+                if src_path.is_dir():
+                    shutil.copytree(src_path, dst_path)
+                else:
+                    shutil.copy2(src_path, dst_path)
+                console.print(f"[green]📋 Copied: {parts[1]} → {parts[2]}[/green]")
+            except Exception as e:
+                console.print(f"[red]cp: {e}[/red]")
+
+            return True
+
+        elif cmd == "mv":
+            # Move file using shutil (safe, no shell injection)
+            if len(parts) < 3:
+                console.print("[red]mv: missing file operand[/red]")
+                return True
+
+            src = parts[1]
+            dst = parts[2]
+            src_path = current_directory / src if not Path(src).is_absolute() else Path(src)
+            dst_path = current_directory / dst if not Path(dst).is_absolute() else Path(dst)
+
+            try:
+                shutil.move(str(src_path), str(dst_path))
+                console.print(f"[green]📦 Moved: {parts[1]} → {parts[2]}[/green]")
+            except Exception as e:
+                console.print(f"[red]mv: {e}[/red]")
+
+            return True
+
+        elif cmd == "rm":
+            # Remove file using pathlib (safe, no shell injection)
+            if len(parts) < 2:
+                console.print("[red]rm: missing operand[/red]")
+                return True
+
+            file_path = " ".join(parts[1:])  # Handle paths with spaces
+            target_path = current_directory / file_path if not Path(file_path).is_absolute() else Path(file_path)
+
+            try:
+                if target_path.is_dir():
+                    # For directories, require explicit -r flag
+                    if "-r" in parts or "-rf" in parts:
+                        shutil.rmtree(target_path)
+                        console.print(f"[green]🗑️  Removed directory: {parts[1]}[/green]")
+                    else:
+                        console.print(f"[red]rm: cannot remove '{parts[1]}': Is a directory (use -r to remove directories)[/red]")
+                else:
+                    target_path.unlink()
                     console.print(f"[green]🗑️  Removed: {parts[1]}[/green]")
-                elif result.stdout:
-                    console.print(result.stdout.rstrip())
-            
-            # Always show errors
-            if result.stderr:
-                console.print(f"[red]{result.stderr.rstrip()}[/red]")
-            
+            except FileNotFoundError:
+                console.print(f"[red]rm: cannot remove '{parts[1]}': No such file or directory[/red]")
+            except Exception as e:
+                console.print(f"[red]rm: {e}[/red]")
+
             return True
         
         else:

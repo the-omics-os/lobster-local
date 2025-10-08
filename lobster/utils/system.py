@@ -11,6 +11,7 @@ whether agents are local or remote.
 
 import platform
 import subprocess
+import os
 from pathlib import Path
 from typing import Tuple
 
@@ -64,11 +65,15 @@ def open_file(file_path: Path) -> Tuple[bool, str]:
             subprocess.run(["xdg-open", str(file_path)], check=True)
             return True, f"Opened file: {file_path.name}"
         elif IS_WINDOWS:
-            subprocess.run(["start", "", str(file_path)], shell=True, check=True)
+            # Use os.startfile() instead of subprocess with shell=True for security
+            os.startfile(str(file_path))
             return True, f"Opened file: {file_path.name}"
         else:
             return False, f"Unsupported operating system: {_PLATFORM}"
     except subprocess.CalledProcessError as e:
+        return False, f"Failed to open file '{file_path.name}': {e}"
+    except OSError as e:
+        # os.startfile() raises OSError on failure
         return False, f"Failed to open file '{file_path.name}': {e}"
     except Exception as e:
         return False, f"Error opening file '{file_path.name}': {e}"
