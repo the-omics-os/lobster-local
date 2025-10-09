@@ -41,19 +41,35 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 git clone https://github.com/the-omics-os/lobster-local.git
 cd lobster-local
 
-# 2. Install with make (handles all dependencies)
-make install 
-#and if you want to access lobster from other directories later you can add:
-make install-global
+# 2. Install with make (automatically creates .env file)
+make install
 
-# 3. Set up your API key
-cp .env.example .env
-echo "ANTHROPIC_API_KEY=sk-ant-api03-your-key-here" >> .env
+# 3. Configure your API key
+# The .env file is automatically created during installation
+# Edit it with your preferred editor:
 
-# 4. Start analyzing!
+# macOS:
+open .env
+
+# Linux:
+nano .env
+
+# Windows (untested):
+notepad .env
+
+# Add your API key to the .env file:
+# ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+
+# 4. Activate the virtual environment
+source .venv/bin/activate
+
+# 5. Start analyzing!
 lobster chat
 # or if you want to see the reasoning
 lobster chat --reasoning
+
+# Optional: Install globally to use 'lobster' from any directory
+make install-global
 ```
 
 ### ⚠️ Important: API Keys & Rate Limits
@@ -172,16 +188,30 @@ Analysis complete! Results saved to workspace.
 
 ### API Keys
 
-Lobster AI requires an LLM provider (fill these lines in the newly created `.env` file). Choose one:
+The `.env` file is automatically created during installation (`make install` calls `setup-env`). You just need to edit it with your API credentials.
 
-**Option 1: Claude API (Recommended)**
-No cost output yet, be aware! You can always switch to cost efficient mode
+**Edit the .env file:**
+```bash
+# macOS - Opens in default text editor (TextEdit, etc.)
+open .env
+
+# Linux - Use nano or your preferred editor
+nano .env
+
+# Windows (⚠️ untested platform)
+notepad .env
+```
+
+**Choose ONE LLM provider:**
+
+**Option 1: Claude API (Recommended for quick start)**
 ```bash
 # Get your key from https://console.anthropic.com/
 ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
 ```
+⚠️ Note: Claude API has rate limits for new accounts. For production use, consider AWS Bedrock.
 
-**Option 2: AWS Bedrock**
+**Option 2: AWS Bedrock (Recommended for production)**
 ```bash
 # Requires AWS account with Bedrock access
 AWS_BEDROCK_ACCESS_KEY=AKIA...
@@ -191,12 +221,21 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
 ### Optional Configuration
 
 ```bash
-# Enhanced literature search
+# Enhanced literature search (optional)
 NCBI_API_KEY=your-ncbi-api-key  # Get from NCBI
 
 # Force specific provider (auto-detected by default)
 LOBSTER_LLM_PROVIDER=anthropic  # or "bedrock"
+
+# Cloud mode (optional - contact info@omics-os.com for access)
+LOBSTER_CLOUD_KEY=your-cloud-api-key
 ```
+
+### Platform Support
+
+- ✅ **macOS**: Fully tested and supported
+- ✅ **Linux**: Tested and supported
+- ⚠️ **Windows**: Not currently tested (may work but no guarantees)
 
 ## 📚 Documentation
 

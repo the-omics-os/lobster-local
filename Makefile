@@ -408,7 +408,15 @@ install: $(VENV_PATH) setup-env
 	@echo "   $(YELLOW)source $(VENV_PATH)/bin/activate$(NC)"
 	@echo ""
 	@echo "2. Configure your API keys in the .env file:"
-	@echo "   $(YELLOW)nano .env$(NC)"
+	@UNAME_S=$$(uname -s 2>/dev/null || echo "Unknown"); \
+	if [ "$$UNAME_S" = "Darwin" ]; then \
+		echo "   $(YELLOW)open .env$(NC)  $(BLUE)# Opens in your default text editor$(NC)"; \
+	elif [ "$$UNAME_S" = "Linux" ]; then \
+		echo "   $(YELLOW)nano .env$(NC)  $(BLUE)# Or use your preferred editor (vi, vim, gedit)$(NC)"; \
+	else \
+		echo "   $(YELLOW)notepad .env$(NC)  $(BLUE)# Windows$(NC)"; \
+		echo "   $(RED)⚠️  Note: Windows support is currently untested$(NC)"; \
+	fi
 	@echo "   $(BLUE)Required: ANTHROPIC_API_KEY or AWS Bedrock credentials$(NC)"
 	@echo ""
 	@echo "3. Test the installation:"
