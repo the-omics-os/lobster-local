@@ -10,10 +10,10 @@ Architecture:
 - ErrorHandlerRegistry: Manages and dispatches to handlers
 """
 
+import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
-from abc import ABC, abstractmethod
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class ErrorGuidance:
     Provides comprehensive guidance including problem description,
     actionable solutions, severity level, and support resources.
     """
+
     error_type: str
     title: str
     description: str
@@ -91,7 +92,7 @@ class RateLimitErrorHandler(ErrorHandler):
             "rate limit",
             "too many requests",
             "exceeded your organization",
-            "usage increase rate"
+            "usage increase rate",
         ]
         error_lower = error_str.lower()
         return any(pattern in error_lower for pattern in patterns)
@@ -109,16 +110,13 @@ class RateLimitErrorHandler(ErrorHandler):
                 "Wait a few minutes and try again (limits reset periodically)",
                 "Request a rate increase at: https://docs.anthropic.com/en/api/rate-limits",
                 "Switch to AWS Bedrock (recommended for production): See installation docs",
-                "Contact us for assistance: info@omics-os.com"
+                "Contact us for assistance: info@omics-os.com",
             ],
             severity="warning",
             documentation_url="https://docs.anthropic.com/en/api/rate-limits",
             can_retry=True,
             retry_delay=60,
-            metadata={
-                "original_error": error_str[:200],
-                "provider": "anthropic"
-            }
+            metadata={"original_error": error_str[:200], "provider": "anthropic"},
         )
 
 
@@ -137,7 +135,7 @@ class AuthenticationErrorHandler(ErrorHandler):
             "invalid api key",
             "authentication failed",
             "invalid_api_key",
-            "api key not found"
+            "api key not found",
         ]
         error_lower = error_str.lower()
         return any(pattern in error_lower for pattern in patterns)
@@ -156,14 +154,12 @@ class AuthenticationErrorHandler(ErrorHandler):
                 "Verify the API key is valid at: https://console.anthropic.com/",
                 "Ensure .env file is in the project root directory",
                 "Reload environment variables: source .env && lobster chat",
-                "For AWS Bedrock: Verify AWS credentials are configured correctly"
+                "For AWS Bedrock: Verify AWS credentials are configured correctly",
             ],
             severity="error",
             documentation_url="https://github.com/the-omics-os/lobster/wiki/03-configuration",
             can_retry=False,
-            metadata={
-                "original_error": error_str[:200]
-            }
+            metadata={"original_error": error_str[:200]},
         )
 
 
@@ -186,7 +182,7 @@ class NetworkErrorHandler(ErrorHandler):
             "dns",
             "timed out",
             "connection reset",
-            "no route to host"
+            "no route to host",
         ]
         error_lower = error_str.lower()
         return any(pattern in error_lower for pattern in patterns)
@@ -205,14 +201,12 @@ class NetworkErrorHandler(ErrorHandler):
                 "Verify firewall settings allow HTTPS connections (port 443)",
                 "Try again in a few moments (may be temporary)",
                 "If using a proxy, ensure it's configured correctly",
-                "Check API service status: https://status.anthropic.com"
+                "Check API service status: https://status.anthropic.com",
             ],
             severity="error",
             can_retry=True,
             retry_delay=30,
-            metadata={
-                "original_error": error_str[:200]
-            }
+            metadata={"original_error": error_str[:200]},
         )
 
 
@@ -230,7 +224,7 @@ class QuotaExceededErrorHandler(ErrorHandler):
             "insufficient_quota",
             "billing",
             "payment required",
-            "402"
+            "402",
         ]
         error_lower = error_str.lower()
         return any(pattern in error_lower for pattern in patterns)
@@ -249,14 +243,12 @@ class QuotaExceededErrorHandler(ErrorHandler):
                 "Review your current usage and limits",
                 "Upgrade your plan or add additional credits",
                 "Contact Anthropic support for quota increases",
-                "Consider AWS Bedrock for enterprise-level quotas"
+                "Consider AWS Bedrock for enterprise-level quotas",
             ],
             severity="error",
             documentation_url="https://docs.anthropic.com/en/api/rate-limits",
             can_retry=False,
-            metadata={
-                "original_error": error_str[:200]
-            }
+            metadata={"original_error": error_str[:200]},
         )
 
 
@@ -272,7 +264,9 @@ class ErrorHandlerRegistry:
         """Initialize registry with default handlers."""
         self.handlers: List[ErrorHandler] = []
         self._register_default_handlers()
-        logger.debug("Error handler registry initialized with %d handlers", len(self.handlers))
+        logger.debug(
+            "Error handler registry initialized with %d handlers", len(self.handlers)
+        )
 
     def _register_default_handlers(self):
         """Register built-in error handlers in priority order."""
@@ -315,7 +309,7 @@ class ErrorHandlerRegistry:
                 description="Operation was cancelled by user (Ctrl+C)",
                 solutions=["Operation stopped safely", "No action required"],
                 severity="warning",
-                can_retry=False
+                can_retry=False,
             )
 
         # Try each handler in order (first match wins)
@@ -325,7 +319,7 @@ class ErrorHandlerRegistry:
                     logger.debug(
                         "Handler %s accepted error: %s",
                         handler.__class__.__name__,
-                        error_str[:100]
+                        error_str[:100],
                     )
                     return handler.handle(error, error_str)
             except Exception as handler_error:
@@ -333,7 +327,7 @@ class ErrorHandlerRegistry:
                 logger.error(
                     "Handler %s failed to process error: %s",
                     handler.__class__.__name__,
-                    handler_error
+                    handler_error,
                 )
                 continue
 
@@ -341,7 +335,9 @@ class ErrorHandlerRegistry:
         logger.debug("No handler matched, using generic guidance")
         return self._create_generic_guidance(error, error_str)
 
-    def _create_generic_guidance(self, error: Exception, error_str: str) -> ErrorGuidance:
+    def _create_generic_guidance(
+        self, error: Exception, error_str: str
+    ) -> ErrorGuidance:
         """
         Fallback for unhandled errors.
 
@@ -362,15 +358,12 @@ class ErrorHandlerRegistry:
                 "Try running with --debug flag for more information: lobster chat --debug",
                 "Review the documentation at: https://github.com/the-omics-os/lobster/wiki",
                 "Search for similar issues: https://github.com/the-omics-os/lobster/issues",
-                "Report this issue if it persists: https://github.com/the-omics-os/lobster/issues/new"
+                "Report this issue if it persists: https://github.com/the-omics-os/lobster/issues/new",
             ],
             severity="error",
             support_email="info@omics-os.com",
             can_retry=False,
-            metadata={
-                "original_error": error_str,
-                "error_type": type(error).__name__
-            }
+            metadata={"original_error": error_str, "error_type": type(error).__name__},
         )
 
 

@@ -17,7 +17,7 @@ import pandas as pd
 class IModalityAdapter(ABC):
     """
     Abstract interface for modality-specific data adapters.
-    
+
     This interface defines the contract for converting raw data from various
     sources into standardized AnnData objects with modality-specific schemas.
     Each adapter handles the specific requirements and conventions of its
@@ -26,9 +26,7 @@ class IModalityAdapter(ABC):
 
     @abstractmethod
     def from_source(
-        self, 
-        source: Union[str, Path, pd.DataFrame], 
-        **kwargs
+        self, source: Union[str, Path, pd.DataFrame], **kwargs
     ) -> anndata.AnnData:
         """
         Convert source data to AnnData with appropriate schema.
@@ -49,9 +47,7 @@ class IModalityAdapter(ABC):
 
     @abstractmethod
     def validate(
-        self, 
-        adata: anndata.AnnData, 
-        strict: bool = False
+        self, adata: anndata.AnnData, strict: bool = False
     ) -> "ValidationResult":
         """
         Validate AnnData against modality schema.
@@ -102,7 +98,7 @@ class IModalityAdapter(ABC):
         Returns:
             str: Modality name (e.g., 'transcriptomics', 'proteomics')
         """
-        return self.__class__.__name__.lower().replace('adapter', '')
+        return self.__class__.__name__.lower().replace("adapter", "")
 
     def detect_format(self, source: Union[str, Path]) -> Optional[str]:
         """
@@ -117,28 +113,24 @@ class IModalityAdapter(ABC):
         if isinstance(source, (str, Path)):
             path = Path(source)
             extension = path.suffix.lower()
-            
+
             format_mapping = {
-                '.csv': 'csv',
-                '.tsv': 'tsv',
-                '.txt': 'txt',
-                '.h5ad': 'h5ad',
-                '.h5': 'h5',
-                '.xlsx': 'excel',
-                '.xls': 'excel',
-                '.mtx': 'mtx',
-                '.h5mu': 'h5mu'
+                ".csv": "csv",
+                ".tsv": "tsv",
+                ".txt": "txt",
+                ".h5ad": "h5ad",
+                ".h5": "h5",
+                ".xlsx": "excel",
+                ".xls": "excel",
+                ".mtx": "mtx",
+                ".h5mu": "h5mu",
             }
-            
+
             return format_mapping.get(extension)
-        
+
         return None
 
-    def preprocess_data(
-        self, 
-        adata: anndata.AnnData, 
-        **kwargs
-    ) -> anndata.AnnData:
+    def preprocess_data(self, adata: anndata.AnnData, **kwargs) -> anndata.AnnData:
         """
         Apply modality-specific preprocessing steps.
 
@@ -166,14 +158,16 @@ class IModalityAdapter(ABC):
         return {
             "n_obs": adata.n_obs,
             "n_vars": adata.n_vars,
-            "sparsity": 1.0 - (adata.X != 0).sum() / adata.X.size if hasattr(adata.X, 'size') else 0.0,
-            "memory_usage": adata.X.nbytes if hasattr(adata.X, 'nbytes') else 0
+            "sparsity": (
+                1.0 - (adata.X != 0).sum() / adata.X.size
+                if hasattr(adata.X, "size")
+                else 0.0
+            ),
+            "memory_usage": adata.X.nbytes if hasattr(adata.X, "nbytes") else 0,
         }
 
     def standardize_metadata(
-        self, 
-        adata: anndata.AnnData,
-        metadata_mapping: Optional[Dict[str, str]] = None
+        self, adata: anndata.AnnData, metadata_mapping: Optional[Dict[str, str]] = None
     ) -> anndata.AnnData:
         """
         Standardize metadata column names according to schema.
@@ -190,17 +184,17 @@ class IModalityAdapter(ABC):
             for old_name, new_name in metadata_mapping.items():
                 if old_name in adata.obs.columns:
                     adata.obs = adata.obs.rename(columns={old_name: new_name})
-                
+
                 if old_name in adata.var.columns:
                     adata.var = adata.var.rename(columns={old_name: new_name})
-        
+
         return adata
 
     def add_provenance(
         self,
         adata: anndata.AnnData,
         source_info: Dict[str, Any],
-        processing_params: Optional[Dict[str, Any]] = None
+        processing_params: Optional[Dict[str, Any]] = None,
     ) -> anndata.AnnData:
         """
         Add provenance information to AnnData object.
@@ -214,20 +208,20 @@ class IModalityAdapter(ABC):
             anndata.AnnData: AnnData with provenance information
         """
         import datetime
-        
+
         provenance = {
             "adapter": self.__class__.__name__,
             "modality": self.get_modality_name(),
             "source": source_info,
             "processing_params": processing_params or {},
             "timestamp": datetime.datetime.now().isoformat(),
-            "version": "1.0.0"  # Could be extracted from package version
+            "version": "1.0.0",  # Could be extracted from package version
         }
-        
+
         # Add to uns (unstructured metadata)
         if "provenance" not in adata.uns:
             adata.uns["provenance"] = []
-        
+
         adata.uns["provenance"].append(provenance)
-        
+
         return adata

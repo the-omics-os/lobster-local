@@ -5,23 +5,23 @@ This module provides sophisticated status displays using Rich Layout,
 multi-panel views, and real-time system monitoring with orange theming.
 """
 
-from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from pathlib import Path
-import psutil
+from typing import Any, Dict, List, Optional
 
+import psutil
+from rich import box
+from rich.align import Align
+from rich.columns import Columns
+from rich.console import Group
 from rich.layout import Layout
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
 from rich.text import Text
-from rich.progress import Progress, BarColumn, TextColumn
-from rich.columns import Columns
-from rich.align import Align
-from rich.console import Group
-from rich import box
 
-from ..themes import LobsterTheme
 from ..console_manager import get_console_manager
+from ..themes import LobsterTheme
 
 
 class EnhancedStatusDisplay:
@@ -49,16 +49,11 @@ class EnhancedStatusDisplay:
         layout = Layout()
 
         # Split into header and body
-        layout.split_column(
-            Layout(name="header", size=3),
-            Layout(name="body")
-        )
+        layout.split_column(Layout(name="header", size=3), Layout(name="body"))
 
         # Split body into left, center, and right panels
         layout["body"].split_row(
-            Layout(name="left"),
-            Layout(name="center"),
-            Layout(name="right")
+            Layout(name="left"), Layout(name="center"), Layout(name="right")
         )
 
         # Add header
@@ -66,7 +61,7 @@ class EnhancedStatusDisplay:
         layout["header"].update(
             LobsterTheme.create_panel(
                 Align.center(header_text),
-                title=f"Updated: {datetime.now().strftime('%H:%M:%S')}"
+                title=f"Updated: {datetime.now().strftime('%H:%M:%S')}",
             )
         )
 
@@ -86,11 +81,7 @@ class EnhancedStatusDisplay:
         status = client.get_status()
 
         # Create status table
-        table = Table(
-            show_header=False,
-            box=box.SIMPLE,
-            padding=(0, 1)
-        )
+        table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
         table.add_column("Property", style="data.key", width=15)
         table.add_column("Value", style="data.value")
         table.add_column("Status", width=3)
@@ -113,10 +104,7 @@ class EnhancedStatusDisplay:
             if summary.get("memory_usage"):
                 table.add_row("Memory", summary["memory_usage"], "💾")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="📋 Core Status"
-        )
+        return LobsterTheme.create_panel(table, title="📋 Core Status")
 
     def _create_resource_panel(self) -> Panel:
         """Create system resource monitoring panel."""
@@ -124,14 +112,10 @@ class EnhancedStatusDisplay:
             # Get system metrics
             cpu_percent = psutil.cpu_percent(interval=0.1)
             memory = psutil.virtual_memory()
-            disk = psutil.disk_usage('.')
+            disk = psutil.disk_usage(".")
 
             # Create resource table
-            table = Table(
-                show_header=False,
-                box=box.SIMPLE,
-                padding=(0, 1)
-            )
+            table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
             table.add_column("Resource", style="data.key", width=12)
             table.add_column("Usage", style="data.value", width=15)
             table.add_column("Bar", width=20)
@@ -142,7 +126,9 @@ class EnhancedStatusDisplay:
 
             # Memory usage
             memory_bar = self._create_usage_bar(memory.percent)
-            memory_text = f"{memory.used / (1024**3):.1f}GB / {memory.total / (1024**3):.1f}GB"
+            memory_text = (
+                f"{memory.used / (1024**3):.1f}GB / {memory.total / (1024**3):.1f}GB"
+            )
             table.add_row("Memory", memory_text, memory_bar)
 
             # Disk usage
@@ -162,27 +148,21 @@ class EnhancedStatusDisplay:
             table.add_row("Resource monitoring")
             table.add_row("unavailable")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="⚡ Resources"
-        )
+        return LobsterTheme.create_panel(table, title="⚡ Resources")
 
     def _create_agent_status_panel(self, client) -> Panel:
         """Create agent status panel."""
         # Get current mode/profile
         try:
             from lobster.config.agent_config import get_agent_configurator
+
             configurator = get_agent_configurator()
             current_mode = configurator.get_current_profile()
         except Exception:
             current_mode = "unknown"
 
         # Create agent status table
-        table = Table(
-            show_header=False,
-            box=box.SIMPLE,
-            padding=(0, 1)
-        )
+        table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
         table.add_column("Agent", style="data.key", width=15)
         table.add_column("Status", style="data.value")
         table.add_column("Icon", width=3)
@@ -196,17 +176,18 @@ class EnhancedStatusDisplay:
             ("SingleCell Expert", "Ready", "🧬"),
             ("Proteomics Expert", "Ready", "🔬"),
             ("Research Agent", "Ready", "📚"),
-            ("Supervisor", "Active", "🎯")
+            ("Supervisor", "Active", "🎯"),
         ]
 
         for agent_name, status, icon in agents:
-            status_style = f"[{LobsterTheme.PRIMARY_ORANGE}]" if status == "Active" else "[green]"
-            table.add_row(agent_name, f"{status_style}{status}[/{status_style.strip('[]')}]", icon)
+            status_style = (
+                f"[{LobsterTheme.PRIMARY_ORANGE}]" if status == "Active" else "[green]"
+            )
+            table.add_row(
+                agent_name, f"{status_style}{status}[/{status_style.strip('[]')}]", icon
+            )
 
-        return LobsterTheme.create_panel(
-            table,
-            title="🤖 Agents"
-        )
+        return LobsterTheme.create_panel(table, title="🤖 Agents")
 
     def _create_usage_bar(self, percentage: float) -> str:
         """Create a colored usage bar."""
@@ -240,15 +221,14 @@ class EnhancedStatusDisplay:
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="workspace_info", size=8),
-            Layout(name="files_and_data")
+            Layout(name="files_and_data"),
         )
 
         # Header
         header_text = LobsterTheme.create_title_text("Workspace Overview", "🏗️")
         layout["header"].update(
             LobsterTheme.create_panel(
-                Align.center(header_text),
-                title="Workspace Status"
+                Align.center(header_text), title="Workspace Status"
             )
         )
 
@@ -257,8 +237,7 @@ class EnhancedStatusDisplay:
 
         # Split files and data section
         layout["files_and_data"].split_row(
-            Layout(name="files"),
-            Layout(name="data_status")
+            Layout(name="files"), Layout(name="data_status")
         )
 
         layout["files"].update(self._create_recent_files_panel(client))
@@ -269,25 +248,39 @@ class EnhancedStatusDisplay:
     def _create_workspace_info_panel(self, client) -> Panel:
         """Create workspace information panel."""
         try:
-            if hasattr(client.data_manager, 'get_workspace_status'):
+            if hasattr(client.data_manager, "get_workspace_status"):
                 workspace_status = client.data_manager.get_workspace_status()
 
                 # Create workspace table
-                table = Table(
-                    show_header=False,
-                    box=box.SIMPLE,
-                    padding=(0, 1)
-                )
+                table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
                 table.add_column("Property", style="data.key", width=18)
                 table.add_column("Value", style="data.value")
                 table.add_column("Icon", width=3)
 
-                table.add_row("Workspace Path", str(Path(workspace_status.get("workspace_path", "")).name), "📁")
-                table.add_row("Modalities", str(workspace_status.get("modalities_loaded", 0)), "🧬")
-                table.add_row("Backends", str(len(workspace_status.get("registered_backends", []))), "💾")
-                table.add_row("Adapters", str(len(workspace_status.get("registered_adapters", []))), "🔌")
+                table.add_row(
+                    "Workspace Path",
+                    str(Path(workspace_status.get("workspace_path", "")).name),
+                    "📁",
+                )
+                table.add_row(
+                    "Modalities",
+                    str(workspace_status.get("modalities_loaded", 0)),
+                    "🧬",
+                )
+                table.add_row(
+                    "Backends",
+                    str(len(workspace_status.get("registered_backends", []))),
+                    "💾",
+                )
+                table.add_row(
+                    "Adapters",
+                    str(len(workspace_status.get("registered_adapters", []))),
+                    "🔌",
+                )
 
-                provenance = "✅" if workspace_status.get("provenance_enabled") else "❌"
+                provenance = (
+                    "✅" if workspace_status.get("provenance_enabled") else "❌"
+                )
                 table.add_row("Provenance", provenance, "📋")
 
                 mudata = "✅" if workspace_status.get("mudata_available") else "❌"
@@ -306,10 +299,7 @@ class EnhancedStatusDisplay:
             table.add_row("Unable to load")
             table.add_row("workspace status")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="🏗️ Workspace Info"
-        )
+        return LobsterTheme.create_panel(table, title="🏗️ Workspace Info")
 
     def _create_recent_files_panel(self, client) -> Panel:
         """Create recent files panel."""
@@ -330,7 +320,7 @@ class EnhancedStatusDisplay:
                 show_header=True,
                 header_style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
                 box=box.SIMPLE,
-                padding=(0, 1)
+                padding=(0, 1),
             )
             table.add_column("File", style="white", width=20)
             table.add_column("Type", style="cyan", width=8)
@@ -343,16 +333,20 @@ class EnhancedStatusDisplay:
                     file_name = file_name[:15] + "..."
 
                 size_kb = file_info["size"] / 1024
-                size_str = f"{size_kb:.1f}KB" if size_kb < 1024 else f"{size_kb/1024:.1f}MB"
+                size_str = (
+                    f"{size_kb:.1f}KB" if size_kb < 1024 else f"{size_kb/1024:.1f}MB"
+                )
 
                 # Category icon
                 category_icons = {
                     "bioinformatics": "🧬",
                     "tabular": "📊",
                     "visualization": "📈",
-                    "exports": "📤"
+                    "exports": "📤",
                 }
-                category_display = category_icons.get(category, "📄") + " " + category.title()[:6]
+                category_display = (
+                    category_icons.get(category, "📄") + " " + category.title()[:6]
+                )
 
                 table.add_row(file_name, category_display, size_str)
 
@@ -364,10 +358,7 @@ class EnhancedStatusDisplay:
             table.add_column("Info", style="grey50")
             table.add_row("No files found")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="📁 Recent Files"
-        )
+        return LobsterTheme.create_panel(table, title="📁 Recent Files")
 
     def _create_data_status_panel(self, client) -> Panel:
         """Create data status panel."""
@@ -376,11 +367,7 @@ class EnhancedStatusDisplay:
                 summary = client.data_manager.get_data_summary()
 
                 # Create data table
-                table = Table(
-                    show_header=False,
-                    box=box.SIMPLE,
-                    padding=(0, 1)
-                )
+                table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
                 table.add_column("Property", style="data.key", width=12)
                 table.add_column("Value", style="data.value")
                 table.add_column("Icon", width=3)
@@ -421,10 +408,7 @@ class EnhancedStatusDisplay:
             table.add_column("Error", style="red")
             table.add_row("Data status unavailable")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="📊 Data Status"
-        )
+        return LobsterTheme.create_panel(table, title="📊 Data Status")
 
     def create_analysis_dashboard(self, client) -> Layout:
         """
@@ -439,23 +423,16 @@ class EnhancedStatusDisplay:
         layout = Layout()
 
         # Split into header and content
-        layout.split_column(
-            Layout(name="header", size=3),
-            Layout(name="content")
-        )
+        layout.split_column(Layout(name="header", size=3), Layout(name="content"))
 
         # Split content into analysis and plots
-        layout["content"].split_row(
-            Layout(name="analysis"),
-            Layout(name="plots")
-        )
+        layout["content"].split_row(Layout(name="analysis"), Layout(name="plots"))
 
         # Header
         header_text = LobsterTheme.create_title_text("Analysis Dashboard", "🧬")
         layout["header"].update(
             LobsterTheme.create_panel(
-                Align.center(header_text),
-                title="Real-time Analysis Monitoring"
+                Align.center(header_text), title="Real-time Analysis Monitoring"
             )
         )
 
@@ -471,14 +448,16 @@ class EnhancedStatusDisplay:
         """Create analysis operations panel."""
         try:
             # Get tool usage history if available
-            if hasattr(client.data_manager, 'tool_usage_history'):
-                history = client.data_manager.tool_usage_history[-10:]  # Last 10 operations
+            if hasattr(client.data_manager, "tool_usage_history"):
+                history = client.data_manager.tool_usage_history[
+                    -10:
+                ]  # Last 10 operations
 
                 table = Table(
                     show_header=True,
                     header_style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
                     box=box.SIMPLE,
-                    padding=(0, 1)
+                    padding=(0, 1),
                 )
                 table.add_column("Operation", style="white", width=15)
                 table.add_column("Status", style="data.value", width=10)
@@ -493,14 +472,20 @@ class EnhancedStatusDisplay:
                     timestamp = operation.get("timestamp", "")
                     if timestamp:
                         try:
-                            time_str = datetime.fromisoformat(timestamp.replace('Z', '+00:00')).strftime("%H:%M")
+                            time_str = datetime.fromisoformat(
+                                timestamp.replace("Z", "+00:00")
+                            ).strftime("%H:%M")
                         except:
                             time_str = "N/A"
                     else:
                         time_str = "N/A"
 
                     success = operation.get("success", True)
-                    status = f"[green]✅ Success[/green]" if success else f"[red]❌ Failed[/red]"
+                    status = (
+                        f"[green]✅ Success[/green]"
+                        if success
+                        else f"[red]❌ Failed[/red]"
+                    )
 
                     table.add_row(op_name, status, time_str)
 
@@ -517,10 +502,7 @@ class EnhancedStatusDisplay:
             table.add_row("Analysis history")
             table.add_row("unavailable")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="⚙️ Recent Operations"
-        )
+        return LobsterTheme.create_panel(table, title="⚙️ Recent Operations")
 
     def _create_plots_panel(self, client) -> Panel:
         """Create plots status panel."""
@@ -532,7 +514,7 @@ class EnhancedStatusDisplay:
                     show_header=True,
                     header_style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
                     box=box.SIMPLE,
-                    padding=(0, 1)
+                    padding=(0, 1),
                 )
                 table.add_column("Plot", style="white", width=15)
                 table.add_column("Type", style="cyan", width=8)
@@ -548,7 +530,9 @@ class EnhancedStatusDisplay:
 
                     # Format timestamp
                     try:
-                        created = datetime.fromisoformat(plot["timestamp"].replace('Z', '+00:00'))
+                        created = datetime.fromisoformat(
+                            plot["timestamp"].replace("Z", "+00:00")
+                        )
                         created_str = created.strftime("%H:%M")
                     except:
                         created_str = "N/A"
@@ -571,10 +555,7 @@ class EnhancedStatusDisplay:
             table.add_row("Plot history")
             table.add_row("unavailable")
 
-        return LobsterTheme.create_panel(
-            table,
-            title="📈 Visualizations"
-        )
+        return LobsterTheme.create_panel(table, title="📈 Visualizations")
 
 
 # Global enhanced status display instance

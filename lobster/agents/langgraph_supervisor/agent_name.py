@@ -17,7 +17,9 @@ CONTENT_PATTERN = re.compile(r"<content>(.*?)</content>", re.DOTALL)
 AgentNameMode = Literal["inline"]
 
 
-def _is_content_blocks_content(content: list[dict | str] | str) -> TypeGuard[list[dict]]:
+def _is_content_blocks_content(
+    content: list[dict | str] | str,
+) -> TypeGuard[list[dict]]:
     return (
         isinstance(content, list)
         and len(content) > 0
@@ -43,10 +45,14 @@ def add_inline_agent_name(message: BaseMessage) -> BaseMessage:
     formatted_message = message.model_copy()
     if _is_content_blocks_content(message.content):
         text_blocks = [block for block in message.content if block["type"] == "text"]
-        non_text_blocks = [block for block in message.content if block["type"] != "text"]
+        non_text_blocks = [
+            block for block in message.content if block["type"] != "text"
+        ]
         content = text_blocks[0]["text"] if text_blocks else ""
         formatted_content = f"<name>{message.name}</name><content>{content}</content>"
-        formatted_message_content = [{"type": "text", "text": formatted_content}] + non_text_blocks
+        formatted_message_content = [
+            {"type": "text", "text": formatted_content}
+        ] + non_text_blocks
         formatted_message.content = formatted_message_content
     else:
         formatted_message.content = (
@@ -74,7 +80,9 @@ def remove_inline_agent_name(message: BaseMessage) -> BaseMessage:
         if not text_blocks:
             return message
 
-        non_text_blocks = [block for block in message.content if block["type"] != "text"]
+        non_text_blocks = [
+            block for block in message.content if block["type"] != "text"
+        ]
         content = text_blocks[0]["text"]
     else:
         content = message.content

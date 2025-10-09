@@ -9,9 +9,9 @@ Cloud-agnostic design: All operations run on the CLI side regardless of
 whether agents are local or remote.
 """
 
+import os
 import platform
 import subprocess
-import os
 from pathlib import Path
 from typing import Tuple
 
@@ -98,11 +98,16 @@ def open_folder(folder_path: Path) -> Tuple[bool, str]:
             file_managers = ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm"]
             for fm in file_managers:
                 try:
-                    subprocess.run([fm, str(folder_path)], check=True, stderr=subprocess.DEVNULL)
+                    subprocess.run(
+                        [fm, str(folder_path)], check=True, stderr=subprocess.DEVNULL
+                    )
                     return True, f"Opened folder: {folder_path.name}"
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     continue
-            return False, f"Could not find a suitable file manager to open: {folder_path.name}"
+            return (
+                False,
+                f"Could not find a suitable file manager to open: {folder_path.name}",
+            )
         elif IS_WINDOWS:
             subprocess.run(["explorer", str(folder_path)], check=True)
             return True, f"Opened folder in Explorer: {folder_path.name}"

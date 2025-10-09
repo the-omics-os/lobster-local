@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class BaseBackend(IDataBackend):
     """
     Base implementation of data backend with common functionality.
-    
+
     This class provides shared functionality for all backend implementations
     including path validation, metadata handling, and common operations.
     Subclasses need only implement the storage-specific methods.
@@ -48,10 +48,10 @@ class BaseBackend(IDataBackend):
             Path: Resolved absolute path
         """
         path = Path(path)
-        
+
         if self.base_path and not path.is_absolute():
             return self.base_path / path
-        
+
         return path.resolve()
 
     def _ensure_directory(self, path: Union[str, Path]) -> None:
@@ -78,12 +78,12 @@ class BaseBackend(IDataBackend):
             resolved_path = self._resolve_path(path)
             if not resolved_path.exists():
                 return None
-            
+
             sha256_hash = hashlib.sha256()
             with open(resolved_path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     sha256_hash.update(chunk)
-            
+
             return sha256_hash.hexdigest()
         except Exception as e:
             self.logger.warning(f"Failed to calculate checksum for {path}: {e}")
@@ -101,20 +101,20 @@ class BaseBackend(IDataBackend):
         """
         path = Path(path)
         extension = path.suffix.lower()
-        
+
         format_mapping = {
-            '.h5ad': 'h5ad',
-            '.h5': 'h5',
-            '.csv': 'csv',
-            '.tsv': 'tsv',
-            '.txt': 'txt',
-            '.xlsx': 'excel',
-            '.xls': 'excel',
-            '.h5mu': 'h5mu',
-            '.zarr': 'zarr'
+            ".h5ad": "h5ad",
+            ".h5": "h5",
+            ".csv": "csv",
+            ".tsv": "tsv",
+            ".txt": "txt",
+            ".xlsx": "excel",
+            ".xls": "excel",
+            ".h5mu": "h5mu",
+            ".zarr": "zarr",
         }
-        
-        return format_mapping.get(extension, 'unknown')
+
+        return format_mapping.get(extension, "unknown")
 
     def validate_path(self, path: Union[str, Path]) -> Path:
         """
@@ -131,7 +131,7 @@ class BaseBackend(IDataBackend):
         """
         if not path:
             raise ValueError("Path cannot be empty")
-        
+
         try:
             resolved_path = self._resolve_path(path)
             return resolved_path
@@ -152,12 +152,12 @@ class BaseBackend(IDataBackend):
             FileNotFoundError: If the file doesn't exist
         """
         resolved_path = self._resolve_path(path)
-        
+
         if not resolved_path.exists():
             raise FileNotFoundError(f"File not found: {resolved_path}")
-        
+
         stat = resolved_path.stat()
-        
+
         return {
             "size": stat.st_size,
             "modified": stat.st_mtime,
@@ -165,7 +165,7 @@ class BaseBackend(IDataBackend):
             "format": self._detect_format(resolved_path),
             "path": str(resolved_path),
             "name": resolved_path.name,
-            "extension": resolved_path.suffix
+            "extension": resolved_path.suffix,
         }
 
     def list_files(self, directory: Union[str, Path], pattern: str = "*") -> List[str]:
@@ -184,19 +184,21 @@ class BaseBackend(IDataBackend):
             PermissionError: If read access is denied
         """
         resolved_dir = self._resolve_path(directory)
-        
+
         if not resolved_dir.exists():
             raise FileNotFoundError(f"Directory not found: {resolved_dir}")
-        
+
         if not resolved_dir.is_dir():
             raise ValueError(f"Path is not a directory: {resolved_dir}")
-        
+
         try:
             files = list(resolved_dir.glob(pattern))
             # Return only files (not directories)
             return [str(f) for f in files if f.is_file()]
         except PermissionError as e:
-            raise PermissionError(f"Permission denied accessing directory {resolved_dir}: {e}")
+            raise PermissionError(
+                f"Permission denied accessing directory {resolved_dir}: {e}"
+            )
 
     def exists(self, path: Union[str, Path]) -> bool:
         """
@@ -226,10 +228,10 @@ class BaseBackend(IDataBackend):
             PermissionError: If delete access is denied
         """
         resolved_path = self._resolve_path(path)
-        
+
         if not resolved_path.exists():
             raise FileNotFoundError(f"File not found: {resolved_path}")
-        
+
         try:
             resolved_path.unlink()
             self.logger.info(f"Deleted file: {resolved_path}")
@@ -244,12 +246,14 @@ class BaseBackend(IDataBackend):
             Dict[str, Any]: Storage backend information
         """
         info = super().get_storage_info()
-        info.update({
-            "base_path": str(self.base_path) if self.base_path else None,
-            "supports_directories": True,
-            "supports_metadata": True,
-            "path_style": "local"
-        })
+        info.update(
+            {
+                "base_path": str(self.base_path) if self.base_path else None,
+                "supports_directories": True,
+                "supports_metadata": True,
+                "path_style": "local",
+            }
+        )
         return info
 
     def supports_format(self, format_name: str) -> bool:
@@ -262,9 +266,7 @@ class BaseBackend(IDataBackend):
         Returns:
             bool: True if format is supported, False otherwise
         """
-        supported_formats = {
-            'h5ad', 'h5', 'csv', 'tsv', 'txt', 'excel', 'xlsx', 'xls'
-        }
+        supported_formats = {"h5ad", "h5", "csv", "tsv", "txt", "excel", "xlsx", "xls"}
         return format_name.lower() in supported_formats
 
     def create_backup(self, path: Union[str, Path]) -> Optional[Path]:
@@ -281,15 +283,19 @@ class BaseBackend(IDataBackend):
             resolved_path = self._resolve_path(path)
             if not resolved_path.exists():
                 return None
-            
+
             # Create backup with timestamp
             import datetime
+
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_path = resolved_path.with_suffix(f".{timestamp}.backup{resolved_path.suffix}")
-            
+            backup_path = resolved_path.with_suffix(
+                f".{timestamp}.backup{resolved_path.suffix}"
+            )
+
             import shutil
+
             shutil.copy2(resolved_path, backup_path)
-            
+
             self.logger.info(f"Created backup: {backup_path}")
             return backup_path
         except Exception as e:

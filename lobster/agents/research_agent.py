@@ -6,59 +6,54 @@ and providing comprehensive research context using the modular publication servi
 architecture with DataManagerV2 integration.
 """
 
+import json
 import re
+from datetime import date
 from typing import List
+
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
+
+from lobster.agents.research_agent_assistant import ResearchAgentAssistant
 from lobster.config.llm_factory import create_llm
-
-from datetime import date
-import json
-
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.publication_service import PublicationService
 from lobster.tools.providers.base_provider import DatasetType, PublicationSource
-from lobster.agents.research_agent_assistant import ResearchAgentAssistant
+from lobster.tools.publication_service import PublicationService
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def research_agent(
-    data_manager: DataManagerV2, 
-    callback_handler=None, 
+    data_manager: DataManagerV2,
+    callback_handler=None,
     agent_name: str = "research_agent",
-    handoff_tools: List = None
+    handoff_tools: List = None,
 ):
     """Create research agent using DataManagerV2 and modular publication service."""
-    
+
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('research_agent')
-    llm = create_llm('research_agent', model_params)
-    
-    if callback_handler and hasattr(llm, 'with_config'):
+    model_params = settings.get_agent_llm_params("research_agent")
+    llm = create_llm("research_agent", model_params)
+
+    if callback_handler and hasattr(llm, "with_config"):
         llm = llm.with_config(callbacks=[callback_handler])
-    
+
     # Initialize publication service with NCBI API key
-    publication_service = PublicationService(
-        data_manager=data_manager
-    )
-    
+    publication_service = PublicationService(data_manager=data_manager)
+
     # Initialize research agent assistant for metadata validation
     research_assistant = ResearchAgentAssistant()
-    
+
     # Define tools
     @tool
     def search_literature(
-        query: str,
-        max_results: int = 5,
-        sources: str = "pubmed",
-        filters: str = None
+        query: str, max_results: int = 5, sources: str = "pubmed", filters: str = None
     ) -> str:
         """
         Search for scientific literature across multiple sources.
-        
+
         Args:
             query: Search query string
             max_results: Number of results to retrieve (default: 5, range: 1-20)
@@ -69,47 +64,48 @@ def research_agent(
             # Parse sources
             source_list = []
             if sources:
-                for source in sources.split(','):
+                for source in sources.split(","):
                     source = source.strip().lower()
-                    if source == 'pubmed':
+                    if source == "pubmed":
                         source_list.append(PublicationSource.PUBMED)
-                    elif source == 'biorxiv':
+                    elif source == "biorxiv":
                         source_list.append(PublicationSource.BIORXIV)
-                    elif source == 'medrxiv':
+                    elif source == "medrxiv":
                         source_list.append(PublicationSource.MEDRXIV)
-            
+
             # Parse filters if provided
             filter_dict = None
             if filters:
                 import json
+
                 try:
                     filter_dict = json.loads(filters)
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid filters JSON: {filters}")
-            
+
             results = publication_service.search_literature(
                 query=query,
                 max_results=max_results,
                 sources=source_list if source_list else None,
-                filters=filter_dict
+                filters=filter_dict,
             )
-            
-            logger.info(f"Literature search completed for: {query[:50]}... (max_results={max_results})")
+
+            logger.info(
+                f"Literature search completed for: {query[:50]}... (max_results={max_results})"
+            )
             return results
-            
+
         except Exception as e:
             logger.error(f"Error searching literature: {e}")
             return f"Error searching literature: {str(e)}"
 
     @tool
     def discover_related_studies(
-        identifier: str,
-        research_topic: str = None,
-        max_results: int = 5
+        identifier: str, research_topic: str = None, max_results: int = 5
     ) -> str:
         """
         Discover studies related to a given publication or research topic.
-        
+
         Args:
             identifier: Publication identifier (DOI or PMID) to find related studies
             research_topic: Optional research topic to focus the search
@@ -118,36 +114,39 @@ def research_agent(
         try:
             # First get metadata from the source publication
             metadata = publication_service.extract_publication_metadata(identifier)
-            
+
             if isinstance(metadata, str):
                 return f"Could not extract metadata for {identifier}: {metadata}"
-            
+
             # Build search query based on metadata and research topic
             search_terms = []
-            
+
             # Extract key terms from title
             if metadata.title:
                 # Simple keyword extraction (could be enhanced with NLP)
-                title_words = re.findall(r'\b[a-zA-Z]{4,}\b', metadata.title.lower())
+                title_words = re.findall(r"\b[a-zA-Z]{4,}\b", metadata.title.lower())
                 # Filter common words and take meaningful terms
-                meaningful_terms = [w for w in title_words if w not in ['study', 'analysis', 'using', 'with', 'from', 'data']]
+                meaningful_terms = [
+                    w
+                    for w in title_words
+                    if w not in ["study", "analysis", "using", "with", "from", "data"]
+                ]
                 search_terms.extend(meaningful_terms[:3])
-            
+
             # Add research topic if provided
             if research_topic:
                 search_terms.append(research_topic)
-            
+
             # Build search query
-            search_query = ' '.join(search_terms[:5])  # Limit to avoid too broad search
-            
+            search_query = " ".join(search_terms[:5])  # Limit to avoid too broad search
+
             if not search_query.strip():
                 search_query = "related studies"
-            
+
             results = publication_service.search_literature(
-                query=search_query,
-                max_results=max_results
+                query=search_query, max_results=max_results
             )
-            
+
             # Add context header
             context_header = f"## Related Studies for {identifier}\n"
             context_header += f"**Source publication**: {metadata.title[:100]}...\n"
@@ -155,23 +154,21 @@ def research_agent(
             if research_topic:
                 context_header += f"**Research focus**: {research_topic}\n"
             context_header += "\n"
-            
+
             logger.info(f"Related studies search completed for {identifier}")
             return context_header + results
-            
+
         except Exception as e:
             logger.error(f"Error discovering related studies: {e}")
             return f"Error discovering related studies: {str(e)}"
 
     @tool
     def find_datasets_from_publication(
-        identifier: str,
-        dataset_types: str = None,
-        include_related: bool = True
+        identifier: str, dataset_types: str = None, include_related: bool = True
     ) -> str:
         """
         Find datasets associated with a scientific publication.
-        
+
         Args:
             identifier: Publication identifier (DOI or PMID)
             dataset_types: Types of datasets to search for, comma-separated (e.g., "geo,sra,arrayexpress")
@@ -182,42 +179,38 @@ def research_agent(
             type_list = []
             if dataset_types:
                 type_mapping = {
-                    'geo': DatasetType.GEO,
-                    'sra': DatasetType.SRA,
-                    'arrayexpress': DatasetType.ARRAYEXPRESS,
-                    'ena': DatasetType.ENA,
-                    'bioproject': DatasetType.BIOPROJECT,
-                    'biosample': DatasetType.BIOSAMPLE,
-                    'dbgap': DatasetType.DBGAP
+                    "geo": DatasetType.GEO,
+                    "sra": DatasetType.SRA,
+                    "arrayexpress": DatasetType.ARRAYEXPRESS,
+                    "ena": DatasetType.ENA,
+                    "bioproject": DatasetType.BIOPROJECT,
+                    "biosample": DatasetType.BIOSAMPLE,
+                    "dbgap": DatasetType.DBGAP,
                 }
-                
-                for dtype in dataset_types.split(','):
+
+                for dtype in dataset_types.split(","):
                     dtype = dtype.strip().lower()
                     if dtype in type_mapping:
                         type_list.append(type_mapping[dtype])
-            
+
             results = publication_service.find_datasets_from_publication(
                 identifier=identifier,
                 dataset_types=type_list if type_list else None,
-                include_related=include_related
+                include_related=include_related,
             )
-            
+
             logger.info(f"Dataset discovery completed for: {identifier}")
             return results
-            
+
         except Exception as e:
             logger.error(f"Error finding datasets: {e}")
             return f"Error finding datasets from publication: {str(e)}"
 
     @tool
-    def find_marker_genes(
-        query: str,
-        max_results: int = 5,
-        filters: str = None
-    ) -> str:
+    def find_marker_genes(query: str, max_results: int = 5, filters: str = None) -> str:
         """
         Find marker genes for cell types from literature.
-        
+
         Args:
             query: Query with cell_type parameter (e.g., 'cell_type=T_cell disease=cancer')
             max_results: Number of results to retrieve (default: 5, range: 1-15)
@@ -225,58 +218,56 @@ def research_agent(
         """
         try:
             # Parse parameters from query
-            cell_type_match = re.search(r'cell[_\s]type[=\s]+([^,\s]+)', query)
-            disease_match = re.search(r'disease[=\s]+([^,\s]+)', query)
-            
+            cell_type_match = re.search(r"cell[_\s]type[=\s]+([^,\s]+)", query)
+            disease_match = re.search(r"disease[=\s]+([^,\s]+)", query)
+
             if not cell_type_match:
                 return "Please specify cell_type parameter (e.g., 'cell_type=T_cell')"
-            
+
             cell_type = cell_type_match.group(1).strip()
             disease = disease_match.group(1).strip() if disease_match else None
-            
+
             # Build search query for marker genes
             search_query = f'"{cell_type}" marker genes'
             if disease:
-                search_query += f' {disease}'
-            
+                search_query += f" {disease}"
+
             # Parse filters if provided
             filter_dict = None
             if filters:
                 import json
+
                 try:
                     filter_dict = json.loads(filters)
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid filters JSON: {filters}")
-            
+
             results = publication_service.search_literature(
-                query=search_query,
-                max_results=max_results,
-                filters=filter_dict
+                query=search_query, max_results=max_results, filters=filter_dict
             )
-            
+
             # Add context header
             context_header = f"## Marker Gene Search Results for {cell_type}\n"
             if disease:
                 context_header += f"**Disease context**: {disease}\n"
             context_header += f"**Search query**: {search_query}\n\n"
-            
-            logger.info(f"Marker gene search completed for {cell_type} (max_results={max_results})")
+
+            logger.info(
+                f"Marker gene search completed for {cell_type} (max_results={max_results})"
+            )
             return context_header + results
-            
+
         except Exception as e:
             logger.error(f"Error finding marker genes: {e}")
             return f"Error finding marker genes: {str(e)}"
 
     @tool
     def search_datasets_directly(
-        query: str,
-        data_type: str = "geo",
-        max_results: int = 5,
-        filters: str = None
+        query: str, data_type: str = "geo", max_results: int = 5, filters: str = None
     ) -> str:
         """
         Search for datasets directly across omics databases.
-        
+
         Args:
             query: Search query for datasets
             data_type: Type of omics data (default: "geo", options: "geo,sra,bioproject,biosample,dbgap")
@@ -286,48 +277,48 @@ def research_agent(
         try:
             # Map string to DatasetType
             type_mapping = {
-                'geo': DatasetType.GEO,
-                'sra': DatasetType.SRA,
-                'bioproject': DatasetType.BIOPROJECT,
-                'biosample': DatasetType.BIOSAMPLE,
-                'dbgap': DatasetType.DBGAP,
-                'arrayexpress': DatasetType.ARRAYEXPRESS,
-                'ena': DatasetType.ENA
+                "geo": DatasetType.GEO,
+                "sra": DatasetType.SRA,
+                "bioproject": DatasetType.BIOPROJECT,
+                "biosample": DatasetType.BIOSAMPLE,
+                "dbgap": DatasetType.DBGAP,
+                "arrayexpress": DatasetType.ARRAYEXPRESS,
+                "ena": DatasetType.ENA,
             }
-            
+
             dataset_type = type_mapping.get(data_type.lower(), DatasetType.GEO)
-            
+
             # Parse filters if provided
             filter_dict = None
             if filters:
                 import json
+
                 try:
                     filter_dict = json.loads(filters)
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid filters JSON: {filters}")
-            
+
             results = publication_service.search_datasets_directly(
                 query=query,
                 data_type=dataset_type,
                 max_results=max_results,
-                filters=filter_dict
+                filters=filter_dict,
             )
-            
-            logger.info(f"Direct dataset search completed: {query[:50]}... ({data_type})")
+
+            logger.info(
+                f"Direct dataset search completed: {query[:50]}... ({data_type})"
+            )
             return results
-            
+
         except Exception as e:
             logger.error(f"Error searching datasets directly: {e}")
             return f"Error searching datasets directly: {str(e)}"
 
     @tool
-    def extract_publication_metadata(
-        identifier: str,
-        source: str = "auto"
-    ) -> str:
+    def extract_publication_metadata(identifier: str, source: str = "auto") -> str:
         """
         Extract comprehensive metadata from a publication.
-        
+
         Args:
             identifier: Publication identifier (DOI or PMID)
             source: Publication source (default: "auto", options: "auto,pubmed,biorxiv,medrxiv")
@@ -337,20 +328,19 @@ def research_agent(
             source_obj = None
             if source != "auto":
                 source_mapping = {
-                    'pubmed': PublicationSource.PUBMED,
-                    'biorxiv': PublicationSource.BIORXIV,
-                    'medrxiv': PublicationSource.MEDRXIV
+                    "pubmed": PublicationSource.PUBMED,
+                    "biorxiv": PublicationSource.BIORXIV,
+                    "medrxiv": PublicationSource.MEDRXIV,
                 }
                 source_obj = source_mapping.get(source.lower())
-            
+
             metadata = publication_service.extract_publication_metadata(
-                identifier=identifier,
-                source=source_obj
+                identifier=identifier, source=source_obj
             )
-            
+
             if isinstance(metadata, str):
                 return metadata  # Error message
-            
+
             # Format metadata for display
             formatted = f"## Publication Metadata for {identifier}\n\n"
             formatted += f"**Title**: {metadata.title}\n"
@@ -367,13 +357,13 @@ def research_agent(
                 formatted += f"**Authors**: {', '.join(metadata.authors[:5])}{'...' if len(metadata.authors) > 5 else ''}\n"
             if metadata.keywords:
                 formatted += f"**Keywords**: {', '.join(metadata.keywords)}\n"
-            
+
             if metadata.abstract:
                 formatted += f"\n**Abstract**:\n{metadata.abstract[:1000]}{'...' if len(metadata.abstract) > 1000 else ''}\n"
-            
+
             logger.info(f"Metadata extraction completed for: {identifier}")
             return formatted
-            
+
         except Exception as e:
             logger.error(f"Error extracting metadata: {e}")
             return f"Error extracting publication metadata: {str(e)}"
@@ -382,7 +372,7 @@ def research_agent(
     def get_research_capabilities() -> str:
         """
         Get information about available research capabilities and providers.
-        
+
         Returns:
             str: Formatted capabilities report
         """
@@ -397,24 +387,24 @@ def research_agent(
         accession: str,
         required_fields: str,
         required_values: str = None,
-        threshold: float = 0.8
+        threshold: float = 0.8,
     ) -> str:
         """
         Quickly validate if a dataset contains required metadata without downloading.
-        
+
         Args:
             accession: Dataset ID (GSE, E-MTAB, etc.)
             required_fields: Comma-separated required fields (e.g., "smoking_status,treatment_response")
             required_values: Optional JSON of required values (e.g., '{{"smoking_status": ["smoker", "non-smoker"]}}')
             threshold: Minimum fraction of samples with required fields (default: 0.8)
-            
+
         Returns:
             Validation report with recommendation (proceed/skip/manual_check)
         """
         try:
             # Parse required fields
-            fields_list = [f.strip() for f in required_fields.split(',')]
-            
+            fields_list = [f.strip() for f in required_fields.split(",")]
+
             # Parse required values if provided
             values_dict = None
             if required_values:
@@ -422,58 +412,64 @@ def research_agent(
                     values_dict = json.loads(required_values)
                 except json.JSONDecodeError:
                     return f"Error: Invalid JSON for required_values: {required_values}"
-            
+
             # Use GEOService to fetch metadata only
             from lobster.tools.geo_service import GEOService
-            
-            console = getattr(data_manager, 'console', None)
+
+            console = getattr(data_manager, "console", None)
             geo_service = GEOService(data_manager, console=console)
 
-            #------------------------------------------------
+            # ------------------------------------------------
             # Check if metadata already in store
-            #------------------------------------------------
+            # ------------------------------------------------
             if accession in data_manager.metadata_store:
-                logger.debug(f"Metadata already stored for: {accession}. returning summary")
-                metadata = data_manager.metadata_store[accession]['metadata']
+                logger.debug(
+                    f"Metadata already stored for: {accession}. returning summary"
+                )
+                metadata = data_manager.metadata_store[accession]["metadata"]
                 return metadata
 
-                        
-            #------------------------------------------------
-            # If not fetch and return metadata & val res 
-            #------------------------------------------------
+            # ------------------------------------------------
+            # If not fetch and return metadata & val res
+            # ------------------------------------------------
             # Fetch metadata only (no expression data download)
             try:
-                if accession.startswith('G'):
-                    metadata, validation_result = geo_service.fetch_metadata_only(accession)
-                    
+                if accession.startswith("G"):
+                    metadata, validation_result = geo_service.fetch_metadata_only(
+                        accession
+                    )
+
                     # Use the assistant to validate metadata
                     validation_result = research_assistant.validate_dataset_metadata(
                         metadata=metadata,
                         geo_id=accession,
                         required_fields=fields_list,
                         required_values=values_dict,
-                        threshold=threshold
+                        threshold=threshold,
                     )
-                    
+
                     if validation_result:
                         # Format the validation report
                         report = research_assistant.format_validation_report(
-                            validation_result,
-                            accession
+                            validation_result, accession
                         )
-                        
-                        logger.info(f"Metadata validation completed for {accession}: {validation_result.recommendation}")
+
+                        logger.info(
+                            f"Metadata validation completed for {accession}: {validation_result.recommendation}"
+                        )
                         return report
                     else:
                         return f"Error: Failed to validate metadata for {accession}"
                 else:
-                    logger.info(f"Currently only GEO metadata can be retrieved. {accession} doesnt seem to be a GEO identifier")
+                    logger.info(
+                        f"Currently only GEO metadata can be retrieved. {accession} doesnt seem to be a GEO identifier"
+                    )
                     return f"Currently only GEO metadata can be retrieved. {accession} doesnt seem to be a GEO identifier"
-                    
+
             except Exception as e:
                 logger.error(f"Error accessing dataset {accession}: {e}")
                 return f"Error accessing dataset {accession}: {str(e)}"
-                
+
         except Exception as e:
             logger.error(f"Error in metadata validation: {e}")
             return f"Error validating dataset metadata: {str(e)}"
@@ -486,12 +482,12 @@ def research_agent(
         search_datasets_directly,
         extract_publication_metadata,
         get_research_capabilities,
-        validate_dataset_metadata
+        validate_dataset_metadata,
     ]
-    
+
     # Combine base tools with handoff tools if provided
     tools = base_tools + (handoff_tools or [])
-    
+
     system_prompt = """
 You are a research specialist focused on scientific literature discovery and dataset identification in bioinformatics and computational biology, supporting pharmaceutical early research and drug discovery.
 
@@ -799,11 +795,8 @@ Dataset Discovery Results for [Drug Target/Indication]
 
 
 """.format(
-    date=date.today()
-)
+        date=date.today()
+    )
     return create_react_agent(
-        model=llm,
-        tools=tools,
-        prompt=system_prompt,
-        name=agent_name
+        model=llm, tools=tools, prompt=system_prompt, name=agent_name
     )

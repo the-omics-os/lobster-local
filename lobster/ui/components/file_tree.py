@@ -6,15 +6,15 @@ status indicators, and interactive navigation capabilities.
 """
 
 import os
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Callable
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Set
 
-from rich.tree import Tree
-from rich.text import Text
+from rich.console import Console
 from rich.filesize import decimal
 from rich.markup import escape
-from rich.console import Console
+from rich.text import Text
+from rich.tree import Tree
 
 from ..themes import LobsterTheme
 
@@ -22,6 +22,7 @@ from ..themes import LobsterTheme
 @dataclass
 class FileInfo:
     """Information about a file or directory."""
+
     path: Path
     name: str
     is_dir: bool
@@ -45,7 +46,7 @@ class LobsterFileTree:
         root_path: Path,
         show_hidden: bool = False,
         max_depth: int = 3,
-        file_filter: Optional[Callable[[Path], bool]] = None
+        file_filter: Optional[Callable[[Path], bool]] = None,
     ):
         """
         Initialize file tree component.
@@ -63,15 +64,44 @@ class LobsterFileTree:
 
         # File type detection patterns
         self.data_extensions = {
-            '.h5ad', '.h5', '.csv', '.tsv', '.txt', '.xlsx', '.xls',
-            '.mtx', '.gz', '.bz2', '.zip', '.tar'
+            ".h5ad",
+            ".h5",
+            ".csv",
+            ".tsv",
+            ".txt",
+            ".xlsx",
+            ".xls",
+            ".mtx",
+            ".gz",
+            ".bz2",
+            ".zip",
+            ".tar",
         }
         self.bio_extensions = {
-            '.fastq', '.fq', '.fasta', '.fa', '.bam', '.sam', '.vcf',
-            '.bed', '.gtf', '.gff', '.wig', '.bigwig', '.bedgraph'
+            ".fastq",
+            ".fq",
+            ".fasta",
+            ".fa",
+            ".bam",
+            ".sam",
+            ".vcf",
+            ".bed",
+            ".gtf",
+            ".gff",
+            ".wig",
+            ".bigwig",
+            ".bedgraph",
         }
         self.analysis_extensions = {
-            '.py', '.r', '.R', '.ipynb', '.rmd', '.md', '.sh', '.yaml', '.yml'
+            ".py",
+            ".r",
+            ".R",
+            ".ipynb",
+            ".rmd",
+            ".md",
+            ".sh",
+            ".yaml",
+            ".yml",
         }
 
         # Status tracking
@@ -92,9 +122,9 @@ class LobsterFileTree:
             return "bioinformatics"
         elif suffix in self.analysis_extensions:
             return "analysis"
-        elif suffix in {'.png', '.jpg', '.jpeg', '.svg', '.pdf', '.html'}:
+        elif suffix in {".png", ".jpg", ".jpeg", ".svg", ".pdf", ".html"}:
             return "visualization"
-        elif suffix in {'.log', '.out', '.err'}:
+        elif suffix in {".log", ".out", ".err"}:
             return "log"
         else:
             return "unknown"
@@ -117,7 +147,7 @@ class LobsterFileTree:
                 modified=stat.st_mtime,
                 has_data=has_data,
                 file_type=file_type,
-                status=status
+                status=status,
             )
         except (OSError, PermissionError):
             return FileInfo(
@@ -125,7 +155,7 @@ class LobsterFileTree:
                 name=path.name,
                 is_dir=path.is_dir(),
                 file_type="error",
-                status="error"
+                status="error",
             )
 
     def _create_file_text(self, file_info: FileInfo) -> Text:
@@ -141,7 +171,7 @@ class LobsterFileTree:
             "visualization": "📈",
             "log": "📋",
             "unknown": "📄",
-            "error": "❌"
+            "error": "❌",
         }
 
         icon = icons.get(file_info.file_type, "📄")
@@ -178,7 +208,7 @@ class LobsterFileTree:
     def _should_show_file(self, path: Path) -> bool:
         """Determine if a file should be shown in the tree."""
         # Skip hidden files if not showing hidden
-        if not self.show_hidden and path.name.startswith('.'):
+        if not self.show_hidden and path.name.startswith("."):
             return False
 
         # Apply custom filter
@@ -188,10 +218,7 @@ class LobsterFileTree:
         return True
 
     def _build_tree_recursive(
-        self,
-        tree: Tree,
-        directory: Path,
-        current_depth: int = 0
+        self, tree: Tree, directory: Path, current_depth: int = 0
     ):
         """Recursively build the file tree."""
         if current_depth >= self.max_depth:
@@ -245,10 +272,7 @@ class LobsterFileTree:
         root_text.append("🦞 ", style="")
         root_text.append(title, style=f"bold {LobsterTheme.PRIMARY_ORANGE}")
 
-        tree = Tree(
-            root_text,
-            **LobsterTheme.get_tree_style()
-        )
+        tree = Tree(root_text, **LobsterTheme.get_tree_style())
 
         # Build the tree structure
         self._build_tree_recursive(tree, self.root_path)
@@ -267,7 +291,7 @@ class LobsterFileTree:
         """
         workspace_tree = Tree(
             Text("🦞 Lobster Workspace", style=f"bold {LobsterTheme.PRIMARY_ORANGE}"),
-            **LobsterTheme.get_tree_style()
+            **LobsterTheme.get_tree_style(),
         )
 
         # Define workspace structure
@@ -276,7 +300,7 @@ class LobsterFileTree:
             "exports": "📤 Exports",
             "plots": "📈 Visualizations",
             "cache": "💾 Cache",
-            "logs": "📋 Logs"
+            "logs": "📋 Logs",
         }
 
         for dir_name, display_name in workspace_dirs.items():
@@ -284,13 +308,18 @@ class LobsterFileTree:
             if dir_path.exists():
                 # Create subtree for each workspace directory
                 dir_text = Text()
-                dir_text.append(display_name, style=f"bold {LobsterTheme.PRIMARY_ORANGE}")
+                dir_text.append(
+                    display_name, style=f"bold {LobsterTheme.PRIMARY_ORANGE}"
+                )
 
                 subtree = workspace_tree.add(dir_text)
 
                 # Add contents of each directory
                 try:
-                    items = sorted(dir_path.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower()))
+                    items = sorted(
+                        dir_path.iterdir(),
+                        key=lambda x: (not x.is_dir(), x.name.lower()),
+                    )
                     for item in items[:10]:  # Limit to first 10 items
                         if self._should_show_file(item):
                             file_info = self._get_file_info(item)
@@ -298,7 +327,10 @@ class LobsterFileTree:
                             subtree.add(file_text)
 
                     if len(list(dir_path.iterdir())) > 10:
-                        more_text = Text(f"... and {len(list(dir_path.iterdir())) - 10} more", style="dim grey50")
+                        more_text = Text(
+                            f"... and {len(list(dir_path.iterdir())) - 10} more",
+                            style="dim grey50",
+                        )
                         subtree.add(more_text)
 
                 except (OSError, PermissionError):
@@ -341,12 +373,12 @@ class LobsterFileTree:
         """
         title_text = Text()
         title_text.append("📁 ", style="")
-        title_text.append(f"{self.root_path.name} (compact)", style=f"bold {LobsterTheme.PRIMARY_ORANGE}")
-
-        tree = Tree(
-            title_text,
-            **LobsterTheme.get_tree_style()
+        title_text.append(
+            f"{self.root_path.name} (compact)",
+            style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
         )
+
+        tree = Tree(title_text, **LobsterTheme.get_tree_style())
 
         try:
             # Get all files and directories, prioritizing data files
@@ -357,11 +389,13 @@ class LobsterFileTree:
                     all_items.append((item, file_info))
 
             # Sort by importance: data files first, then by type
-            all_items.sort(key=lambda x: (
-                x[1].file_type not in ["data", "bioinformatics"],
-                x[1].file_type,
-                x[0].name.lower()
-            ))
+            all_items.sort(
+                key=lambda x: (
+                    x[1].file_type not in ["data", "bioinformatics"],
+                    x[1].file_type,
+                    x[0].name.lower(),
+                )
+            )
 
             # Add top items
             for item, file_info in all_items[:max_items]:
@@ -372,7 +406,9 @@ class LobsterFileTree:
                 # Add icon and styling
                 if file_info.has_data:
                     file_text.append("📊 ", style="")
-                    file_text.append(str(rel_path), style=f"{LobsterTheme.PRIMARY_ORANGE}")
+                    file_text.append(
+                        str(rel_path), style=f"{LobsterTheme.PRIMARY_ORANGE}"
+                    )
                 else:
                     file_text.append("📄 ", style="")
                     file_text.append(str(rel_path), style="white")
@@ -380,7 +416,10 @@ class LobsterFileTree:
                 tree.add(file_text)
 
             if len(all_items) > max_items:
-                more_text = Text(f"... and {len(all_items) - max_items} more files", style="dim grey50")
+                more_text = Text(
+                    f"... and {len(all_items) - max_items} more files",
+                    style="dim grey50",
+                )
                 tree.add(more_text)
 
         except (OSError, PermissionError):
@@ -394,7 +433,7 @@ def create_file_tree(
     root_path: Path,
     title: Optional[str] = None,
     show_hidden: bool = False,
-    max_depth: int = 3
+    max_depth: int = 3,
 ) -> Tree:
     """
     Quick function to create a file tree.
@@ -409,9 +448,7 @@ def create_file_tree(
         Rich Tree object
     """
     tree_component = LobsterFileTree(
-        root_path=root_path,
-        show_hidden=show_hidden,
-        max_depth=max_depth
+        root_path=root_path, show_hidden=show_hidden, max_depth=max_depth
     )
     return tree_component.create_tree(title)
 

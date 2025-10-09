@@ -10,9 +10,4 @@ from .adapter import IModalityAdapter
 from .backend import IDataBackend
 from .validator import IValidator, ValidationResult
 
-__all__ = [
-    "IDataBackend",
-    "IModalityAdapter", 
-    "IValidator",
-    "ValidationResult"
-]
+__all__ = ["IDataBackend", "IModalityAdapter", "IValidator", "ValidationResult"]

@@ -6,39 +6,48 @@ live updates, concurrent operation monitoring, and orange theming.
 """
 
 import asyncio
+import queue
 import time
 import uuid
-from typing import Dict, List, Optional, Callable, Any, Set
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from threading import Thread, Event, Lock
-from contextlib import contextmanager
-import queue
+from threading import Event, Lock, Thread
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from rich.live import Live
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.table import Table
-from rich.progress import (
-    Progress, TaskID, SpinnerColumn, TextColumn, BarColumn,
-    TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn,
-    FileSizeColumn, TransferSpeedColumn, DownloadColumn,
-    MofNCompleteColumn
-)
-from rich.text import Text
+from rich import box
 from rich.align import Align
 from rich.columns import Columns
 from rich.console import Group
-from rich import box
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    FileSizeColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskID,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
+from rich.table import Table
+from rich.text import Text
 
-from ..themes import LobsterTheme
 from ..console_manager import get_console_manager
 from ..progress_manager import get_progress_manager
+from ..themes import LobsterTheme
 
 
 @dataclass
 class MultiTaskOperation:
     """Information about a multi-task operation."""
+
     operation_id: str
     name: str
     description: str
@@ -85,11 +94,7 @@ class MultiTaskProgressManager:
         self.active_progress_bars: Dict[str, TaskID] = {}
 
     def create_multi_operation(
-        self,
-        name: str,
-        description: str,
-        subtasks: List[str],
-        **metadata
+        self, name: str, description: str, subtasks: List[str], **metadata
     ) -> str:
         """
         Create a new multi-task operation.
@@ -110,7 +115,7 @@ class MultiTaskProgressManager:
             name=name,
             description=description,
             subtasks=subtasks.copy(),
-            metadata=metadata
+            metadata=metadata,
         )
 
         with self.operations_lock:
@@ -128,7 +133,7 @@ class MultiTaskProgressManager:
         operation_id: str,
         subtask: str,
         progress: float,
-        details: Optional[str] = None
+        details: Optional[str] = None,
     ):
         """
         Update progress for a specific subtask.
@@ -160,7 +165,7 @@ class MultiTaskProgressManager:
         operation_id: str,
         subtask: str,
         success: bool = True,
-        result: Optional[str] = None
+        result: Optional[str] = None,
     ):
         """
         Mark a subtask as completed.
@@ -186,7 +191,9 @@ class MultiTaskProgressManager:
 
                 # Check if entire operation is complete
                 total_subtasks = len(operation.subtasks)
-                completed_or_failed = len(operation.completed_subtasks) + len(operation.failed_subtasks)
+                completed_or_failed = len(operation.completed_subtasks) + len(
+                    operation.failed_subtasks
+                )
 
                 if completed_or_failed >= total_subtasks:
                     operation.end_time = datetime.now()
@@ -230,23 +237,19 @@ class MultiTaskProgressManager:
         layout = Layout()
 
         # Split into header and body
-        layout.split_column(
-            Layout(name="header", size=3),
-            Layout(name="body")
-        )
+        layout.split_column(Layout(name="header", size=3), Layout(name="body"))
 
         # Split body into operations and details
-        layout["body"].split_row(
-            Layout(name="operations"),
-            Layout(name="details")
-        )
+        layout["body"].split_row(Layout(name="operations"), Layout(name="details"))
 
         # Add header
-        header_text = LobsterTheme.create_title_text("Multi-Task Progress Monitor", "🦞")
+        header_text = LobsterTheme.create_title_text(
+            "Multi-Task Progress Monitor", "🦞"
+        )
         layout["header"].update(
             LobsterTheme.create_panel(
                 Align.center(header_text),
-                title=f"Active Operations: {len([op for op in self.operations.values() if op.status == 'running'])}"
+                title=f"Active Operations: {len([op for op in self.operations.values() if op.status == 'running'])}",
             )
         )
 
@@ -264,10 +267,12 @@ class MultiTaskProgressManager:
             if not self.operations:
                 empty_text = Text()
                 empty_text.append("No active operations\n\n", style="grey50")
-                empty_text.append("Multi-task operations will\nappear here when started", style="dim grey50")
+                empty_text.append(
+                    "Multi-task operations will\nappear here when started",
+                    style="dim grey50",
+                )
                 return LobsterTheme.create_panel(
-                    Align.center(empty_text),
-                    title="🔄 Operations Overview"
+                    Align.center(empty_text), title="🔄 Operations Overview"
                 )
 
             # Create operations table
@@ -275,7 +280,7 @@ class MultiTaskProgressManager:
                 show_header=True,
                 header_style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
                 box=LobsterTheme.BOXES["primary"],
-                border_style=LobsterTheme.PRIMARY_ORANGE
+                border_style=LobsterTheme.PRIMARY_ORANGE,
             )
 
             table.add_column("Operation", style="white", width=20)
@@ -293,7 +298,7 @@ class MultiTaskProgressManager:
                 status_styles = {
                     "running": f"[{LobsterTheme.PRIMARY_ORANGE}]Running[/{LobsterTheme.PRIMARY_ORANGE}]",
                     "completed": "[green]Completed[/green]",
-                    "failed": "[red]Failed[/red]"
+                    "failed": "[red]Failed[/red]",
                 }
                 status_text = status_styles.get(operation.status, operation.status)
 
@@ -303,7 +308,7 @@ class MultiTaskProgressManager:
                 else:
                     duration = datetime.now() - operation.start_time
 
-                duration_str = str(duration).split('.')[0]  # Remove microseconds
+                duration_str = str(duration).split(".")[0]  # Remove microseconds
 
                 # Subtasks summary
                 completed = len(operation.completed_subtasks)
@@ -319,39 +324,28 @@ class MultiTaskProgressManager:
                     op_name = op_name[:15] + "..."
 
                 table.add_row(
-                    op_name,
-                    progress_bar,
-                    status_text,
-                    duration_str,
-                    subtasks_str
+                    op_name, progress_bar, status_text, duration_str, subtasks_str
                 )
 
-        return LobsterTheme.create_panel(
-            table,
-            title="🔄 Operations Overview"
-        )
+        return LobsterTheme.create_panel(table, title="🔄 Operations Overview")
 
     def _create_details_panel(self) -> Panel:
         """Create detailed progress panel for the most recent operation."""
         with self.operations_lock:
             if not self.operations:
                 return LobsterTheme.create_panel(
-                    "No operations to display",
-                    title="📊 Operation Details"
+                    "No operations to display", title="📊 Operation Details"
                 )
 
             # Get most recent operation
-            latest_operation = max(
-                self.operations.values(),
-                key=lambda x: x.start_time
-            )
+            latest_operation = max(self.operations.values(), key=lambda x: x.start_time)
 
             # Create subtasks table
             table = Table(
                 show_header=True,
                 header_style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
                 box=box.SIMPLE,
-                padding=(0, 1)
+                padding=(0, 1),
             )
 
             table.add_column("Subtask", style="white", width=18)
@@ -387,16 +381,9 @@ class MultiTaskProgressManager:
             op_info = f"[bold white]{latest_operation.name}[/bold white]\n"
             op_info += f"[grey50]{latest_operation.description}[/grey50]"
 
-            content = Group(
-                Text(op_info, justify="left"),
-                Text(""),  # Spacer
-                table
-            )
+            content = Group(Text(op_info, justify="left"), Text(""), table)  # Spacer
 
-        return LobsterTheme.create_panel(
-            content,
-            title="📊 Operation Details"
-        )
+        return LobsterTheme.create_panel(content, title="📊 Operation Details")
 
     def _create_progress_bar(self, percentage: float) -> str:
         """Create a progress bar visualization."""
@@ -427,7 +414,7 @@ class MultiTaskProgressManager:
             layout,
             console=self.console_manager.console,
             refresh_per_second=self.refresh_rate,
-            auto_refresh=True
+            auto_refresh=True,
         ) as live:
             self.start_monitoring()
             try:
@@ -456,7 +443,9 @@ class MultiTaskProgressManager:
     def get_active_operations_count(self) -> int:
         """Get count of active operations."""
         with self.operations_lock:
-            return len([op for op in self.operations.values() if op.status == "running"])
+            return len(
+                [op for op in self.operations.values() if op.status == "running"]
+            )
 
     def cleanup_completed_operations(self, max_age_hours: int = 24):
         """Clean up old completed operations."""
@@ -465,9 +454,11 @@ class MultiTaskProgressManager:
         with self.operations_lock:
             to_remove = []
             for op_id, operation in self.operations.items():
-                if (operation.status in ["completed", "failed"] and
-                    operation.end_time and
-                    operation.end_time < cutoff_time):
+                if (
+                    operation.status in ["completed", "failed"]
+                    and operation.end_time
+                    and operation.end_time < cutoff_time
+                ):
                     to_remove.append(op_id)
 
             for op_id in to_remove:
@@ -481,11 +472,7 @@ class MultiTaskProgressManager:
 
     @contextmanager
     def track_multi_operation(
-        self,
-        name: str,
-        description: str,
-        subtasks: List[str],
-        **metadata
+        self, name: str, description: str, subtasks: List[str], **metadata
     ):
         """
         Context manager for tracking a multi-task operation.
@@ -499,7 +486,9 @@ class MultiTaskProgressManager:
         Yields:
             Operation ID for progress updates
         """
-        operation_id = self.create_multi_operation(name, description, subtasks, **metadata)
+        operation_id = self.create_multi_operation(
+            name, description, subtasks, **metadata
+        )
 
         try:
             yield operation_id
@@ -532,10 +521,7 @@ def create_multi_progress_layout() -> Layout:
 
 @contextmanager
 def track_multi_task_operation(
-    name: str,
-    description: str,
-    subtasks: List[str],
-    **metadata
+    name: str, description: str, subtasks: List[str], **metadata
 ):
     """
     Quick context manager for tracking multi-task operations.
@@ -550,5 +536,7 @@ def track_multi_task_operation(
         Tuple of (operation_id, progress_manager)
     """
     manager = get_multi_progress_manager()
-    with manager.track_multi_operation(name, description, subtasks, **metadata) as operation_id:
+    with manager.track_multi_operation(
+        name, description, subtasks, **metadata
+    ) as operation_id:
         yield operation_id, manager

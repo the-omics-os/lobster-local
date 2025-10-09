@@ -7,17 +7,17 @@ custom certificate bundles. It also provides graceful error handling
 for SSL verification issues common in different environments.
 """
 
-import ssl
 import os
+import ssl
 from typing import Optional
+
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 
 def create_ssl_context(
-    verify: Optional[bool] = None,
-    cert_path: Optional[str] = None
+    verify: Optional[bool] = None, cert_path: Optional[str] = None
 ) -> Optional[ssl.SSLContext]:
     """
     Create an SSL context for HTTPS requests with proper certificate handling.
@@ -46,6 +46,7 @@ def create_ssl_context(
     """
     # Import settings here to avoid circular imports
     from lobster.config.settings import get_settings
+
     settings = get_settings()
 
     # Determine if we should verify SSL
@@ -70,6 +71,7 @@ def create_ssl_context(
         # Try to use certifi package for better certificate handling
         try:
             import certifi
+
             context = ssl.create_default_context(cafile=certifi.where())
             logger.debug("Using certifi certificate bundle")
         except ImportError:

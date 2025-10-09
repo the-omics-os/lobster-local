@@ -1,4 +1,5 @@
 """Lobster - Multi-Agent Bioinformatics Analysis System."""
+
 try:
     from ._version import __version__
 except ImportError:

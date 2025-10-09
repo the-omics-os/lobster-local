@@ -7,13 +7,13 @@ methodological analysis using the modular DataManagerV2 and publication service.
 """
 
 import re
+from datetime import date
 from typing import List
+
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
+
 from lobster.config.llm_factory import create_llm
-
-from datetime import date
-
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.tools.publication_service import PublicationService
@@ -23,34 +23,32 @@ logger = get_logger(__name__)
 
 
 def method_expert(
-    data_manager: DataManagerV2, 
-    callback_handler=None, 
+    data_manager: DataManagerV2,
+    callback_handler=None,
     agent_name: str = "method_expert_agent",
-    handoff_tools: List = None
+    handoff_tools: List = None,
 ):
     """Create method expert agent focused on parameter extraction using DataManagerV2."""
-    
+
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('method_expert_agent')
-    llm = create_llm('method_expert_agent', model_params)
-    
-    if callback_handler and hasattr(llm, 'with_config'):
+    model_params = settings.get_agent_llm_params("method_expert_agent")
+    llm = create_llm("method_expert_agent", model_params)
+
+    if callback_handler and hasattr(llm, "with_config"):
         llm = llm.with_config(callbacks=[callback_handler])
-    
+
     # Initialize publication service for method extraction
     publication_service = PublicationService(data_manager=data_manager)
-    
+
     # Define tools
 
     @tool
     def find_method_parameters_from_doi(
-        doi: str,
-        top_k_results: int = 5,
-        doc_content_chars_max: int = 6000
+        doi: str, top_k_results: int = 5, doc_content_chars_max: int = 6000
     ) -> str:
         """
         Extract method parameters and protocols from a publication DOI.
-        
+
         Args:
             doi: Publication DOI (e.g., "10.1038/s41586-021-03659-0")
             top_k_results: Number of results to retrieve (default: 5, range: 1-10)
@@ -59,26 +57,26 @@ def method_expert(
         try:
             if not doi.startswith("10."):
                 return "Invalid DOI format. DOI should start with '10.'"
-            
+
             from lobster.tools.pubmed_service import PubMedService
-            
+
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            
+
             # Search for the publication with enhanced parameters
             results = pubmed_service.search_pubmed(
                 query=f"DOI:{doi}",
                 top_k_results=top_k_results,
-                doc_content_chars_max=doc_content_chars_max
+                doc_content_chars_max=doc_content_chars_max,
             )
-            
+
             # Store DOI-based parameters in metadata using DataManagerV2's tool logging
             if "parameters" in results.lower() or "methods" in results.lower():
                 data_manager.log_tool_usage(
                     tool_name="find_method_parameters_from_doi",
                     parameters={"doi": doi, "found_parameters": True},
-                    description=f"Found method parameters for DOI: {doi}"
+                    description=f"Found method parameters for DOI: {doi}",
                 )
-                
+
             logger.info(f"Method search completed for DOI: {doi} (k={top_k_results})")
             return results
         except Exception as e:
@@ -87,13 +85,11 @@ def method_expert(
 
     @tool
     def extract_computational_methods(
-        identifier: str,
-        method_type: str = "all",
-        include_parameters: bool = True
+        identifier: str, method_type: str = "all", include_parameters: bool = True
     ) -> str:
         """
         Extract computational methods and parameters from a publication.
-        
+
         Args:
             identifier: Publication identifier (DOI or PMID)
             method_type: Type of methods to extract ("all", "preprocessing", "clustering", "normalization", etc.)
@@ -103,25 +99,23 @@ def method_expert(
             results = publication_service.extract_computational_methods(
                 doi_or_pmid=identifier,
                 method_type=method_type,
-                include_parameters=include_parameters
+                include_parameters=include_parameters,
             )
-            
+
             logger.info(f"Method extraction completed for: {identifier}")
             return results
-            
+
         except Exception as e:
             logger.error(f"Error extracting methods: {e}")
             return f"Error extracting computational methods: {str(e)}"
 
     @tool
     def find_protocol_information(
-        technique: str,
-        top_k_results: int = 4,
-        doc_content_chars_max: int = 5000
+        technique: str, top_k_results: int = 4, doc_content_chars_max: int = 5000
     ) -> str:
         """
         Find protocol information for bioinformatics techniques.
-        
+
         Args:
             technique: The bioinformatics technique (e.g., "single-cell RNA-seq clustering")
             top_k_results: Number of results to retrieve (default: 4, range: 1-10)
@@ -129,15 +123,17 @@ def method_expert(
         """
         try:
             from lobster.tools.pubmed_service import PubMedService
-            
+
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            
+
             results = pubmed_service.find_protocol_information(
                 technique=technique,
                 top_k_results=top_k_results,
-                doc_content_chars_max=doc_content_chars_max
+                doc_content_chars_max=doc_content_chars_max,
             )
-            logger.info(f"Protocol search completed for: {technique} (k={top_k_results})")
+            logger.info(
+                f"Protocol search completed for: {technique} (k={top_k_results})"
+            )
             return results
         except Exception as e:
             logger.error(f"Error finding protocol info: {e}")
@@ -145,18 +141,16 @@ def method_expert(
 
     @tool
     def find_method_parameters_for_modality(
-        modality_name: str,
-        analysis_type: str,
-        top_k_results: int = 5
+        modality_name: str, analysis_type: str, top_k_results: int = 5
     ) -> str:
         """
         Find method parameters specifically for a loaded modality.
-        
+
         Args:
             modality_name: Name of the loaded modality to find parameters for
             analysis_type: Type of analysis (e.g., 'clustering', 'differential_expression', 'quality_control')
             top_k_results: Number of results to retrieve
-            
+
         Returns:
             str: Method parameters specific to the modality type
         """
@@ -167,40 +161,44 @@ def method_expert(
                 metrics = data_manager.get_quality_metrics(modality_name)
             except ValueError:
                 return f"Modality '{modality_name}' not found. Available modalities: {data_manager.list_modalities()}"
-            
+
             # Determine modality type from adapter info
             adapter_info = data_manager.get_adapter_info()
             modality_type = "single_cell"  # Default
-            
+
             for adapter_name, info in adapter_info.items():
-                if modality_name in adapter_name or info['modality_name'] in modality_name.lower():
-                    if 'single_cell' in info['schema']['modality']:
+                if (
+                    modality_name in adapter_name
+                    or info["modality_name"] in modality_name.lower()
+                ):
+                    if "single_cell" in info["schema"]["modality"]:
                         modality_type = "single-cell RNA-seq"
-                    elif 'bulk' in info['schema']['modality']:
+                    elif "bulk" in info["schema"]["modality"]:
                         modality_type = "bulk RNA-seq"
-                    elif 'proteomics' in info['schema']['modality']:
+                    elif "proteomics" in info["schema"]["modality"]:
                         modality_type = "proteomics"
                     break
-            
+
             # Build search query based on modality and analysis type
             search_query = f"{modality_type} {analysis_type} parameters methods"
-            
+
             # Add data characteristics to search
             if adata.n_obs > 1000 and adata.n_vars > 10000:
                 search_query += " large-scale"
             elif adata.n_obs < 100:
                 search_query += " small-scale"
-            
+
             # Search for relevant methods using DataManagerV2
             from lobster.tools.pubmed_service import PubMedService
+
             pubmed_service = PubMedService(parse=None, data_manager=data_manager)
-            
+
             results = pubmed_service.search_pubmed(
                 query=search_query,
                 top_k_results=top_k_results,
-                doc_content_chars_max=6000
+                doc_content_chars_max=6000,
             )
-            
+
             # Add modality context to results
             context_info = f"""
 ## Modality Context for '{modality_name}'
@@ -211,49 +209,48 @@ def method_expert(
 
 ## Literature-Based Method Parameters:
 """
-            
+
             return context_info + results
-            
+
         except Exception as e:
             logger.error(f"Error finding modality parameters: {e}")
             return f"Error finding method parameters: {str(e)}"
 
     @tool
     def analyze_methodology(
-        identifiers: str,
-        analysis_focus: str = "parameters"
+        identifiers: str, analysis_focus: str = "parameters"
     ) -> str:
         """
         Analyze methodologies across multiple publications for parameter consensus.
-        
+
         Args:
             identifiers: Comma-separated list of DOIs or PMIDs
             analysis_focus: Focus of analysis ("parameters", "tools", "workflows", "all")
         """
         try:
-            identifier_list = [id.strip() for id in identifiers.split(',')]
+            identifier_list = [id.strip() for id in identifiers.split(",")]
             results = []
-            
+
             for identifier in identifier_list:
                 if not identifier:
                     continue
-                    
+
                 methods = publication_service.extract_computational_methods(
-                    doi_or_pmid=identifier,
-                    method_type="all",
-                    include_parameters=True
+                    doi_or_pmid=identifier, method_type="all", include_parameters=True
                 )
                 results.append(f"### Analysis of {identifier}\n{methods}\n")
-            
+
             # Combine results with analysis header
             combined_results = f"## Comparative Methodology Analysis\n"
             combined_results += f"**Publications analyzed**: {len(identifier_list)}\n"
             combined_results += f"**Analysis focus**: {analysis_focus}\n\n"
             combined_results += "\n---\n\n".join(results)
-            
-            logger.info(f"Methodology analysis completed for {len(identifier_list)} publications")
+
+            logger.info(
+                f"Methodology analysis completed for {len(identifier_list)} publications"
+            )
             return combined_results
-            
+
         except Exception as e:
             logger.error(f"Error analyzing methodology: {e}")
             return f"Error analyzing methodology: {str(e)}"
@@ -263,12 +260,12 @@ def method_expert(
         extract_computational_methods,
         find_protocol_information,
         find_method_parameters_for_modality,
-        analyze_methodology
+        analyze_methodology,
     ]
-    
+
     # Combine base tools with handoff tools if provided
     tools = base_tools + (handoff_tools or [])
-    
+
     system_prompt = """
 You are a computational bioinformatics methods specialist focused on extracting and analyzing computational parameters and methodologies from scientific publications.
 
@@ -420,12 +417,9 @@ Structure your findings as:
 
 Today's date is {date}. Maximum iterations: 5
 """.format(
-    date=date.today()
-)
+        date=date.today()
+    )
 
     return create_react_agent(
-        model=llm,
-        tools=tools,
-        prompt=system_prompt,
-        name=agent_name
+        model=llm, tools=tools, prompt=system_prompt, name=agent_name
     )

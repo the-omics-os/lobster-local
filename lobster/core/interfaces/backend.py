@@ -16,7 +16,7 @@ import anndata
 class IDataBackend(ABC):
     """
     Abstract interface for data storage backends.
-    
+
     This interface defines the contract for storing and retrieving
     bioinformatics data in various formats and storage systems.
     All backends must implement these core operations to ensure
@@ -136,8 +136,15 @@ class IDataBackend(ABC):
         """
         return {
             "backend_type": self.__class__.__name__,
-            "capabilities": ["load", "save", "exists", "delete", "list_files", "get_metadata"],
-            "configuration": {}
+            "capabilities": [
+                "load",
+                "save",
+                "exists",
+                "delete",
+                "list_files",
+                "get_metadata",
+            ],
+            "configuration": {},
         }
 
     def validate_path(self, path: Union[str, Path]) -> Union[str, Path]:
@@ -166,4 +173,4 @@ class IDataBackend(ABC):
             bool: True if format is supported, False otherwise
         """
         # Default implementation - subclasses should override
-        return format_name.lower() in ['h5ad', 'csv']
+        return format_name.lower() in ["h5ad", "csv"]

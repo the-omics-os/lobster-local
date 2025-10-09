@@ -5,15 +5,21 @@ This module defines common handoff patterns and provides automatic tool registra
 based on available agents in the system.
 """
 
-from typing import Dict, List, Any, Type, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Type
 
-from .enhanced_handoff_tool import SCVI_CONTEXT_SCHEMA, PSEUDOBULK_CONTEXT_SCHEMA, DATA_LOADING_SCHEMA, METHOD_CONTEXT_SCHEMA
+from .enhanced_handoff_tool import (
+    DATA_LOADING_SCHEMA,
+    METHOD_CONTEXT_SCHEMA,
+    PSEUDOBULK_CONTEXT_SCHEMA,
+    SCVI_CONTEXT_SCHEMA,
+)
 
 
 @dataclass
 class HandoffPattern:
     """Configuration for a handoff pattern between experts."""
+
     from_expert: str
     to_expert: str
     task_types: List[str]
@@ -28,38 +34,47 @@ EXPERT_HANDOFF_PATTERNS = {
     "singlecell_to_ml": HandoffPattern(
         from_expert="singlecell_expert",
         to_expert="machine_learning_expert",
-        task_types=["scvi_training", "deep_learning_embedding", "neural_network_analysis"],
+        task_types=[
+            "scvi_training",
+            "deep_learning_embedding",
+            "neural_network_analysis",
+        ],
         context_schema=SCVI_CONTEXT_SCHEMA,
         return_flow="sender",
         description="Single Cell Expert to Machine Learning Expert for deep learning tasks",
-        priority=10
+        priority=10,
     ),
-
     "singlecell_to_bulk": HandoffPattern(
         from_expert="singlecell_expert",
         to_expert="bulk_rnaseq_expert",
-        task_types=["pseudobulk_analysis", "differential_expression", "bulk_conversion"],
+        task_types=[
+            "pseudobulk_analysis",
+            "differential_expression",
+            "bulk_conversion",
+        ],
         context_schema=PSEUDOBULK_CONTEXT_SCHEMA,
         return_flow="sender",
         description="Single Cell Expert to Bulk RNA-seq Expert for pseudobulk analysis",
-        priority=8
+        priority=8,
     ),
-
     "data_to_singlecell": HandoffPattern(
         from_expert="data_expert",
         to_expert="singlecell_expert",
-        task_types=["singlecell_analysis", "cell_type_annotation", "trajectory_analysis"],
+        task_types=[
+            "singlecell_analysis",
+            "cell_type_annotation",
+            "trajectory_analysis",
+        ],
         context_schema={
             "modality_name": str,
             "analysis_type": str,
             "quality_control": Optional[bool],
-            "clustering_resolution": Optional[float]
+            "clustering_resolution": Optional[float],
         },
         return_flow="supervisor",
         description="Data Expert to Single Cell Expert for specialized analysis",
-        priority=9
+        priority=9,
     ),
-
     "data_to_bulk": HandoffPattern(
         from_expert="data_expert",
         to_expert="bulk_rnaseq_expert",
@@ -68,13 +83,12 @@ EXPERT_HANDOFF_PATTERNS = {
             "modality_name": str,
             "design_formula": str,
             "contrast": Optional[str],
-            "analysis_type": str
+            "analysis_type": str,
         },
         return_flow="supervisor",
         description="Data Expert to Bulk RNA-seq Expert for bulk analysis",
-        priority=9
+        priority=9,
     ),
-
     "data_to_research": HandoffPattern(
         from_expert="data_expert",
         to_expert="research_agent",
@@ -82,19 +96,21 @@ EXPERT_HANDOFF_PATTERNS = {
         context_schema=DATA_LOADING_SCHEMA,
         return_flow="sender",
         description="Data Expert to Research Agent for dataset discovery",
-        priority=7
+        priority=7,
     ),
-
     "research_to_method": HandoffPattern(
         from_expert="research_agent",
         to_expert="method_expert",
-        task_types=["parameter_extraction", "method_recommendation", "protocol_analysis"],
+        task_types=[
+            "parameter_extraction",
+            "method_recommendation",
+            "protocol_analysis",
+        ],
         context_schema=METHOD_CONTEXT_SCHEMA,
         return_flow="sender",
         description="Research Agent to Method Expert for parameter extraction from publications",
-        priority=6
+        priority=6,
     ),
-
     "research_to_data": HandoffPattern(
         from_expert="research_agent",
         to_expert="data_expert",
@@ -103,13 +119,12 @@ EXPERT_HANDOFF_PATTERNS = {
             "dataset_id": str,
             "data_source": str,
             "file_paths": List[str],
-            "metadata": Optional[Dict[str, Any]]
+            "metadata": Optional[Dict[str, Any]],
         },
         return_flow="sender",
         description="Research Agent to Data Expert for dataset loading after discovery",
-        priority=8
+        priority=8,
     ),
-
     "method_to_singlecell": HandoffPattern(
         from_expert="method_expert",
         to_expert="singlecell_expert",
@@ -118,13 +133,12 @@ EXPERT_HANDOFF_PATTERNS = {
             "method_name": str,
             "parameters": Dict[str, Any],
             "modality_name": str,
-            "reference_paper": Optional[str]
+            "reference_paper": Optional[str],
         },
         return_flow="sender",
         description="Method Expert to Single Cell Expert for applying extracted methods",
-        priority=7
+        priority=7,
     ),
-
     "method_to_bulk": HandoffPattern(
         from_expert="method_expert",
         to_expert="bulk_rnaseq_expert",
@@ -133,28 +147,30 @@ EXPERT_HANDOFF_PATTERNS = {
             "method_name": str,
             "parameters": Dict[str, Any],
             "modality_name": str,
-            "design_matrix": Optional[Dict[str, Any]]
+            "design_matrix": Optional[Dict[str, Any]],
         },
         return_flow="sender",
         description="Method Expert to Bulk RNA-seq Expert for applying statistical methods",
-        priority=7
+        priority=7,
     ),
-
     "bulk_to_singlecell": HandoffPattern(
         from_expert="bulk_rnaseq_expert",
         to_expert="singlecell_expert",
-        task_types=["signature_analysis", "cell_type_deconvolution", "bulk_to_sc_mapping"],
+        task_types=[
+            "signature_analysis",
+            "cell_type_deconvolution",
+            "bulk_to_sc_mapping",
+        ],
         context_schema={
             "bulk_modality": str,
             "singlecell_modality": str,
             "signature_genes": Optional[List[str]],
-            "method": str
+            "method": str,
         },
         return_flow="sender",
         description="Bulk RNA-seq Expert to Single Cell Expert for signature-based analysis",
-        priority=6
+        priority=6,
     ),
-
     # Proteomics patterns
     "data_to_ms_proteomics": HandoffPattern(
         from_expert="data_expert",
@@ -164,13 +180,12 @@ EXPERT_HANDOFF_PATTERNS = {
             "modality_name": str,
             "data_type": str,  # "DDA", "DIA", "TMT", etc.
             "missing_value_strategy": Optional[str],
-            "normalization_method": Optional[str]
+            "normalization_method": Optional[str],
         },
         return_flow="supervisor",
         description="Data Expert to MS Proteomics Expert for mass spectrometry analysis",
-        priority=9
+        priority=9,
     ),
-
     "data_to_affinity_proteomics": HandoffPattern(
         from_expert="data_expert",
         to_expert="affinity_proteomics_expert",
@@ -179,13 +194,12 @@ EXPERT_HANDOFF_PATTERNS = {
             "modality_name": str,
             "panel_type": str,  # "Olink", "Antibody Array", etc.
             "cv_threshold": Optional[float],
-            "quality_filters": Optional[Dict[str, Any]]
+            "quality_filters": Optional[Dict[str, Any]],
         },
         return_flow="supervisor",
         description="Data Expert to Affinity Proteomics Expert for targeted protein analysis",
-        priority=9
+        priority=9,
     ),
-
     "ms_proteomics_to_research": HandoffPattern(
         from_expert="ms_proteomics_expert",
         to_expert="research_agent",
@@ -194,31 +208,36 @@ EXPERT_HANDOFF_PATTERNS = {
             "protein_list": List[str],
             "organism": Optional[str],
             "enrichment_database": Optional[str],
-            "context": str
+            "context": str,
         },
         return_flow="sender",
         description="MS Proteomics Expert to Research Agent for protein functional analysis",
-        priority=6
+        priority=6,
     ),
-
     "affinity_proteomics_to_research": HandoffPattern(
         from_expert="affinity_proteomics_expert",
         to_expert="research_agent",
-        task_types=["biomarker_validation", "clinical_annotation", "panel_optimization"],
+        task_types=[
+            "biomarker_validation",
+            "clinical_annotation",
+            "panel_optimization",
+        ],
         context_schema={
             "biomarkers": List[str],
             "clinical_context": str,
             "validation_studies": Optional[List[str]],
-            "panel_name": Optional[str]
+            "panel_name": Optional[str],
         },
         return_flow="sender",
         description="Affinity Proteomics Expert to Research Agent for biomarker validation",
-        priority=6
-    )
+        priority=6,
+    ),
 }
 
 
-def get_handoff_patterns_for_expert(expert_name: str, direction: str = "from") -> List[HandoffPattern]:
+def get_handoff_patterns_for_expert(
+    expert_name: str, direction: str = "from"
+) -> List[HandoffPattern]:
     """
     Get all handoff patterns for a specific expert.
 
@@ -240,7 +259,9 @@ def get_handoff_patterns_for_expert(expert_name: str, direction: str = "from") -
     return sorted(patterns, key=lambda p: p.priority, reverse=True)
 
 
-def get_handoff_pattern(from_expert: str, to_expert: str, task_type: Optional[str] = None) -> Optional[HandoffPattern]:
+def get_handoff_pattern(
+    from_expert: str, to_expert: str, task_type: Optional[str] = None
+) -> Optional[HandoffPattern]:
     """
     Get a specific handoff pattern between two experts.
 
@@ -304,7 +325,9 @@ def validate_handoff_pattern(from_expert: str, to_expert: str, task_type: str) -
     return pattern is not None
 
 
-def get_context_schema_for_handoff(from_expert: str, to_expert: str, task_type: str) -> Optional[Dict[str, Type]]:
+def get_context_schema_for_handoff(
+    from_expert: str, to_expert: str, task_type: str
+) -> Optional[Dict[str, Type]]:
     """
     Get the context schema for a specific handoff.
 
@@ -340,7 +363,9 @@ def should_return_to_sender(from_expert: str, to_expert: str, task_type: str) ->
     return True  # Default to returning to sender
 
 
-def get_handoff_description(from_expert: str, to_expert: str, task_type: str) -> Optional[str]:
+def get_handoff_description(
+    from_expert: str, to_expert: str, task_type: str
+) -> Optional[str]:
     """
     Get description for a specific handoff pattern.
 

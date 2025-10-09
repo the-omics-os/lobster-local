@@ -8,7 +8,7 @@ quality control, quantification, and differential expression analysis.
 import os
 import subprocess
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -16,7 +16,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from lobster.core import PseudobulkError, FormulaError, DesignMatrixError
+from lobster.core import DesignMatrixError, FormulaError, PseudobulkError
 from lobster.tools.differential_formula_service import DifferentialFormulaService
 from lobster.utils.logger import get_logger
 
@@ -25,11 +25,13 @@ logger = get_logger(__name__)
 
 class BulkRNASeqError(Exception):
     """Base exception for bulk RNA-seq operations."""
+
     pass
 
 
 class PyDESeq2Error(BulkRNASeqError):
     """Exception for pyDESeq2-related operations."""
+
     pass
 
 
@@ -57,13 +59,15 @@ class BulkRNASeqService:
             self.results_dir = data_dir / "bulk_results"
         else:
             self.results_dir = Path(results_dir)
-            
+
         self.results_dir.mkdir(exist_ok=True)
-        
+
         # Initialize formula service
         self.formula_service = DifferentialFormulaService()
-        
-        logger.debug(f"BulkRNASeqService initialized with results_dir: {self.results_dir}")
+
+        logger.debug(
+            f"BulkRNASeqService initialized with results_dir: {self.results_dir}"
+        )
 
     def run_fastqc(self, fastq_files: List[str]) -> str:
         """
@@ -247,7 +251,9 @@ Next suggested step: Proceed with quantification if quality looks good, or inves
         elif index_path is not None:
             actual_index_path = index_path
         else:
-            raise BulkRNASeqError("Either index_path or transcriptome_index must be provided")
+            raise BulkRNASeqError(
+                "Either index_path or transcriptome_index must be provided"
+            )
 
         logger.debug(f"Index path: {actual_index_path}")
         logger.debug(f"Input files: {fastq_files}")
@@ -385,7 +391,7 @@ Next suggested step: Import quantification data with tximport for differential e
         group1: str,
         group2: str,
         method: str = "deseq2_like",
-        min_expression_threshold: float = 1.0
+        min_expression_threshold: float = 1.0,
     ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Run differential expression analysis on bulk RNA-seq data.
@@ -413,57 +419,77 @@ Next suggested step: Import quantification data with tximport for differential e
             if group1 is None or group2 is None:
                 raise BulkRNASeqError("group1 and group2 parameters are required")
 
-            logger.info(f"Running differential expression analysis: {group1} vs {group2}")
-            
+            logger.info(
+                f"Running differential expression analysis: {group1} vs {group2}"
+            )
+
             # Create working copy
             adata_de = adata.copy()
-            
+
             # Validate groupby column and groups exist
             if groupby not in adata_de.obs.columns:
-                raise BulkRNASeqError(f"Group column '{groupby}' not found in observations")
-                
+                raise BulkRNASeqError(
+                    f"Group column '{groupby}' not found in observations"
+                )
+
             available_groups = adata_de.obs[groupby].unique()
             if group1 not in available_groups:
-                raise BulkRNASeqError(f"Group '{group1}' not found in {groupby}. Available: {available_groups}")
+                raise BulkRNASeqError(
+                    f"Group '{group1}' not found in {groupby}. Available: {available_groups}"
+                )
             if group2 not in available_groups:
-                raise BulkRNASeqError(f"Group '{group2}' not found in {groupby}. Available: {available_groups}")
-            
+                raise BulkRNASeqError(
+                    f"Group '{group2}' not found in {groupby}. Available: {available_groups}"
+                )
+
             # Filter genes by expression threshold
             if min_expression_threshold > 0:
                 gene_filter = (adata_de.X > min_expression_threshold).sum(axis=0) >= 2
-                if hasattr(gene_filter, 'A1'):
+                if hasattr(gene_filter, "A1"):
                     gene_filter = gene_filter.A1
                 adata_de = adata_de[:, gene_filter].copy()
-                logger.info(f"Filtered to {adata_de.n_vars} genes above expression threshold")
-            
+                logger.info(
+                    f"Filtered to {adata_de.n_vars} genes above expression threshold"
+                )
+
             # Create comparison matrix
             group1_mask = adata_de.obs[groupby] == group1
             group2_mask = adata_de.obs[groupby] == group2
-            
+
             group1_data = adata_de[group1_mask]
             group2_data = adata_de[group2_mask]
-            
+
             if group1_data.n_obs == 0 or group2_data.n_obs == 0:
-                raise BulkRNASeqError(f"One or both groups have no samples: {group1}={group1_data.n_obs}, {group2}={group2_data.n_obs}")
-            
+                raise BulkRNASeqError(
+                    f"One or both groups have no samples: {group1}={group1_data.n_obs}, {group2}={group2_data.n_obs}"
+                )
+
             # Run differential expression based on method
             if method == "deseq2_like":
-                results_df = self._run_deseq2_like_analysis(group1_data, group2_data, group1, group2)
+                results_df = self._run_deseq2_like_analysis(
+                    group1_data, group2_data, group1, group2
+                )
             elif method == "wilcoxon":
-                results_df = self._run_wilcoxon_test(group1_data, group2_data, group1, group2)
+                results_df = self._run_wilcoxon_test(
+                    group1_data, group2_data, group1, group2
+                )
             elif method == "t_test":
-                results_df = self._run_ttest_analysis(group1_data, group2_data, group1, group2)
+                results_df = self._run_ttest_analysis(
+                    group1_data, group2_data, group1, group2
+                )
             else:
-                raise BulkRNASeqError(f"Unknown differential expression method: {method}")
-            
+                raise BulkRNASeqError(
+                    f"Unknown differential expression method: {method}"
+                )
+
             # Add results to AnnData
-            adata_de.uns[f'de_results_{group1}_vs_{group2}'] = results_df.to_dict()
-            
+            adata_de.uns[f"de_results_{group1}_vs_{group2}"] = results_df.to_dict()
+
             # Count significant genes
-            significant_genes = results_df[results_df['padj'] < 0.05]
-            upregulated = significant_genes[significant_genes['log2FoldChange'] > 0]
-            downregulated = significant_genes[significant_genes['log2FoldChange'] < 0]
-            
+            significant_genes = results_df[results_df["padj"] < 0.05]
+            upregulated = significant_genes[significant_genes["log2FoldChange"] > 0]
+            downregulated = significant_genes[significant_genes["log2FoldChange"] < 0]
+
             # Compile analysis statistics
             de_stats = {
                 "analysis_type": "differential_expression",
@@ -477,31 +503,38 @@ Next suggested step: Import quantification data with tximport for differential e
                 "n_significant_genes": len(significant_genes),
                 "n_upregulated": len(upregulated),
                 "n_downregulated": len(downregulated),
-                "significant_genes_list": significant_genes.index.tolist()[:100],  # Top 100
-                "top_upregulated": upregulated.nlargest(10, 'log2FoldChange').index.tolist(),
-                "top_downregulated": downregulated.nsmallest(10, 'log2FoldChange').index.tolist(),
-                "de_results_key": f'de_results_{group1}_vs_{group2}'
+                "significant_genes_list": significant_genes.index.tolist()[
+                    :100
+                ],  # Top 100
+                "top_upregulated": upregulated.nlargest(
+                    10, "log2FoldChange"
+                ).index.tolist(),
+                "top_downregulated": downregulated.nsmallest(
+                    10, "log2FoldChange"
+                ).index.tolist(),
+                "de_results_key": f"de_results_{group1}_vs_{group2}",
             }
-            
-            logger.info(f"Differential expression completed: {len(significant_genes)} significant genes found")
-            
+
+            logger.info(
+                f"Differential expression completed: {len(significant_genes)} significant genes found"
+            )
+
             return adata_de, de_stats
 
         except Exception as e:
             logger.exception(f"Error in differential expression analysis: {e}")
             raise BulkRNASeqError(f"Differential expression analysis failed: {str(e)}")
 
-
     def run_pathway_enrichment(
         self,
         gene_list: List[str],
         analysis_type: str = "GO",
         background_genes: Optional[List[str]] = None,
-        organism: Optional[str] = None
+        organism: Optional[str] = None,
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Run pathway enrichment analysis on a gene list.
-        
+
         NOTE: This is a placeholder implementation. For production use, integrate with
         libraries like GSEApy, gprofiler-python, or enrichr-python for real enrichment analysis.
 
@@ -512,11 +545,13 @@ Next suggested step: Import quantification data with tximport for differential e
 
         Returns:
             Tuple[pd.DataFrame, Dict[str, Any]]: Enrichment results and stats
-            
+
         Raises:
             BulkRNASeqError: If enrichment analysis fails
         """
-        logger.warning("Pathway enrichment analysis not yet implemented. This is a placeholder.")
+        logger.warning(
+            "Pathway enrichment analysis not yet implemented. This is a placeholder."
+        )
         raise BulkRNASeqError(
             "Pathway enrichment analysis not yet implemented. "
             "Please integrate with GSEApy, gprofiler-python, or enrichr-python for real functionality."
@@ -527,7 +562,7 @@ Next suggested step: Import quantification data with tximport for differential e
         group1_data: anndata.AnnData,
         group2_data: anndata.AnnData,
         group1_name: str,
-        group2_name: str
+        group2_name: str,
     ) -> pd.DataFrame:
         """Run DESeq2-like differential expression analysis."""
 
@@ -537,7 +572,7 @@ Next suggested step: Import quantification data with tximport for differential e
         logger.info(f"Running DESeq2-like analysis: {group1_name} vs {group2_name}")
 
         # Extract expression matrices
-        if hasattr(group1_data.X, 'toarray'):
+        if hasattr(group1_data.X, "toarray"):
             group1_expr = group1_data.X.toarray()
             group2_expr = group2_data.X.toarray()
         else:
@@ -546,17 +581,17 @@ Next suggested step: Import quantification data with tximport for differential e
 
         n_genes = group1_data.n_vars
         gene_names = group1_data.var_names
-        
+
         # Calculate basic statistics
         group1_mean = np.mean(group1_expr, axis=0)
         group2_mean = np.mean(group2_expr, axis=0)
-        
+
         # Calculate fold changes (add pseudocount to avoid log(0))
         log2_fold_change = np.log2((group2_mean + 1) / (group1_mean + 1))
-        
+
         # Simple statistical test (t-test) for p-values
         from scipy import stats
-        
+
         p_values = []
         for i in range(n_genes):
             if group1_expr.shape[0] > 1 and group2_expr.shape[0] > 1:
@@ -564,23 +599,27 @@ Next suggested step: Import quantification data with tximport for differential e
                 p_values.append(p_val)
             else:
                 p_values.append(1.0)  # No test possible with single sample
-        
+
         p_values = np.array(p_values)
-        
+
         # Multiple testing correction (Benjamini-Hochberg)
         from statsmodels.stats.multitest import multipletests
-        _, p_adjusted, _, _ = multipletests(p_values, method='fdr_bh')
-        
+
+        _, p_adjusted, _, _ = multipletests(p_values, method="fdr_bh")
+
         # Create results DataFrame
-        results_df = pd.DataFrame({
-            'baseMean': (group1_mean + group2_mean) / 2,
-            'log2FoldChange': log2_fold_change,
-            'lfcSE': np.ones(n_genes),  # Simplified
-            'stat': log2_fold_change / np.ones(n_genes),  # Simplified
-            'pvalue': p_values,
-            'padj': p_adjusted
-        }, index=gene_names)
-        
+        results_df = pd.DataFrame(
+            {
+                "baseMean": (group1_mean + group2_mean) / 2,
+                "log2FoldChange": log2_fold_change,
+                "lfcSE": np.ones(n_genes),  # Simplified
+                "stat": log2_fold_change / np.ones(n_genes),  # Simplified
+                "pvalue": p_values,
+                "padj": p_adjusted,
+            },
+            index=gene_names,
+        )
+
         return results_df.dropna()
 
     def _run_wilcoxon_test(
@@ -588,7 +627,7 @@ Next suggested step: Import quantification data with tximport for differential e
         group1_data: anndata.AnnData,
         group2_data: anndata.AnnData,
         group1_name: str,
-        group2_name: str
+        group2_name: str,
     ) -> pd.DataFrame:
         """Run Wilcoxon rank-sum test for differential expression."""
 
@@ -600,21 +639,21 @@ Next suggested step: Import quantification data with tximport for differential e
         from scipy import stats
 
         # Extract expression matrices
-        if hasattr(group1_data.X, 'toarray'):
+        if hasattr(group1_data.X, "toarray"):
             group1_expr = group1_data.X.toarray()
             group2_expr = group2_data.X.toarray()
         else:
             group1_expr = group1_data.X
             group2_expr = group2_data.X
-        
+
         n_genes = group1_data.n_vars
         gene_names = group1_data.var_names
-        
+
         # Calculate statistics
         group1_mean = np.mean(group1_expr, axis=0)
         group2_mean = np.mean(group2_expr, axis=0)
         log2_fold_change = np.log2((group2_mean + 1) / (group1_mean + 1))
-        
+
         # Wilcoxon test for each gene
         p_values = []
         for i in range(n_genes):
@@ -623,22 +662,26 @@ Next suggested step: Import quantification data with tximport for differential e
                 p_values.append(p_val)
             else:
                 p_values.append(1.0)
-        
+
         p_values = np.array(p_values)
-        
+
         # Multiple testing correction
         from statsmodels.stats.multitest import multipletests
-        _, p_adjusted, _, _ = multipletests(p_values, method='fdr_bh')
-        
-        results_df = pd.DataFrame({
-            'baseMean': (group1_mean + group2_mean) / 2,
-            'log2FoldChange': log2_fold_change,
-            'lfcSE': np.ones(n_genes),
-            'stat': log2_fold_change / np.ones(n_genes),
-            'pvalue': p_values,
-            'padj': p_adjusted
-        }, index=gene_names)
-        
+
+        _, p_adjusted, _, _ = multipletests(p_values, method="fdr_bh")
+
+        results_df = pd.DataFrame(
+            {
+                "baseMean": (group1_mean + group2_mean) / 2,
+                "log2FoldChange": log2_fold_change,
+                "lfcSE": np.ones(n_genes),
+                "stat": log2_fold_change / np.ones(n_genes),
+                "pvalue": p_values,
+                "padj": p_adjusted,
+            },
+            index=gene_names,
+        )
+
         return results_df.dropna()
 
     def _run_ttest_analysis(
@@ -646,7 +689,7 @@ Next suggested step: Import quantification data with tximport for differential e
         group1_data: anndata.AnnData,
         group2_data: anndata.AnnData,
         group1_name: str,
-        group2_name: str
+        group2_name: str,
     ) -> pd.DataFrame:
         """Run t-test for differential expression."""
 
@@ -658,21 +701,21 @@ Next suggested step: Import quantification data with tximport for differential e
         from scipy import stats
 
         # Extract expression matrices
-        if hasattr(group1_data.X, 'toarray'):
+        if hasattr(group1_data.X, "toarray"):
             group1_expr = group1_data.X.toarray()
             group2_expr = group2_data.X.toarray()
         else:
             group1_expr = group1_data.X
             group2_expr = group2_data.X
-        
+
         n_genes = group1_data.n_vars
         gene_names = group1_data.var_names
-        
+
         # Calculate statistics
         group1_mean = np.mean(group1_expr, axis=0)
         group2_mean = np.mean(group2_expr, axis=0)
         log2_fold_change = np.log2((group2_mean + 1) / (group1_mean + 1))
-        
+
         # T-test for each gene
         p_values = []
         t_stats = []
@@ -684,23 +727,27 @@ Next suggested step: Import quantification data with tximport for differential e
             else:
                 t_stats.append(0.0)
                 p_values.append(1.0)
-        
+
         p_values = np.array(p_values)
         t_stats = np.array(t_stats)
-        
+
         # Multiple testing correction
         from statsmodels.stats.multitest import multipletests
-        _, p_adjusted, _, _ = multipletests(p_values, method='fdr_bh')
-        
-        results_df = pd.DataFrame({
-            'baseMean': (group1_mean + group2_mean) / 2,
-            'log2FoldChange': log2_fold_change,
-            'lfcSE': np.ones(n_genes),
-            'stat': t_stats,
-            'pvalue': p_values,
-            'padj': p_adjusted
-        }, index=gene_names)
-        
+
+        _, p_adjusted, _, _ = multipletests(p_values, method="fdr_bh")
+
+        results_df = pd.DataFrame(
+            {
+                "baseMean": (group1_mean + group2_mean) / 2,
+                "log2FoldChange": log2_fold_change,
+                "lfcSE": np.ones(n_genes),
+                "stat": t_stats,
+                "pvalue": p_values,
+                "padj": p_adjusted,
+            },
+            index=gene_names,
+        )
+
         return results_df.dropna()
 
     def _parse_fastqc_results(self, qc_dir: Path) -> str:
@@ -735,7 +782,7 @@ Next suggested step: Import quantification data with tximport for differential e
         contrast: Optional[List[str]] = None,
         alpha: float = 0.05,
         shrink_lfc: bool = True,
-        n_cpus: int = 1
+        n_cpus: int = 1,
     ) -> pd.DataFrame:
         """
         Run pyDESeq2 differential expression analysis.
@@ -757,59 +804,56 @@ Next suggested step: Import quantification data with tximport for differential e
         """
         try:
             logger.info(f"Running pyDESeq2 analysis with formula: {formula}")
-            
+
             # Validate pyDESeq2 installation
             installation_status = self.validate_pydeseq2_setup()
             if not all(installation_status.values()):
                 missing_deps = [k for k, v in installation_status.items() if not v]
                 raise PyDESeq2Error(f"Missing pyDESeq2 dependencies: {missing_deps}")
-            
+
             # Import pyDESeq2 components
             from pydeseq2.dds import DeseqDataSet
-            from pydeseq2.ds import DeseqStats
             from pydeseq2.default_inference import DefaultInference
-            
+            from pydeseq2.ds import DeseqStats
+
             # Validate inputs
             self._validate_deseq2_inputs(count_matrix, metadata, formula, contrast)
-            
+
             # Parse formula and validate design
             design_info = self.formula_service.parse_formula(formula, metadata)
             design_result = self.formula_service.construct_design_matrix(
                 design_info, metadata, contrast
             )
-            
+
             # Ensure count matrix is integer and properly oriented (samples x genes for pyDESeq2)
-            count_matrix_int = count_matrix.T.astype(int)  # Transpose to samples x genes
-            
+            count_matrix_int = count_matrix.T.astype(
+                int
+            )  # Transpose to samples x genes
+
             # Align metadata with count matrix
             aligned_metadata = metadata.loc[count_matrix_int.index].copy()
-            
+
             # Create inference object with parallel processing
             inference = DefaultInference(n_cpus=n_cpus)
-            
+
             # Initialize DESeq2 dataset
             logger.info("Initializing DESeq2 dataset...")
             dds = DeseqDataSet(
                 counts=count_matrix_int,
                 metadata=aligned_metadata,
                 design=formula,
-                inference=inference
+                inference=inference,
             )
-            
+
             # Fit dispersion and log fold changes
             logger.info("Fitting DESeq2 model...")
             dds.deseq2()
-            
+
             # Perform statistical testing
             logger.info(f"Running statistical tests for contrast: {contrast}")
-            ds = DeseqStats(
-                dds, 
-                contrast=contrast, 
-                alpha=alpha, 
-                inference=inference
-            )
+            ds = DeseqStats(dds, contrast=contrast, alpha=alpha, inference=inference)
             ds.summary()
-            
+
             # Optional LFC shrinkage for better estimates
             if shrink_lfc:
                 logger.info("Applying log fold change shrinkage...")
@@ -820,15 +864,15 @@ Next suggested step: Import quantification data with tximport for differential e
                     ds.lfc_shrink(coeff=coeff_name)
                 except Exception as e:
                     logger.warning(f"LFC shrinkage failed, continuing without: {e}")
-            
+
             # Extract results
             results_df = ds.results_df.copy()
-            
+
             # Add additional statistics
             results_df = self._enhance_deseq2_results(results_df, dds, contrast)
-            
+
             logger.info(f"pyDESeq2 analysis completed: {len(results_df)} genes tested")
-            
+
             return results_df
 
         except Exception as e:
@@ -844,7 +888,7 @@ Next suggested step: Import quantification data with tximport for differential e
         formula: str,
         contrast: List[str],
         count_layer: str = None,
-        **kwargs
+        **kwargs,
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
         Run pyDESeq2 analysis on pseudobulk data.
@@ -864,34 +908,36 @@ Next suggested step: Import quantification data with tximport for differential e
         """
         try:
             logger.info("Running pyDESeq2 analysis on pseudobulk data")
-            
+
             # Extract count matrix
             if count_layer and count_layer in pseudobulk_adata.layers:
                 count_matrix = pd.DataFrame(
                     pseudobulk_adata.layers[count_layer].T,
                     index=pseudobulk_adata.var_names,
-                    columns=pseudobulk_adata.obs_names
+                    columns=pseudobulk_adata.obs_names,
                 )
             else:
                 count_matrix = pd.DataFrame(
                     pseudobulk_adata.X.T,
                     index=pseudobulk_adata.var_names,
-                    columns=pseudobulk_adata.obs_names
+                    columns=pseudobulk_adata.obs_names,
                 )
-            
+
             # Extract metadata
             metadata = pseudobulk_adata.obs.copy()
-            
+
             # Run pyDESeq2 analysis
             results_df = self.run_pydeseq2_analysis(
                 count_matrix, metadata, formula, contrast, **kwargs
             )
-            
+
             # Create analysis statistics
-            significant_genes = results_df[results_df['padj'] < kwargs.get('alpha', 0.05)]
-            upregulated = significant_genes[significant_genes['log2FoldChange'] > 0]
-            downregulated = significant_genes[significant_genes['log2FoldChange'] < 0]
-            
+            significant_genes = results_df[
+                results_df["padj"] < kwargs.get("alpha", 0.05)
+            ]
+            upregulated = significant_genes[significant_genes["log2FoldChange"] > 0]
+            downregulated = significant_genes[significant_genes["log2FoldChange"] < 0]
+
             analysis_stats = {
                 "analysis_type": "pydeseq2_pseudobulk",
                 "formula": formula,
@@ -901,13 +947,19 @@ Next suggested step: Import quantification data with tximport for differential e
                 "n_significant_genes": len(significant_genes),
                 "n_upregulated": len(upregulated),
                 "n_downregulated": len(downregulated),
-                "significance_threshold": kwargs.get('alpha', 0.05),
-                "top_upregulated": upregulated.nlargest(10, 'log2FoldChange').index.tolist(),
-                "top_downregulated": downregulated.nsmallest(10, 'log2FoldChange').index.tolist()
+                "significance_threshold": kwargs.get("alpha", 0.05),
+                "top_upregulated": upregulated.nlargest(
+                    10, "log2FoldChange"
+                ).index.tolist(),
+                "top_downregulated": downregulated.nsmallest(
+                    10, "log2FoldChange"
+                ).index.tolist(),
             }
-            
-            logger.info(f"pyDESeq2 pseudobulk analysis completed: {len(significant_genes)} significant genes")
-            
+
+            logger.info(
+                f"pyDESeq2 pseudobulk analysis completed: {len(significant_genes)} significant genes"
+            )
+
             return results_df, analysis_stats
 
         except Exception as e:
@@ -926,37 +978,41 @@ Next suggested step: Import quantification data with tximport for differential e
         try:
             from pydeseq2.dds import DeseqDataSet
             from pydeseq2.ds import DeseqStats
-            status['pydeseq2'] = True
-            status['pydeseq2_available'] = True  # Add expected key for tests
+
+            status["pydeseq2"] = True
+            status["pydeseq2_available"] = True  # Add expected key for tests
             logger.debug("pyDESeq2 core components available")
         except ImportError as e:
             logger.warning(f"pyDESeq2 not available: {e}")
-            status['pydeseq2'] = False
-            status['pydeseq2_available'] = False
+            status["pydeseq2"] = False
+            status["pydeseq2_available"] = False
 
         try:
             from pydeseq2.default_inference import DefaultInference
-            status['pydeseq2_inference'] = True
+
+            status["pydeseq2_inference"] = True
             logger.debug("pyDESeq2 inference components available")
         except ImportError as e:
             logger.warning(f"pyDESeq2 inference not available: {e}")
-            status['pydeseq2_inference'] = False
+            status["pydeseq2_inference"] = False
 
         try:
             import numba
-            status['numba'] = True
+
+            status["numba"] = True
             logger.debug(f"numba version {numba.__version__} available")
         except ImportError:
             logger.warning("numba not available - pyDESeq2 performance may be reduced")
-            status['numba'] = False
+            status["numba"] = False
 
         try:
             import statsmodels
-            status['statsmodels'] = True
+
+            status["statsmodels"] = True
             logger.debug(f"statsmodels version {statsmodels.__version__} available")
         except ImportError:
             logger.warning("statsmodels not available")
-            status['statsmodels'] = False
+            status["statsmodels"] = False
 
         return status
 
@@ -967,7 +1023,7 @@ Next suggested step: Import quantification data with tximport for differential e
         batch_col: Optional[str] = None,
         reference_condition: Optional[str] = None,
         condition_column: Optional[str] = None,
-        batch_column: Optional[str] = None
+        batch_column: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create design matrix for common experimental designs.
@@ -1004,10 +1060,7 @@ Next suggested step: Import quantification data with tximport for differential e
             raise FormulaError(f"Failed to create design matrix: {e}")
 
     def validate_experimental_design(
-        self,
-        metadata: pd.DataFrame,
-        formula: str,
-        min_replicates: int = 2
+        self, metadata: pd.DataFrame, formula: str, min_replicates: int = 2
     ) -> Dict[str, Any]:
         """
         Validate experimental design for statistical analysis.
@@ -1023,10 +1076,10 @@ Next suggested step: Import quantification data with tximport for differential e
         try:
             if metadata is None or formula is None:
                 return {
-                    'valid': False,
-                    'errors': ['metadata and formula are required'],
-                    'warnings': [],
-                    'design_summary': {}
+                    "valid": False,
+                    "errors": ["metadata and formula are required"],
+                    "warnings": [],
+                    "design_summary": {},
                 }
 
             return self.formula_service.validate_experimental_design(
@@ -1034,10 +1087,10 @@ Next suggested step: Import quantification data with tximport for differential e
             )
         except Exception as e:
             return {
-                'valid': False,
-                'errors': [str(e)],
-                'warnings': [],
-                'design_summary': {}
+                "valid": False,
+                "errors": [str(e)],
+                "warnings": [],
+                "design_summary": {},
             }
 
     def _validate_deseq2_inputs(
@@ -1045,7 +1098,7 @@ Next suggested step: Import quantification data with tximport for differential e
         count_matrix: pd.DataFrame,
         metadata: pd.DataFrame,
         formula: str,
-        contrast: List[str]
+        contrast: List[str],
     ) -> None:
         """Validate inputs for pyDESeq2 analysis."""
 
@@ -1055,46 +1108,49 @@ Next suggested step: Import quantification data with tximport for differential e
         # Check count matrix
         if count_matrix.empty:
             raise PyDESeq2Error("Count matrix is empty")
-        
+
         if not count_matrix.dtypes.apply(lambda x: np.issubdtype(x, np.number)).all():
             raise PyDESeq2Error("Count matrix contains non-numeric data")
-        
+
         if (count_matrix < 0).any().any():
             raise PyDESeq2Error("Count matrix contains negative values")
-        
+
         # Check metadata
         if metadata.empty:
             raise PyDESeq2Error("Metadata is empty")
-        
+
         # Check sample alignment
         count_samples = set(count_matrix.columns)
         metadata_samples = set(metadata.index)
-        
+
         if not count_samples.issubset(metadata_samples):
             missing = count_samples - metadata_samples
-            raise PyDESeq2Error(f"Samples in count matrix missing from metadata: {missing}")
-        
+            raise PyDESeq2Error(
+                f"Samples in count matrix missing from metadata: {missing}"
+            )
+
         # Validate contrast
         if len(contrast) != 3:
             raise PyDESeq2Error("Contrast must be [factor, level1, level2]")
-        
+
         factor, level1, level2 = contrast
-        
+
         if factor not in metadata.columns:
             raise PyDESeq2Error(f"Contrast factor '{factor}' not found in metadata")
-        
+
         factor_levels = metadata[factor].unique()
         if level1 not in factor_levels:
-            raise PyDESeq2Error(f"Contrast level '{level1}' not found in factor '{factor}'")
-        
+            raise PyDESeq2Error(
+                f"Contrast level '{level1}' not found in factor '{factor}'"
+            )
+
         if level2 not in factor_levels:
-            raise PyDESeq2Error(f"Contrast level '{level2}' not found in factor '{factor}'")
+            raise PyDESeq2Error(
+                f"Contrast level '{level2}' not found in factor '{factor}'"
+            )
 
     def _enhance_deseq2_results(
-        self,
-        results_df: pd.DataFrame,
-        dds,
-        contrast: List[str]
+        self, results_df: pd.DataFrame, dds, contrast: List[str]
     ) -> pd.DataFrame:
         """Enhance pyDESeq2 results with additional statistics."""
 
@@ -1102,24 +1158,26 @@ Next suggested step: Import quantification data with tximport for differential e
             raise PyDESeq2Error("results_df and contrast are required")
 
         # Add contrast information
-        results_df['contrast'] = f"{contrast[0]}_{contrast[1]}_vs_{contrast[2]}"
-        
+        results_df["contrast"] = f"{contrast[0]}_{contrast[1]}_vs_{contrast[2]}"
+
         # Add significance categories
         alpha = 0.05  # Default significance threshold
-        results_df['significant'] = (results_df['padj'] < alpha) & (~results_df['padj'].isna())
-        
+        results_df["significant"] = (results_df["padj"] < alpha) & (
+            ~results_df["padj"].isna()
+        )
+
         # Add regulation direction
-        results_df['regulation'] = 'unchanged'
+        results_df["regulation"] = "unchanged"
         results_df.loc[
-            (results_df['significant']) & (results_df['log2FoldChange'] > 0),
-            'regulation'
-        ] = 'upregulated'
+            (results_df["significant"]) & (results_df["log2FoldChange"] > 0),
+            "regulation",
+        ] = "upregulated"
         results_df.loc[
-            (results_df['significant']) & (results_df['log2FoldChange'] < 0),
-            'regulation'
-        ] = 'downregulated'
-        
+            (results_df["significant"]) & (results_df["log2FoldChange"] < 0),
+            "regulation",
+        ] = "downregulated"
+
         # Add rank based on adjusted p-value
-        results_df['rank'] = results_df['padj'].rank(method='min', na_option='bottom')
-        
+        results_df["rank"] = results_df["padj"].rank(method="min", na_option="bottom")
+
         return results_df

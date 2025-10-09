@@ -6,9 +6,10 @@ Deep learning-based dimensionality reduction and batch correction using scVI
 embeddings for single-cell RNA-seq data.
 """
 
-from typing import Optional, Dict, Any, Tuple, List
 import logging
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 import numpy as np
 import scvi
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 class ScviEmbeddingService:
     """
     Service for training scVI embeddings on single-cell data.
-    
+
     This service handles:
     - Dependency checking and installation guidance
     - scVI model training with optimal parameters
@@ -29,38 +30,39 @@ class ScviEmbeddingService:
     - GPU/CPU device management
     - Batch correction capabilities
     """
-    
+
     def __init__(self):
         self.availability_info = GPUDetector.check_scvi_availability()
         self.device = None
         self.model = None
-        
+
     def check_availability(self) -> Dict[str, Any]:
         """
         Check if scVI dependencies are available.
-        
+
         Returns:
             Dictionary with availability status and installation guidance
         """
         return self.availability_info.copy()
-    
+
     def get_installation_message(self) -> str:
         """Get user-friendly installation guidance message."""
         return format_installation_message(self.availability_info)
-    
+
     def _import_scvi_dependencies(self):
         """
         Import scVI dependencies with helpful error messages.
-        
+
         Raises:
             ImportError: If dependencies are not available with installation guidance
         """
         if not self.availability_info["ready_for_scvi"]:
             message = self.get_installation_message()
             raise ImportError(f"scVI dependencies not available.\n{message}")
-        
+
         try:
             import torch
+
             return torch
         except ImportError as e:
             hardware_rec = self.availability_info["hardware_recommendation"]
@@ -68,25 +70,25 @@ class ScviEmbeddingService:
                 f"Failed to import scVI dependencies: {e}\n"
                 f"Try installing with: {hardware_rec['command']}"
             )
-    
+
     def setup_device(self, force_cpu: bool = False) -> str:
         """
         Set up the optimal compute device for training.
-        
+
         Args:
             force_cpu: Force CPU usage even if GPU is available
-            
+
         Returns:
             Device string used ("cuda", "mps", or "cpu")
         """
         torch = self._import_scvi_dependencies()
-        
+
         if force_cpu:
             device = "cpu"
         else:
             hardware_rec = GPUDetector.get_hardware_recommendation()
             recommended_device = hardware_rec["device"]
-            
+
             # Verify the device is actually available
             if recommended_device == "cuda" and torch.cuda.is_available():
                 device = "cuda"
@@ -94,11 +96,11 @@ class ScviEmbeddingService:
                 device = "mps"
             else:
                 device = "cpu"
-        
+
         self.device = device
         logger.info(f"Using device: {device}")
         return device
-    
+
     def train_scvi_embedding(
         self,
         adata,
@@ -108,13 +110,13 @@ class ScviEmbeddingService:
         layer: Optional[str] = None,
         n_layers: int = 2,
         n_latent: int = 10,
-        gene_likelihood: str = 'zinb',
+        gene_likelihood: str = "zinb",
         max_epochs: Optional[int] = 100,
         early_stopping: bool = True,
         early_stopping_patience: int = 5,
         save_path: Optional[str] = None,
         force_cpu: bool = False,
-        **model_kwargs
+        **model_kwargs,
     ) -> Tuple[Any, Dict[str, Any]]:
         """
         Train scVI model and generate embeddings.
@@ -137,28 +139,28 @@ class ScviEmbeddingService:
             Tuple of (trained_model, training_info_dict)
         """
         torch = self._import_scvi_dependencies()
-        
+
         # Setup device
         device = self.setup_device(force_cpu=force_cpu)
-        
+
         # Prepare data for scVI
         logger.info("Setting up scVI data...")
-        
+
         # Setup AnnData for scVI
         scvi.model.SCVI.setup_anndata(
             adata,
             layer=layer,
             batch_key=batch_key,
             categorical_covariate_keys=categorical_covariate_keys,
-            continuous_covariate_keys=continuous_covariate_keys
+            continuous_covariate_keys=continuous_covariate_keys,
         )
-        
+
         # Create model
         logger.info(f"Creating scVI model with {n_latent} latent dimensions...")
-        
+
         # Extract use_observed_lib_size from model_kwargs if present, default True
-        use_observed_lib_size = model_kwargs.pop('use_observed_lib_size', True)
-        
+        use_observed_lib_size = model_kwargs.pop("use_observed_lib_size", True)
+
         model = scvi.model.SCVI(
             adata,
             n_layers=n_layers,
@@ -167,18 +169,18 @@ class ScviEmbeddingService:
             use_observed_lib_size=use_observed_lib_size,
             # **model_kwargs #FIXME needs to be readjusted once ready
         )
-        
+
         # Train model with comprehensive error handling
         logger.info(f"Training scVI model for up to {max_epochs} epochs on {device}...")
 
         # get model to device
         # model.to_device(device)
-        
+
         training_config = {
             "max_epochs": max_epochs,
             "accelerator": device,
-            "devices": 'auto',
-            "early_stopping": early_stopping
+            "devices": "auto",
+            "early_stopping": early_stopping,
         }
 
         # Execute training with comprehensive error handling
@@ -192,8 +194,10 @@ class ScviEmbeddingService:
 
             # Extract embeddings and store in AnnData
             embeddings = model.get_latent_representation()
-            adata.obsm['X_scvi'] = embeddings
-            logger.info(f"Stored embeddings in adata.obsm['X_scvi']: {embeddings.shape}")
+            adata.obsm["X_scvi"] = embeddings
+            logger.info(
+                f"Stored embeddings in adata.obsm['X_scvi']: {embeddings.shape}"
+            )
 
             # Create comprehensive training info
             training_info = {
@@ -206,7 +210,7 @@ class ScviEmbeddingService:
                 "model_saved": save_path is not None,
                 "batch_key": batch_key,
                 "accelerator": device,  # Keep for backward compatibility
-                "early_stopping": early_stopping
+                "early_stopping": early_stopping,
             }
 
             # Save model if path provided
@@ -223,24 +227,30 @@ class ScviEmbeddingService:
             return model, training_info
         except RuntimeError as e:
             error_msg = str(e).lower()
-            
+
             # Handle device placement errors
             if "device" in error_msg or "cuda" in error_msg:
                 logger.error(f"Device error during training: {e}")
                 if device != "cpu" and not force_cpu:
-                    logger.info("Attempting to retry training on CPU due to device error...")
+                    logger.info(
+                        "Attempting to retry training on CPU due to device error..."
+                    )
                     try:
                         training_config["accelerator"] = "cpu"
                         training_config["devices"] = "auto"
                         model.train(**training_config)
                         device = "cpu"
-                        logger.info("Successfully completed training on CPU after device error")
+                        logger.info(
+                            "Successfully completed training on CPU after device error"
+                        )
 
                         # Training successful on CPU - process like normal success case
                         self.model = model
                         embeddings = model.get_latent_representation()
-                        adata.obsm['X_scvi'] = embeddings
-                        logger.info(f"Stored embeddings in adata.obsm['X_scvi']: {embeddings.shape}")
+                        adata.obsm["X_scvi"] = embeddings
+                        logger.info(
+                            f"Stored embeddings in adata.obsm['X_scvi']: {embeddings.shape}"
+                        )
 
                         training_info = {
                             "device": device,
@@ -253,7 +263,7 @@ class ScviEmbeddingService:
                             "batch_key": batch_key,
                             "accelerator": device,
                             "early_stopping": early_stopping,
-                            "fallback_to_cpu": True
+                            "fallback_to_cpu": True,
                         }
 
                         if save_path:
@@ -275,7 +285,7 @@ class ScviEmbeddingService:
                             "n_genes": adata.n_vars,
                             "max_epochs": max_epochs,
                             "error": f"Training failed on both {device} (device error) and CPU: {cpu_error}",
-                            "error_type": "device_and_cpu_failure"
+                            "error_type": "device_and_cpu_failure",
                         }
                         return None, error_info
                 else:
@@ -286,7 +296,7 @@ class ScviEmbeddingService:
                         "n_genes": adata.n_vars,
                         "max_epochs": max_epochs,
                         "error": f"Device error during training: {e}",
-                        "error_type": "device_error"
+                        "error_type": "device_error",
                     }
                     return None, error_info
 
@@ -299,7 +309,7 @@ class ScviEmbeddingService:
                     "n_genes": adata.n_vars,
                     "max_epochs": max_epochs,
                     "error": f"Training convergence error - try reducing learning rate or batch size: {e}",
-                    "error_type": "convergence_error"
+                    "error_type": "convergence_error",
                 }
                 return None, error_info
 
@@ -312,20 +322,20 @@ class ScviEmbeddingService:
                     "n_genes": adata.n_vars,
                     "max_epochs": max_epochs,
                     "error": f"Training failed with runtime error: {e}",
-                    "error_type": "runtime_error"
+                    "error_type": "runtime_error",
                 }
                 return None, error_info
 
         except ValueError as e:
             # Handle parameter validation errors
             error_info = {
-                "device": device if 'device' in locals() else "unknown",
+                "device": device if "device" in locals() else "unknown",
                 "n_latent": n_latent,
                 "n_cells": adata.n_obs,
                 "n_genes": adata.n_vars,
                 "max_epochs": max_epochs,
                 "error": f"Invalid training parameters: {e}",
-                "error_type": "parameter_validation_error"
+                "error_type": "parameter_validation_error",
             }
             return None, error_info
 
@@ -333,13 +343,12 @@ class ScviEmbeddingService:
             # Handle any other unexpected errors
             logger.error(f"Unexpected error during scVI training: {e}")
             error_info = {
-                "device": device if 'device' in locals() else "unknown",
+                "device": device if "device" in locals() else "unknown",
                 "n_latent": n_latent,
                 "n_cells": adata.n_obs,
                 "n_genes": adata.n_vars,
                 "max_epochs": max_epochs,
                 "error": f"Unexpected error during scVI training: {e}",
-                "error_type": "unexpected_error"
+                "error_type": "unexpected_error",
             }
             return None, error_info
-

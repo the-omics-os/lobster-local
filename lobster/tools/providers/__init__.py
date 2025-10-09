@@ -7,24 +7,22 @@ various publication and dataset sources.
 
 from lobster.tools.providers.base_provider import (
     BasePublicationProvider,
-    PublicationSource,
+    DatasetMetadata,
     DatasetType,
     PublicationMetadata,
-    DatasetMetadata
+    PublicationSource,
 )
-from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
 from lobster.tools.providers.geo_provider import GEOProvider, GEOProviderConfig
-
+from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
 
 __all__ = [
     # Base classes
     "BasePublicationProvider",
     "PublicationSource",
-    "DatasetType", 
+    "DatasetType",
     "PublicationMetadata",
     "DatasetMetadata",
-    
     # PubMed provider
     "PubMedProvider",
-    "PubMedProviderConfig"
+    "PubMedProviderConfig",
 ]

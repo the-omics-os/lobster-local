@@ -6,8 +6,8 @@ in the H5AD format with support for local storage and future
 S3 integration without API changes.
 """
 
-import logging
 import collections
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 from urllib.parse import urlparse
@@ -24,17 +24,17 @@ logger = logging.getLogger(__name__)
 class H5ADBackend(BaseBackend):
     """
     Backend for H5AD file storage with S3-ready path handling.
-    
+
     This backend handles AnnData objects stored in H5AD format,
     with path parsing that's ready for future S3 integration
     without requiring API changes.
     """
 
     def __init__(
-        self, 
+        self,
         base_path: Optional[Union[str, Path]] = None,
         compression: str = "gzip",
-        compression_opts: Optional[int] = None
+        compression_opts: Optional[int] = None,
     ):
         """
         Initialize the H5AD backend.
@@ -47,13 +47,13 @@ class H5ADBackend(BaseBackend):
         super().__init__(base_path=base_path)
         self.compression = compression
         self.compression_opts = compression_opts or 6  # Default compression level
-        
+
         # S3-ready configuration (for future use)
         self.s3_config = {
             "bucket": None,
             "region": None,
             "access_key": None,
-            "secret_key": None
+            "secret_key": None,
         }
 
     def load(self, path: Union[str, Path], **kwargs) -> anndata.AnnData:
@@ -74,35 +74,35 @@ class H5ADBackend(BaseBackend):
             ValueError: If the file format is invalid
         """
         resolved_path = self._resolve_path_with_s3_support(path)
-        
+
         # Check if this is an S3 path (for future implementation)
         if self._is_s3_path(path):
             return self._load_from_s3(path, **kwargs)
-        
+
         # Local file loading
         if not resolved_path.exists():
             raise FileNotFoundError(f"H5AD file not found: {resolved_path}")
-        
+
         try:
             # Extract loading parameters
-            backed = kwargs.get('backed', False)
-            
+            backed = kwargs.get("backed", False)
+
             if backed:
                 # Load in backed mode for large files
-                adata = sc.read_h5ad(resolved_path, backed='r')
+                adata = sc.read_h5ad(resolved_path, backed="r")
             else:
                 # Load fully into memory
                 adata = sc.read_h5ad(resolved_path)
-            
+
             self._log_operation(
-                "load", 
-                resolved_path, 
+                "load",
+                resolved_path,
                 backed=backed,
-                size_mb=resolved_path.stat().st_size / 1024**2
+                size_mb=resolved_path.stat().st_size / 1024**2,
             )
-            
+
             return adata
-            
+
         except Exception as e:
             raise ValueError(f"Failed to load H5AD file {resolved_path}: {e}")
 
@@ -116,6 +116,7 @@ class H5ADBackend(BaseBackend):
         - Replaces '/' in keys with '__' (HDF5 safe)
         - Recursively applies to .uns, .obsm, .varm, .layers
         """
+
         def sanitize_key(key):
             if isinstance(key, str) and "/" in key:
                 return key.replace("/", slash_replacement)
@@ -147,14 +148,8 @@ class H5ADBackend(BaseBackend):
         adata.var.columns = [sanitize_key(col) for col in adata.var.columns]
 
         return adata
-    
 
-    def save(
-        self, 
-        adata: anndata.AnnData, 
-        path: Union[str, Path], 
-        **kwargs
-    ) -> None:
+    def save(self, adata: anndata.AnnData, path: Union[str, Path], **kwargs) -> None:
         """
         Save AnnData to H5AD file.
 
@@ -171,55 +166,55 @@ class H5ADBackend(BaseBackend):
             PermissionError: If write access is denied
         """
         resolved_path = self._resolve_path_with_s3_support(path)
-        
+
         # Check if this is an S3 path (for future implementation)
         if self._is_s3_path(path):
             return self._save_to_s3(adata, path, **kwargs)
-        
+
         # Ensure parent directory exists
         self._ensure_directory(resolved_path)
-        
+
         # Create backup if file exists
         # if resolved_path.exists():
         #     backup_path = self.create_backup(resolved_path)
         #     if backup_path:
         #         self.logger.info(f"Created backup: {backup_path}")
-        
+
         try:
             # Extract saving parameters
-            compression = kwargs.get('compression', self.compression)
-            compression_opts = kwargs.get('compression_opts', self.compression_opts)
-            as_dense = kwargs.get('as_dense', False)
+            compression = kwargs.get("compression", self.compression)
+            compression_opts = kwargs.get("compression_opts", self.compression_opts)
+            as_dense = kwargs.get("as_dense", False)
 
-            #saniztize Anndata before storing
+            # saniztize Anndata before storing
             adata_sanitized = self.sanitize_anndata(adata)
 
-            #make variables unique
-            adata_sanitized.var_names_make_unique(join='__')
-            
+            # make variables unique
+            adata_sanitized.var_names_make_unique(join="__")
+
             # Prepare AnnData for saving
             adata_to_save = adata_sanitized.copy()
-            
-            if as_dense and hasattr(adata_to_save.X, 'toarray'):
+
+            if as_dense and hasattr(adata_to_save.X, "toarray"):
                 # Convert sparse to dense if requested
                 adata_to_save.X = adata_to_save.X.toarray()
-            
+
             # Save to H5AD format
             adata_to_save.write_h5ad(
                 resolved_path,
                 compression=compression,
-                compression_opts=compression_opts
+                compression_opts=compression_opts,
             )
-            
+
             self._log_operation(
                 "save",
                 resolved_path,
                 compression=compression,
                 compression_opts=compression_opts,
                 shape=adata.shape,
-                size_mb=resolved_path.stat().st_size / 1024**2
+                size_mb=resolved_path.stat().st_size / 1024**2,
             )
-            
+
         except Exception as e:
             # Remove failed file if it was created
             if resolved_path.exists():
@@ -239,7 +234,7 @@ class H5ADBackend(BaseBackend):
         Returns:
             bool: True if format is supported
         """
-        return format_name.lower() in ['h5ad', 'h5']
+        return format_name.lower() in ["h5ad", "h5"]
 
     def get_storage_info(self) -> Dict[str, Any]:
         """
@@ -249,19 +244,19 @@ class H5ADBackend(BaseBackend):
             Dict[str, Any]: Storage backend information
         """
         info = super().get_storage_info()
-        info.update({
-            "supported_formats": ["h5ad"],
-            "compression": self.compression,
-            "compression_opts": self.compression_opts,
-            "s3_ready": True,
-            "backed_mode_support": True
-        })
+        info.update(
+            {
+                "supported_formats": ["h5ad"],
+                "compression": self.compression,
+                "compression_opts": self.compression_opts,
+                "s3_ready": True,
+                "backed_mode_support": True,
+            }
+        )
         return info
 
     def optimize_for_reading(
-        self, 
-        path: Union[str, Path],
-        chunk_size: Optional[int] = None
+        self, path: Union[str, Path], chunk_size: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Optimize H5AD file for reading performance.
@@ -274,44 +269,50 @@ class H5ADBackend(BaseBackend):
             Dict[str, Any]: Optimization results
         """
         resolved_path = self._resolve_path_with_s3_support(path)
-        
+
         if not resolved_path.exists():
             raise FileNotFoundError(f"H5AD file not found: {resolved_path}")
-        
+
         try:
             # Load file to analyze structure
             adata = self.load(resolved_path, backed=True)
-            
+
             # Analyze data characteristics
             analysis = {
                 "shape": adata.shape,
-                "is_sparse": hasattr(adata.X, 'nnz'),
+                "is_sparse": hasattr(adata.X, "nnz"),
                 "sparsity": None,
                 "recommended_chunk_size": None,
-                "estimated_memory_mb": None
+                "estimated_memory_mb": None,
             }
-            
-            if hasattr(adata.X, 'nnz'):
+
+            if hasattr(adata.X, "nnz"):
                 # Sparse matrix analysis
-                analysis["sparsity"] = 1.0 - (adata.X.nnz / (adata.n_obs * adata.n_vars))
-                
+                analysis["sparsity"] = 1.0 - (
+                    adata.X.nnz / (adata.n_obs * adata.n_vars)
+                )
+
                 # Recommend chunk size based on sparsity and size
                 if analysis["sparsity"] > 0.9:  # Very sparse
                     analysis["recommended_chunk_size"] = min(10000, adata.n_obs // 10)
                 else:
                     analysis["recommended_chunk_size"] = min(5000, adata.n_obs // 20)
-            
+
             # Estimate memory usage
             dtype_size = 4 if adata.X.dtype in [np.float32, np.int32] else 8
             if analysis["is_sparse"]:
                 # Sparse matrix memory estimate
-                analysis["estimated_memory_mb"] = (adata.X.nnz * dtype_size * 3) / 1024**2  # data + indices + indptr
+                analysis["estimated_memory_mb"] = (
+                    adata.X.nnz * dtype_size * 3
+                ) / 1024**2  # data + indices + indptr
             else:
                 # Dense matrix memory estimate
-                analysis["estimated_memory_mb"] = (adata.n_obs * adata.n_vars * dtype_size) / 1024**2
-            
+                analysis["estimated_memory_mb"] = (
+                    adata.n_obs * adata.n_vars * dtype_size
+                ) / 1024**2
+
             return analysis
-            
+
         except Exception as e:
             self.logger.warning(f"Failed to optimize file {path}: {e}")
             return {"error": str(e)}
@@ -327,7 +328,7 @@ class H5ADBackend(BaseBackend):
             Dict[str, Any]: Validation results
         """
         resolved_path = self._resolve_path_with_s3_support(path)
-        
+
         validation = {
             "valid": False,
             "readable": False,
@@ -336,42 +337,42 @@ class H5ADBackend(BaseBackend):
             "has_var": False,
             "shape": None,
             "errors": [],
-            "warnings": []
+            "warnings": [],
         }
-        
+
         try:
             # Check if file exists and is readable
             if not resolved_path.exists():
                 validation["errors"].append("File does not exist")
                 return validation
-            
+
             # Try to load the file
             adata = self.load(resolved_path, backed=True)
             validation["readable"] = True
-            
+
             # Check basic structure
             validation["shape"] = adata.shape
             validation["has_X"] = adata.X is not None
             validation["has_obs"] = len(adata.obs) > 0
             validation["has_var"] = len(adata.var) > 0
-            
+
             # Check for common issues
             if adata.n_obs == 0:
                 validation["warnings"].append("No observations in dataset")
             if adata.n_vars == 0:
                 validation["warnings"].append("No variables in dataset")
-            
+
             # Validate X matrix
             if adata.X is not None:
-                if hasattr(adata.X, 'dtype'):
+                if hasattr(adata.X, "dtype"):
                     if not np.issubdtype(adata.X.dtype, np.number):
                         validation["errors"].append("Non-numeric data in X matrix")
-            
+
             validation["valid"] = len(validation["errors"]) == 0
-            
+
         except Exception as e:
             validation["errors"].append(f"Failed to read file: {e}")
-        
+
         return validation
 
     def _resolve_path_with_s3_support(self, path: Union[str, Path]) -> Path:
@@ -389,7 +390,7 @@ class H5ADBackend(BaseBackend):
             # For now, just return the string representation
             # In future S3 implementation, this would handle S3 URIs
             return Path(str(path))
-        
+
         # Handle local paths normally
         return self._resolve_path(path)
 
@@ -404,7 +405,7 @@ class H5ADBackend(BaseBackend):
             bool: True if path is S3 URI
         """
         path_str = str(path)
-        return path_str.startswith('s3://')
+        return path_str.startswith("s3://")
 
     def _load_from_s3(self, s3_path: str, **kwargs) -> anndata.AnnData:
         """
@@ -427,12 +428,7 @@ class H5ADBackend(BaseBackend):
             "but the API is designed to support S3 in the future."
         )
 
-    def _save_to_s3(
-        self, 
-        adata: anndata.AnnData, 
-        s3_path: str, 
-        **kwargs
-    ) -> None:
+    def _save_to_s3(self, adata: anndata.AnnData, s3_path: str, **kwargs) -> None:
         """
         Save AnnData to S3 (future implementation).
 
@@ -456,7 +452,7 @@ class H5ADBackend(BaseBackend):
         bucket: str,
         region: str = "us-east-1",
         access_key: Optional[str] = None,
-        secret_key: Optional[str] = None
+        secret_key: Optional[str] = None,
     ) -> None:
         """
         Configure S3 settings (future implementation).
@@ -467,15 +463,21 @@ class H5ADBackend(BaseBackend):
             access_key: AWS access key
             secret_key: AWS secret key
         """
-        self.s3_config.update({
-            "bucket": bucket,
-            "region": region,
-            "access_key": access_key,
-            "secret_key": secret_key
-        })
-        
-        self.logger.info(f"S3 configuration set for bucket: {bucket} in region: {region}")
-        self.logger.warning("S3 functionality is not yet implemented but configuration is stored")
+        self.s3_config.update(
+            {
+                "bucket": bucket,
+                "region": region,
+                "access_key": access_key,
+                "secret_key": secret_key,
+            }
+        )
+
+        self.logger.info(
+            f"S3 configuration set for bucket: {bucket} in region: {region}"
+        )
+        self.logger.warning(
+            "S3 functionality is not yet implemented but configuration is stored"
+        )
 
     def _detect_format(self, path: Union[str, Path]) -> str:
         """
@@ -489,10 +491,10 @@ class H5ADBackend(BaseBackend):
         """
         path = Path(path)
         extension = path.suffix.lower()
-        
-        if extension == '.h5ad':
-            return 'h5ad'
-        elif extension == '.h5':
-            return 'h5'
+
+        if extension == ".h5ad":
+            return "h5ad"
+        elif extension == ".h5":
+            return "h5"
         else:
-            return 'unknown'
+            return "unknown"

@@ -8,16 +8,16 @@ This module provides advanced Rich-based UI components including:
 - Professional styling and visual components
 """
 
-from .themes import LobsterTheme
 from .console_manager import get_console, setup_logging
 from .live_dashboard import LiveDashboard
 from .progress_manager import ProgressManager, get_progress_manager
+from .themes import LobsterTheme
 
 __all__ = [
-    'LobsterTheme',
-    'get_console',
-    'setup_logging',
-    'LiveDashboard',
-    'ProgressManager',
-    'get_progress_manager'
+    "LobsterTheme",
+    "get_console",
+    "setup_logging",
+    "LiveDashboard",
+    "ProgressManager",
+    "get_progress_manager",
 ]

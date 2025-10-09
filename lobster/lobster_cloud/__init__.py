@@ -6,6 +6,4 @@ __version__ = "0.1.0"
 
 from .client import CloudLobsterClient
 
-__all__ = [
-    "CloudLobsterClient"
-]
+__all__ = ["CloudLobsterClient"]

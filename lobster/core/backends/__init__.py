@@ -10,6 +10,7 @@ from .h5ad_backend import H5ADBackend
 
 try:
     from .mudata_backend import MuDataBackend
+
     __all__ = ["BaseBackend", "H5ADBackend", "MuDataBackend"]
 except ImportError:
     # MuData not available

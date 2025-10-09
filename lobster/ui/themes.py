@@ -7,13 +7,14 @@ for different data types and contexts.
 """
 
 import os
-from typing import Dict, Any, Optional
-from rich.theme import Theme
-from rich.style import Style
-from rich.color import Color
+from typing import Any, Dict, Optional
+
 from rich import box
+from rich.color import Color
 from rich.panel import Panel
+from rich.style import Style
 from rich.text import Text
+from rich.theme import Theme
 
 
 class LobsterTheme:
@@ -36,14 +37,12 @@ class LobsterTheme:
         "lobster_orange_bright": "#ff6b52",
         "lobster_orange_dark": "#c44836",
         "lobster_orange_dim": "#b23a29",
-
         # Background and text
         "background": BACKGROUND_WHITE,
         "text_primary": TEXT_BLACK,
         "text_secondary": "#cccccc",  # Lighter for dark backgrounds
-        "text_tertiary": "#aaaaaa",   # Lighter for dark backgrounds
-        "text_muted": "#888888",      # Lighter for dark backgrounds
-
+        "text_tertiary": "#aaaaaa",  # Lighter for dark backgrounds
+        "text_muted": "#888888",  # Lighter for dark backgrounds
         # Status colors with orange variations
         "success": "#28a745",
         "success_orange": "#e4a547",
@@ -53,7 +52,6 @@ class LobsterTheme:
         "error_orange": "#e44747",
         "info": "#17a2b8",
         "info_orange": "#e49c47",
-
         # Data type specific colors
         "genomics": "#4CAF50",
         "genomics_orange": "#e4af47",
@@ -61,97 +59,87 @@ class LobsterTheme:
         "proteomics_orange": "#477ce4",
         "metabolomics": "#9C27B0",
         "metabolomics_orange": "#c447e4",
-
         # UI element colors
         "border": PRIMARY_ORANGE,
         "border_dim": "#e4a547",
         "highlight": PRIMARY_ORANGE,
         "selection": "#ffe4df",
         "hover": "#fff0ee",
-
         # Progress and status indicators
         "progress_complete": PRIMARY_ORANGE,
         "progress_incomplete": "#333333",  # Darker for visibility on dark backgrounds
         "loading": PRIMARY_ORANGE,
         "active": PRIMARY_ORANGE,
-        "inactive": "#666666"              # More visible on dark backgrounds
+        "inactive": "#666666",  # More visible on dark backgrounds
     }
 
     # Rich Theme Styles
-    RICH_THEME = Theme({
-        # Brand styles
-        "lobster.primary": f"bold {PRIMARY_ORANGE}",
-        "lobster.logo": f"bold {PRIMARY_ORANGE}",
-        "lobster.highlight": f"{PRIMARY_ORANGE}",
-        "lobster.accent": f"italic {PRIMARY_ORANGE}",
-
-        # Text hierarchy
-        "text.primary": TEXT_BLACK,
-        "text.secondary": "#cccccc",  # Lighter for dark backgrounds
-        "text.tertiary": "#aaaaaa",   # Lighter for dark backgrounds
-        "text.muted": "#888888",      # Lighter for dark backgrounds
-        "text.inverse": f"{BACKGROUND_WHITE} on {PRIMARY_ORANGE}",
-
-        # Status styles
-        "status.success": "bold #28a745",
-        "status.warning": "bold #ffc107",
-        "status.error": "bold #dc3545",
-        "status.info": "bold #17a2b8",
-        "status.loading": f"bold {PRIMARY_ORANGE}",
-
-        # Data styles
-        "data.header": f"bold {PRIMARY_ORANGE}",
-        "data.value": TEXT_BLACK,
-        "data.key": "#cccccc",  # Lighter for dark backgrounds
-        "data.number": "#66aaff",      # Brighter blue for dark backgrounds
-        "data.string": "#66ff66",      # Brighter green for dark backgrounds
-        "data.boolean": "#ffaa66",     # Brighter orange for dark backgrounds
-
-        # Interactive elements
-        "interactive.prompt": f"bold {PRIMARY_ORANGE}",
-        "interactive.choice": f"{PRIMARY_ORANGE}",
-        "interactive.selected": f"reverse {PRIMARY_ORANGE}",
-        "interactive.cursor": f"bold {PRIMARY_ORANGE}",
-
-        # Progress elements
-        "progress.bar": f"{PRIMARY_ORANGE}",
-        "progress.complete": f"bold {PRIMARY_ORANGE}",
-        "progress.percentage": f"bold {PRIMARY_ORANGE}",
-        "progress.data": "#aaaaaa",    # Lighter for dark backgrounds
-
-        # Panel and border styles
-        "panel.title": f"bold {PRIMARY_ORANGE}",
-        "panel.border": PRIMARY_ORANGE,
-        "border.primary": PRIMARY_ORANGE,
-        "border.secondary": "#e4a547",
-        "error": "#dc3545",
-        "success": "#28a745",
-
-        # Tree styles
-        "tree.line": PRIMARY_ORANGE,
-        "tree.guide": "#e4a547",
-        "tree.folder": f"bold {PRIMARY_ORANGE}",
-        "tree.file": TEXT_BLACK,
-
-        # Table styles
-        "table.header": f"bold {PRIMARY_ORANGE}",  # Removed white background
-        "table.cell": TEXT_BLACK,
-        "table.row_odd": "default",               # Use terminal default background
-        "table.row_even": "default",              # Use terminal default background
-
-        # Agent and system styles
-        "agent.name": f"bold {PRIMARY_ORANGE}",
-        "agent.active": f"bold reverse {PRIMARY_ORANGE}",
-        "system.healthy": "bold #28a745",
-        "system.warning": "bold #ffc107",
-        "system.error": "bold #dc3545",
-
-        # Analysis specific styles
-        "analysis.metric": f"bold {PRIMARY_ORANGE}",
-        "analysis.result": TEXT_BLACK,
-        "analysis.significant": "bold #28a745",
-        "analysis.nonsignificant": "#aaaaaa"  # Lighter for dark backgrounds
-    })
+    RICH_THEME = Theme(
+        {
+            # Brand styles
+            "lobster.primary": f"bold {PRIMARY_ORANGE}",
+            "lobster.logo": f"bold {PRIMARY_ORANGE}",
+            "lobster.highlight": f"{PRIMARY_ORANGE}",
+            "lobster.accent": f"italic {PRIMARY_ORANGE}",
+            # Text hierarchy
+            "text.primary": TEXT_BLACK,
+            "text.secondary": "#cccccc",  # Lighter for dark backgrounds
+            "text.tertiary": "#aaaaaa",  # Lighter for dark backgrounds
+            "text.muted": "#888888",  # Lighter for dark backgrounds
+            "text.inverse": f"{BACKGROUND_WHITE} on {PRIMARY_ORANGE}",
+            # Status styles
+            "status.success": "bold #28a745",
+            "status.warning": "bold #ffc107",
+            "status.error": "bold #dc3545",
+            "status.info": "bold #17a2b8",
+            "status.loading": f"bold {PRIMARY_ORANGE}",
+            # Data styles
+            "data.header": f"bold {PRIMARY_ORANGE}",
+            "data.value": TEXT_BLACK,
+            "data.key": "#cccccc",  # Lighter for dark backgrounds
+            "data.number": "#66aaff",  # Brighter blue for dark backgrounds
+            "data.string": "#66ff66",  # Brighter green for dark backgrounds
+            "data.boolean": "#ffaa66",  # Brighter orange for dark backgrounds
+            # Interactive elements
+            "interactive.prompt": f"bold {PRIMARY_ORANGE}",
+            "interactive.choice": f"{PRIMARY_ORANGE}",
+            "interactive.selected": f"reverse {PRIMARY_ORANGE}",
+            "interactive.cursor": f"bold {PRIMARY_ORANGE}",
+            # Progress elements
+            "progress.bar": f"{PRIMARY_ORANGE}",
+            "progress.complete": f"bold {PRIMARY_ORANGE}",
+            "progress.percentage": f"bold {PRIMARY_ORANGE}",
+            "progress.data": "#aaaaaa",  # Lighter for dark backgrounds
+            # Panel and border styles
+            "panel.title": f"bold {PRIMARY_ORANGE}",
+            "panel.border": PRIMARY_ORANGE,
+            "border.primary": PRIMARY_ORANGE,
+            "border.secondary": "#e4a547",
+            "error": "#dc3545",
+            "success": "#28a745",
+            # Tree styles
+            "tree.line": PRIMARY_ORANGE,
+            "tree.guide": "#e4a547",
+            "tree.folder": f"bold {PRIMARY_ORANGE}",
+            "tree.file": TEXT_BLACK,
+            # Table styles
+            "table.header": f"bold {PRIMARY_ORANGE}",  # Removed white background
+            "table.cell": TEXT_BLACK,
+            "table.row_odd": "default",  # Use terminal default background
+            "table.row_even": "default",  # Use terminal default background
+            # Agent and system styles
+            "agent.name": f"bold {PRIMARY_ORANGE}",
+            "agent.active": f"bold reverse {PRIMARY_ORANGE}",
+            "system.healthy": "bold #28a745",
+            "system.warning": "bold #ffc107",
+            "system.error": "bold #dc3545",
+            # Analysis specific styles
+            "analysis.metric": f"bold {PRIMARY_ORANGE}",
+            "analysis.result": TEXT_BLACK,
+            "analysis.significant": "bold #28a745",
+            "analysis.nonsignificant": "#aaaaaa",  # Lighter for dark backgrounds
+        }
+    )
 
     # Box styles with orange branding
     BOXES = {
@@ -159,7 +147,7 @@ class LobsterTheme:
         "secondary": box.SIMPLE,
         "minimal": box.MINIMAL,
         "double": box.DOUBLE,
-        "heavy": box.HEAVY
+        "heavy": box.HEAVY,
     }
 
     @classmethod
@@ -180,7 +168,7 @@ class LobsterTheme:
         subtitle: Optional[str] = None,
         border_style: str = "border.primary",
         title_style: str = "panel.title",
-        box_style: str = "primary"
+        box_style: str = "primary",
     ) -> Panel:
         """Create a themed panel with orange branding."""
         return Panel(
@@ -190,7 +178,7 @@ class LobsterTheme:
             border_style=cls.get_color("border"),
             title_align="left",
             box=cls.BOXES[box_style],
-            padding=(1, 2)
+            padding=(1, 2),
         )
 
     @classmethod
@@ -211,7 +199,7 @@ class LobsterTheme:
             "warning": "status.warning",
             "error": "status.error",
             "info": "status.info",
-            "loading": "status.loading"
+            "loading": "status.loading",
         }
         return Text(text, style=style_map.get(status, "status.info"))
 
@@ -224,7 +212,7 @@ class LobsterTheme:
             "speed": "[progress.data]{task.speed}",
             "time_remaining": "[progress.data]{task.time_remaining}",
             "completed": f"[bold {cls.PRIMARY_ORANGE}]",
-            "remaining": "[#333333]"  # Darker for visibility on dark backgrounds
+            "remaining": "[#333333]",  # Darker for visibility on dark backgrounds
         }
 
     @classmethod
@@ -233,10 +221,10 @@ class LobsterTheme:
         return {
             "header_style": f"bold {cls.PRIMARY_ORANGE}",  # Removed white background
             "border_style": cls.PRIMARY_ORANGE,
-            "row_styles": ["default", "default"],          # Use terminal default backgrounds
+            "row_styles": ["default", "default"],  # Use terminal default backgrounds
             "show_header": True,
             "show_lines": True,
-            "box": cls.BOXES["primary"]
+            "box": cls.BOXES["primary"],
         }
 
     @classmethod
@@ -245,7 +233,7 @@ class LobsterTheme:
         return {
             "guide_style": cls.get_color("lobster_orange_dim"),
             "expanded": True,
-            "highlight": True
+            "highlight": True,
         }
 
     @classmethod
@@ -266,14 +254,17 @@ class LobsterTheme:
 DEFAULT_THEME = LobsterTheme.get_theme()
 DARK_THEME = LobsterTheme.get_environment_theme()
 
+
 # Quick access functions
 def get_lobster_color(name: str = "lobster_orange") -> str:
     """Quick access to lobster colors."""
     return LobsterTheme.get_color(name)
 
+
 def create_lobster_panel(content: Any, title: str = None) -> Panel:
     """Quick create orange-themed panel."""
     return LobsterTheme.create_panel(content, title=title)
+
 
 def create_lobster_title(text: str, emoji: str = "🦞") -> Text:
     """Quick create lobster-themed title."""

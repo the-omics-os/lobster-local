@@ -8,14 +8,14 @@ validation rules.
 
 from typing import Any, Dict, List, Optional
 
-from lobster.core.schemas.validation import FlexibleValidator
 from lobster.core.interfaces.validator import ValidationResult
+from lobster.core.schemas.validation import FlexibleValidator
 
 
 class TranscriptomicsSchema:
     """
     Schema definitions for transcriptomics data modalities.
-    
+
     This class provides schema definitions for both single-cell and bulk
     RNA-seq data with appropriate metadata requirements and validation rules.
     """
@@ -31,7 +31,6 @@ class TranscriptomicsSchema:
         return {
             "modality": "single_cell_rna_seq",
             "description": "Single-cell RNA sequencing data schema",
-            
             # obs: Observations (cells/samples) metadata - DataFrame with cells as rows
             # Contains per-cell metadata including experimental conditions, quality metrics,
             # cell annotations, and computational results (clustering, cell cycle, etc.)
@@ -45,26 +44,26 @@ class TranscriptomicsSchema:
             # CELL_005       CELL_005  Sample_B  Batch2 Treatment    T_cell     2089          9012            9.8      0     S
             "obs": {
                 "required": [],  # Columns that must be present - flexible to accommodate diverse datasets
-                "optional": [   # Commonly expected columns that may be present depending on analysis stage
-                    "cell_id",           # Unique cell identifier
-                    "sample_id",         # Sample origin
-                    "batch",             # Batch identifier
-                    "condition",         # Experimental condition
-                    "cell_type",         # Annotated cell type
-                    "n_genes",           # Number of genes detected
-                    "n_genes_by_counts", # Number of genes with counts > 0
-                    "total_counts",      # Total UMI counts
-                    "total_counts_mt",   # Total mitochondrial counts
-                    "pct_counts_mt",     # Mitochondrial percentage
-                    "pct_counts_ribo",   # Ribosomal percentage
-                    "doublet_score",     # Doublet detection score
-                    "is_doublet",        # Doublet classification
-                    "leiden",            # Leiden clustering
-                    "louvain",           # Louvain clustering
-                    "phase",             # Cell cycle phase
-                    "G1_score",          # G1 phase score
-                    "S_score",           # S phase score
-                    "G2M_score",         # G2/M phase score
+                "optional": [  # Commonly expected columns that may be present depending on analysis stage
+                    "cell_id",  # Unique cell identifier
+                    "sample_id",  # Sample origin
+                    "batch",  # Batch identifier
+                    "condition",  # Experimental condition
+                    "cell_type",  # Annotated cell type
+                    "n_genes",  # Number of genes detected
+                    "n_genes_by_counts",  # Number of genes with counts > 0
+                    "total_counts",  # Total UMI counts
+                    "total_counts_mt",  # Total mitochondrial counts
+                    "pct_counts_mt",  # Mitochondrial percentage
+                    "pct_counts_ribo",  # Ribosomal percentage
+                    "doublet_score",  # Doublet detection score
+                    "is_doublet",  # Doublet classification
+                    "leiden",  # Leiden clustering
+                    "louvain",  # Louvain clustering
+                    "phase",  # Cell cycle phase
+                    "G1_score",  # G1 phase score
+                    "S_score",  # S phase score
+                    "G2M_score",  # G2/M phase score
                 ],
                 "types": {
                     "cell_id": "string",
@@ -82,11 +81,10 @@ class TranscriptomicsSchema:
                     "is_doublet": "boolean",
                     "leiden": "categorical",
                     "louvain": "categorical",
-                    "phase": "categorical"
-                }
+                    "phase": "categorical",
+                },
             },
-            
-            # var: Variables (genes/features) metadata - DataFrame with genes as rows  
+            # var: Variables (genes/features) metadata - DataFrame with genes as rows
             # Contains per-gene metadata including gene identifiers, genomic coordinates,
             # gene annotations, and computational metrics (expression stats, variability)
             #
@@ -98,30 +96,30 @@ class TranscriptomicsSchema:
             # ENSG00000186092  ENSG00000186092       OR4F5  olfactory receptor family 4 subfamily F          1  protein_coding        1          1.0           False False False
             "var": {
                 "required": [],  # Columns that must be present - flexible for different gene annotation levels
-                "optional": [   # Standard gene metadata columns that enhance interpretability
-                    "gene_id",           # Ensembl ID (primary key)
-                    "gene_symbol",       # HGNC symbol
-                    "gene_name",         # Full gene name
-                    "chromosome",        # Genomic location
-                    "start",             # Gene start position
-                    "end",               # Gene end position
-                    "strand",            # Genomic strand
-                    "biotype",           # Gene biotype
-                    "n_cells",           # Number of cells expressing
-                    "n_cells_by_counts", # Number of cells with counts > 0
-                    "mean_counts",       # Mean expression across cells
-                    "pct_dropout_by_counts", # Dropout percentage
-                    "total_counts",      # Total counts across all cells
-                    "highly_variable",   # Highly variable gene flag
-                    "means",             # Mean expression (scanpy)
-                    "dispersions",       # Dispersion values
+                "optional": [  # Standard gene metadata columns that enhance interpretability
+                    "gene_id",  # Ensembl ID (primary key)
+                    "gene_symbol",  # HGNC symbol
+                    "gene_name",  # Full gene name
+                    "chromosome",  # Genomic location
+                    "start",  # Gene start position
+                    "end",  # Gene end position
+                    "strand",  # Genomic strand
+                    "biotype",  # Gene biotype
+                    "n_cells",  # Number of cells expressing
+                    "n_cells_by_counts",  # Number of cells with counts > 0
+                    "mean_counts",  # Mean expression across cells
+                    "pct_dropout_by_counts",  # Dropout percentage
+                    "total_counts",  # Total counts across all cells
+                    "highly_variable",  # Highly variable gene flag
+                    "means",  # Mean expression (scanpy)
+                    "dispersions",  # Dispersion values
                     "dispersions_norm",  # Normalized dispersions
-                    "mt",                # Mitochondrial gene flag
-                    "ribo",              # Ribosomal gene flag
+                    "mt",  # Mitochondrial gene flag
+                    "ribo",  # Ribosomal gene flag
                 ],
-                "types": {      # Expected data types for validation and processing
+                "types": {  # Expected data types for validation and processing
                     "gene_id": "string",
-                    "gene_symbol": "string", 
+                    "gene_symbol": "string",
                     "gene_name": "string",
                     "chromosome": "string",
                     "start": "numeric",
@@ -138,16 +136,15 @@ class TranscriptomicsSchema:
                     "dispersions": "numeric",
                     "dispersions_norm": "numeric",
                     "mt": "boolean",
-                    "ribo": "boolean"
-                }
+                    "ribo": "boolean",
+                },
             },
-            
             # layers: Alternative expression matrices with same dimensions as X
             # Store different transformations/versions of the count data (raw, normalized, scaled)
             # Each layer is a 2D matrix: cells x genes, same shape as adata.X
             #
             # Example layers (5 cells x 4 genes):
-            # 
+            #
             # layers['counts'] (raw UMI counts):
             #           BRCA2  TP53  TTN  OR4F5
             # CELL_001     12    28    0      0
@@ -165,15 +162,14 @@ class TranscriptomicsSchema:
             # CELL_005   2.44  2.0   0.11  0.0
             "layers": {
                 "required": [],  # No layers are strictly required (main data stored in adata.X)
-                "optional": [   # Common data transformations stored as separate matrices
-                    "counts",            # Raw count data
-                    "normalized",        # Normalized counts
-                    "log1p",            # Log-transformed normalized counts
-                    "scaled",           # Z-scored expression values
-                    "imputed"           # Imputed values
-                ]
+                "optional": [  # Common data transformations stored as separate matrices
+                    "counts",  # Raw count data
+                    "normalized",  # Normalized counts
+                    "log1p",  # Log-transformed normalized counts
+                    "scaled",  # Z-scored expression values
+                    "imputed",  # Imputed values
+                ],
             },
-            
             # obsm: Observations (cells) multidimensional annotations - matrices/arrays per cell
             # Stores per-cell multidimensional data like embeddings, coordinates, or feature sets
             # Each entry is a 2D array: cells x dimensions (e.g., cells x PC components)
@@ -197,15 +193,14 @@ class TranscriptomicsSchema:
             # CELL_005   0.6    1.2
             "obsm": {
                 "required": [],  # No embeddings are required (generated during analysis)
-                "optional": [   # Common dimensionality reduction and embedding results
-                    "X_pca",            # PCA coordinates
-                    "X_umap",           # UMAP embedding
-                    "X_tsne",           # t-SNE embedding
-                    "X_diffmap",        # Diffusion map
-                    "X_draw_graph_fa"   # Force-directed layout
-                ]
+                "optional": [  # Common dimensionality reduction and embedding results
+                    "X_pca",  # PCA coordinates
+                    "X_umap",  # UMAP embedding
+                    "X_tsne",  # t-SNE embedding
+                    "X_diffmap",  # Diffusion map
+                    "X_draw_graph_fa",  # Force-directed layout
+                ],
             },
-            
             # uns: Unstructured annotations - global metadata and analysis parameters
             # Stores dataset-level information, analysis parameters, and complex results
             # Contains nested dictionaries, arrays, or objects that don't fit obs/var structure
@@ -232,78 +227,73 @@ class TranscriptomicsSchema:
             # }
             "uns": {
                 "required": [],  # No global metadata is strictly required
-                "optional": [   # Common analysis metadata and computational results
+                "optional": [  # Common analysis metadata and computational results
                     # Analysis-related metadata
-                    "log1p",            # Log transformation parameters
-                    "hvg",              # Highly variable genes info
-                    "pca",              # PCA parameters and results
-                    "neighbors",        # Nearest neighbors graph
-                    "umap",             # UMAP parameters
-                    "tsne",             # t-SNE parameters
-                    "leiden",           # Leiden clustering parameters
-                    "louvain",          # Louvain clustering parameters
-                    "rank_genes_groups", # Differential expression results
-                    
+                    "log1p",  # Log transformation parameters
+                    "hvg",  # Highly variable genes info
+                    "pca",  # PCA parameters and results
+                    "neighbors",  # Nearest neighbors graph
+                    "umap",  # UMAP parameters
+                    "tsne",  # t-SNE parameters
+                    "leiden",  # Leiden clustering parameters
+                    "louvain",  # Louvain clustering parameters
+                    "rank_genes_groups",  # Differential expression results
                     # Dataset provenance and metadata
-                    "provenance",       # General provenance tracking
-                    
+                    "provenance",  # General provenance tracking
                     # GEO metadata fields (matching _extract_metadata output exactly)
                     "contact_address",  # Contact address from GEO
-                    "contact_city",     # Contact city from GEO  
+                    "contact_city",  # Contact city from GEO
                     "contact_country",  # Contact country from GEO
-                    "contact_department", # Contact department
-                    "contact_email",    # Contact email address
-                    "contact_institute", # Contact institution from GEO
-                    "contact_name",     # Contact name from GEO
-                    "contact_phone",    # Contact phone number
-                    "contact_zip/postal_code", # Contact ZIP/postal code from GEO (exact field name)
-                    "contributor",      # List of contributors from GEO
-                    "geo_accession",    # GEO accession number (e.g., GSE194247)
-                    "last_update_date", # Last update date from GEO
-                    "overall_design",   # Overall experimental design from GEO
-                    "platform_id",      # Platform ID from GEO (e.g., GPL24676)
-                    "platform_taxid",   # Platform taxonomy ID from GEO
-                    "platforms",        # Platforms dictionary from GEO
-                    "pubmed_id",        # PubMed ID from GEO
-                    "relation",         # Relation field from GEO (BioProject links, etc.)
-                    "sample_id",        # List of sample IDs from GEO
-                    "sample_taxid",     # Sample taxonomy ID from GEO
-                    "samples",          # Complete samples dictionary from GEO
-                    "status",           # Publication status from GEO
+                    "contact_department",  # Contact department
+                    "contact_email",  # Contact email address
+                    "contact_institute",  # Contact institution from GEO
+                    "contact_name",  # Contact name from GEO
+                    "contact_phone",  # Contact phone number
+                    "contact_zip/postal_code",  # Contact ZIP/postal code from GEO (exact field name)
+                    "contributor",  # List of contributors from GEO
+                    "geo_accession",  # GEO accession number (e.g., GSE194247)
+                    "last_update_date",  # Last update date from GEO
+                    "overall_design",  # Overall experimental design from GEO
+                    "platform_id",  # Platform ID from GEO (e.g., GPL24676)
+                    "platform_taxid",  # Platform taxonomy ID from GEO
+                    "platforms",  # Platforms dictionary from GEO
+                    "pubmed_id",  # PubMed ID from GEO
+                    "relation",  # Relation field from GEO (BioProject links, etc.)
+                    "sample_id",  # List of sample IDs from GEO
+                    "sample_taxid",  # Sample taxonomy ID from GEO
+                    "samples",  # Complete samples dictionary from GEO
+                    "status",  # Publication status from GEO
                     "submission_date",  # Submission date from GEO
-                    "summary",          # Dataset summary from GEO
-                    "supplementary_file", # Main supplementary file URL from GEO
-                    "title",            # Dataset title from GEO
-                    "type",             # Dataset type from GEO (e.g., "Expression profiling by high throughput sequencing")
-                    "web_link",         # Web link or URL related to the dataset
-                    
+                    "summary",  # Dataset summary from GEO
+                    "supplementary_file",  # Main supplementary file URL from GEO
+                    "title",  # Dataset title from GEO
+                    "type",  # Dataset type from GEO (e.g., "Expression profiling by high throughput sequencing")
+                    "web_link",  # Web link or URL related to the dataset
                     # Sample-level metadata fields (from samples dictionary)
-                    "channel_count",    # Number of channels per sample
-                    "characteristics_ch1", # Sample characteristics from GEO
+                    "channel_count",  # Number of channels per sample
+                    "characteristics_ch1",  # Sample characteristics from GEO
                     "data_processing",  # Data processing steps from sample metadata
-                    "data_row_count",   # Number of data rows per sample
-                    "extract_protocol_ch1", # RNA extraction protocol from sample metadata
-                    "growth_protocol_ch1", # Growth/culture protocol from sample metadata
-                    "instrument_model", # Sequencing instrument model from sample metadata
-                    "library_selection", # Library selection method from sample metadata
-                    "library_source",   # Library source type from sample metadata
-                    "library_strategy", # Library strategy from sample metadata (RNA-Seq, etc.)
-                    "molecule_ch1",     # Molecule type from sample metadata (polyA RNA, etc.)
-                    "organism_ch1",     # Organism from sample metadata
-                    "series_id",        # Series ID from sample metadata
+                    "data_row_count",  # Number of data rows per sample
+                    "extract_protocol_ch1",  # RNA extraction protocol from sample metadata
+                    "growth_protocol_ch1",  # Growth/culture protocol from sample metadata
+                    "instrument_model",  # Sequencing instrument model from sample metadata
+                    "library_selection",  # Library selection method from sample metadata
+                    "library_source",  # Library source type from sample metadata
+                    "library_strategy",  # Library strategy from sample metadata (RNA-Seq, etc.)
+                    "molecule_ch1",  # Molecule type from sample metadata (polyA RNA, etc.)
+                    "organism_ch1",  # Organism from sample metadata
+                    "series_id",  # Series ID from sample metadata
                     "source_name_ch1",  # Source name from sample metadata
-                    "supplementary_file_1", # Sample-level supplementary files
-                    "taxid_ch1",        # Taxonomy ID from sample metadata
-                    "treatment_protocol_ch1", # Treatment protocol from sample metadata
-                    
+                    "supplementary_file_1",  # Sample-level supplementary files
+                    "taxid_ch1",  # Taxonomy ID from sample metadata
+                    "treatment_protocol_ch1",  # Treatment protocol from sample metadata
                     # Additional processing and quality information
                     "processing_info",  # Data processing pipeline info
                     "quality_metrics",  # Dataset-wide quality metrics
-                    "data_source",      # Source of the data (GEO, SRA, etc.)
-                ]
-            }
+                    "data_source",  # Source of the data (GEO, SRA, etc.)
+                ],
+            },
         }
-        
 
     @staticmethod
     def get_bulk_rna_seq_schema() -> Dict[str, Any]:
@@ -316,7 +306,6 @@ class TranscriptomicsSchema:
         return {
             "modality": "bulk_rna_seq",
             "description": "Bulk RNA sequencing data schema",
-            
             # obs: Observations (samples) metadata - DataFrame with samples as rows
             # Contains per-sample metadata including experimental design, technical metrics,
             # and quality control measurements specific to bulk RNA-seq experiments
@@ -329,25 +318,25 @@ class TranscriptomicsSchema:
             # Sample_4    Sample_4 Treatment     Drug1  Batch2      Rep2    Brain    Human    15123      46000000            7.8          0.84
             "obs": {
                 "required": [],  # Columns that must be present - flexible for diverse experimental designs
-                "optional": [   # Standard sample metadata for bulk RNA-seq experiments
-                    "sample_id",         # Unique sample identifier
-                    "condition",         # Experimental condition
-                    "treatment",         # Treatment information
-                    "batch",             # Sequencing batch
-                    "replicate",         # Biological replicate
-                    "tissue",            # Tissue type
-                    "organism",          # Organism
-                    "n_genes",           # Number of genes detected
-                    "total_counts",      # Total read counts
-                    "library_size",      # Library size
-                    "rna_integrity",     # RNA integrity number (RIN)
-                    "mapping_rate",      # Alignment rate
+                "optional": [  # Standard sample metadata for bulk RNA-seq experiments
+                    "sample_id",  # Unique sample identifier
+                    "condition",  # Experimental condition
+                    "treatment",  # Treatment information
+                    "batch",  # Sequencing batch
+                    "replicate",  # Biological replicate
+                    "tissue",  # Tissue type
+                    "organism",  # Organism
+                    "n_genes",  # Number of genes detected
+                    "total_counts",  # Total read counts
+                    "library_size",  # Library size
+                    "rna_integrity",  # RNA integrity number (RIN)
+                    "mapping_rate",  # Alignment rate
                     "duplication_rate",  # PCR duplication rate
                 ],
-                "types": {      # Expected data types for validation and processing
+                "types": {  # Expected data types for validation and processing
                     "sample_id": "string",
                     "condition": "categorical",
-                    "treatment": "categorical", 
+                    "treatment": "categorical",
                     "batch": "string",
                     "replicate": "string",
                     "tissue": "categorical",
@@ -357,13 +346,12 @@ class TranscriptomicsSchema:
                     "library_size": "numeric",
                     "rna_integrity": "numeric",
                     "mapping_rate": "numeric",
-                    "duplication_rate": "numeric"
-                }
+                    "duplication_rate": "numeric",
+                },
             },
-            
-            # var: Variables (genes/features) metadata - DataFrame with genes as rows  
+            # var: Variables (genes/features) metadata - DataFrame with genes as rows
             # Contains per-gene metadata including gene identifiers, genomic coordinates,
-            # gene annotations, and computational metrics (expression stats, variability)  
+            # gene annotations, and computational metrics (expression stats, variability)
             #
             # Example var DataFrame:
             #                      gene_id gene_symbol                       gene_name chromosome  length  gc_content  n_samples  mean_counts highly_variable    mt  ribo
@@ -373,28 +361,28 @@ class TranscriptomicsSchema:
             # ENSG00000186092  ENSG00000186092       OR4F5  olfactory receptor family 4          1    2559        0.40          1         45.0           False False False
             "var": {
                 "required": [],  # Columns that must be present - flexible for different gene annotation levels
-                "optional": [   # Standard gene metadata columns that enhance interpretability
-                    "gene_id",           # Ensembl ID
-                    "gene_symbol",       # HGNC symbol
-                    "gene_name",         # Full gene name
-                    "chromosome",        # Genomic location
-                    "start",             # Gene start position
-                    "end",               # Gene end position
-                    "strand",            # Genomic strand
-                    "biotype",           # Gene biotype
-                    "length",            # Gene/transcript length
-                    "gc_content",        # GC content
-                    "n_samples",         # Number of samples expressing
-                    "mean_counts",       # Mean expression across samples
-                    "total_counts",      # Total counts across samples
-                    "highly_variable",   # Highly variable gene flag
-                    "mt",                # Mitochondrial gene flag
-                    "ribo"               # Ribosomal gene flag
+                "optional": [  # Standard gene metadata columns that enhance interpretability
+                    "gene_id",  # Ensembl ID
+                    "gene_symbol",  # HGNC symbol
+                    "gene_name",  # Full gene name
+                    "chromosome",  # Genomic location
+                    "start",  # Gene start position
+                    "end",  # Gene end position
+                    "strand",  # Genomic strand
+                    "biotype",  # Gene biotype
+                    "length",  # Gene/transcript length
+                    "gc_content",  # GC content
+                    "n_samples",  # Number of samples expressing
+                    "mean_counts",  # Mean expression across samples
+                    "total_counts",  # Total counts across samples
+                    "highly_variable",  # Highly variable gene flag
+                    "mt",  # Mitochondrial gene flag
+                    "ribo",  # Ribosomal gene flag
                 ],
-                "types": {      # Expected data types for validation and processing
+                "types": {  # Expected data types for validation and processing
                     "gene_id": "string",
                     "gene_symbol": "string",
-                    "gene_name": "string", 
+                    "gene_name": "string",
                     "chromosome": "string",
                     "start": "numeric",
                     "end": "numeric",
@@ -407,10 +395,9 @@ class TranscriptomicsSchema:
                     "total_counts": "numeric",
                     "highly_variable": "boolean",
                     "mt": "boolean",
-                    "ribo": "boolean"
-                }
+                    "ribo": "boolean",
+                },
             },
-            
             # layers: Alternative expression matrices with same dimensions as X
             # Store different transformations/versions of the count data (raw, normalized, scaled)
             # Each layer is a 2D matrix: samples x genes, same shape as adata.X
@@ -439,18 +426,17 @@ class TranscriptomicsSchema:
             # Sample_4  126.7  219.4  47.1   4.6
             "layers": {
                 "required": [],  # No layers are strictly required (main data stored in adata.X)
-                "optional": [   # Common data transformations for bulk RNA-seq analysis
-                    "counts",            # Raw count data
-                    "tpm",               # Transcripts per million
-                    "fpkm",              # Fragments per kilobase per million
-                    "rpkm",              # Reads per kilobase per million
-                    "normalized",        # Normalized counts (DESeq2, etc.)
-                    "log_normalized",    # Log-normalized counts
-                    "vst",               # Variance stabilized transformation
-                    "rlog"               # Regularized log transformation
-                ]
+                "optional": [  # Common data transformations for bulk RNA-seq analysis
+                    "counts",  # Raw count data
+                    "tpm",  # Transcripts per million
+                    "fpkm",  # Fragments per kilobase per million
+                    "rpkm",  # Reads per kilobase per million
+                    "normalized",  # Normalized counts (DESeq2, etc.)
+                    "log_normalized",  # Log-normalized counts
+                    "vst",  # Variance stabilized transformation
+                    "rlog",  # Regularized log transformation
+                ],
             },
-            
             # obsm: Observations (samples) multidimensional annotations - matrices/arrays per sample
             # Stores per-sample multidimensional data like embeddings, coordinates, or feature sets
             # Each entry is a 2D array: samples x dimensions (e.g., samples x PC components)
@@ -472,13 +458,12 @@ class TranscriptomicsSchema:
             # Sample_4   3.9   -3.1
             "obsm": {
                 "required": [],  # No embeddings are required (generated during analysis)
-                "optional": [   # Common dimensionality reduction results for sample visualization
-                    "X_pca",             # PCA coordinates
-                    "X_tsne",            # t-SNE embedding
-                    "X_umap"             # UMAP embedding
-                ]
+                "optional": [  # Common dimensionality reduction results for sample visualization
+                    "X_pca",  # PCA coordinates
+                    "X_tsne",  # t-SNE embedding
+                    "X_umap",  # UMAP embedding
+                ],
             },
-            
             # uns: Unstructured annotations - global metadata and analysis parameters
             # Stores dataset-level information, analysis parameters, and complex results
             # Contains nested dictionaries, arrays, or objects that don't fit obs/var structure
@@ -505,34 +490,33 @@ class TranscriptomicsSchema:
             # }
             "uns": {
                 "required": [],  # No global metadata is strictly required
-                "optional": [   # Common analysis metadata and computational results for bulk RNA-seq
-                    "log1p",             # Log transformation parameters
-                    "hvg",               # Highly variable genes info
-                    "pca",               # PCA parameters and results
-                    "differential_expression", # DE analysis results
+                "optional": [  # Common analysis metadata and computational results for bulk RNA-seq
+                    "log1p",  # Log transformation parameters
+                    "hvg",  # Highly variable genes info
+                    "pca",  # PCA parameters and results
+                    "differential_expression",  # DE analysis results
                     "pathway_analysis",  # Pathway enrichment results
-                    "provenance",        # Provenance tracking
-                    
+                    "provenance",  # Provenance tracking
                     # Contact and web metadata fields
-                    "contact_address",   # Contact address
-                    "contact_city",      # Contact city
-                    "contact_country",   # Contact country
-                    "contact_department", # Contact department
-                    "contact_email",     # Contact email address
-                    "contact_institute", # Contact institution
-                    "contact_name",      # Contact name
-                    "contact_phone",     # Contact phone number
-                    "contact_zip/postal_code", # Contact ZIP/postal code
-                    "web_link"           # Web link or URL related to the dataset
-                ]
-            }
+                    "contact_address",  # Contact address
+                    "contact_city",  # Contact city
+                    "contact_country",  # Contact country
+                    "contact_department",  # Contact department
+                    "contact_email",  # Contact email address
+                    "contact_institute",  # Contact institution
+                    "contact_name",  # Contact name
+                    "contact_phone",  # Contact phone number
+                    "contact_zip/postal_code",  # Contact ZIP/postal code
+                    "web_link",  # Web link or URL related to the dataset
+                ],
+            },
         }
 
     @staticmethod
     def create_validator(
         schema_type: str = "single_cell",
         strict: bool = False,
-        ignore_warnings: Optional[List[str]] = None
+        ignore_warnings: Optional[List[str]] = None,
     ) -> FlexibleValidator:
         """
         Create a validator for transcriptomics data.
@@ -556,25 +540,27 @@ class TranscriptomicsSchema:
             raise ValueError(f"Unknown schema type: {schema_type}")
 
         ignore_set = set(ignore_warnings) if ignore_warnings else set()
-        
+
         # Add default ignored warnings for transcriptomics
-        ignore_set.update([
-            "Unexpected obs columns",
-            "Unexpected var columns",
-            "missing values",
-            "Very sparse data"
-        ])
+        ignore_set.update(
+            [
+                "Unexpected obs columns",
+                "Unexpected var columns",
+                "missing values",
+                "Very sparse data",
+            ]
+        )
 
         validator = FlexibleValidator(
             schema=schema,
             name=f"TranscriptomicsValidator_{schema_type}",
-            ignore_warnings=ignore_set
+            ignore_warnings=ignore_set,
         )
 
         # Add transcriptomics-specific validation rules
         validator.add_custom_rule("check_gene_symbols", _validate_gene_symbols)
         validator.add_custom_rule("check_count_data", _validate_count_data)
-        
+
         if schema_type == "single_cell":
             validator.add_custom_rule("check_cell_metrics", _validate_cell_metrics)
         elif schema_type == "bulk":
@@ -583,7 +569,9 @@ class TranscriptomicsSchema:
         return validator
 
     @staticmethod
-    def get_recommended_qc_thresholds(schema_type: str = "single_cell") -> Dict[str, Any]:
+    def get_recommended_qc_thresholds(
+        schema_type: str = "single_cell",
+    ) -> Dict[str, Any]:
         """
         Get recommended quality control thresholds.
 
@@ -602,7 +590,7 @@ class TranscriptomicsSchema:
                 "max_pct_ribo": 50.0,
                 "min_total_counts": 1000,
                 "max_total_counts": 50000,
-                "doublet_score_threshold": 0.3
+                "doublet_score_threshold": 0.3,
             }
         elif schema_type == "bulk":
             return {
@@ -611,114 +599,119 @@ class TranscriptomicsSchema:
                 "min_total_counts": 1000000,
                 "min_mapping_rate": 0.7,
                 "max_duplication_rate": 0.3,
-                "min_rna_integrity": 6.0
+                "min_rna_integrity": 6.0,
             }
         else:
             raise ValueError(f"Unknown schema type: {schema_type}")
 
 
-def _validate_gene_symbols(adata) -> 'ValidationResult':
+def _validate_gene_symbols(adata) -> "ValidationResult":
     """Validate gene symbol format and uniqueness."""
     from lobster.core.interfaces.validator import ValidationResult
-    
+
     result = ValidationResult()
-    
+
     # Check for gene symbols in var
-    if 'gene_symbol' in adata.var.columns:
-        symbols = adata.var['gene_symbol']
-        
+    if "gene_symbol" in adata.var.columns:
+        symbols = adata.var["gene_symbol"]
+
         # Check for duplicates
         duplicates = symbols.duplicated().sum()
         if duplicates > 0:
             result.add_warning(f"{duplicates} duplicate gene symbols found")
-        
+
         # Check for missing symbols
         missing = symbols.isna().sum()
         if missing > 0:
             result.add_warning(f"{missing} missing gene symbols")
-        
+
         # Basic format check (starts with letter)
-        if symbols.dtype == 'object':
-            invalid_format = ~symbols.str.match(r'^[A-Za-z]', na=False).sum()
+        if symbols.dtype == "object":
+            invalid_format = ~symbols.str.match(r"^[A-Za-z]", na=False).sum()
             if invalid_format > 0:
                 result.add_warning(f"{invalid_format} gene symbols with unusual format")
-    
+
     return result
 
 
-def _validate_count_data(adata) -> 'ValidationResult':
+def _validate_count_data(adata) -> "ValidationResult":
     """Validate count data characteristics."""
-    from lobster.core.interfaces.validator import ValidationResult
     import numpy as np
-    
+
+    from lobster.core.interfaces.validator import ValidationResult
+
     result = ValidationResult()
-    
+
     # Check for negative values
-    if hasattr(adata.X, 'min'):
+    if hasattr(adata.X, "min"):
         min_val = adata.X.min()
         if min_val < 0:
-            result.add_warning(f"Negative values found in count matrix (min: {min_val})")
-    
+            result.add_warning(
+                f"Negative values found in count matrix (min: {min_val})"
+            )
+
     # Check for non-integer values in what should be count data
-    if hasattr(adata.X, 'dtype'):
+    if hasattr(adata.X, "dtype"):
         if np.issubdtype(adata.X.dtype, np.floating):
             # Check if values are effectively integers
-            if hasattr(adata.X, 'data'):  # Sparse matrix
+            if hasattr(adata.X, "data"):  # Sparse matrix
                 non_int_values = (adata.X.data % 1 != 0).sum()
             else:  # Dense matrix
                 non_int_values = (adata.X % 1 != 0).sum()
-            
+
             if non_int_values > 0:
-                result.add_info(f"Found {non_int_values} non-integer values (may be normalized data)")
-    
+                result.add_info(
+                    f"Found {non_int_values} non-integer values (may be normalized data)"
+                )
+
     return result
 
 
-def _validate_cell_metrics(adata) -> 'ValidationResult':
+def _validate_cell_metrics(adata) -> "ValidationResult":
     """Validate single-cell specific metrics."""
     from lobster.core.interfaces.validator import ValidationResult
-    
+
     result = ValidationResult()
-    
+
     # Check mitochondrial percentage if available
-    if 'pct_counts_mt' in adata.obs.columns:
-        mt_pct = adata.obs['pct_counts_mt']
+    if "pct_counts_mt" in adata.obs.columns:
+        mt_pct = adata.obs["pct_counts_mt"]
         high_mt = (mt_pct > 20).sum()
         if high_mt > 0:
             result.add_warning(f"{high_mt} cells with >20% mitochondrial reads")
-    
+
     # Check for very low or high gene counts
-    if 'n_genes' in adata.obs.columns:
-        n_genes = adata.obs['n_genes']
+    if "n_genes" in adata.obs.columns:
+        n_genes = adata.obs["n_genes"]
         low_genes = (n_genes < 200).sum()
         high_genes = (n_genes > 5000).sum()
-        
+
         if low_genes > 0:
             result.add_warning(f"{low_genes} cells with <200 genes detected")
         if high_genes > 0:
             result.add_warning(f"{high_genes} cells with >5000 genes detected")
-    
+
     return result
 
 
-def _validate_sample_metrics(adata) -> 'ValidationResult':
+def _validate_sample_metrics(adata) -> "ValidationResult":
     """Validate bulk RNA-seq specific metrics."""
     from lobster.core.interfaces.validator import ValidationResult
 
     result = ValidationResult()
-    
+
     # Check mapping rate if available
-    if 'mapping_rate' in adata.obs.columns:
-        mapping_rates = adata.obs['mapping_rate']
+    if "mapping_rate" in adata.obs.columns:
+        mapping_rates = adata.obs["mapping_rate"]
         low_mapping = (mapping_rates < 0.7).sum()
         if low_mapping > 0:
             result.add_warning(f"{low_mapping} samples with <70% mapping rate")
-    
+
     # Check duplication rate if available
-    if 'duplication_rate' in adata.obs.columns:
-        dup_rates = adata.obs['duplication_rate']
+    if "duplication_rate" in adata.obs.columns:
+        dup_rates = adata.obs["duplication_rate"]
         high_dup = (dup_rates > 0.3).sum()
         if high_dup > 0:
             result.add_warning(f"{high_dup} samples with >30% duplication rate")
-    
+
     return result

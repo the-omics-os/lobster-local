@@ -5,15 +5,17 @@
 # langgraph_supervisor package for hierarchical multi-agent coordination.
 # """
 
-from typing import Optional, List, Dict, Any
-from datetime import date
 import platform
+from datetime import date
+from typing import Any, Dict, List, Optional
+
 import psutil
-from lobster.utils.logger import get_logger
-from lobster.config.supervisor_config import SupervisorConfig
+
 from lobster.config.agent_capabilities import AgentCapabilityExtractor
 from lobster.config.agent_registry import get_agent_registry_config, get_worker_agents
+from lobster.config.supervisor_config import SupervisorConfig
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -21,7 +23,7 @@ logger = get_logger(__name__)
 def create_supervisor_prompt(
     data_manager: DataManagerV2,
     config: Optional[SupervisorConfig] = None,
-    active_agents: Optional[List[str]] = None
+    active_agents: Optional[List[str]] = None,
 ) -> str:
     """Create dynamic supervisor prompt based on system state and configuration.
 
@@ -122,8 +124,10 @@ def _build_agents_section(active_agents: List[str], config: SupervisorConfig) ->
         if agent_config:
             # Get capability summary if enabled
             if config.show_agent_capabilities and config.include_agent_tools:
-                capability_summary = AgentCapabilityExtractor.get_agent_capability_summary(
-                    agent_name, max_tools=config.max_tools_per_agent
+                capability_summary = (
+                    AgentCapabilityExtractor.get_agent_capability_summary(
+                        agent_name, max_tools=config.max_tools_per_agent
+                    )
                 )
                 section += f"- {capability_summary}\n"
             else:
@@ -133,7 +137,9 @@ def _build_agents_section(active_agents: List[str], config: SupervisorConfig) ->
     return section.rstrip()
 
 
-def _build_decision_framework(active_agents: List[str], config: SupervisorConfig) -> str:
+def _build_decision_framework(
+    active_agents: List[str], config: SupervisorConfig
+) -> str:
     """Build decision framework with agent-specific delegation rules.
 
     Args:
@@ -175,29 +181,26 @@ def _get_agent_delegation_rules(agent_name: str, agent_config) -> str:
     """
     # Define delegation rules for each agent based on their purpose
     delegation_rules = {
-        'research_agent': """       - Searching scientific literature (PubMed, bioRxiv, medRxiv).
+        "research_agent": """       - Searching scientific literature (PubMed, bioRxiv, medRxiv).
        - Direct GEO DataSets search (e.g., "find single-cell RNA-seq datasets for human T cells").
        - Finding datasets associated with publications (DOI/PMID to GEO/SRA discovery).
        - Discovering marker genes from literature for specific cell types.
        - Finding related studies or publications on specific topics.
        - Extracting publication metadata and bibliographic information.
        - Applying filters to GEO searches (organism, date range, platform, supplementary file types).""",
-
-        'data_expert_agent': """       - Use the list_available_modalities tool to check loaded data before proceeding to inform the data expert.
+        "data_expert_agent": """       - Use the list_available_modalities tool to check loaded data before proceeding to inform the data expert.
        - Questions about data structures like AnnData, Seurat, or Scanpy objects.
        - Fetching GEO metadata to preview datasets (always before any download).
        - Downloading datasets (only after metadata preview and explicit user confirmation).
        - Loading raw count matrices (e.g., CSV, H5AD).
        - Managing or listing datasets already loaded.
        - Providing summaries of available data.""",
-
-        'method_expert_agent': """       - Extracting computational parameters from specific publications (identified by research_agent).
+        "method_expert_agent": """       - Extracting computational parameters from specific publications (identified by research_agent).
        - Analyzing methodologies across multiple studies for parameter consensus.
        - Finding protocol information for specific bioinformatics techniques.
        - Providing parameter recommendations for loaded modalities.
        - Comparative analysis of computational approaches.""",
-
-        'singlecell_expert_agent': """       - Questions about single-cell data analysis.
+        "singlecell_expert_agent": """       - Questions about single-cell data analysis.
        - Performing QC on single-cell datasets (cell/gene filtering, mitochondrial/ribosomal content checks).
        - Detecting/removing doublets in single-cell data.
        - Normalizing single-cell counts (UMI normalization).
@@ -207,15 +210,13 @@ def _get_agent_delegation_rules(agent_name: str, agent_config) -> str:
        - Integrating single-cell datasets with batch correction methods.
        - Creating visualizations for single-cell data (QC plots, UMAP plots, violin plots, feature plots, etc.).
        - Any analysis involving individual cells and cellular heterogeneity.""",
-
-        'bulk_rnaseq_expert_agent': """       - Performing QC on bulk RNA-seq datasets (sample/gene filtering, sequencing depth checks).
+        "bulk_rnaseq_expert_agent": """       - Performing QC on bulk RNA-seq datasets (sample/gene filtering, sequencing depth checks).
        - Normalizing bulk RNA-seq counts (CPM, TPM normalization).
        - Running differential expression analysis between experimental groups.
        - Performing pathway enrichment analysis (GO, KEGG).
        - Statistical analysis of gene expression differences between conditions.
        - Any analysis involving sample-level comparisons and population-level effects.""",
-
-        'ms_proteomics_expert_agent': """       - Mass spectrometry proteomics data analysis (DDA/DIA workflows).
+        "ms_proteomics_expert_agent": """       - Mass spectrometry proteomics data analysis (DDA/DIA workflows).
        - Database search artifact removal and protein inference.
        - Missing value pattern analysis (MNAR vs MCAR).
        - Intensity normalization (TMM, quantile, VSN).
@@ -223,27 +224,27 @@ def _get_agent_delegation_rules(agent_name: str, agent_config) -> str:
        - Batch effect detection and correction in proteomics data.
        - Statistical testing with multiple correction.
        - Pathway enrichment analysis for proteomics.""",
-
-        'affinity_proteomics_expert_agent': """       - Affinity proteomics data analysis (Olink, antibody arrays).
+        "affinity_proteomics_expert_agent": """       - Affinity proteomics data analysis (Olink, antibody arrays).
        - NPX value processing and normalization.
        - Targeted protein panel analysis.
        - Antibody validation metrics.
        - Coefficient of variation analysis.
        - Panel comparison and harmonization.
        - Lower missing value handling (<30%).""",
-
-        'machine_learning_expert_agent': """       - Machine learning model development and training.
+        "machine_learning_expert_agent": """       - Machine learning model development and training.
        - Feature engineering and selection.
        - Data transformation for downstream ML tasks.
        - Model evaluation and validation.
        - Cross-validation and hyperparameter tuning.
        - scVI embedding training for single-cell data.
        - Predictive modeling and classification.
-       - Dimensionality reduction for ML applications."""
+       - Dimensionality reduction for ML applications.""",
     }
 
     # Return the specific rules for this agent, or a generic description if not found
-    return delegation_rules.get(agent_name, f"       - Tasks related to {agent_config.description}")
+    return delegation_rules.get(
+        agent_name, f"       - Tasks related to {agent_config.description}"
+    )
 
 
 def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) -> str:
@@ -259,7 +260,7 @@ def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) 
     section = "<Workflow Awareness>\n"
 
     # Add workflows for agents that are active
-    if 'singlecell_expert_agent' in active_agents:
+    if "singlecell_expert_agent" in active_agents:
         section += """    **Single-cell RNA-seq Workflow:**
     - If user has single-cell datasets:
       1. data_expert_agent loads and summarizes them.
@@ -268,7 +269,7 @@ def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) 
       4. singlecell_expert_agent annotates cell types.
       5. method_expert_agent consulted for parameter optimization if needed.\n\n"""
 
-    if 'bulk_rnaseq_expert_agent' in active_agents:
+    if "bulk_rnaseq_expert_agent" in active_agents:
         section += """    **Bulk RNA-seq Workflow:**
     - If user has bulk RNA-seq datasets:
       1. data_expert_agent loads and summarizes them.
@@ -277,7 +278,10 @@ def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) 
       4. bulk_rnaseq_expert_agent runs pathway enrichment analysis.
       5. method_expert_agent consulted for statistical method selection if needed.\n\n"""
 
-    if 'ms_proteomics_expert_agent' in active_agents or 'affinity_proteomics_expert_agent' in active_agents:
+    if (
+        "ms_proteomics_expert_agent" in active_agents
+        or "affinity_proteomics_expert_agent" in active_agents
+    ):
         section += """    **Proteomics Workflow:**
     - If user has proteomics datasets:
       1. data_expert_agent loads and identifies data type.
@@ -285,7 +289,7 @@ def _build_workflow_section(active_agents: List[str], config: SupervisorConfig) 
       3. Quality control, normalization, and statistical testing.
       4. Pathway enrichment and visualization.\n\n"""
 
-    if 'machine_learning_expert_agent' in active_agents:
+    if "machine_learning_expert_agent" in active_agents:
         section += """    **Machine Learning Workflow:**
     - Dataset independent:
       1. data_expert_agent loads and identifies data type.
@@ -346,7 +350,9 @@ def _build_response_rules(config: SupervisorConfig) -> str:
     return section
 
 
-def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig) -> str:
+def _build_context_section(
+    data_manager: DataManagerV2, config: SupervisorConfig
+) -> str:
     """Build current system context section.
 
     Args:
@@ -365,9 +371,11 @@ def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig
             if modalities:
                 data_context = "<Current Data Context>\n"
                 data_context += f"Currently loaded modalities ({len(modalities)}):\n"
-                for mod_name in modalities: 
+                for mod_name in modalities:
                     adata = data_manager.get_modality(mod_name)
-                    data_context += f"  - {mod_name}: {adata.n_obs} obs × {adata.n_vars} vars\n"
+                    data_context += (
+                        f"  - {mod_name}: {adata.n_obs} obs × {adata.n_vars} vars\n"
+                    )
                 sections.append(data_context)
         except Exception as e:
             logger.debug(f"Could not add data context: {e}")
@@ -377,7 +385,9 @@ def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig
         try:
             workspace_status = data_manager.get_workspace_status()
             workspace_context = "<Workspace Status>\n"
-            workspace_context += f"  - Workspace: {workspace_status['workspace_path']}\n"
+            workspace_context += (
+                f"  - Workspace: {workspace_status['workspace_path']}\n"
+            )
             workspace_context += f"  - Registered adapters: {len(workspace_status['registered_adapters'])}\n"
             workspace_context += f"  - Registered backends: {len(workspace_status['registered_backends'])}\n"
             sections.append(workspace_context)
@@ -388,7 +398,9 @@ def _build_context_section(data_manager: DataManagerV2, config: SupervisorConfig
     if config.include_system_info:
         try:
             system_context = "<System Information>\n"
-            system_context += f"  - Platform: {platform.system()} {platform.release()}\n"
+            system_context += (
+                f"  - Platform: {platform.system()} {platform.release()}\n"
+            )
             system_context += f"  - Architecture: {platform.machine()}\n"
             system_context += f"  - Python: {platform.python_version()}\n"
             system_context += f"  - CPU cores: {psutil.cpu_count(logical=False)} physical, {psutil.cpu_count(logical=True)} logical\n"

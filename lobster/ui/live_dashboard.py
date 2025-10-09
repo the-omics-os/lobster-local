@@ -6,33 +6,41 @@ including multi-panel displays, system health monitoring, and analysis
 progress tracking with orange theming.
 """
 
-import time
-import psutil
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Callable
-from dataclasses import dataclass, field
-from threading import Thread, Event
 import queue
+import time
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from threading import Event, Thread
+from typing import Any, Callable, Dict, List, Optional
 
-from rich.live import Live
-from rich.layout import Layout
-from rich.panel import Panel
-from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
-from rich.text import Text
+import psutil
+from rich import box
 from rich.align import Align
 from rich.columns import Columns
 from rich.console import Group
-from rich import box
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeRemainingColumn,
+)
+from rich.table import Table
+from rich.text import Text
 
-from .themes import LobsterTheme
 from .console_manager import get_console_manager
+from .themes import LobsterTheme
 
 
 @dataclass
 class SystemMetrics:
     """System performance metrics."""
+
     cpu_percent: float = 0.0
     memory_percent: float = 0.0
     memory_used_gb: float = 0.0
@@ -44,6 +52,7 @@ class SystemMetrics:
 @dataclass
 class AnalysisStatus:
     """Analysis operation status."""
+
     operation_id: str
     operation_name: str
     status: str  # 'running', 'completed', 'failed', 'queued'
@@ -90,27 +99,19 @@ class LiveDashboard:
         layout = Layout()
 
         # Split into header and body
-        layout.split_column(
-            Layout(name="header", size=3),
-            Layout(name="body")
-        )
+        layout.split_column(Layout(name="header", size=3), Layout(name="body"))
 
         # Split body into left and right panels
-        layout["body"].split_row(
-            Layout(name="left"),
-            Layout(name="right")
-        )
+        layout["body"].split_row(Layout(name="left"), Layout(name="right"))
 
         # Split left panel into system and operations
         layout["left"].split_column(
-            Layout(name="system", size=12),
-            Layout(name="operations")
+            Layout(name="system", size=12), Layout(name="operations")
         )
 
         # Right panel for analysis details
         layout["right"].split_column(
-            Layout(name="analysis", size=15),
-            Layout(name="logs")
+            Layout(name="analysis", size=15), Layout(name="logs")
         )
 
         return layout
@@ -120,31 +121,25 @@ class LiveDashboard:
         title = Text()
         title.append("🦞 ", style="")
         title.append("Lobster AI Live Dashboard", style="lobster.primary")
-        title.append(f" - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                    style="text.secondary")
+        title.append(
+            f" - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", style="text.secondary"
+        )
 
         return LobsterTheme.create_panel(
-            Align.center(title),
-            title="Real-time Monitoring",
-            box_style="minimal"
+            Align.center(title), title="Real-time Monitoring", box_style="minimal"
         )
 
     def _get_system_panel(self) -> Panel:
         """Create system metrics panel."""
         if not self.system_metrics:
             return LobsterTheme.create_panel(
-                "Collecting system metrics...",
-                title="📊 System Health"
+                "Collecting system metrics...", title="📊 System Health"
             )
 
         latest = self.system_metrics[-1]
 
         # System metrics table
-        table = Table(
-            show_header=False,
-            box=box.SIMPLE,
-            padding=(0, 1)
-        )
+        table = Table(show_header=False, box=box.SIMPLE, padding=(0, 1))
         table.add_column("Metric", style="data.key")
         table.add_column("Value", style="data.value")
         table.add_column("Bar", width=20)
@@ -158,17 +153,14 @@ class LiveDashboard:
         table.add_row(
             "Memory Usage",
             f"{latest.memory_used_gb:.1f}GB / {latest.memory_total_gb:.1f}GB ({latest.memory_percent:.1f}%)",
-            memory_bar
+            memory_bar,
         )
 
         # Disk usage
         disk_bar = self._create_usage_bar(latest.disk_percent)
         table.add_row("Disk Usage", f"{latest.disk_percent:.1f}%", disk_bar)
 
-        return LobsterTheme.create_panel(
-            table,
-            title="📊 System Metrics"
-        )
+        return LobsterTheme.create_panel(table, title="📊 System Metrics")
 
     def _create_usage_bar(self, percentage: float) -> str:
         """Create a text-based usage bar."""
@@ -190,15 +182,14 @@ class LiveDashboard:
         """Create operations status panel."""
         if not self.analysis_operations:
             return LobsterTheme.create_panel(
-                "No active operations",
-                title="🔄 Active Operations"
+                "No active operations", title="🔄 Active Operations"
             )
 
         # Operations table
         table = Table(
             show_header=True,
             header_style="table.header",
-            box=LobsterTheme.BOXES["primary"]
+            box=LobsterTheme.BOXES["primary"],
         )
 
         table.add_column("Operation", style="data.key")
@@ -210,11 +201,11 @@ class LiveDashboard:
         for op in self.analysis_operations.values():
             # Status styling
             status_style = {
-                'running': 'status.info',
-                'completed': 'status.success',
-                'failed': 'status.error',
-                'queued': 'status.warning'
-            }.get(op.status, 'data.value')
+                "running": "status.info",
+                "completed": "status.success",
+                "failed": "status.error",
+                "queued": "status.warning",
+            }.get(op.status, "data.value")
 
             # Progress bar
             progress_bar = self._create_progress_bar(op.progress)
@@ -225,20 +216,17 @@ class LiveDashboard:
             else:
                 duration = datetime.now() - op.start_time
 
-            duration_str = str(duration).split('.')[0]  # Remove microseconds
+            duration_str = str(duration).split(".")[0]  # Remove microseconds
 
             table.add_row(
                 op.operation_name,
                 op.agent_name or "System",
                 f"[{status_style}]{op.status.title()}[/{status_style}]",
                 progress_bar,
-                duration_str
+                duration_str,
             )
 
-        return LobsterTheme.create_panel(
-            table,
-            title="🔄 Operations Status"
-        )
+        return LobsterTheme.create_panel(table, title="🔄 Operations Status")
 
     def _create_progress_bar(self, progress: float) -> str:
         """Create a progress bar visualization."""
@@ -255,41 +243,38 @@ class LiveDashboard:
         # Show details of the most recent operation
         if not self.analysis_operations:
             return LobsterTheme.create_panel(
-                "No analysis operations to display",
-                title="🧬 Analysis Details"
+                "No analysis operations to display", title="🧬 Analysis Details"
             )
 
         # Get most recent operation
-        latest_op = max(
-            self.analysis_operations.values(),
-            key=lambda x: x.start_time
-        )
+        latest_op = max(self.analysis_operations.values(), key=lambda x: x.start_time)
 
         # Create details display
         details = []
         details.append(f"[data.key]Operation:[/] {latest_op.operation_name}")
         details.append(f"[data.key]Agent:[/] {latest_op.agent_name or 'System'}")
         details.append(f"[data.key]Status:[/] {latest_op.status.title()}")
-        details.append(f"[data.key]Started:[/] {latest_op.start_time.strftime('%H:%M:%S')}")
+        details.append(
+            f"[data.key]Started:[/] {latest_op.start_time.strftime('%H:%M:%S')}"
+        )
 
         if latest_op.end_time:
-            details.append(f"[data.key]Completed:[/] {latest_op.end_time.strftime('%H:%M:%S')}")
+            details.append(
+                f"[data.key]Completed:[/] {latest_op.end_time.strftime('%H:%M:%S')}"
+            )
 
         if latest_op.details:
             details.append(f"[data.key]Details:[/] {latest_op.details}")
 
         content = "\n".join(details)
 
-        return LobsterTheme.create_panel(
-            content,
-            title="🧬 Analysis Details"
-        )
+        return LobsterTheme.create_panel(content, title="🧬 Analysis Details")
 
     def _get_logs_panel(self) -> Panel:
         """Create logs panel (placeholder for future enhancement)."""
         return LobsterTheme.create_panel(
             "Log integration coming soon...\n\nReal-time log streaming will be\navailable in the next update.",
-            title="📋 Recent Logs"
+            title="📋 Recent Logs",
         )
 
     def _update_layout(self):
@@ -308,7 +293,7 @@ class LiveDashboard:
             memory = psutil.virtual_memory()
 
             # Disk usage for current directory
-            disk = psutil.disk_usage('.')
+            disk = psutil.disk_usage(".")
 
             metrics = SystemMetrics(
                 cpu_percent=cpu_percent,
@@ -316,7 +301,7 @@ class LiveDashboard:
                 memory_used_gb=memory.used / (1024**3),
                 memory_total_gb=memory.total / (1024**3),
                 disk_percent=(disk.used / disk.total) * 100,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             # Keep only last 60 measurements (2 minutes at 2Hz)
@@ -352,32 +337,34 @@ class LiveDashboard:
 
     def _process_update(self, update: Dict[str, Any]):
         """Process an update from the queue."""
-        update_type = update.get('type')
+        update_type = update.get("type")
 
-        if update_type == 'analysis_start':
-            self.analysis_operations[update['id']] = AnalysisStatus(
-                operation_id=update['id'],
-                operation_name=update['name'],
-                status='running',
-                agent_name=update.get('agent', ''),
-                details=update.get('details', '')
+        if update_type == "analysis_start":
+            self.analysis_operations[update["id"]] = AnalysisStatus(
+                operation_id=update["id"],
+                operation_name=update["name"],
+                status="running",
+                agent_name=update.get("agent", ""),
+                details=update.get("details", ""),
             )
 
-        elif update_type == 'analysis_progress':
-            if update['id'] in self.analysis_operations:
-                self.analysis_operations[update['id']].progress = update['progress']
-                self.analysis_operations[update['id']].details = update.get('details', '')
+        elif update_type == "analysis_progress":
+            if update["id"] in self.analysis_operations:
+                self.analysis_operations[update["id"]].progress = update["progress"]
+                self.analysis_operations[update["id"]].details = update.get(
+                    "details", ""
+                )
 
-        elif update_type == 'analysis_complete':
-            if update['id'] in self.analysis_operations:
-                self.analysis_operations[update['id']].status = 'completed'
-                self.analysis_operations[update['id']].progress = 100.0
-                self.analysis_operations[update['id']].end_time = datetime.now()
+        elif update_type == "analysis_complete":
+            if update["id"] in self.analysis_operations:
+                self.analysis_operations[update["id"]].status = "completed"
+                self.analysis_operations[update["id"]].progress = 100.0
+                self.analysis_operations[update["id"]].end_time = datetime.now()
 
-        elif update_type == 'analysis_failed':
-            if update['id'] in self.analysis_operations:
-                self.analysis_operations[update['id']].status = 'failed'
-                self.analysis_operations[update['id']].end_time = datetime.now()
+        elif update_type == "analysis_failed":
+            if update["id"] in self.analysis_operations:
+                self.analysis_operations[update["id"]].status = "failed"
+                self.analysis_operations[update["id"]].end_time = datetime.now()
 
     @contextmanager
     def live_monitor(self):
@@ -388,7 +375,7 @@ class LiveDashboard:
             self.layout,
             console=self.console_manager.console,
             refresh_per_second=self.refresh_rate,
-            auto_refresh=False
+            auto_refresh=False,
         ) as live:
             try:
                 while self.is_monitoring:
@@ -418,48 +405,39 @@ class LiveDashboard:
                 self.monitor_thread.join(timeout=5)
 
     def add_analysis_operation(
-        self,
-        operation_id: str,
-        name: str,
-        agent: str = "",
-        details: str = ""
+        self, operation_id: str, name: str, agent: str = "", details: str = ""
     ):
         """Add a new analysis operation to monitor."""
-        self.update_queue.put({
-            'type': 'analysis_start',
-            'id': operation_id,
-            'name': name,
-            'agent': agent,
-            'details': details
-        })
+        self.update_queue.put(
+            {
+                "type": "analysis_start",
+                "id": operation_id,
+                "name": name,
+                "agent": agent,
+                "details": details,
+            }
+        )
 
     def update_analysis_progress(
-        self,
-        operation_id: str,
-        progress: float,
-        details: str = ""
+        self, operation_id: str, progress: float, details: str = ""
     ):
         """Update progress for an analysis operation."""
-        self.update_queue.put({
-            'type': 'analysis_progress',
-            'id': operation_id,
-            'progress': progress,
-            'details': details
-        })
+        self.update_queue.put(
+            {
+                "type": "analysis_progress",
+                "id": operation_id,
+                "progress": progress,
+                "details": details,
+            }
+        )
 
     def complete_analysis_operation(self, operation_id: str):
         """Mark an analysis operation as completed."""
-        self.update_queue.put({
-            'type': 'analysis_complete',
-            'id': operation_id
-        })
+        self.update_queue.put({"type": "analysis_complete", "id": operation_id})
 
     def fail_analysis_operation(self, operation_id: str):
         """Mark an analysis operation as failed."""
-        self.update_queue.put({
-            'type': 'analysis_failed',
-            'id': operation_id
-        })
+        self.update_queue.put({"type": "analysis_failed", "id": operation_id})
 
     def cleanup_old_operations(self, max_age_hours: int = 24):
         """Clean up old completed operations."""
@@ -467,9 +445,11 @@ class LiveDashboard:
 
         to_remove = []
         for op_id, operation in self.analysis_operations.items():
-            if (operation.status in ['completed', 'failed'] and
-                operation.end_time and
-                operation.end_time < cutoff_time):
+            if (
+                operation.status in ["completed", "failed"]
+                and operation.end_time
+                and operation.end_time < cutoff_time
+            ):
                 to_remove.append(op_id)
 
         for op_id in to_remove:
@@ -501,5 +481,5 @@ def create_simple_monitor(title: str = "Processing") -> Live:
         Align.center(spinner_text),
         console=console,
         refresh_per_second=2,
-        transient=True
+        transient=True,
     )

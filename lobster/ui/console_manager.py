@@ -5,26 +5,28 @@ This module provides centralized console management with orange theming,
 enhanced logging integration, and session capture capabilities.
 """
 
-import os
 import logging
-from typing import Optional, Any, Dict, TextIO
-from pathlib import Path
+import os
 from getpass import getpass
-from rich.console import Console, Capture
+from pathlib import Path
+from typing import Any, Dict, Optional, TextIO
+
+from rich.console import Capture, Console
+from rich.live import Live
 from rich.logging import RichHandler
-from rich.traceback import install as install_rich_traceback
 from rich.panel import Panel
 from rich.text import Text
-from rich.live import Live
+from rich.traceback import install as install_rich_traceback
 
 try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.history import FileHistory
+
     PROMPT_TOOLKIT_AVAILABLE = True
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
-from .themes import LobsterTheme, DEFAULT_THEME
+from .themes import DEFAULT_THEME, LobsterTheme
 
 
 class HistoryConsole(Console):
@@ -66,17 +68,12 @@ class HistoryConsole(Console):
             self.session = None
             self._has_history = False
             # Only show this message once during initialization
-            if not hasattr(HistoryConsole, '_showed_prompt_toolkit_message'):
+            if not hasattr(HistoryConsole, "_showed_prompt_toolkit_message"):
                 # Use a more subtle notification that doesn't break the Rich styling
                 HistoryConsole._showed_prompt_toolkit_message = True
 
     def input(
-        self,
-        prompt="",
-        markup=True,
-        emoji=True,
-        password=False,
-        stream=None
+        self, prompt="", markup=True, emoji=True, password=False, stream=None
     ) -> str:
         """
         Enhanced input method with arrow key navigation and history.
@@ -102,7 +99,7 @@ class HistoryConsole(Console):
         # Handle stream input
         if stream:
             result = stream.readline()
-            return result.rstrip('\n\r') if result else ""
+            return result.rstrip("\n\r") if result else ""
 
         # Use prompt-toolkit for enhanced input if available
         if self._has_history and self.session:
@@ -127,12 +124,12 @@ class LobsterConsoleManager:
     logging, error handling, and session capture functionality.
     """
 
-    _instance: Optional['LobsterConsoleManager'] = None
+    _instance: Optional["LobsterConsoleManager"] = None
     _console: Optional[Console] = None
     _error_console: Optional[Console] = None
     _capture: Optional[Capture] = None
 
-    def __new__(cls) -> 'LobsterConsoleManager':
+    def __new__(cls) -> "LobsterConsoleManager":
         """Singleton pattern for console manager."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -140,7 +137,7 @@ class LobsterConsoleManager:
 
     def __init__(self):
         """Initialize console manager if not already initialized."""
-        if not hasattr(self, '_initialized'):
+        if not hasattr(self, "_initialized"):
             self._setup_consoles()
             self._setup_logging()
             self._setup_traceback()
@@ -161,7 +158,7 @@ class LobsterConsoleManager:
             highlight=True,
             markup=True,
             emoji=True,
-            record=False  # Disable session recording to allow terminal scrolling
+            record=False,  # Disable session recording to allow terminal scrolling
         )
 
         # Error console (stderr) with same theming
@@ -176,7 +173,7 @@ class LobsterConsoleManager:
             highlight=True,
             markup=True,
             emoji=True,
-            record=False  # Disable session recording to allow terminal scrolling
+            record=False,  # Disable session recording to allow terminal scrolling
         )
 
     def _setup_logging(self):
@@ -190,23 +187,18 @@ class LobsterConsoleManager:
             markup=True,
             rich_tracebacks=True,
             tracebacks_show_locals=False,
-            tracebacks_max_frames=10
+            tracebacks_max_frames=10,
         )
 
         # Configure logging format
-        rich_handler.setFormatter(
-            logging.Formatter(
-                fmt="%(message)s",
-                datefmt="[%X]"
-            )
-        )
+        rich_handler.setFormatter(logging.Formatter(fmt="%(message)s", datefmt="[%X]"))
 
         # Setup root logger
         logging.basicConfig(
             level=logging.INFO,
             format="%(message)s",
             datefmt="[%X]",
-            handlers=[rich_handler]
+            handlers=[rich_handler],
         )
 
         # Adjust levels for specific loggers
@@ -224,7 +216,7 @@ class LobsterConsoleManager:
             word_wrap=True,
             show_locals=False,
             suppress=[],
-            max_frames=20
+            max_frames=20,
         )
 
     @property
@@ -256,9 +248,7 @@ class LobsterConsoleManager:
     def status(self, status: str, spinner: str = "dots"):
         """Create a status context manager."""
         return self._console.status(
-            status,
-            spinner=spinner,
-            spinner_style="lobster.primary"
+            status, spinner=spinner, spinner_style="lobster.primary"
         )
 
     def create_panel(
@@ -266,14 +256,10 @@ class LobsterConsoleManager:
         content: Any,
         title: Optional[str] = None,
         subtitle: Optional[str] = None,
-        style: str = "white on default"
+        style: str = "white on default",
     ) -> Panel:
         """Create a themed panel with orange branding."""
-        return LobsterTheme.create_panel(
-            content,
-            title=title,
-            subtitle=subtitle
-        )
+        return LobsterTheme.create_panel(content, title=title, subtitle=subtitle)
 
     def print_welcome(self, title: str = "Lobster AI", subtitle: str = None):
         """Print branded welcome message."""
@@ -297,7 +283,7 @@ class LobsterConsoleManager:
             show_header=True,
             header_style="table.header",
             border_style="border.primary",
-            box=LobsterTheme.BOXES["primary"]
+            box=LobsterTheme.BOXES["primary"],
         )
 
         table.add_column("Property", style="data.key")
@@ -305,7 +291,7 @@ class LobsterConsoleManager:
 
         for key, value in status_data.items():
             # Format key nicely
-            display_key = key.replace('_', ' ').title()
+            display_key = key.replace("_", " ").title()
             # Format value based on type
             if isinstance(value, bool):
                 display_value = "✓" if value else "✗"
@@ -334,7 +320,7 @@ class LobsterConsoleManager:
             title="Error",
             border_style="error",
             title_align="left",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         self.print(panel)
 
@@ -353,7 +339,7 @@ class LobsterConsoleManager:
             title="Success",
             border_style="success",
             title_align="left",
-            padding=(1, 2)
+            padding=(1, 2),
         )
         self.print(panel)
 
@@ -373,15 +359,13 @@ class LobsterConsoleManager:
         """Export current session to file."""
         if file_path is None:
             from datetime import datetime
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_path = Path(f"lobster_session_{timestamp}.html")
 
         # Export as HTML with styling
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(self._console.export_html(
-                inline_styles=True,
-                code_format="{code}"
-            ))
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(self._console.export_html(inline_styles=True, code_format="{code}"))
 
         return file_path
 
@@ -406,14 +390,16 @@ class LobsterConsoleManager:
             refresh_per_second=refresh_per_second,
             auto_refresh=True,
             vertical_overflow="visible",
-            transient=True  # Enable transient mode to allow terminal scrolling
+            transient=True,  # Enable transient mode to allow terminal scrolling
         )
 
     def has_history_support(self) -> bool:
         """Check if the console has command history support enabled."""
-        return (isinstance(self._console, HistoryConsole) and
-                hasattr(self._console, '_has_history') and
-                self._console._has_history)
+        return (
+            isinstance(self._console, HistoryConsole)
+            and hasattr(self._console, "_has_history")
+            and self._console._has_history
+        )
 
     def get_input_features(self) -> dict:
         """Get information about available input features."""
@@ -423,7 +409,7 @@ class LobsterConsoleManager:
                 "command_history": True,
                 "reverse_search": True,
                 "line_editing": True,
-                "history_file": str(Path.home() / ".lobster" / "lobster_history")
+                "history_file": str(Path.home() / ".lobster" / "lobster_history"),
             }
         else:
             return {
@@ -431,7 +417,7 @@ class LobsterConsoleManager:
                 "command_history": False,
                 "reverse_search": False,
                 "line_editing": False,
-                "suggestion": "Install prompt-toolkit for enhanced input: pip install prompt-toolkit"
+                "suggestion": "Install prompt-toolkit for enhanced input: pip install prompt-toolkit",
             }
 
 

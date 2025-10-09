@@ -5,7 +5,7 @@ This service provides methods for evaluating the quality of single-cell
 RNA-seq data, generating quality metrics and plots.
 """
 
-from typing import Dict, List, Tuple, Any
+from typing import Any, Dict, List, Tuple
 
 import anndata
 import numpy as np
@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 
 class QualityError(Exception):
     """Base exception for quality assessment operations."""
+
     pass
 
 
@@ -34,7 +35,7 @@ class QualityService:
     def __init__(self):
         """
         Initialize the quality assessment service.
-        
+
         This service is stateless and doesn't require a data manager instance.
         """
         logger.debug("Initializing stateless QualityService")
@@ -60,16 +61,16 @@ class QualityService:
 
         Returns:
             Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with QC metrics and assessment stats
-            
+
         Raises:
             QualityError: If quality assessment fails
         """
         try:
             logger.info("Starting quality assessment")
-            
+
             # Create working copy
             adata_qc = adata.copy()
-            
+
             # Calculate QC metrics from expression matrix
             qc_metrics = self._calculate_qc_metrics_from_adata(adata_qc)
 
@@ -106,35 +107,41 @@ class QualityService:
                 "cells_after_qc": cells_after,
                 "cells_removed": cells_before - cells_after,
                 "cells_retained_pct": (cells_after / cells_before) * 100,
-                "quality_status": "Pass" if cells_after / cells_before > 0.7 else "Warning",
+                "quality_status": (
+                    "Pass" if cells_after / cells_before > 0.7 else "Warning"
+                ),
                 "mean_total_counts": float(qc_metrics["total_counts"].mean()),
                 "mean_genes_per_cell": float(qc_metrics["n_genes"].mean()),
                 "mean_mt_pct": float(qc_metrics["mt_pct"].mean()),
                 "mean_ribo_pct": float(qc_metrics["ribo_pct"].mean()),
-                "mean_housekeeping_score": float(qc_metrics["housekeeping_score"].mean()),
+                "mean_housekeeping_score": float(
+                    qc_metrics["housekeeping_score"].mean()
+                ),
                 "qc_summary": summary,
                 "mt_stats": {
                     "min": float(qc_metrics["mt_pct"].min()),
                     "max": float(qc_metrics["mt_pct"].max()),
                     "mean": float(qc_metrics["mt_pct"].mean()),
-                    "std": float(qc_metrics["mt_pct"].std())
+                    "std": float(qc_metrics["mt_pct"].std()),
                 },
                 "ribo_stats": {
                     "min": float(qc_metrics["ribo_pct"].min()),
                     "max": float(qc_metrics["ribo_pct"].max()),
                     "mean": float(qc_metrics["ribo_pct"].mean()),
-                    "std": float(qc_metrics["ribo_pct"].std())
+                    "std": float(qc_metrics["ribo_pct"].std()),
                 },
                 "housekeeping_stats": {
                     "min": float(qc_metrics["housekeeping_score"].min()),
                     "max": float(qc_metrics["housekeeping_score"].max()),
                     "mean": float(qc_metrics["housekeeping_score"].mean()),
-                    "std": float(qc_metrics["housekeeping_score"].std())
-                }
+                    "std": float(qc_metrics["housekeeping_score"].std()),
+                },
             }
 
-            logger.info(f"Quality assessment completed: {cells_after}/{cells_before} cells pass QC ({assessment_stats['cells_retained_pct']:.1f}%)")
-            
+            logger.info(
+                f"Quality assessment completed: {cells_after}/{cells_before} cells pass QC ({assessment_stats['cells_retained_pct']:.1f}%)"
+            )
+
             return adata_qc, assessment_stats
 
         except Exception as e:
@@ -154,21 +161,23 @@ class QualityService:
         logger.info("Calculating quality metrics from AnnData")
 
         # Identify mitochondrial genes
-        mt_genes = adata.var_names.str.startswith("MT-") | adata.var_names.str.startswith("mt-")
-        
+        mt_genes = adata.var_names.str.startswith(
+            "MT-"
+        ) | adata.var_names.str.startswith("mt-")
+
         # Identify ribosomal genes
         ribo_genes = (
-            adata.var_names.str.startswith("RPS") | 
-            adata.var_names.str.startswith("RPL") |
-            adata.var_names.str.startswith("rps") | 
-            adata.var_names.str.startswith("rpl")
+            adata.var_names.str.startswith("RPS")
+            | adata.var_names.str.startswith("RPL")
+            | adata.var_names.str.startswith("rps")
+            | adata.var_names.str.startswith("rpl")
         )
 
         # Identify housekeeping genes for score
         housekeeping_genes = ["ACTB", "GAPDH", "MALAT1"]
 
         # Calculate basic metrics
-        if hasattr(adata.X, 'toarray'):
+        if hasattr(adata.X, "toarray"):
             # Sparse matrix
             total_counts = np.array(adata.X.sum(axis=1)).flatten()
             n_genes = np.array((adata.X > 0).sum(axis=1)).flatten()
@@ -179,35 +188,47 @@ class QualityService:
 
         # Calculate mitochondrial percentage
         if mt_genes.sum() > 0:
-            if hasattr(adata.X, 'toarray'):
+            if hasattr(adata.X, "toarray"):
                 mt_counts = np.array(adata[:, mt_genes].X.sum(axis=1)).flatten()
             else:
                 mt_counts = adata[:, mt_genes].X.sum(axis=1)
-            mt_pct = (mt_counts / (total_counts + 1e-8)) * 100  # Add small epsilon to avoid division by zero
+            mt_pct = (
+                mt_counts / (total_counts + 1e-8)
+            ) * 100  # Add small epsilon to avoid division by zero
         else:
-            logger.warning("No mitochondrial genes found. Setting mitochondrial percentage to 0.")
+            logger.warning(
+                "No mitochondrial genes found. Setting mitochondrial percentage to 0."
+            )
             mt_pct = np.zeros(adata.n_obs)
 
         # Calculate ribosomal percentage
         if ribo_genes.sum() > 0:
-            if hasattr(adata.X, 'toarray'):
+            if hasattr(adata.X, "toarray"):
                 ribo_counts = np.array(adata[:, ribo_genes].X.sum(axis=1)).flatten()
             else:
                 ribo_counts = adata[:, ribo_genes].X.sum(axis=1)
             ribo_pct = (ribo_counts / (total_counts + 1e-8)) * 100
         else:
-            logger.warning("No ribosomal genes found. Setting ribosomal percentage to 0.")
+            logger.warning(
+                "No ribosomal genes found. Setting ribosomal percentage to 0."
+            )
             ribo_pct = np.zeros(adata.n_obs)
 
         # Calculate housekeeping gene score
-        available_hk_genes = [gene for gene in housekeeping_genes if gene in adata.var_names]
+        available_hk_genes = [
+            gene for gene in housekeeping_genes if gene in adata.var_names
+        ]
         if available_hk_genes:
-            if hasattr(adata.X, 'toarray'):
-                housekeeping_score = np.array(adata[:, available_hk_genes].X.sum(axis=1)).flatten()
+            if hasattr(adata.X, "toarray"):
+                housekeeping_score = np.array(
+                    adata[:, available_hk_genes].X.sum(axis=1)
+                ).flatten()
             else:
                 housekeeping_score = adata[:, available_hk_genes].X.sum(axis=1)
         else:
-            logger.warning("No housekeeping genes found. Setting housekeeping score to 0.")
+            logger.warning(
+                "No housekeeping genes found. Setting housekeeping score to 0."
+            )
             housekeeping_score = np.zeros(adata.n_obs)
 
         # Combine metrics into a DataFrame
@@ -219,7 +240,7 @@ class QualityService:
                 "ribo_pct": ribo_pct,
                 "housekeeping_score": housekeeping_score,
             },
-            index=adata.obs_names
+            index=adata.obs_names,
         )
 
         logger.info(f"Generated QC metrics for {len(qc_df)} cells")
@@ -327,7 +348,7 @@ class QualityService:
                 points="outliers",
                 pointpos=0,
                 jitter=0.05,
-                side="positive"
+                side="positive",
             )
         )
         fig1.update_layout(
@@ -335,24 +356,21 @@ class QualityService:
                 text="Distribution of Mitochondrial Gene Percentages",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             yaxis=dict(
                 title=dict(text="Mitochondrial Gene %", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
-            xaxis=dict(
-                tickfont=dict(size=14),
-                showgrid=False
-            ),
+            xaxis=dict(tickfont=dict(size=14), showgrid=False),
             font=dict(size=14, family="Arial, sans-serif"),
             height=600,  # Increased from 400
             width=1000,  # Added width
             margin=dict(l=80, r=80, t=80, b=80),
             plot_bgcolor="white",
             paper_bgcolor="white",
-            showlegend=False
+            showlegend=False,
         )
         plots.append(fig1)
 
@@ -369,7 +387,7 @@ class QualityService:
                 points="outliers",
                 pointpos=0,
                 jitter=0.05,
-                side="positive"
+                side="positive",
             )
         )
         fig1b.update_layout(
@@ -377,24 +395,21 @@ class QualityService:
                 text="Distribution of Ribosomal Gene Percentages",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             yaxis=dict(
                 title=dict(text="Ribosomal Gene %", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
-            xaxis=dict(
-                tickfont=dict(size=14),
-                showgrid=False
-            ),
+            xaxis=dict(tickfont=dict(size=14), showgrid=False),
             font=dict(size=14, family="Arial, sans-serif"),
             height=600,  # Increased from 400
             width=1000,  # Added width
             margin=dict(l=80, r=80, t=80, b=80),
             plot_bgcolor="white",
             paper_bgcolor="white",
-            showlegend=False
+            showlegend=False,
         )
         plots.append(fig1b)
 
@@ -411,7 +426,7 @@ class QualityService:
                 points="outliers",
                 pointpos=0,
                 jitter=0.05,
-                side="positive"
+                side="positive",
             )
         )
         fig1c.update_layout(
@@ -419,24 +434,21 @@ class QualityService:
                 text="Distribution of Housekeeping Gene Scores",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             yaxis=dict(
                 title=dict(text="Housekeeping Score", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
-            xaxis=dict(
-                tickfont=dict(size=14),
-                showgrid=False
-            ),
+            xaxis=dict(tickfont=dict(size=14), showgrid=False),
             font=dict(size=14, family="Arial, sans-serif"),
             height=600,  # Increased from 400
             width=1000,  # Added width
             margin=dict(l=80, r=80, t=80, b=80),
             plot_bgcolor="white",
             paper_bgcolor="white",
-            showlegend=False
+            showlegend=False,
         )
         plots.append(fig1c)
 
@@ -456,31 +468,29 @@ class QualityService:
             height=700,  # Increased from 450
             width=1200,  # Increased from 600
         )
-        
+
         fig2.update_traces(
             marker=dict(
-                size=6,
-                opacity=0.7,
-                line=dict(width=0.5, color='rgba(50,50,50,0.4)')
+                size=6, opacity=0.7, line=dict(width=0.5, color="rgba(50,50,50,0.4)")
             )
         )
-        
+
         fig2.update_layout(
             title=dict(
                 text="Cell Quality Metrics - Mitochondrial Content",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             xaxis=dict(
                 title=dict(text="Total RNA Count", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             yaxis=dict(
                 title=dict(text="Number of Detected Features", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             font=dict(size=14, family="Arial, sans-serif"),
             margin=dict(l=80, r=150, t=80, b=80),
@@ -488,8 +498,8 @@ class QualityService:
             paper_bgcolor="white",
             coloraxis_colorbar=dict(
                 title=dict(text="Mitochondrial %", font=dict(size=14)),
-                tickfont=dict(size=12)
-            )
+                tickfont=dict(size=12),
+            ),
         )
         plots.append(fig2)
 
@@ -509,31 +519,29 @@ class QualityService:
             height=700,  # Increased from 450
             width=1200,  # Increased from 600
         )
-        
+
         fig2b.update_traces(
             marker=dict(
-                size=6,
-                opacity=0.7,
-                line=dict(width=0.5, color='rgba(50,50,50,0.4)')
+                size=6, opacity=0.7, line=dict(width=0.5, color="rgba(50,50,50,0.4)")
             )
         )
-        
+
         fig2b.update_layout(
             title=dict(
                 text="Cell Quality Metrics - Ribosomal Content",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             xaxis=dict(
                 title=dict(text="Total RNA Count", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             yaxis=dict(
                 title=dict(text="Number of Detected Features", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             font=dict(size=14, family="Arial, sans-serif"),
             margin=dict(l=80, r=150, t=80, b=80),
@@ -541,8 +549,8 @@ class QualityService:
             paper_bgcolor="white",
             coloraxis_colorbar=dict(
                 title=dict(text="Ribosomal %", font=dict(size=14)),
-                tickfont=dict(size=12)
-            )
+                tickfont=dict(size=12),
+            ),
         )
         plots.append(fig2b)
 
@@ -560,37 +568,37 @@ class QualityService:
             height=700,  # Increased from 400
             width=1100,  # Increased from 550
         )
-        
+
         fig3.update_traces(
             marker=dict(
                 size=6,
                 opacity=0.6,
-                color='rgba(31, 119, 180, 0.7)',
-                line=dict(width=0.5, color='rgba(50,50,50,0.4)')
+                color="rgba(31, 119, 180, 0.7)",
+                line=dict(width=0.5, color="rgba(50,50,50,0.4)"),
             )
         )
-        
+
         fig3.update_layout(
             title=dict(
                 text="Correlation between Features and RNA Count",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             xaxis=dict(
                 title=dict(text="Total RNA Count", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             yaxis=dict(
                 title=dict(text="Number of Detected Features", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             font=dict(size=14, family="Arial, sans-serif"),
             margin=dict(l=80, r=80, t=80, b=80),
             plot_bgcolor="white",
-            paper_bgcolor="white"
+            paper_bgcolor="white",
         )
         plots.append(fig3)
 

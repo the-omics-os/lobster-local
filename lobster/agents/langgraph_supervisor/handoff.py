@@ -18,9 +18,13 @@ def _normalize_agent_name(agent_name: str) -> str:
     return WHITESPACE_RE.sub("_", agent_name.strip()).lower()
 
 
-def _has_multiple_content_blocks(content: str | list[str | dict]) -> TypeGuard[list[dict]]:
+def _has_multiple_content_blocks(
+    content: str | list[str | dict],
+) -> TypeGuard[list[dict]]:
     """Check if content contains multiple content blocks."""
-    return isinstance(content, list) and len(content) > 1 and isinstance(content[0], dict)
+    return (
+        isinstance(content, list) and len(content) > 1 and isinstance(content[0], dict)
+    )
 
 
 def _remove_non_handoff_tool_calls(
@@ -35,7 +39,10 @@ def _remove_non_handoff_tool_calls(
         content = [
             content_block
             for content_block in content
-            if (content_block["type"] == "tool_use" and content_block["id"] == handoff_tool_call_id)
+            if (
+                content_block["type"] == "tool_use"
+                and content_block["id"] == handoff_tool_call_id
+            )
             or content_block["type"] != "tool_use"
         ]
 
@@ -186,9 +193,7 @@ def create_forward_message_tool(supervisor_name: str = "supervisor") -> BaseTool
             found_names = set(
                 m.name for m in state["messages"] if isinstance(m, AIMessage) and m.name
             )
-            return (
-                f"Could not find message from source agent {from_agent}. Found names: {found_names}"
-            )
+            return f"Could not find message from source agent {from_agent}. Found names: {found_names}"
         updates = [
             AIMessage(
                 content=target_message.content,

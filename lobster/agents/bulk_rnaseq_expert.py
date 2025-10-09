@@ -1,25 +1,24 @@
 """
 Bulk RNA-seq Expert Agent for specialized bulk RNA-seq analysis.
 
-This agent focuses exclusively on bulk RNA-seq analysis using the modular DataManagerV2 
+This agent focuses exclusively on bulk RNA-seq analysis using the modular DataManagerV2
 system with proper modality handling and schema enforcement.
 """
 
-from typing import List
-from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
-from lobster.config.llm_factory import create_llm
-
 from datetime import date
+from typing import List
 
 import pandas as pd
+from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
 
 from lobster.agents.state import BulkRNASeqExpertState
+from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.preprocessing_service import PreprocessingService, PreprocessingError
-from lobster.tools.quality_service import QualityService, QualityError
-from lobster.tools.bulk_rnaseq_service import BulkRNASeqService, BulkRNASeqError
+from lobster.tools.bulk_rnaseq_service import BulkRNASeqError, BulkRNASeqService
+from lobster.tools.preprocessing_service import PreprocessingError, PreprocessingService
+from lobster.tools.quality_service import QualityError, QualityService
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,36 +26,38 @@ logger = get_logger(__name__)
 
 class BulkRNASeqError(Exception):
     """Base exception for bulk RNA-seq operations."""
+
     pass
 
 
 class ModalityNotFoundError(BulkRNASeqError):
     """Raised when requested modality doesn't exist."""
+
     pass
 
 
 def bulk_rnaseq_expert(
-    data_manager: DataManagerV2, 
-    callback_handler=None, 
+    data_manager: DataManagerV2,
+    callback_handler=None,
     agent_name: str = "bulk_rnaseq_expert_agent",
-    handoff_tools: List = None
-):  
+    handoff_tools: List = None,
+):
     """Create bulk RNA-seq expert agent using DataManagerV2 and modular services."""
-    
+
     settings = get_settings()
-    model_params = settings.get_agent_llm_params('bulk_rnaseq_expert_agent')
-    llm = create_llm('bulk_rnaseq_expert_agent', model_params)
-    
-    if callback_handler and hasattr(llm, 'with_config'):
+    model_params = settings.get_agent_llm_params("bulk_rnaseq_expert_agent")
+    llm = create_llm("bulk_rnaseq_expert_agent", model_params)
+
+    if callback_handler and hasattr(llm, "with_config"):
         llm = llm.with_config(callbacks=[callback_handler])
-    
+
     # Initialize stateless services for bulk RNA-seq analysis
     preprocessing_service = PreprocessingService()
     quality_service = QualityService()
     bulk_service = BulkRNASeqService()
-    
+
     analysis_results = {"summary": "", "details": {}}
-    
+
     # -------------------------
     # DATA STATUS TOOLS
     # -------------------------
@@ -68,12 +69,15 @@ def bulk_rnaseq_expert(
                 modalities = data_manager.list_modalities()
                 if not modalities:
                     return "No modalities loaded. Please ask the data expert to load a bulk RNA-seq dataset first."
-                
+
                 # Filter for likely bulk RNA-seq modalities
-                bulk_modalities = [mod for mod in modalities if 
-                                 'bulk' in mod.lower() or 
-                                 data_manager._detect_modality_type(mod) == 'bulk_rna_seq']
-                
+                bulk_modalities = [
+                    mod
+                    for mod in modalities
+                    if "bulk" in mod.lower()
+                    or data_manager._detect_modality_type(mod) == "bulk_rna_seq"
+                ]
+
                 if not bulk_modalities:
                     response = f"Available modalities ({len(modalities)}) but none appear to be bulk RNA-seq:\n"
                     for mod_name in modalities:
@@ -81,31 +85,37 @@ def bulk_rnaseq_expert(
                         response += f"- **{mod_name}**: {adata.n_obs} samples × {adata.n_vars} genes\n"
                     response += "\nPlease specify a modality name if it contains bulk RNA-seq data."
                 else:
-                    response = f"Bulk RNA-seq modalities found ({len(bulk_modalities)}):\n"
+                    response = (
+                        f"Bulk RNA-seq modalities found ({len(bulk_modalities)}):\n"
+                    )
                     for mod_name in bulk_modalities:
                         adata = data_manager.get_modality(mod_name)
                         response += f"- **{mod_name}**: {adata.n_obs} samples × {adata.n_vars} genes\n"
-                
+
                 return response
-            
+
             else:
                 # Check specific modality
                 if modality_name not in data_manager.list_modalities():
                     return f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}"
-                
+
                 adata = data_manager.get_modality(modality_name)
                 metrics = data_manager.get_quality_metrics(modality_name)
-                
-                response = f"Bulk RNA-seq modality '{modality_name}' ready for analysis:\n"
+
+                response = (
+                    f"Bulk RNA-seq modality '{modality_name}' ready for analysis:\n"
+                )
                 response += f"- Shape: {adata.n_obs} samples × {adata.n_vars} genes\n"
                 response += f"- Sample metadata: {list(adata.obs.columns)[:5]}...\n"
                 response += f"- Gene metadata: {list(adata.var.columns)[:5]}...\n"
-                
-                if 'total_counts' in metrics:
+
+                if "total_counts" in metrics:
                     response += f"- Total counts: {metrics['total_counts']:,.0f}\n"
-                if 'mean_counts_per_obs' in metrics:
-                    response += f"- Mean counts/sample: {metrics['mean_counts_per_obs']:.1f}\n"
-                
+                if "mean_counts_per_obs" in metrics:
+                    response += (
+                        f"- Mean counts/sample: {metrics['mean_counts_per_obs']:.1f}\n"
+                    )
+
                 # Add bulk RNA-seq specific checks
                 if adata.n_obs < 6:
                     response += f"- Sample size: Small ({adata.n_obs} samples) - may limit statistical power\n"
@@ -113,15 +123,20 @@ def bulk_rnaseq_expert(
                     response += f"- Sample size: Moderate ({adata.n_obs} samples) - good for analysis\n"
                 else:
                     response += f"- Sample size: Large ({adata.n_obs} samples) - excellent statistical power\n"
-                
+
                 # Check for experimental design columns
-                design_cols = [col for col in adata.obs.columns if col.lower() in ['condition', 'treatment', 'group', 'batch', 'time_point']]
+                design_cols = [
+                    col
+                    for col in adata.obs.columns
+                    if col.lower()
+                    in ["condition", "treatment", "group", "batch", "time_point"]
+                ]
                 if design_cols:
                     response += f"- Experimental design: {', '.join(design_cols)}\n"
-                
+
                 analysis_results["details"]["data_status"] = response
                 return response
-                
+
         except Exception as e:
             logger.error(f"Error checking bulk RNA-seq data status: {e}")
             return f"Error checking bulk RNA-seq data status: {str(e)}"
@@ -132,33 +147,33 @@ def bulk_rnaseq_expert(
         min_genes: int = 1000,
         max_mt_pct: float = 50.0,
         min_total_counts: float = 10000.0,
-        check_batch_effects: bool = True
+        check_batch_effects: bool = True,
     ) -> str:
         """Run comprehensive quality control assessment on bulk RNA-seq data."""
         try:
             if modality_name == "":
                 return "Please specify modality_name for bulk RNA-seq quality assessment. Use check_data_status() to see available modalities."
-            
+
             # Validate modality exists
             if modality_name not in data_manager.list_modalities():
                 return f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}"
-            
+
             # Get the modality
             adata = data_manager.get_modality(modality_name)
-            
+
             # Run quality assessment using service with bulk RNA-seq specific parameters
             adata_qc, assessment_stats = quality_service.assess_quality(
                 adata=adata,
                 min_genes=min_genes,
                 max_mt_pct=max_mt_pct,
                 max_ribo_pct=100.0,  # Less stringent for bulk
-                min_housekeeping_score=0.5  # Less stringent for bulk
+                min_housekeeping_score=0.5,  # Less stringent for bulk
             )
-            
+
             # Create new modality with QC annotations
             qc_modality_name = f"{modality_name}_quality_assessed"
             data_manager.modalities[qc_modality_name] = adata_qc
-            
+
             # Log the operation
             data_manager.log_tool_usage(
                 tool_name="assess_data_quality",
@@ -167,11 +182,11 @@ def bulk_rnaseq_expert(
                     "min_genes": min_genes,
                     "max_mt_pct": max_mt_pct,
                     "min_total_counts": min_total_counts,
-                    "check_batch_effects": check_batch_effects
+                    "check_batch_effects": check_batch_effects,
                 },
-                description=f"Bulk RNA-seq quality assessment for {modality_name}"
+                description=f"Bulk RNA-seq quality assessment for {modality_name}",
             )
-            
+
             # Format professional response with bulk RNA-seq context
             response = f"""Bulk RNA-seq Quality Assessment Complete for '{modality_name}'!
 
@@ -192,10 +207,10 @@ def bulk_rnaseq_expert(
 💾 **New modality created**: '{qc_modality_name}' (with bulk RNA-seq QC annotations)
 
 Proceed with filtering and normalization for differential expression analysis."""
-            
+
             analysis_results["details"]["quality_assessment"] = response
             return response
-            
+
         except QualityError as e:
             logger.error(f"Bulk RNA-seq quality assessment error: {e}")
             return f"Bulk RNA-seq quality assessment failed: {str(e)}"
@@ -214,15 +229,15 @@ Proceed with filtering and normalization for differential expression analysis.""
         min_total_counts: float = 10000.0,
         normalization_method: str = "log1p",
         target_sum: int = 1000000,
-        save_result: bool = True
+        save_result: bool = True,
     ) -> str:
         """
         Filter and normalize bulk RNA-seq data using professional standards.
-        
+
         Args:
             modality_name: Name of the modality to process
             min_genes_per_sample: Minimum number of genes expressed per sample
-            min_samples_per_gene: Minimum number of samples expressing each gene  
+            min_samples_per_gene: Minimum number of samples expressing each gene
             min_total_counts: Minimum total read counts per sample
             normalization_method: Normalization method ('log1p', 'cpm', 'tpm')
             target_sum: Target sum for normalization (1M standard for bulk RNA-seq)
@@ -231,32 +246,38 @@ Proceed with filtering and normalization for differential expression analysis.""
         try:
             # Validate modality exists
             if modality_name not in data_manager.list_modalities():
-                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
-            
+                raise ModalityNotFoundError(
+                    f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}"
+                )
+
             # Get the modality
             adata = data_manager.get_modality(modality_name)
-            logger.info(f"Processing bulk RNA-seq modality '{modality_name}': {adata.shape[0]} samples × {adata.shape[1]} genes")
-            
-            # Use preprocessing service with bulk RNA-seq optimized parameters
-            adata_processed, processing_stats = preprocessing_service.filter_and_normalize_cells(
-                adata=adata,
-                min_genes_per_cell=min_genes_per_sample,
-                max_genes_per_cell=50000,  # No upper limit for bulk
-                min_cells_per_gene=min_samples_per_gene,
-                max_mito_percent=100.0,  # Less stringent for bulk
-                normalization_method=normalization_method,
-                target_sum=target_sum
+            logger.info(
+                f"Processing bulk RNA-seq modality '{modality_name}': {adata.shape[0]} samples × {adata.shape[1]} genes"
             )
-            
+
+            # Use preprocessing service with bulk RNA-seq optimized parameters
+            adata_processed, processing_stats = (
+                preprocessing_service.filter_and_normalize_cells(
+                    adata=adata,
+                    min_genes_per_cell=min_genes_per_sample,
+                    max_genes_per_cell=50000,  # No upper limit for bulk
+                    min_cells_per_gene=min_samples_per_gene,
+                    max_mito_percent=100.0,  # Less stringent for bulk
+                    normalization_method=normalization_method,
+                    target_sum=target_sum,
+                )
+            )
+
             # Save as new modality
             filtered_modality_name = f"{modality_name}_filtered_normalized"
             data_manager.modalities[filtered_modality_name] = adata_processed
-            
+
             # Save to file if requested
             if save_result:
                 save_path = f"{modality_name}_filtered_normalized.h5ad"
                 data_manager.save_modality(filtered_modality_name, save_path)
-            
+
             # Log the operation
             data_manager.log_tool_usage(
                 tool_name="filter_and_normalize_modality",
@@ -266,17 +287,17 @@ Proceed with filtering and normalization for differential expression analysis.""
                     "min_samples_per_gene": min_samples_per_gene,
                     "min_total_counts": min_total_counts,
                     "normalization_method": normalization_method,
-                    "target_sum": target_sum
+                    "target_sum": target_sum,
                 },
-                description=f"Bulk RNA-seq filtered and normalized {modality_name}"
+                description=f"Bulk RNA-seq filtered and normalized {modality_name}",
             )
-            
+
             # Format professional response
-            original_shape = processing_stats['original_shape']
-            final_shape = processing_stats['final_shape']
-            samples_retained_pct = processing_stats['cells_retained_pct']
-            genes_retained_pct = processing_stats['genes_retained_pct']
-            
+            original_shape = processing_stats["original_shape"]
+            final_shape = processing_stats["final_shape"]
+            samples_retained_pct = processing_stats["cells_retained_pct"]
+            genes_retained_pct = processing_stats["genes_retained_pct"]
+
             response = f"""Successfully filtered and normalized bulk RNA-seq modality '{modality_name}'!
 
 📊 **Bulk RNA-seq Filtering Results:**
@@ -295,17 +316,19 @@ Proceed with filtering and normalization for differential expression analysis.""
 
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
-            
+
             response += f"\n\nNext recommended steps: differential expression analysis between experimental groups."
-            
+
             analysis_results["details"]["filter_normalize"] = response
             return response
-            
+
         except (PreprocessingError, ModalityNotFoundError) as e:
             logger.error(f"Error in bulk RNA-seq filtering/normalization: {e}")
             return f"Error filtering and normalizing bulk RNA-seq modality: {str(e)}"
         except Exception as e:
-            logger.error(f"Unexpected error in bulk RNA-seq filtering/normalization: {e}")
+            logger.error(
+                f"Unexpected error in bulk RNA-seq filtering/normalization: {e}"
+            )
             return f"Unexpected error: {str(e)}"
 
     # -------------------------
@@ -319,16 +342,16 @@ Proceed with filtering and normalization for differential expression analysis.""
         group2: str,
         method: str = "deseq2_like",
         min_expression_threshold: float = 1.0,
-        save_result: bool = True
+        save_result: bool = True,
     ) -> str:
         """
         Run differential expression analysis between two groups in bulk RNA-seq data.
-        
+
         Args:
             modality_name: Name of the bulk RNA-seq modality to analyze
             groupby: Column name for grouping (e.g., 'condition', 'treatment')
             group1: First group for comparison (e.g., 'control')
-            group2: Second group for comparison (e.g., 'treatment') 
+            group2: Second group for comparison (e.g., 'treatment')
             method: Analysis method ('deseq2_like', 'wilcoxon', 't_test')
             min_expression_threshold: Minimum expression threshold for gene filtering
             save_result: Whether to save the results
@@ -336,24 +359,32 @@ Proceed with filtering and normalization for differential expression analysis.""
         try:
             # Validate modality exists
             if modality_name not in data_manager.list_modalities():
-                raise ModalityNotFoundError(f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}")
-            
+                raise ModalityNotFoundError(
+                    f"Modality '{modality_name}' not found. Available: {data_manager.list_modalities()}"
+                )
+
             # Get the modality
             adata = data_manager.get_modality(modality_name)
-            logger.info(f"Running DE analysis on bulk RNA-seq modality '{modality_name}': {adata.shape[0]} samples × {adata.shape[1]} genes")
-            
+            logger.info(
+                f"Running DE analysis on bulk RNA-seq modality '{modality_name}': {adata.shape[0]} samples × {adata.shape[1]} genes"
+            )
+
             # Validate experimental design
             if groupby not in adata.obs.columns:
-                available_columns = [col for col in adata.obs.columns if col.lower() in ['condition', 'treatment', 'group', 'batch']]
+                available_columns = [
+                    col
+                    for col in adata.obs.columns
+                    if col.lower() in ["condition", "treatment", "group", "batch"]
+                ]
                 return f"Grouping column '{groupby}' not found. Available experimental design columns: {available_columns}"
-            
+
             # Check if groups exist
             available_groups = list(adata.obs[groupby].unique())
             if group1 not in available_groups:
                 return f"Group '{group1}' not found in column '{groupby}'. Available groups: {available_groups}"
             if group2 not in available_groups:
                 return f"Group '{group2}' not found in column '{groupby}'. Available groups: {available_groups}"
-            
+
             # Use bulk service for differential expression
             adata_de, de_stats = bulk_service.run_differential_expression_analysis(
                 adata=adata,
@@ -361,18 +392,18 @@ Proceed with filtering and normalization for differential expression analysis.""
                 group1=group1,
                 group2=group2,
                 method=method,
-                min_expression_threshold=min_expression_threshold
+                min_expression_threshold=min_expression_threshold,
             )
-            
+
             # Save as new modality
             de_modality_name = f"{modality_name}_de_{group1}_vs_{group2}"
             data_manager.modalities[de_modality_name] = adata_de
-            
+
             # Save to file if requested
             if save_result:
                 save_path = f"{modality_name}_de_{group1}_vs_{group2}.h5ad"
                 data_manager.save_modality(de_modality_name, save_path)
-            
+
             # Log the operation
             data_manager.log_tool_usage(
                 tool_name="run_differential_expression_analysis",
@@ -382,11 +413,11 @@ Proceed with filtering and normalization for differential expression analysis.""
                     "group1": group1,
                     "group2": group2,
                     "method": method,
-                    "min_expression_threshold": min_expression_threshold
+                    "min_expression_threshold": min_expression_threshold,
                 },
-                description=f"Bulk RNA-seq DE analysis: {de_stats['n_significant_genes']} significant genes found"
+                description=f"Bulk RNA-seq DE analysis: {de_stats['n_significant_genes']} significant genes found",
             )
-            
+
             # Format professional response
             response = f"""Bulk RNA-seq Differential Expression Analysis Complete for '{modality_name}'!
 
@@ -401,30 +432,34 @@ Proceed with filtering and normalization for differential expression analysis.""
 - Downregulated in {group2}: {de_stats['n_downregulated']} genes
 
 🧬 **Top Upregulated Genes:**"""
-            
-            for gene in de_stats['top_upregulated'][:5]:
+
+            for gene in de_stats["top_upregulated"][:5]:
                 response += f"\n- {gene}"
-            
+
             response += f"\n\n🧬 **Top Downregulated Genes:**"
-            for gene in de_stats['top_downregulated'][:5]:
+            for gene in de_stats["top_downregulated"][:5]:
                 response += f"\n- {gene}"
-            
+
             response += f"\n\n💾 **New modality created**: '{de_modality_name}'"
-            
+
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
-            
+
             response += f"\n📈 **Access detailed results**: adata.uns['{de_stats['de_results_key']}']"
             response += f"\n\nUse the significant genes for pathway enrichment analysis or gene set analysis."
-            
+
             analysis_results["details"]["differential_expression"] = response
             return response
-            
+
         except (BulkRNASeqError, ModalityNotFoundError) as e:
             logger.error(f"Error in bulk RNA-seq differential expression analysis: {e}")
-            return f"Error running bulk RNA-seq differential expression analysis: {str(e)}"
+            return (
+                f"Error running bulk RNA-seq differential expression analysis: {str(e)}"
+            )
         except Exception as e:
-            logger.error(f"Unexpected error in bulk RNA-seq differential expression: {e}")
+            logger.error(
+                f"Unexpected error in bulk RNA-seq differential expression: {e}"
+            )
             return f"Unexpected error: {str(e)}"
 
     @tool
@@ -432,11 +467,11 @@ Proceed with filtering and normalization for differential expression analysis.""
         gene_list: List[str],
         analysis_type: str = "GO",
         modality_name: str = None,
-        save_result: bool = True
+        save_result: bool = True,
     ) -> str:
         """
         Run pathway enrichment analysis on gene lists from bulk RNA-seq differential expression results.
-        
+
         Args:
             gene_list: List of genes for enrichment analysis
             analysis_type: Type of analysis ("GO" or "KEGG")
@@ -447,42 +482,49 @@ Proceed with filtering and normalization for differential expression analysis.""
             # If modality name provided, extract significant genes from it
             if modality_name and modality_name in data_manager.list_modalities():
                 adata = data_manager.get_modality(modality_name)
-                
+
                 # Look for DE results in uns
-                de_keys = [key for key in adata.uns.keys() if key.startswith('de_results_')]
+                de_keys = [
+                    key for key in adata.uns.keys() if key.startswith("de_results_")
+                ]
                 if de_keys:
                     de_results = adata.uns[de_keys[0]]  # Use first DE result
                     if isinstance(de_results, dict):
                         # Extract significant genes
                         de_df = pd.DataFrame(de_results)
-                        if 'padj' in de_df.columns:
-                            significant_genes = de_df[de_df['padj'] < 0.05].index.tolist()
+                        if "padj" in de_df.columns:
+                            significant_genes = de_df[
+                                de_df["padj"] < 0.05
+                            ].index.tolist()
                             if significant_genes:
                                 gene_list = significant_genes[:500]  # Top 500 genes
-                                logger.info(f"Extracted {len(gene_list)} significant genes from bulk RNA-seq analysis {modality_name}")
-            
+                                logger.info(
+                                    f"Extracted {len(gene_list)} significant genes from bulk RNA-seq analysis {modality_name}"
+                                )
+
             if not gene_list or len(gene_list) == 0:
                 return "No genes provided for enrichment analysis. Please provide a gene list or run differential expression analysis first."
-            
-            logger.info(f"Running pathway enrichment on {len(gene_list)} genes from bulk RNA-seq data")
-            
+
+            logger.info(
+                f"Running pathway enrichment on {len(gene_list)} genes from bulk RNA-seq data"
+            )
+
             # Use bulk service for pathway enrichment
             enrichment_df, enrichment_stats = bulk_service.run_pathway_enrichment(
-                gene_list=gene_list,
-                analysis_type=analysis_type
+                gene_list=gene_list, analysis_type=analysis_type
             )
-            
+
             # Log the operation
             data_manager.log_tool_usage(
                 tool_name="run_pathway_enrichment_analysis",
                 parameters={
                     "gene_list_size": len(gene_list),
                     "analysis_type": analysis_type,
-                    "modality_name": modality_name
+                    "modality_name": modality_name,
                 },
-                description=f"Bulk RNA-seq {analysis_type} enrichment: {enrichment_stats['n_significant_terms']} significant terms"
+                description=f"Bulk RNA-seq {analysis_type} enrichment: {enrichment_stats['n_significant_terms']} significant terms",
             )
-            
+
             # Format professional response
             response = f"""Bulk RNA-seq {analysis_type} Pathway Enrichment Analysis Complete!
 
@@ -493,19 +535,19 @@ Proceed with filtering and normalization for differential expression analysis.""
 - Significant terms (p.adj < 0.05): {enrichment_stats['n_significant_terms']}
 
 🧬 **Top Enriched Pathways:**"""
-            
-            for term in enrichment_stats['top_terms'][:8]:
+
+            for term in enrichment_stats["top_terms"][:8]:
                 response += f"\n- {term}"
-            
-            if len(enrichment_stats['top_terms']) > 8:
-                remaining = len(enrichment_stats['top_terms']) - 8
+
+            if len(enrichment_stats["top_terms"]) > 8:
+                remaining = len(enrichment_stats["top_terms"]) - 8
                 response += f"\n... and {remaining} more pathways"
-            
+
             response += f"\n\nPathway enrichment reveals biological processes and pathways associated with bulk RNA-seq differential expression."
-            
+
             analysis_results["details"]["pathway_enrichment"] = response
             return response
-            
+
         except BulkRNASeqError as e:
             logger.error(f"Error in bulk RNA-seq pathway enrichment: {e}")
             return f"Error running bulk RNA-seq pathway enrichment: {str(e)}"
@@ -519,42 +561,60 @@ Proceed with filtering and normalization for differential expression analysis.""
         try:
             if not analysis_results["details"]:
                 return "No bulk RNA-seq analyses have been performed yet. Run some analysis tools first."
-            
+
             summary = "# Bulk RNA-seq Analysis Summary\n\n"
-            
+
             for step, details in analysis_results["details"].items():
                 summary += f"## {step.replace('_', ' ').title()}\n"
                 summary += f"{details}\n\n"
-            
+
             # Add current modality status
             modalities = data_manager.list_modalities()
             if modalities:
                 # Filter for bulk RNA-seq modalities
-                bulk_modalities = [mod for mod in modalities if 
-                                 'bulk' in mod.lower() or 
-                                 data_manager._detect_modality_type(mod) == 'bulk_rna_seq']
-                
+                bulk_modalities = [
+                    mod
+                    for mod in modalities
+                    if "bulk" in mod.lower()
+                    or data_manager._detect_modality_type(mod) == "bulk_rna_seq"
+                ]
+
                 summary += f"## Current Bulk RNA-seq Modalities\n"
                 summary += f"Bulk RNA-seq modalities ({len(bulk_modalities)}): {', '.join(bulk_modalities)}\n\n"
-                
+
                 # Add modality details
                 summary += "### Bulk RNA-seq Modality Details:\n"
                 for mod_name in bulk_modalities:
                     try:
                         adata = data_manager.get_modality(mod_name)
                         summary += f"- **{mod_name}**: {adata.n_obs} samples × {adata.n_vars} genes\n"
-                        
+
                         # Add key bulk RNA-seq observation columns if present
-                        key_cols = [col for col in adata.obs.columns if col.lower() in ['condition', 'treatment', 'group', 'batch', 'time_point']]
+                        key_cols = [
+                            col
+                            for col in adata.obs.columns
+                            if col.lower()
+                            in [
+                                "condition",
+                                "treatment",
+                                "group",
+                                "batch",
+                                "time_point",
+                            ]
+                        ]
                         if key_cols:
-                            summary += f"  - Experimental design: {', '.join(key_cols)}\n"
+                            summary += (
+                                f"  - Experimental design: {', '.join(key_cols)}\n"
+                            )
                     except Exception as e:
                         summary += f"- **{mod_name}**: Error accessing modality\n"
-            
+
             analysis_results["summary"] = summary
-            logger.info(f"Created bulk RNA-seq analysis summary with {len(analysis_results['details'])} analysis steps")
+            logger.info(
+                f"Created bulk RNA-seq analysis summary with {len(analysis_results['details'])} analysis steps"
+            )
             return summary
-            
+
         except Exception as e:
             logger.error(f"Error creating bulk RNA-seq analysis summary: {e}")
             return f"Error creating bulk RNA-seq summary: {str(e)}"
@@ -568,9 +628,9 @@ Proceed with filtering and normalization for differential expression analysis.""
         filter_and_normalize_modality,
         run_differential_expression_analysis,
         run_pathway_enrichment_analysis,
-        create_analysis_summary
+        create_analysis_summary,
     ]
-    
+
     tools = base_tools + (handoff_tools or [])
 
     # -------------------------
@@ -764,5 +824,5 @@ Today's date: {date.today()}
         tools=tools,
         prompt=system_prompt,
         name=agent_name,
-        state_schema=BulkRNASeqExpertState
+        state_schema=BulkRNASeqExpertState,
     )

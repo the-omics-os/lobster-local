@@ -100,26 +100,110 @@ class LobsterAgentConfigurator:
     - Thinking/reasoning support for compatible models
     """
 
-    # Pre-defined model configurations - Simplified to 2 models
+    # Pre-defined model configurations
     MODEL_PRESETS = {
-        # Development Model - Claude 3.7 Sonnet
+        # Anthropic Claude Models - Lightweight (Haiku family)
+        "claude-3-haiku": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-3-haiku-20240307-v1:0",
+            tier=ModelTier.LIGHTWEIGHT,
+            temperature=1.0,
+            description="Fast, cost-effective Claude 3 Haiku for simple tasks",
+            supports_thinking=False,
+        ),
+        "claude-3-5-haiku": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-3-5-haiku-20241022-v1:0",
+            tier=ModelTier.LIGHTWEIGHT,
+            temperature=1.0,
+            description="Fast, cost-effective Claude 3.5 Haiku for simple tasks",
+            supports_thinking=False,
+        ),
+        "claude-3-5-sonnet-v2": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+            tier=ModelTier.STANDARD,
+            temperature=1.0,
+            description="Latest Claude 3.5 Sonnet v2 with enhanced capabilities",
+            supports_thinking=False,
+        ),
+        "claude-4-sonnet": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+            tier=ModelTier.STANDARD,
+            temperature=1.0,
+            description="Next-generation Claude 4 Sonnet model",
+            supports_thinking=True,
+        ),
+        "claude-4-opus": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-opus-4-20250514-v1:0",
+            tier=ModelTier.HEAVY,
+            temperature=1.0,
+            description="Advanced Claude 4 Opus for complex reasoning",
+            supports_thinking=True,
+        ),
+        "claude-4-1-opus": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-opus-4-1-20250805-v1:0",
+            tier=ModelTier.HEAVY,
+            temperature=1.0,
+            description="Latest Claude 4.1 Opus with cutting-edge capabilities",
+            supports_thinking=True,
+        ),
+        # Ultra Performance Models
         "claude-3-7-sonnet": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-3-7-sonnet-20250219-v1:0",
             tier=ModelTier.ULTRA,
             temperature=1.0,
-            region="us-east-1",
-            description="Claude 3.7 Sonnet for development and worker agents",
+            description="Highest-performance Claude 3.7 Sonnet model with thinking support",
             supports_thinking=True,
         ),
-        # Production Model - Claude 4.5 Sonnet
-        "claude-4-5-sonnet": ModelConfig(
+        # EU Region Models (for EU compliance)
+        "claude-3-5-haiku-eu": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
-            model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            model_id="eu.anthropic.claude-3-5-haiku-20241022-v1:0",
+            tier=ModelTier.LIGHTWEIGHT,
+            temperature=1.0,
+            region="eu-central-1",
+            description="EU region Claude 3.5 Haiku model",
+            supports_thinking=False,
+        ),
+        "claude-3-5-sonnet-v2-eu": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
+            tier=ModelTier.STANDARD,
+            temperature=1.0,
+            region="eu-central-1",
+            description="EU region Claude 3.5 Sonnet v2 model",
+            supports_thinking=False,
+        ),
+        "claude-4-opus-eu": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="eu.anthropic.claude-opus-4-20250514-v1:0",
+            tier=ModelTier.HEAVY,
+            temperature=1.0,
+            region="eu-central-1",
+            description="EU region Claude 4 Opus model",
+            supports_thinking=True,
+        ),
+        "claude-4-1-opus-eu": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="eu.anthropic.claude-opus-4-1-20250805-v1:0",
+            tier=ModelTier.HEAVY,
+            temperature=1.0,
+            region="eu-central-1",
+            description="EU region Claude 4.1 Opus model",
+            supports_thinking=True,
+        ),
+        "claude-3-7-sonnet-eu": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="eu.anthropic.claude-3-7-sonnet-20250219-v1:0",
             tier=ModelTier.ULTRA,
             temperature=1.0,
-            region="us-east-1",
-            description="Claude 4.5 Sonnet for production and supervisor",
+            region="eu-central-1",
+            description="EU region Claude 3.7 Sonnet model with thinking support",
             supports_thinking=True,
         ),
     }
@@ -148,13 +232,11 @@ class LobsterAgentConfigurator:
         "deep": ThinkingConfig(enabled=True, budget_tokens=10000),
     }
 
-    # Pre-defined testing profiles - Simplified to 2 profiles
+    # Pre-defined testing profiles - automatically includes all agents
     TESTING_PROFILES = {
         "development": {
-            # Supervisor uses Claude 4.5 Sonnet
-            "supervisor": "claude-4-5-sonnet",
-            # All worker agents use Claude 3.7 Sonnet
-            "assistant": "claude-3-7-sonnet",
+            "assistant": "claude-3-5-sonnet-v2",
+            "supervisor": "claude-3-7-sonnet",
             "singlecell_expert_agent": "claude-3-7-sonnet",
             "bulk_rnaseq_expert_agent": "claude-3-7-sonnet",
             "method_expert_agent": "claude-3-7-sonnet",
@@ -167,19 +249,32 @@ class LobsterAgentConfigurator:
             "thinking": {},  # No thinking in development mode for faster testing
         },
         "production": {
-            # All agents including supervisor use Claude 4.5 Sonnet
-            "supervisor": "claude-4-5-sonnet",
-            "assistant": "claude-4-5-sonnet",
-            "singlecell_expert_agent": "claude-4-5-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-4-5-sonnet",
-            "method_expert_agent": "claude-4-5-sonnet",
-            "data_expert_agent": "claude-4-5-sonnet",
-            "machine_learning_expert_agent": "claude-4-5-sonnet",
-            "research_agent": "claude-4-5-sonnet",
-            "ms_proteomics_expert_agent": "claude-4-5-sonnet",
-            "affinity_proteomics_expert_agent": "claude-4-5-sonnet",
-            "visualization_expert_agent": "claude-4-5-sonnet",
+            "assistant": "claude-3-5-sonnet-v2",
+            "supervisor": "claude-4-sonnet",
+            "singlecell_expert_agent": "claude-4-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "method_expert_agent": "claude-4-sonnet",
+            "data_expert_agent": "claude-4-sonnet",
+            "machine_learning_expert_agent": "claude-4-sonnet",
+            "research_agent": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-sonnet",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {},  # No thinking configured for production
+        },
+        "cost-optimized": {
+            "assistant": "claude-3-5-sonnet-v2",
+            "supervisor": "claude-3-7-sonnet",
+            "singlecell_expert_agent": "claude-3-7-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-3-7-sonnet",
+            "method_expert_agent": "claude-3-7-sonnet",
+            "data_expert_agent": "claude-3-7-sonnet",
+            "machine_learning_expert_agent": "claude-3-7-sonnet",
+            "research_agent": "claude-3-7-sonnet",
+            "ms_proteomics_expert_agent": "claude-3-7-sonnet",
+            "affinity_proteomics_expert_agent": "claude-3-7-sonnet",
+            "visualization_expert_agent": "claude-3-7-sonnet",
+            "thinking": {},  # No thinking for cost optimization
         },
     }
 

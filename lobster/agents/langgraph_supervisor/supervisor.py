@@ -1,5 +1,15 @@
 import inspect
-from typing import Any, Callable, Literal, Optional, Sequence, Type, Union, cast, get_args
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    Sequence,
+    Type,
+    Union,
+    cast,
+    get_args,
+)
 from uuid import UUID, uuid5
 from warnings import warn
 
@@ -26,7 +36,10 @@ from langgraph.pregel import Pregel
 from langgraph.pregel.remote import RemoteGraph
 from typing_extensions import Annotated, TypedDict, Unpack
 
-from lobster.agents.langgraph_supervisor.agent_name import AgentNameMode, with_agent_name
+from lobster.agents.langgraph_supervisor.agent_name import (
+    AgentNameMode,
+    with_agent_name,
+)
 from lobster.agents.langgraph_supervisor.handoff import (
     METADATA_KEY_HANDOFF_DESTINATION,
     _normalize_agent_name,
@@ -102,12 +115,20 @@ def _make_call_agent(
         thread_id = config.get("configurable", {}).get("thread_id")
         output = agent.invoke(
             state,
-            patch_configurable(
-                config,
-                {"thread_id": str(uuid5(UUID(str(thread_id)), agent.name)) if thread_id else None},
-            )
-            if isinstance(agent, RemoteGraph)
-            else config,
+            (
+                patch_configurable(
+                    config,
+                    {
+                        "thread_id": (
+                            str(uuid5(UUID(str(thread_id)), agent.name))
+                            if thread_id
+                            else None
+                        )
+                    },
+                )
+                if isinstance(agent, RemoteGraph)
+                else config
+            ),
         )
         return _process_output(output)
 
@@ -115,12 +136,20 @@ def _make_call_agent(
         thread_id = config.get("configurable", {}).get("thread_id")
         output = await agent.ainvoke(
             state,
-            patch_configurable(
-                config,
-                {"thread_id": str(uuid5(UUID(str(thread_id)), agent.name)) if thread_id else None},
-            )
-            if isinstance(agent, RemoteGraph)
-            else config,
+            (
+                patch_configurable(
+                    config,
+                    {
+                        "thread_id": (
+                            str(uuid5(UUID(str(thread_id)), agent.name))
+                            if thread_id
+                            else None
+                        )
+                    },
+                )
+                if isinstance(agent, RemoteGraph)
+                else config
+            ),
         )
         return _process_output(output)
 

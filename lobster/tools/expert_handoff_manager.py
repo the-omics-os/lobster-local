@@ -6,19 +6,17 @@ handoffs with context preservation and automatic return flow management.
 """
 
 import json
+import logging
 import time
 import uuid
-from typing import Dict, List, Optional, Any 
-from langchain_core.tools import BaseTool
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from datetime import datetime
-import logging
+from typing import Any, Dict, List, Optional
 
-from langchain_core.tools import tool
-from typing_extensions import Annotated
+from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
-from langchain_core.tools import InjectedToolCallId
 from langgraph.types import Command
+from typing_extensions import Annotated
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class HandoffContext:
     """Context data for expert handoffs."""
+
     handoff_id: str
     from_expert: str
     to_expert: str
@@ -41,7 +40,7 @@ class HandoffContext:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'HandoffContext':
+    def from_dict(cls, data: Dict[str, Any]) -> "HandoffContext":
         """Create from dictionary."""
         return cls(**data)
 
@@ -49,6 +48,7 @@ class HandoffContext:
 @dataclass
 class HandoffResult:
     """Result from a completed handoff operation."""
+
     handoff_id: str
     success: bool
     result_data: Dict[str, Any]
@@ -73,7 +73,9 @@ class ExpertHandoffManager:
         self.handoff_chains: Dict[str, List[str]] = {}
         self._max_chain_depth = 10  # Prevent infinite recursion
 
-    def register_handoff(self, from_expert: str, to_expert: str, handoff_tool: BaseTool) -> None:
+    def register_handoff(
+        self, from_expert: str, to_expert: str, handoff_tool: BaseTool
+    ) -> None:
         """
         Register a handoff tool between two experts.
 
@@ -87,10 +89,7 @@ class ExpertHandoffManager:
         logger.info(f"Registered handoff: {from_expert} -> {to_expert}")
 
     def create_context_preserving_handoff(
-        self,
-        to_expert: str,
-        context: HandoffContext,
-        return_to_sender: bool = True
+        self, to_expert: str, context: HandoffContext, return_to_sender: bool = True
     ) -> Command:
         """
         Create handoff command that preserves context across agents.
@@ -116,7 +115,9 @@ class ExpertHandoffManager:
         # Check for chain depth limit
         if len(self.handoff_chains[chain_key]) > self._max_chain_depth:
             logger.error(f"Handoff chain depth exceeded for {context.handoff_id}")
-            raise ValueError(f"Maximum handoff chain depth ({self._max_chain_depth}) exceeded")
+            raise ValueError(
+                f"Maximum handoff chain depth ({self._max_chain_depth}) exceeded"
+            )
 
         # Create detailed task description for target expert
         task_description = self._format_task_description(context)
@@ -130,8 +131,8 @@ class ExpertHandoffManager:
                 "handoff_context": context.to_dict(),
                 "task_description": task_description,
                 "return_to_sender": return_to_sender,
-                "handoff_id": context.handoff_id
-            }
+                "handoff_id": context.handoff_id,
+            },
         )
 
     def track_handoff_chain(self, handoff_id: str, chain: List[str]) -> None:
@@ -184,10 +185,7 @@ class ExpertHandoffManager:
         return context.from_expert
 
     def complete_handoff(
-        self,
-        handoff_id: str,
-        result: HandoffResult,
-        state: Dict[str, Any]
+        self, handoff_id: str, result: HandoffResult, state: Dict[str, Any]
     ) -> Command:
         """
         Complete a handoff operation and return control to sender.
@@ -219,8 +217,8 @@ class ExpertHandoffManager:
                 update={
                     **state,
                     "handoff_result": result.to_dict(),
-                    "handoff_completed": True
-                }
+                    "handoff_completed": True,
+                },
             )
         else:
             # Return to specific agent
@@ -230,8 +228,8 @@ class ExpertHandoffManager:
                     **state,
                     "handoff_result": result.to_dict(),
                     "handoff_completed": True,
-                    "returned_from": context.to_expert
-                }
+                    "returned_from": context.to_expert,
+                },
             )
 
     def cleanup_handoff(self, handoff_id: str) -> None:
@@ -244,12 +242,14 @@ class ExpertHandoffManager:
         # Move to history before cleanup
         if handoff_id in self.active_handoffs:
             context = self.active_handoffs[handoff_id]
-            self.handoff_history.append({
-                "handoff_id": handoff_id,
-                "context": context.to_dict(),
-                "completed_at": datetime.now().isoformat(),
-                "status": "completed"
-            })
+            self.handoff_history.append(
+                {
+                    "handoff_id": handoff_id,
+                    "context": context.to_dict(),
+                    "completed_at": datetime.now().isoformat(),
+                    "status": "completed",
+                }
+            )
 
             # Clean up active data
             del self.active_handoffs[handoff_id]
@@ -306,7 +306,7 @@ class ExpertHandoffManager:
         self,
         event_type: str,
         context: HandoffContext,
-        additional_data: Optional[Dict[str, Any]] = None
+        additional_data: Optional[Dict[str, Any]] = None,
     ) -> None:
         """
         Log handoff events for debugging and analytics.
@@ -322,7 +322,7 @@ class ExpertHandoffManager:
             "handoff_id": context.handoff_id,
             "from_expert": context.from_expert,
             "to_expert": context.to_expert,
-            "task_type": context.task_type
+            "task_type": context.task_type,
         }
 
         if additional_data:
@@ -330,8 +330,10 @@ class ExpertHandoffManager:
 
         self.handoff_history.append(log_entry)
 
-        logger.info(f"Handoff event: {event_type} for {context.handoff_id} "
-                   f"({context.from_expert} -> {context.to_expert})")
+        logger.info(
+            f"Handoff event: {event_type} for {context.handoff_id} "
+            f"({context.from_expert} -> {context.to_expert})"
+        )
 
 
 # Global instance for use across the application
@@ -343,7 +345,7 @@ def create_handoff_context(
     to_expert: str,
     task_type: str,
     parameters: Dict[str, Any],
-    return_expectations: Optional[Dict[str, Any]] = None
+    return_expectations: Optional[Dict[str, Any]] = None,
 ) -> HandoffContext:
     """
     Helper function to create handoff context.
@@ -365,7 +367,7 @@ def create_handoff_context(
         task_type=task_type,
         parameters=parameters,
         return_expectations=return_expectations or {},
-        timestamp=datetime.now().isoformat()
+        timestamp=datetime.now().isoformat(),
     )
 
 
@@ -373,7 +375,7 @@ def create_handoff_result(
     handoff_id: str,
     success: bool,
     result_data: Dict[str, Any],
-    error_message: Optional[str] = None
+    error_message: Optional[str] = None,
 ) -> HandoffResult:
     """
     Helper function to create handoff result.
@@ -392,5 +394,5 @@ def create_handoff_result(
         success=success,
         result_data=result_data,
         error_message=error_message,
-        completion_time=datetime.now().isoformat()
+        completion_time=datetime.now().isoformat(),
     )

@@ -10,11 +10,11 @@ import json
 import os
 import re
 import tarfile
-import urllib.request
 import time
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -25,7 +25,6 @@ except ImportError:
     GEOparse = None
 
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.utils.logger import get_logger
 
 # Import helper modules for fallback functionality
 from lobster.tools.geo_downloader import GEODownloadManager
@@ -33,6 +32,7 @@ from lobster.tools.geo_parser import GEOParser
 
 # Import the main service classes and enums
 from lobster.tools.geo_service import GEODataSource, GEOResult
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -40,15 +40,15 @@ logger = get_logger(__name__)
 class GEOFallbackService:
     """
     Fallback service for GEO data downloading when primary methods fail.
-    
+
     This service is only instantiated and used when the standard _try_geoparse_download
     method fails, providing alternative download strategies and file processing methods.
     """
-    
+
     def __init__(self, geo_service):
         """
         Initialize the fallback service with references to the main GEO service.
-        
+
         Args:
             geo_service: Main GEOService instance for accessing shared resources
         """
@@ -58,7 +58,7 @@ class GEOFallbackService:
         self.console = geo_service.console
         self.geo_downloader = geo_service.geo_downloader
         self.geo_parser = geo_service.geo_parser
-        
+
     # ========================================
     # PIPELINE STEP FUNCTIONS (FALLBACK)
     # ========================================
@@ -68,20 +68,25 @@ class GEOFallbackService:
         try:
             logger.debug(f"Trying TAR supplementary files for {geo_id}")
             soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
-            
-            if isinstance(data_sources, dict) and 'tar' in data_sources:
-                matrix = self.geo_parser.parse_supplementary_file(data_sources['tar'])
+
+            if isinstance(data_sources, dict) and "tar" in data_sources:
+                matrix = self.geo_parser.parse_supplementary_file(data_sources["tar"])
                 if matrix is not None and not matrix.empty:
                     return GEOResult(
                         data=matrix,
                         metadata=metadata,
                         source=GEODataSource.TAR_ARCHIVE,
-                        processing_info={"method": "helper_tar", "source_file": str(data_sources['tar'])},
-                        success=True
+                        processing_info={
+                            "method": "helper_tar",
+                            "source_file": str(data_sources["tar"]),
+                        },
+                        success=True,
                     )
-            
-            return GEOResult(success=False, error_message="No TAR files found or parsable")
-            
+
+            return GEOResult(
+                success=False, error_message="No TAR files found or parsable"
+            )
+
         except Exception as e:
             logger.warning(f"TAR supplementary download failed: {e}")
             return GEOResult(success=False, error_message=str(e))
@@ -92,66 +97,82 @@ class GEOFallbackService:
             logger.debug(f"Trying series matrix for {geo_id}")
             # Use GEOparse to get series matrix
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
-            
+
             # Check if there's a series matrix
-            if hasattr(gse, 'table') and gse.table is not None:
+            if hasattr(gse, "table") and gse.table is not None:
                 return GEOResult(
                     data=gse.table,
                     metadata=metadata,
                     source=GEODataSource.GEOPARSE,
                     processing_info={"method": "series_matrix"},
-                    success=True
+                    success=True,
                 )
-            
+
             return GEOResult(success=False, error_message="No series matrix available")
-            
+
         except Exception as e:
             logger.warning(f"Series matrix download failed: {e}")
             return GEOResult(success=False, error_message=str(e))
 
-    def try_supplementary_files(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+    def try_supplementary_files(
+        self, geo_id: str, metadata: Dict[str, Any]
+    ) -> GEOResult:
         """Pipeline step: Try supplementary files (non-TAR)."""
         try:
             logger.debug(f"Trying supplementary files for {geo_id}")
             soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
-            
-            if isinstance(data_sources, dict) and 'supplementary' in data_sources:
-                matrix = self.geo_parser.parse_supplementary_file(data_sources['supplementary'])
+
+            if isinstance(data_sources, dict) and "supplementary" in data_sources:
+                matrix = self.geo_parser.parse_supplementary_file(
+                    data_sources["supplementary"]
+                )
                 if matrix is not None and not matrix.empty:
                     return GEOResult(
                         data=matrix,
                         metadata=metadata,
                         source=GEODataSource.SUPPLEMENTARY,
-                        processing_info={"method": "helper_supplementary", "source_file": str(data_sources['supplementary'])},
-                        success=True
+                        processing_info={
+                            "method": "helper_supplementary",
+                            "source_file": str(data_sources["supplementary"]),
+                        },
+                        success=True,
                     )
-            
-            return GEOResult(success=False, error_message="No supplementary files found or parsable")
-            
+
+            return GEOResult(
+                success=False, error_message="No supplementary files found or parsable"
+            )
+
         except Exception as e:
             logger.warning(f"Supplementary files download failed: {e}")
             return GEOResult(success=False, error_message=str(e))
 
-    def try_sample_matrices_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+    def try_sample_matrices_fallback(
+        self, geo_id: str, metadata: Dict[str, Any]
+    ) -> GEOResult:
         """Pipeline step: Try individual sample matrices as fallback."""
         try:
             logger.debug(f"Trying sample matrices fallback for {geo_id}")
             # This is already handled in _try_geoparse_download, so this is a no-op
-            return GEOResult(success=False, error_message="Sample matrices already tried in GEOparse step")
-            
+            return GEOResult(
+                success=False,
+                error_message="Sample matrices already tried in GEOparse step",
+            )
+
         except Exception as e:
             logger.warning(f"Sample matrices fallback failed: {e}")
             return GEOResult(success=False, error_message=str(e))
 
-    def try_helper_download_fallback(self, geo_id: str, metadata: Dict[str, Any]) -> GEOResult:
+    def try_helper_download_fallback(
+        self, geo_id: str, metadata: Dict[str, Any]
+    ) -> GEOResult:
         """Pipeline step: Final fallback using helper downloader."""
         try:
             logger.debug(f"Trying helper download fallback for {geo_id}")
             soft_file, data_sources = self.geo_downloader.download_geo_data(geo_id)
-            
+
             if not data_sources:
                 return GEOResult(success=False, error_message="No data sources found")
-            
+
             # Try all available data sources
             if isinstance(data_sources, dict):
                 for source_name, source_path in data_sources.items():
@@ -162,8 +183,11 @@ class GEOFallbackService:
                                 data=matrix,
                                 metadata=metadata,
                                 source=GEODataSource.SOFT_FILE,
-                                processing_info={"method": f"helper_fallback_{source_name}", "source_file": str(source_path)},
-                                success=True
+                                processing_info={
+                                    "method": f"helper_fallback_{source_name}",
+                                    "source_file": str(source_path),
+                                },
+                                success=True,
                             )
                     except Exception as e:
                         logger.warning(f"Failed to parse {source_name}: {e}")
@@ -176,12 +200,17 @@ class GEOFallbackService:
                         data=matrix,
                         metadata=metadata,
                         source=GEODataSource.SOFT_FILE,
-                        processing_info={"method": "helper_fallback_single", "source_file": str(data_sources)},
-                        success=True
+                        processing_info={
+                            "method": "helper_fallback_single",
+                            "source_file": str(data_sources),
+                        },
+                        success=True,
                     )
-            
-            return GEOResult(success=False, error_message="All helper download attempts failed")
-            
+
+            return GEOResult(
+                success=False, error_message="All helper download attempts failed"
+            )
+
         except Exception as e:
             logger.warning(f"Helper download fallback failed: {e}")
             return GEOResult(success=False, error_message=str(e))
@@ -193,94 +222,114 @@ class GEOFallbackService:
     def download_single_cell_sample(self, gsm_id: str) -> str:
         """
         Specialized single-cell sample downloading (Scenario 4).
-        
+
         Args:
             gsm_id: GEO sample ID (e.g., GSM123456)
-            
+
         Returns:
             str: Status message
         """
         try:
             logger.debug(f"Downloading single-cell sample: {gsm_id}")
-            
+
             # Clean sample ID
             clean_gsm_id = gsm_id.strip().upper()
-            if not clean_gsm_id.startswith('GSM'):
+            if not clean_gsm_id.startswith("GSM"):
                 return f"Invalid sample ID format: {gsm_id}. Must be a GSM accession (e.g., GSM123456)."
-            
+
             # Try GEOparse first
             try:
                 gsm = GEOparse.get_GEO(geo=clean_gsm_id, destdir=str(self.cache_dir))
-                
+
                 # Check for 10X format supplementary files
                 if hasattr(gsm, "metadata") and "supplementary_file" in gsm.metadata:
                     suppl_files = gsm.metadata["supplementary_file"]
                     if not isinstance(suppl_files, list):
                         suppl_files = [suppl_files]
-                    
+
                     # Look for 10X format files
                     for suppl_url in suppl_files:
-                        if any(pattern in suppl_url.lower() for pattern in 
-                               ['matrix.mtx', 'barcodes.tsv', 'features.tsv', '.h5']):
-                            
+                        if any(
+                            pattern in suppl_url.lower()
+                            for pattern in [
+                                "matrix.mtx",
+                                "barcodes.tsv",
+                                "features.tsv",
+                                ".h5",
+                            ]
+                        ):
+
                             # Download and parse 10X data
-                            matrix = self._download_and_parse_10x_sample(suppl_url, clean_gsm_id)
+                            matrix = self._download_and_parse_10x_sample(
+                                suppl_url, clean_gsm_id
+                            )
                             if matrix is not None:
-                                return self.geo_service._store_single_sample_as_modality(clean_gsm_id, matrix, gsm)
-                
+                                return (
+                                    self.geo_service._store_single_sample_as_modality(
+                                        clean_gsm_id, matrix, gsm
+                                    )
+                                )
+
                 # Fallback to expression table
                 if hasattr(gsm, "table") and gsm.table is not None:
                     matrix = gsm.table
-                    return self.geo_service._store_single_sample_as_modality(clean_gsm_id, matrix, gsm)
-                    
+                    return self.geo_service._store_single_sample_as_modality(
+                        clean_gsm_id, matrix, gsm
+                    )
+
             except Exception as e:
                 logger.warning(f"GEOparse failed for {clean_gsm_id}: {e}")
-            
+
             # Fallback to helper downloader
             try:
                 return self.download_sample_with_helpers(clean_gsm_id)
             except Exception as e:
                 logger.error(f"Helper download failed for {clean_gsm_id}: {e}")
                 return f"Failed to download sample {clean_gsm_id}: {str(e)}"
-                
+
         except Exception as e:
             logger.exception(f"Error downloading single-cell sample {gsm_id}: {e}")
             return f"Error downloading single-cell sample {gsm_id}: {str(e)}"
 
-    def download_bulk_dataset(self, geo_id: str, prefer_series_matrix: bool = True) -> str:
+    def download_bulk_dataset(
+        self, geo_id: str, prefer_series_matrix: bool = True
+    ) -> str:
         """
         Enhanced bulk data downloading (Scenario 5).
-        
+
         Args:
             geo_id: GEO accession ID
             prefer_series_matrix: Whether to prefer series matrix over supplementary files
-            
+
         Returns:
             str: Status message
         """
         try:
             logger.debug(f"Downloading bulk dataset: {geo_id}")
-            
+
             clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
+            if not clean_geo_id.startswith("GSE"):
                 return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
-            
+
             # Ensure metadata exists
             if clean_geo_id not in self.data_manager.metadata_store:
                 metadata_summary = self.geo_service.fetch_metadata_only(clean_geo_id)
                 if "Error" in metadata_summary:
                     return f"Failed to fetch metadata: {metadata_summary}"
-            
+
             # Strategy for bulk data
             from lobster.tools.geo_service import DownloadStrategy, GEODataType
+
             strategy = DownloadStrategy(
                 prefer_geoparse=True,
                 prefer_supplementary=not prefer_series_matrix,
-                max_retries=2
+                max_retries=2,
             )
-            
-            result = self.geo_service.download_with_strategy(clean_geo_id, strategy, GEODataType.BULK)
-            
+
+            result = self.geo_service.download_with_strategy(
+                clean_geo_id, strategy, GEODataType.BULK
+            )
+
             if result.success:
                 # Store as bulk RNA-seq modality
                 modality_name = f"geo_{clean_geo_id.lower()}_bulk"
@@ -289,13 +338,13 @@ class GEOFallbackService:
                     source=result.data,
                     adapter="transcriptomics_bulk",
                     validate=True,
-                    **result.processing_info
+                    **result.processing_info,
                 )
-                
+
                 # Save to workspace
                 save_path = f"{clean_geo_id.lower()}_bulk_raw.h5ad"
                 saved_file = self.data_manager.save_modality(modality_name, save_path)
-                
+
                 return f"""Successfully downloaded bulk dataset {clean_geo_id}!
 
 📊 Modality: '{modality_name}' ({adata.n_obs} samples × {adata.n_vars} genes)
@@ -304,7 +353,7 @@ class GEOFallbackService:
 📈 Ready for bulk RNA-seq analysis!"""
             else:
                 return f"Failed to download bulk dataset {clean_geo_id}: {result.error_message}"
-                
+
         except Exception as e:
             logger.exception(f"Error downloading bulk dataset {geo_id}: {e}")
             return f"Error downloading bulk dataset {geo_id}: {str(e)}"
@@ -312,78 +361,84 @@ class GEOFallbackService:
     def process_supplementary_tar_files(self, geo_id: str) -> str:
         """
         TAR file processing fallback for single-cell data (Scenario 6).
-        
+
         Args:
             geo_id: GEO accession ID
-            
+
         Returns:
             str: Status message
         """
         try:
             logger.debug(f"Processing supplementary TAR files for: {geo_id}")
-            
+
             clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith('GSE'):
+            if not clean_geo_id.startswith("GSE"):
                 return f"Invalid GEO ID format: {geo_id}. Must be a GSE accession."
-            
+
             # Use helper downloader for TAR processing
-            soft_file, data_sources = self.geo_downloader.download_geo_data(clean_geo_id)
-            
+            soft_file, data_sources = self.geo_downloader.download_geo_data(
+                clean_geo_id
+            )
+
             if not data_sources:
                 return f"No TAR files found for {clean_geo_id}"
-            
+
             # Process TAR files using helper parser
             if isinstance(data_sources, dict):
-                if 'tar' in data_sources:
-                    matrix = self.geo_parser.parse_supplementary_file(data_sources['tar'])
-                elif 'tar_dir' in data_sources:
+                if "tar" in data_sources:
+                    matrix = self.geo_parser.parse_supplementary_file(
+                        data_sources["tar"]
+                    )
+                elif "tar_dir" in data_sources:
                     # Process directory with multiple files
-                    matrix = self.process_tar_directory_with_helpers(data_sources['tar_dir'])
+                    matrix = self.process_tar_directory_with_helpers(
+                        data_sources["tar_dir"]
+                    )
                 else:
                     return f"No TAR data found in downloaded files for {clean_geo_id}"
             else:
                 # Single file
                 matrix = self.geo_parser.parse_supplementary_file(data_sources)
-            
+
             if matrix is None or matrix.empty:
                 return f"Failed to parse TAR files for {clean_geo_id}"
-            
+
             # Store as single-cell modality
             modality_name = f"geo_{clean_geo_id.lower()}_tar"
-            
+
             enhanced_metadata = {
                 "dataset_id": clean_geo_id,
                 "dataset_type": "GEO",
                 "data_source": "tar_supplementary",
                 "processing_date": pd.Timestamp.now().isoformat(),
-                "parser_version": "helper_parser"
+                "parser_version": "helper_parser",
             }
-            
+
             adata = self.data_manager.load_modality(
                 name=modality_name,
                 source=matrix,
                 adapter="transcriptomics_single_cell",
                 validate=True,
-                **enhanced_metadata
+                **enhanced_metadata,
             )
-            
+
             # Save to workspace
             save_path = f"{clean_geo_id.lower()}_tar_processed.h5ad"
             saved_file = self.data_manager.save_modality(modality_name, save_path)
-            
+
             self.data_manager.log_tool_usage(
                 tool_name="process_supplementary_tar_files",
                 parameters={"geo_id": clean_geo_id},
-                description=f"Processed TAR supplementary files for {clean_geo_id}"
+                description=f"Processed TAR supplementary files for {clean_geo_id}",
             )
-            
+
             return f"""Successfully processed TAR supplementary files for {clean_geo_id}!
 
 📊 Modality: '{modality_name}' ({adata.n_obs} cells × {adata.n_vars} genes)
 🔬 Source: TAR supplementary files
 💾 Saved to: {save_path}
 📈 Ready for single-cell analysis!"""
-            
+
         except Exception as e:
             logger.exception(f"Error processing TAR files for {geo_id}: {e}")
             return f"Error processing TAR files for {geo_id}: {str(e)}"
@@ -399,12 +454,14 @@ class GEOFallbackService:
             # This would need to be implemented in the helper downloader
             # For now, return a not implemented message
             return f"Helper-based sample download for {gsm_id} not yet implemented. Please use GEOparse method."
-            
+
         except Exception as e:
             logger.error(f"Error downloading sample with helpers {gsm_id}: {e}")
             return f"Error downloading sample with helpers {gsm_id}: {str(e)}"
 
-    def process_tar_directory_with_helpers(self, tar_dir: Path) -> Optional[pd.DataFrame]:
+    def process_tar_directory_with_helpers(
+        self, tar_dir: Path
+    ) -> Optional[pd.DataFrame]:
         """Process TAR directory using helper parser."""
         try:
             # Look for expression files in the directory
@@ -416,10 +473,10 @@ class GEOFallbackService:
                 ):
                     if file_path.stat().st_size > 10000:  # > 10KB
                         expression_files.append(file_path)
-            
+
             # Sort by size, try largest first
             expression_files.sort(key=lambda x: x.stat().st_size, reverse=True)
-            
+
             for file_path in expression_files[:5]:  # Try top 5 files
                 try:
                     matrix = self.geo_parser.parse_supplementary_file(file_path)
@@ -429,14 +486,16 @@ class GEOFallbackService:
                 except Exception as e:
                     logger.warning(f"Failed to parse {file_path.name}: {e}")
                     continue
-            
+
             return None
-            
+
         except Exception as e:
             logger.error(f"Error processing TAR directory: {e}")
             return None
 
-    def _download_and_parse_10x_sample(self, suppl_url: str, gsm_id: str) -> Optional[pd.DataFrame]:
+    def _download_and_parse_10x_sample(
+        self, suppl_url: str, gsm_id: str
+    ) -> Optional[pd.DataFrame]:
         """Download and parse 10X format single-cell sample."""
         try:
             # Download using helper downloader for better progress tracking

@@ -8,35 +8,44 @@ and parallel processing visualization with orange theming.
 
 import time
 import uuid
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Callable, Union
-from dataclasses import dataclass, field
 from contextlib import contextmanager
-from threading import Lock
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock
+from typing import Any, Callable, Dict, List, Optional, Union
 
-from rich.progress import (
-    Progress, TaskID, SpinnerColumn, TextColumn, BarColumn,
-    TaskProgressColumn, TimeRemainingColumn, TimeElapsedColumn,
-    FileSizeColumn, TransferSpeedColumn, DownloadColumn,
-    MofNCompleteColumn
-)
-from rich.panel import Panel
-from rich.table import Table
-from rich.text import Text
-from rich.live import Live
-from rich.layout import Layout
+from rich import box
 from rich.align import Align
 from rich.columns import Columns
-from rich import box
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    FileSizeColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskID,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
+from rich.table import Table
+from rich.text import Text
 
-from .themes import LobsterTheme
 from .console_manager import get_console_manager
+from .themes import LobsterTheme
 
 
 @dataclass
 class TaskInfo:
     """Information about a progress task."""
+
     task_id: TaskID
     name: str
     description: str
@@ -80,14 +89,14 @@ class ProgressManager:
             BarColumn(
                 bar_width=None,
                 complete_style=LobsterTheme.PRIMARY_ORANGE,
-                finished_style=LobsterTheme.PRIMARY_ORANGE
+                finished_style=LobsterTheme.PRIMARY_ORANGE,
             ),
             TaskProgressColumn(),
             TimeElapsedColumn(),
             TimeRemainingColumn(),
             console=self.console_manager.console,
             transient=True,
-            expand=True
+            expand=True,
         )
 
         # Download progress with file size and speed
@@ -97,14 +106,14 @@ class ProgressManager:
             BarColumn(
                 bar_width=None,
                 complete_style=LobsterTheme.PRIMARY_ORANGE,
-                finished_style=LobsterTheme.PRIMARY_ORANGE
+                finished_style=LobsterTheme.PRIMARY_ORANGE,
             ),
             DownloadColumn(),
             TransferSpeedColumn(),
             TimeRemainingColumn(),
             console=self.console_manager.console,
             transient=True,
-            expand=True
+            expand=True,
         )
 
         # Analysis progress with step tracking
@@ -113,14 +122,14 @@ class ProgressManager:
             BarColumn(
                 bar_width=None,
                 complete_style=LobsterTheme.PRIMARY_ORANGE,
-                finished_style=LobsterTheme.PRIMARY_ORANGE
+                finished_style=LobsterTheme.PRIMARY_ORANGE,
             ),
             MofNCompleteColumn(),
             TaskProgressColumn(),
             TimeElapsedColumn(),
             console=self.console_manager.console,
             transient=True,
-            expand=True
+            expand=True,
         )
 
         # Batch processing progress
@@ -130,14 +139,14 @@ class ProgressManager:
             BarColumn(
                 bar_width=None,
                 complete_style=LobsterTheme.PRIMARY_ORANGE,
-                finished_style=LobsterTheme.PRIMARY_ORANGE
+                finished_style=LobsterTheme.PRIMARY_ORANGE,
             ),
             MofNCompleteColumn(),
             TaskProgressColumn(),
             TimeElapsedColumn(),
             console=self.console_manager.console,
             transient=True,
-            expand=True
+            expand=True,
         )
 
     def create_task(
@@ -146,7 +155,7 @@ class ProgressManager:
         description: str,
         total: Optional[float] = None,
         progress_type: str = "general",
-        **metadata
+        **metadata,
     ) -> str:
         """
         Create a new progress task.
@@ -166,7 +175,7 @@ class ProgressManager:
             "general": self.general_progress,
             "download": self.download_progress,
             "analysis": self.analysis_progress,
-            "batch": self.batch_progress
+            "batch": self.batch_progress,
         }
 
         progress = progress_instances.get(progress_type, self.general_progress)
@@ -178,7 +187,7 @@ class ProgressManager:
             name=name,
             description=description,
             total=total,
-            metadata=metadata
+            metadata=metadata,
         )
 
         with self.task_lock:
@@ -193,7 +202,7 @@ class ProgressManager:
         advance: Optional[float] = None,
         completed: Optional[float] = None,
         description: Optional[str] = None,
-        **metadata
+        **metadata,
     ):
         """
         Update a progress task.
@@ -257,7 +266,7 @@ class ProgressManager:
             status_text = "completed" if success else "failed"
             progress.update(
                 task_info.task_id,
-                description=f"{status_emoji} {task_info.description} ({status_text})"
+                description=f"{status_emoji} {task_info.description} ({status_text})",
             )
 
     def _get_progress_for_task(self, task_info: TaskInfo) -> Progress:
@@ -267,10 +276,7 @@ class ProgressManager:
         return self.general_progress
 
     def create_download_tracker(
-        self,
-        filename: str,
-        total_size: int,
-        description: Optional[str] = None
+        self, filename: str, total_size: int, description: Optional[str] = None
     ) -> str:
         """
         Create a specialized download progress tracker.
@@ -287,9 +293,7 @@ class ProgressManager:
             description = f"Downloading {filename}"
 
         task_id = self.download_progress.add_task(
-            description,
-            total=total_size,
-            filename=filename
+            description, total=total_size, filename=filename
         )
 
         # Create task info
@@ -298,7 +302,7 @@ class ProgressManager:
             name=f"download_{filename}",
             description=description,
             total=total_size,
-            metadata={"filename": filename, "type": "download"}
+            metadata={"filename": filename, "type": "download"},
         )
 
         with self.task_lock:
@@ -308,10 +312,7 @@ class ProgressManager:
         return unique_id
 
     def update_download(
-        self,
-        task_id: str,
-        bytes_downloaded: int,
-        speed: Optional[int] = None
+        self, task_id: str, bytes_downloaded: int, speed: Optional[int] = None
     ):
         """
         Update download progress.
@@ -337,10 +338,7 @@ class ProgressManager:
                 task_info.metadata["speed"] = speed
 
     def create_analysis_pipeline(
-        self,
-        pipeline_name: str,
-        steps: List[str],
-        description: Optional[str] = None
+        self, pipeline_name: str, steps: List[str], description: Optional[str] = None
     ) -> str:
         """
         Create an analysis pipeline progress tracker.
@@ -356,10 +354,7 @@ class ProgressManager:
         if description is None:
             description = f"Running {pipeline_name}"
 
-        task_id = self.analysis_progress.add_task(
-            description,
-            total=len(steps)
-        )
+        task_id = self.analysis_progress.add_task(description, total=len(steps))
 
         # Create task info
         task_info = TaskInfo(
@@ -371,8 +366,8 @@ class ProgressManager:
                 "type": "analysis_pipeline",
                 "steps": steps,
                 "current_step": 0,
-                "step_names": steps
-            }
+                "step_names": steps,
+            },
         )
 
         with self.task_lock:
@@ -385,7 +380,7 @@ class ProgressManager:
         self,
         task_id: str,
         step_name: Optional[str] = None,
-        details: Optional[str] = None
+        details: Optional[str] = None,
     ):
         """
         Advance to the next step in an analysis pipeline.
@@ -413,12 +408,13 @@ class ProgressManager:
                 if details:
                     description += f" - {details}"
                 self.analysis_progress.update(
-                    task_info.task_id,
-                    description=description
+                    task_info.task_id, description=description
                 )
 
     @contextmanager
-    def progress_context(self, progress_type: str = "general", clear_previous: bool = True):
+    def progress_context(
+        self, progress_type: str = "general", clear_previous: bool = True
+    ):
         """
         Context manager for showing progress bars.
 
@@ -430,7 +426,7 @@ class ProgressManager:
             "general": self.general_progress,
             "download": self.download_progress,
             "analysis": self.analysis_progress,
-            "batch": self.batch_progress
+            "batch": self.batch_progress,
         }
 
         progress = progress_instances.get(progress_type, self.general_progress)
@@ -472,7 +468,7 @@ class ProgressManager:
                 "general": self.general_progress,
                 "download": self.download_progress,
                 "analysis": self.analysis_progress,
-                "batch": self.batch_progress
+                "batch": self.batch_progress,
             }
             progress = progress_instances.get(ptype, self.general_progress)
             panels[ptype] = progress
@@ -504,7 +500,7 @@ class ProgressManager:
             show_header=True,
             header_style="table.header",
             border_style=LobsterTheme.PRIMARY_ORANGE,
-            box=LobsterTheme.BOXES["primary"]
+            box=LobsterTheme.BOXES["primary"],
         )
 
         table.add_column("Task", style="data.key")
@@ -520,7 +516,7 @@ class ProgressManager:
                 else:
                     duration = datetime.now() - task_info.start_time
 
-                duration_str = str(duration).split('.')[0]  # Remove microseconds
+                duration_str = str(duration).split(".")[0]  # Remove microseconds
 
                 # Format progress
                 if task_info.total:
@@ -534,17 +530,14 @@ class ProgressManager:
                     "running": "status.info",
                     "completed": "status.success",
                     "failed": "status.error",
-                    "paused": "status.warning"
+                    "paused": "status.warning",
                 }
                 status_style = status_styles.get(task_info.status, "data.value")
-                status_text = f"[{status_style}]{task_info.status.title()}[/{status_style}]"
-
-                table.add_row(
-                    task_info.name,
-                    status_text,
-                    progress_str,
-                    duration_str
+                status_text = (
+                    f"[{status_style}]{task_info.status.title()}[/{status_style}]"
                 )
+
+                table.add_row(task_info.name, status_text, progress_str, duration_str)
 
         return table
 
@@ -552,7 +545,8 @@ class ProgressManager:
         """Remove completed and failed tasks."""
         with self.task_lock:
             to_remove = [
-                task_id for task_id, task_info in self.tasks.items()
+                task_id
+                for task_id, task_info in self.tasks.items()
                 if task_info.status in ["completed", "failed"]
             ]
 
@@ -567,7 +561,7 @@ class ProgressManager:
                 self.general_progress,
                 self.download_progress,
                 self.analysis_progress,
-                self.batch_progress
+                self.batch_progress,
             ]:
                 # Get all task IDs and remove them
                 task_ids_to_remove = list(progress_instance.task_ids)
@@ -585,8 +579,7 @@ class ProgressManager:
         """Get count of active (running) tasks."""
         with self.task_lock:
             return sum(
-                1 for task_info in self.tasks.values()
-                if task_info.status == "running"
+                1 for task_info in self.tasks.values() if task_info.status == "running"
             )
 
 
@@ -605,9 +598,7 @@ def get_progress_manager() -> ProgressManager:
 def create_simple_progress(description: str, total: Optional[float] = None) -> str:
     """Quick function to create a simple progress task."""
     return get_progress_manager().create_task(
-        name=description,
-        description=description,
-        total=total
+        name=description, description=description, total=total
     )
 
 

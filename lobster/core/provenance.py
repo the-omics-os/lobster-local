@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class ProvenanceTracker:
     """
     W3C-PROV-like provenance tracking system.
-    
+
     This class tracks data processing activities, entities, and agents
     to provide a complete audit trail and enable reproducibility.
     """
@@ -45,7 +45,7 @@ class ProvenanceTracker:
         inputs: Optional[List[Dict[str, Any]]] = None,
         outputs: Optional[List[Dict[str, Any]]] = None,
         parameters: Optional[Dict[str, Any]] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> str:
         """
         Create a new provenance activity record.
@@ -73,12 +73,12 @@ class ProvenanceTracker:
             "outputs": outputs or [],
             "parameters": parameters or {},
             "description": description,
-            "software_versions": self._get_software_versions()
+            "software_versions": self._get_software_versions(),
         }
 
         self.activities.append(activity)
         self.logger.debug(f"Created activity: {activity_id} ({activity_type})")
-        
+
         return activity_id
 
     def create_entity(
@@ -87,7 +87,7 @@ class ProvenanceTracker:
         uri: Union[str, Path] = None,
         checksum: Optional[str] = None,
         format: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Create a new provenance entity record.
@@ -103,7 +103,7 @@ class ProvenanceTracker:
             str: Unique entity ID
         """
         entity_id = f"{self.namespace}:entity:{uuid.uuid4()}"
-        
+
         # Calculate checksum if not provided and entity is a file
         if checksum is None and isinstance(uri, (str, Path)):
             checksum = self._calculate_checksum(uri)
@@ -115,12 +115,12 @@ class ProvenanceTracker:
             "checksum": checksum,
             "format": format,
             "metadata": metadata or {},
-            "created": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         }
 
         self.entities[entity_id] = entity
         self.logger.debug(f"Created entity: {entity_id} ({entity_type})")
-        
+
         return entity_id
 
     def create_agent(
@@ -128,7 +128,7 @@ class ProvenanceTracker:
         name: str,
         agent_type: str = "software",
         version: Optional[str] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> str:
         """
         Create a new provenance agent record.
@@ -150,7 +150,7 @@ class ProvenanceTracker:
                 "name": name,
                 "type": agent_type,
                 "version": version,
-                "description": description
+                "description": description,
             }
             self.agents[agent_id] = agent
             self.logger.debug(f"Created agent: {agent_id}")
@@ -162,7 +162,7 @@ class ProvenanceTracker:
         source_path: Union[str, Path],
         output_entity_id: str,
         adapter_name: str,
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Log a data loading activity.
@@ -180,14 +180,14 @@ class ProvenanceTracker:
         input_entity_id = self.create_entity(
             entity_type="source_file",
             uri=source_path,
-            format=self._detect_format(source_path)
+            format=self._detect_format(source_path),
         )
 
         # Create agent for adapter
         agent_id = self.create_agent(
             name=adapter_name,
             agent_type="software",
-            description=f"Data adapter for loading biological data"
+            description=f"Data adapter for loading biological data",
         )
 
         # Create loading activity
@@ -197,7 +197,7 @@ class ProvenanceTracker:
             inputs=[{"entity": input_entity_id, "role": "source"}],
             outputs=[{"entity": output_entity_id, "role": "loaded_data"}],
             parameters=parameters,
-            description=f"Loaded data from {source_path} using {adapter_name}"
+            description=f"Loaded data from {source_path} using {adapter_name}",
         )
 
         return activity_id
@@ -209,7 +209,7 @@ class ProvenanceTracker:
         processing_type: str,
         agent_name: str,
         parameters: Optional[Dict[str, Any]] = None,
-        description: Optional[str] = None
+        description: Optional[str] = None,
     ) -> str:
         """
         Log a data processing activity.
@@ -227,9 +227,7 @@ class ProvenanceTracker:
         """
         # Create agent
         agent_id = self.create_agent(
-            name=agent_name,
-            agent_type="software",
-            description=f"Data processing agent"
+            name=agent_name, agent_type="software", description=f"Data processing agent"
         )
 
         # Create processing activity
@@ -239,7 +237,7 @@ class ProvenanceTracker:
             inputs=[{"entity": input_entity_id, "role": "input_data"}],
             outputs=[{"entity": output_entity_id, "role": "processed_data"}],
             parameters=parameters,
-            description=description or f"Applied {processing_type} to data"
+            description=description or f"Applied {processing_type} to data",
         )
 
         return activity_id
@@ -249,7 +247,7 @@ class ProvenanceTracker:
         input_entity_id: str,
         output_path: Union[str, Path],
         backend_name: str,
-        parameters: Optional[Dict[str, Any]] = None
+        parameters: Optional[Dict[str, Any]] = None,
     ) -> str:
         """
         Log a data saving activity.
@@ -267,14 +265,14 @@ class ProvenanceTracker:
         output_entity_id = self.create_entity(
             entity_type="saved_file",
             uri=output_path,
-            format=self._detect_format(output_path)
+            format=self._detect_format(output_path),
         )
 
         # Create agent for backend
         agent_id = self.create_agent(
             name=backend_name,
             agent_type="software",
-            description=f"Data storage backend"
+            description=f"Data storage backend",
         )
 
         # Create saving activity
@@ -284,7 +282,7 @@ class ProvenanceTracker:
             inputs=[{"entity": input_entity_id, "role": "data_to_save"}],
             outputs=[{"entity": output_entity_id, "role": "saved_file"}],
             parameters=parameters,
-            description=f"Saved data to {output_path} using {backend_name}"
+            description=f"Saved data to {output_path} using {backend_name}",
         )
 
         return activity_id
@@ -323,13 +321,13 @@ class ProvenanceTracker:
             return False
 
         prov_data = adata.uns["provenance"]
-        
+
         if "activities" in prov_data:
             self.activities.extend(prov_data["activities"])
-        
+
         if "entities" in prov_data:
             self.entities.update(prov_data["entities"])
-        
+
         if "agents" in prov_data:
             self.agents.update(prov_data["agents"])
 
@@ -346,7 +344,7 @@ class ProvenanceTracker:
             List[Dict[str, Any]]: List of activities in the lineage
         """
         lineage = []
-        
+
         # Find activities that produced this entity
         for activity in self.activities:
             for output in activity.get("outputs", []):
@@ -359,7 +357,7 @@ class ProvenanceTracker:
                             parent_lineage = self.get_lineage(input_entity_id)
                             lineage.extend(parent_lineage)
                     break
-        
+
         return lineage
 
     def to_dict(self) -> Dict[str, Any]:
@@ -374,7 +372,9 @@ class ProvenanceTracker:
             "activities": self.activities,
             "entities": self.entities,
             "agents": self.agents,
-            "export_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat()
+            "export_timestamp": datetime.datetime.now(
+                datetime.timezone.utc
+            ).isoformat(),
         }
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -395,12 +395,12 @@ class ProvenanceTracker:
             path = Path(path)
             if not path.exists():
                 return None
-            
+
             sha256_hash = hashlib.sha256()
             with open(path, "rb") as f:
                 for chunk in iter(lambda: f.read(4096), b""):
                     sha256_hash.update(chunk)
-            
+
             return sha256_hash.hexdigest()
         except Exception as e:
             self.logger.warning(f"Failed to calculate checksum for {path}: {e}")
@@ -410,56 +410,61 @@ class ProvenanceTracker:
         """Detect file format from extension."""
         path = Path(path)
         extension = path.suffix.lower()
-        
+
         format_mapping = {
-            '.h5ad': 'h5ad',
-            '.h5': 'h5',
-            '.csv': 'csv',
-            '.tsv': 'tsv',
-            '.txt': 'txt',
-            '.xlsx': 'excel',
-            '.xls': 'excel',
-            '.h5mu': 'h5mu',
-            '.png': 'png',
-            '.pdf': 'pdf',
-            '.svg': 'svg'
+            ".h5ad": "h5ad",
+            ".h5": "h5",
+            ".csv": "csv",
+            ".tsv": "tsv",
+            ".txt": "txt",
+            ".xlsx": "excel",
+            ".xls": "excel",
+            ".h5mu": "h5mu",
+            ".png": "png",
+            ".pdf": "pdf",
+            ".svg": "svg",
         }
-        
-        return format_mapping.get(extension, 'unknown')
+
+        return format_mapping.get(extension, "unknown")
 
     def _get_software_versions(self) -> Dict[str, str]:
         """Get versions of key software packages."""
         versions = {}
-        
+
         try:
             import scanpy
+
             versions["scanpy"] = scanpy.__version__
         except ImportError:
             pass
-        
+
         try:
             import anndata
+
             versions["anndata"] = anndata.__version__
         except ImportError:
             pass
-        
+
         try:
             import pandas
+
             versions["pandas"] = pandas.__version__
         except ImportError:
             pass
-        
+
         try:
             import numpy
+
             versions["numpy"] = numpy.__version__
         except ImportError:
             pass
-        
+
         try:
             # Try to get lobster version
             from lobster.version import __version__
+
             versions["lobster"] = __version__
         except ImportError:
             versions["lobster"] = "unknown"
-        
+
         return versions

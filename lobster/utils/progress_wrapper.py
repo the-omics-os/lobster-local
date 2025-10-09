@@ -7,8 +7,8 @@ progress reporting using a simple threading approach.
 
 import threading
 import time
-from typing import Callable, Optional, Any
 from contextlib import contextmanager
+from typing import Any, Callable, Optional
 
 from lobster.utils.logger import get_logger
 
@@ -20,7 +20,7 @@ def with_periodic_progress(
     operation_name: str,
     progress_callback: Optional[Callable[[str], None]] = None,
     update_interval: int = 15,
-    show_elapsed: bool = True
+    show_elapsed: bool = True,
 ):
     """
     Context manager that provides periodic progress updates for black box operations.
@@ -49,6 +49,7 @@ def with_periodic_progress(
         # If no callback provided, just log to debug
         def default_callback(message: str):
             logger.debug(f"Progress: {message}")
+
         progress_callback = default_callback
 
     # Thread synchronization
@@ -116,7 +117,7 @@ def wrap_with_progress(
     operation_name: str,
     progress_callback: Optional[Callable[[str], None]] = None,
     update_interval: int = 15,
-    show_elapsed: bool = True
+    show_elapsed: bool = True,
 ) -> Callable:
     """
     Decorator version of with_periodic_progress for wrapping functions.
@@ -136,12 +137,10 @@ def wrap_with_progress(
         def find_markers_with_progress(*args, **kwargs):
             return find_markers(*args, **kwargs)
     """
+
     def wrapper(*args, **kwargs):
         with with_periodic_progress(
-            operation_name,
-            progress_callback,
-            update_interval,
-            show_elapsed
+            operation_name, progress_callback, update_interval, show_elapsed
         ):
             return func(*args, **kwargs)
 
@@ -160,7 +159,7 @@ class ProgressContext:
         self,
         operation_name: str,
         progress_callback: Optional[Callable[[str], None]] = None,
-        update_interval: int = 15
+        update_interval: int = 15,
     ):
         self.operation_name = operation_name
         self.progress_callback = progress_callback or (lambda x: None)
@@ -183,7 +182,11 @@ class ProgressContext:
 
                 elapsed = int(time.time() - self.start_time)
                 if elapsed > 0:
-                    elapsed_str = f"{elapsed // 60}m {elapsed % 60}s" if elapsed >= 60 else f"{elapsed}s"
+                    elapsed_str = (
+                        f"{elapsed // 60}m {elapsed % 60}s"
+                        if elapsed >= 60
+                        else f"{elapsed}s"
+                    )
                     message = f"Still {self.operation_name.lower()} ({elapsed_str} elapsed)..."
                 else:
                     message = f"Still {self.operation_name.lower()}..."

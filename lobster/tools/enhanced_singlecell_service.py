@@ -16,6 +16,7 @@ import scanpy as sc
 
 try:
     import scrublet as scr
+
     SCRUBLET_AVAILABLE = True
 except ImportError:
     SCRUBLET_AVAILABLE = False
@@ -28,6 +29,7 @@ logger = get_logger(__name__)
 
 class SingleCellError(Exception):
     """Base exception for single-cell analysis operations."""
+
     pass
 
 
@@ -42,7 +44,7 @@ class EnhancedSingleCellService:
     def __init__(self):
         """
         Initialize the enhanced single-cell service.
-        
+
         This service is stateless and doesn't require a data manager instance.
         """
         logger.debug("Initializing stateless EnhancedSingleCellService")
@@ -66,10 +68,10 @@ class EnhancedSingleCellService:
         logger.debug("EnhancedSingleCellService initialized successfully")
 
     def detect_doublets(
-        self, 
+        self,
         adata: anndata.AnnData,
-        expected_doublet_rate: float = 0.025, 
-        threshold: Optional[float] = None
+        expected_doublet_rate: float = 0.025,
+        threshold: Optional[float] = None,
     ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Detect doublets using Scrublet or fallback method.
@@ -81,16 +83,18 @@ class EnhancedSingleCellService:
 
         Returns:
             Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with doublet scores and detection stats
-            
+
         Raises:
             SingleCellError: If doublet detection fails
         """
         try:
-            logger.info(f"Starting doublet detection with expected rate: {expected_doublet_rate}")
-            
+            logger.info(
+                f"Starting doublet detection with expected rate: {expected_doublet_rate}"
+            )
+
             # Create working copy
             adata_doublets = adata.copy()
-            
+
             # Get count matrix for doublet detection
             if adata_doublets.raw is not None:
                 logger.info("Using raw counts for doublet detection")
@@ -98,11 +102,11 @@ class EnhancedSingleCellService:
             else:
                 logger.info("Using current matrix for doublet detection")
                 counts_matrix = adata_doublets.X
-            
+
             # Convert to dense array if sparse
-            if hasattr(counts_matrix, 'toarray'):
+            if hasattr(counts_matrix, "toarray"):
                 counts_matrix = counts_matrix.toarray()
-            
+
             logger.info(f"Doublet detection matrix shape: {counts_matrix.shape}")
 
             # Check if we have enough features
@@ -113,8 +117,10 @@ class EnhancedSingleCellService:
             if SCRUBLET_AVAILABLE:
                 try:
                     logger.info("Running Scrublet doublet detection")
-                    scrub = scr.Scrublet(counts_matrix, expected_doublet_rate=expected_doublet_rate)
-                    
+                    scrub = scr.Scrublet(
+                        counts_matrix, expected_doublet_rate=expected_doublet_rate
+                    )
+
                     doublet_scores, predicted_doublets = scrub.scrub_doublets(
                         min_counts=2,
                         min_cells=3,
@@ -127,18 +133,22 @@ class EnhancedSingleCellService:
                     if threshold is not None:
                         logger.info(f"Using custom doublet threshold: {threshold}")
                         predicted_doublets = scrub.call_doublets(threshold=threshold)
-                        
+
                     detection_method = "scrublet"
-                    
+
                 except Exception as e:
                     logger.warning(f"Scrublet failed: {e}. Using fallback method.")
-                    doublet_scores, predicted_doublets, detection_method = self._fallback_doublet_detection(
-                        counts_matrix, expected_doublet_rate
+                    doublet_scores, predicted_doublets, detection_method = (
+                        self._fallback_doublet_detection(
+                            counts_matrix, expected_doublet_rate
+                        )
                     )
             else:
                 logger.info("Scrublet not available, using fallback doublet detection")
-                doublet_scores, predicted_doublets, detection_method = self._fallback_doublet_detection(
-                    counts_matrix, expected_doublet_rate
+                doublet_scores, predicted_doublets, detection_method = (
+                    self._fallback_doublet_detection(
+                        counts_matrix, expected_doublet_rate
+                    )
                 )
 
             # Add doublet information to AnnData
@@ -161,12 +171,14 @@ class EnhancedSingleCellService:
                     "min": float(doublet_scores.min()),
                     "max": float(doublet_scores.max()),
                     "mean": float(doublet_scores.mean()),
-                    "std": float(doublet_scores.std())
-                }
+                    "std": float(doublet_scores.std()),
+                },
             }
 
-            logger.info(f"Doublet detection completed: {n_doublets} doublets detected ({doublet_rate:.1%})")
-            
+            logger.info(
+                f"Doublet detection completed: {n_doublets} doublets detected ({doublet_rate:.1%})"
+            )
+
             return adata_doublets, detection_stats
 
         except Exception as e:
@@ -174,47 +186,51 @@ class EnhancedSingleCellService:
             raise SingleCellError(f"Doublet detection failed: {str(e)}")
 
     def _fallback_doublet_detection(
-        self, 
-        counts_matrix: np.ndarray, 
-        expected_doublet_rate: float
+        self, counts_matrix: np.ndarray, expected_doublet_rate: float
     ) -> Tuple[np.ndarray, np.ndarray, str]:
         """
         Fallback doublet detection method when Scrublet is not available.
-        
+
         Args:
             counts_matrix: Count matrix (cells x genes)
             expected_doublet_rate: Expected doublet rate
-            
+
         Returns:
             Tuple of (doublet_scores, predicted_doublets, method_name)
         """
         logger.info("Using fallback doublet detection method")
-        
+
         n_cells = counts_matrix.shape[0]
-        
+
         # Calculate per-cell metrics that indicate doublets
         total_counts = np.sum(counts_matrix, axis=1)
         n_genes = np.sum(counts_matrix > 0, axis=1)
-        
+
         # Normalize metrics to z-scores
-        total_counts_z = np.abs((total_counts - np.mean(total_counts)) / np.std(total_counts))
+        total_counts_z = np.abs(
+            (total_counts - np.mean(total_counts)) / np.std(total_counts)
+        )
         n_genes_z = np.abs((n_genes - np.mean(n_genes)) / np.std(n_genes))
-        
+
         # Combined doublet score (higher = more likely doublet)
         doublet_scores = (total_counts_z + n_genes_z) / 2
-        
+
         # Apply threshold based on expected doublet rate
-        doublet_threshold = np.percentile(doublet_scores, (1 - expected_doublet_rate) * 100)
+        doublet_threshold = np.percentile(
+            doublet_scores, (1 - expected_doublet_rate) * 100
+        )
         predicted_doublets = doublet_scores > doublet_threshold
-        
-        logger.info(f"Fallback method detected {np.sum(predicted_doublets)} potential doublets")
-        
+
+        logger.info(
+            f"Fallback method detected {np.sum(predicted_doublets)} potential doublets"
+        )
+
         return doublet_scores, predicted_doublets, "fallback_outlier_detection"
 
     def annotate_cell_types(
-        self, 
+        self,
         adata: anndata.AnnData,
-        reference_markers: Optional[Dict[str, List[str]]] = None
+        reference_markers: Optional[Dict[str, List[str]]] = None,
     ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Annotate cell types based on marker genes.
@@ -225,16 +241,18 @@ class EnhancedSingleCellService:
 
         Returns:
             Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with cell type annotations and stats
-            
+
         Raises:
             SingleCellError: If annotation fails
         """
         try:
             logger.info("Starting cell type annotation using marker genes")
-            
+
             # Validate input
             if "leiden" not in adata.obs.columns:
-                raise SingleCellError("No clustering results found. Please run clustering first.")
+                raise SingleCellError(
+                    "No clustering results found. Please run clustering first."
+                )
 
             # Create working copy
             adata_annotated = adata.copy()
@@ -244,7 +262,9 @@ class EnhancedSingleCellService:
             logger.info(f"Using {len(markers)} marker sets for annotation")
 
             # Calculate marker gene scores for each cluster
-            cluster_annotations = self._calculate_marker_scores_from_adata(adata_annotated, markers)
+            cluster_annotations = self._calculate_marker_scores_from_adata(
+                adata_annotated, markers
+            )
 
             # Determine best cell type for each cluster
             cluster_to_celltype = {}
@@ -265,20 +285,26 @@ class EnhancedSingleCellService:
             # Calculate annotation statistics
             cell_type_counts = cell_types.value_counts().to_dict()
             n_cell_types = len(set(cell_types))
-            
+
             annotation_stats = {
                 "analysis_type": "cell_type_annotation",
                 "markers_used": list(markers.keys()),
                 "n_marker_sets": len(markers),
                 "n_clusters": len(adata_annotated.obs["leiden"].unique()),
                 "n_cell_types_identified": n_cell_types,
-                "cluster_to_celltype": {str(k): v for k, v in cluster_to_celltype.items()},
-                "cell_type_counts": {str(k): int(v) for k, v in cell_type_counts.items()},
-                "marker_scores": cluster_annotations
+                "cluster_to_celltype": {
+                    str(k): v for k, v in cluster_to_celltype.items()
+                },
+                "cell_type_counts": {
+                    str(k): int(v) for k, v in cell_type_counts.items()
+                },
+                "marker_scores": cluster_annotations,
             }
 
-            logger.info(f"Cell type annotation completed: {n_cell_types} cell types identified")
-            
+            logger.info(
+                f"Cell type annotation completed: {n_cell_types} cell types identified"
+            )
+
             return adata_annotated, annotation_stats
 
         except Exception as e:
@@ -286,12 +312,12 @@ class EnhancedSingleCellService:
             raise SingleCellError(f"Cell type annotation failed: {str(e)}")
 
     def find_marker_genes(
-        self, 
+        self,
         adata: anndata.AnnData,
         groupby: str = "leiden",
         groups: Optional[List[str]] = None,
         method: str = "wilcoxon",
-        n_genes: int = 25
+        n_genes: int = 25,
     ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
         """
         Find marker genes for clusters or cell types.
@@ -305,16 +331,18 @@ class EnhancedSingleCellService:
 
         Returns:
             Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with marker gene results and stats
-            
+
         Raises:
             SingleCellError: If marker gene detection fails
         """
         try:
             logger.info(f"Finding marker genes grouped by: {groupby}")
-            
+
             # Validate input
             if groupby not in adata.obs.columns:
-                raise SingleCellError(f"Group column '{groupby}' not found in observations")
+                raise SingleCellError(
+                    f"Group column '{groupby}' not found in observations"
+                )
 
             # Create working copy
             adata_markers = adata.copy()
@@ -326,16 +354,16 @@ class EnhancedSingleCellService:
                 groups=groups,
                 method=method,
                 n_genes=n_genes,
-                use_raw=True
+                use_raw=True,
             )
 
             # Extract marker genes into structured format
             marker_genes_df = self._extract_marker_genes(adata_markers, groupby)
-            
+
             # Calculate marker gene statistics
             unique_groups = adata_markers.obs[groupby].unique()
             n_groups = len(unique_groups)
-            
+
             marker_stats = {
                 "analysis_type": "marker_gene_analysis",
                 "groupby": groupby,
@@ -344,26 +372,32 @@ class EnhancedSingleCellService:
                 "n_groups": n_groups,
                 "groups_analyzed": [str(g) for g in unique_groups],
                 "has_marker_results": "rank_genes_groups" in adata_markers.uns,
-                "marker_genes_df_shape": marker_genes_df.shape if not marker_genes_df.empty else (0, 0)
+                "marker_genes_df_shape": (
+                    marker_genes_df.shape if not marker_genes_df.empty else (0, 0)
+                ),
             }
-            
+
             # Store top marker genes per group
             if not marker_genes_df.empty:
                 top_markers_per_group = {}
                 for group in marker_genes_df["group"].unique():
-                    group_genes = marker_genes_df[marker_genes_df["group"] == group].head(10)
+                    group_genes = marker_genes_df[
+                        marker_genes_df["group"] == group
+                    ].head(10)
                     top_markers_per_group[str(group)] = [
                         {
-                            "gene": row["gene"], 
-                            "score": float(row["score"]), 
-                            "pval": float(row["pval"])
+                            "gene": row["gene"],
+                            "score": float(row["score"]),
+                            "pval": float(row["pval"]),
                         }
                         for _, row in group_genes.iterrows()
                     ]
                 marker_stats["top_markers_per_group"] = top_markers_per_group
 
-            logger.info(f"Marker gene analysis completed for {n_groups} groups using {method} method")
-            
+            logger.info(
+                f"Marker gene analysis completed for {n_groups} groups using {method} method"
+            )
+
             return adata_markers, marker_stats
 
         except Exception as e:
@@ -371,22 +405,20 @@ class EnhancedSingleCellService:
             raise SingleCellError(f"Marker gene analysis failed: {str(e)}")
 
     def _calculate_marker_scores_from_adata(
-        self, 
-        adata: anndata.AnnData, 
-        markers: Dict[str, List[str]]
+        self, adata: anndata.AnnData, markers: Dict[str, List[str]]
     ) -> Dict[str, Dict[str, float]]:
         """
         Calculate marker gene scores for each cluster from AnnData object.
-        
+
         Args:
             adata: AnnData object with clustering results
             markers: Dictionary of cell type markers
-            
+
         Returns:
             Dict[str, Dict[str, float]]: Cluster scores for each cell type
         """
         logger.info("Calculating marker scores from AnnData")
-        
+
         # Ensure unique names to prevent reindexing errors
         if not adata.obs_names.is_unique:
             logger.warning("Non-unique observation indices detected. Making unique.")
@@ -417,11 +449,11 @@ class EnhancedSingleCellService:
                         subset = adata[cluster_cells, available_markers]
 
                         if subset.shape[0] > 0:  # Check if any cells match
-                            if hasattr(subset.X, 'toarray'):
+                            if hasattr(subset.X, "toarray"):
                                 marker_expression = subset.X.toarray().mean(axis=0)
                             else:
                                 marker_expression = subset.X.mean(axis=0)
-                                
+
                             # Calculate score as mean of available markers
                             score = float(np.mean(marker_expression))
                             cluster_scores[cluster][cell_type] = score

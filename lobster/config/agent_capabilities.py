@@ -6,15 +6,15 @@ agent modules and extracting @tool decorated functions, enabling dynamic
 supervisor prompt generation without manual updates.
 """
 
-import inspect
 import importlib
-from typing import Dict, List, Optional, Any, Callable
+import inspect
 from dataclasses import dataclass
 from functools import lru_cache
-from lobster.utils.logger import get_logger
+from typing import Any, Callable, Dict, List, Optional
 
 # Import registry functions at module level for easier mocking in tests
 from lobster.config.agent_registry import get_agent_registry_config, get_all_agent_names
+from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
@@ -29,6 +29,7 @@ class AgentCapability:
         parameters: Dict of parameter names to descriptions
         return_type: Description of return type
     """
+
     tool_name: str
     description: str
     parameters: Dict[str, str]
@@ -46,6 +47,7 @@ class AgentCapabilities:
         tools: List of agent capabilities
         error: Error message if capability extraction failed
     """
+
     agent_name: str
     display_name: str
     description: str
@@ -67,9 +69,13 @@ class AgentCapabilityExtractor:
             Dict containing parsed information
         """
         if not docstring:
-            return {"description": "No description available", "params": {}, "returns": "Unknown"}
+            return {
+                "description": "No description available",
+                "params": {},
+                "returns": "Unknown",
+            }
 
-        lines = docstring.strip().split('\n')
+        lines = docstring.strip().split("\n")
         description = []
         params = {}
         returns = "Unknown"
@@ -79,13 +85,15 @@ class AgentCapabilityExtractor:
             line = line.strip()
 
             # Check for section markers
-            if line.lower().startswith(('args:', 'arguments:', 'parameters:')):
+            if line.lower().startswith(("args:", "arguments:", "parameters:")):
                 current_section = "params"
                 continue
-            elif line.lower().startswith(('returns:', 'return:')):
+            elif line.lower().startswith(("returns:", "return:")):
                 current_section = "returns"
                 continue
-            elif line.lower().startswith(('raises:', 'note:', 'notes:', 'example:', 'examples:')):
+            elif line.lower().startswith(
+                ("raises:", "note:", "notes:", "example:", "examples:")
+            ):
                 # Stop parsing at other sections
                 break
 
@@ -94,12 +102,12 @@ class AgentCapabilityExtractor:
                 description.append(line)
             elif current_section == "params" and line:
                 # Parse parameter lines (format: "param_name: description" or "- param_name: description")
-                if ':' in line:
-                    line = line.lstrip('- ').strip()
-                    param_name, param_desc = line.split(':', 1)
+                if ":" in line:
+                    line = line.lstrip("- ").strip()
+                    param_name, param_desc = line.split(":", 1)
                     param_name = param_name.strip()
                     # Remove type hints from param name if present
-                    if ' ' in param_name:
+                    if " " in param_name:
                         param_name = param_name.split()[0]
                     params[param_name] = param_desc.strip()
             elif current_section == "returns" and line:
@@ -107,9 +115,11 @@ class AgentCapabilityExtractor:
                     returns = line
 
         return {
-            "description": ' '.join(description) if description else "No description available",
+            "description": (
+                " ".join(description) if description else "No description available"
+            ),
             "params": params,
-            "returns": returns
+            "returns": returns,
         }
 
     @staticmethod
@@ -124,7 +134,7 @@ class AgentCapabilityExtractor:
         """
         try:
             # Get the original function if it's wrapped
-            if hasattr(func, '__wrapped__'):
+            if hasattr(func, "__wrapped__"):
                 original_func = func.__wrapped__
             else:
                 original_func = func
@@ -133,7 +143,7 @@ class AgentCapabilityExtractor:
             params = {}
 
             for param_name, param in sig.parameters.items():
-                if param_name == 'self':
+                if param_name == "self":
                     continue
 
                 # Build parameter description
@@ -161,9 +171,9 @@ class AgentCapabilityExtractor:
             bool: True if the object is a tool function
         """
         # Check for langchain @tool decorator
-        if hasattr(obj, '__wrapped__') and hasattr(obj, '__name__'):
+        if hasattr(obj, "__wrapped__") and hasattr(obj, "__name__"):
             # Additional check for tool-specific attributes
-            if hasattr(obj, 'name') or hasattr(obj, 'description'):
+            if hasattr(obj, "name") or hasattr(obj, "description"):
                 return True
             # Check if it's a callable with a docstring (likely a tool)
             if callable(obj) and obj.__doc__:
@@ -190,7 +200,7 @@ class AgentCapabilityExtractor:
                 display_name=agent_name,
                 description="Unknown agent",
                 tools=[],
-                error=error_msg
+                error=error_msg,
             )
 
         capabilities = []
@@ -198,15 +208,17 @@ class AgentCapabilityExtractor:
 
         try:
             # Extract module path from factory function
-            module_path = config.factory_function.rsplit('.', 1)[0]
+            module_path = config.factory_function.rsplit(".", 1)[0]
 
             # Import the agent module
             module = importlib.import_module(module_path)
 
             # Find the factory function
-            factory_name = config.factory_function.rsplit('.', 1)[1]
+            factory_name = config.factory_function.rsplit(".", 1)[1]
             if not hasattr(module, factory_name):
-                raise ImportError(f"Factory function '{factory_name}' not found in module")
+                raise ImportError(
+                    f"Factory function '{factory_name}' not found in module"
+                )
 
             # Get the factory function
             factory_func = getattr(module, factory_name)
@@ -231,7 +243,7 @@ class AgentCapabilityExtractor:
                         tool_name=name,
                         description=doc_info["description"],
                         parameters=params,
-                        return_type=doc_info["returns"]
+                        return_type=doc_info["returns"],
                     )
                     capabilities.append(capability)
                     logger.debug(f"Found tool '{name}' in {agent_name}")
@@ -239,7 +251,9 @@ class AgentCapabilityExtractor:
             # If no module-level tools found, try to analyze the factory function itself
             # This is more complex as tools are often defined inside the factory
             if not capabilities:
-                logger.debug(f"No module-level tools found for {agent_name}, checking factory function")
+                logger.debug(
+                    f"No module-level tools found for {agent_name}, checking factory function"
+                )
                 # This would require more sophisticated analysis
                 # For now, we'll return empty capabilities
 
@@ -252,7 +266,7 @@ class AgentCapabilityExtractor:
             display_name=config.display_name,
             description=config.description,
             tools=capabilities,
-            error=error
+            error=error,
         )
 
     @classmethod
@@ -266,7 +280,9 @@ class AgentCapabilityExtractor:
         capabilities = {}
         for agent_name in get_all_agent_names():
             capabilities[agent_name] = cls.extract_capabilities(agent_name)
-            logger.info(f"Extracted {len(capabilities[agent_name].tools)} tools for {agent_name}")
+            logger.info(
+                f"Extracted {len(capabilities[agent_name].tools)} tools for {agent_name}"
+            )
 
         return capabilities
 

@@ -6,7 +6,7 @@ and generating visualizations of the results.
 """
 
 import time
-from typing import Callable, Dict, Optional, Tuple, Any, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import anndata
 import numpy as np
@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 
 class ClusteringError(Exception):
     """Base exception for clustering operations."""
+
     pass
 
 
@@ -36,7 +37,7 @@ class ClusteringService:
     def __init__(self):
         """
         Initialize the clustering service.
-        
+
         This service is stateless and doesn't require a data manager instance.
         """
         logger.debug("Initializing stateless ClusteringService")
@@ -80,9 +81,11 @@ class ClusteringService:
         Returns:
             Callable that adapts with_periodic_progress messages to the existing callback system
         """
+
         def progress_callback_wrapper(message: str):
             if self.progress_callback:
                 self.progress_callback(None, message)
+
         return progress_callback_wrapper
 
     def cluster_and_visualize(
@@ -102,8 +105,8 @@ class ClusteringService:
         Args:
             adata: AnnData object to cluster
             resolution: Resolution parameter for Leiden clustering
-            use_rep: Representation to use for clustering (e.g., 'X_scvi', 'X_pca'). 
-                    If None, uses standard PCA workflow. If specified, uses the 
+            use_rep: Representation to use for clustering (e.g., 'X_scvi', 'X_pca').
+                    If None, uses standard PCA workflow. If specified, uses the
                     custom embedding from adata.obsm[use_rep] for neighbor calculation.
             batch_correction: Whether to perform batch correction
             batch_key: Column name for batch information
@@ -113,13 +116,13 @@ class ClusteringService:
 
         Returns:
             Tuple[anndata.AnnData, Dict[str, Any]]: Clustered AnnData and clustering stats
-            
+
         Raises:
             ClusteringError: If clustering fails
         """
         try:
             logger.info("Starting clustering and visualization pipeline")
-            
+
             # Initialize progress tracking
             self.current_progress = 0
             skip_steps = skip_steps or []
@@ -129,18 +132,20 @@ class ClusteringService:
                 self.total_steps += 1
             if "marker_genes" not in skip_steps:
                 self.total_steps += 1
-            
-            # Set resolution  
+
+            # Set resolution
             if resolution is None:
                 resolution = self.default_cluster_resolution
-            
+
             logger.info(f"Performing clustering with resolution {resolution}")
-            
+
             # Create working copy
             adata_clustered = adata.copy()
             original_shape = adata_clustered.shape
-            
-            logger.info(f"Input data dimensions: {original_shape[0]} cells × {original_shape[1]} genes")
+
+            logger.info(
+                f"Input data dimensions: {original_shape[0]} cells × {original_shape[1]} genes"
+            )
 
             # Handle demo mode settings
             if demo_mode:
@@ -148,14 +153,18 @@ class ClusteringService:
                 if "marker_genes" not in skip_steps:
                     skip_steps.append("marker_genes")
                 if not subsample_size:
-                    subsample_size = min(1000, original_shape[0])  # Default to 1000 cells in demo mode
+                    subsample_size = min(
+                        1000, original_shape[0]
+                    )  # Default to 1000 cells in demo mode
 
             # Subsample if needed
             if subsample_size and adata_clustered.n_obs > subsample_size:
-                logger.info(f"Subsampling data to {subsample_size} cells (from {adata_clustered.n_obs})")
+                logger.info(
+                    f"Subsampling data to {subsample_size} cells (from {adata_clustered.n_obs})"
+                )
                 sc.pp.subsample(adata_clustered, n_obs=subsample_size, random_state=42)
                 logger.info(f"Data subsampled: {adata_clustered.n_obs} cells remaining")
-            
+
             self._update_progress("Data preparation completed")
 
             # Check for batch information if batch correction requested
@@ -167,30 +176,42 @@ class ClusteringService:
                             batch_key = potential_key
                             logger.info(f"Auto-detected batch key: {batch_key}")
                             break
-                
+
                 if batch_key and batch_key in adata_clustered.obs.columns:
                     unique_batches = adata_clustered.obs[batch_key].unique()
                     if len(unique_batches) > 1:
-                        logger.info(f"Found {len(unique_batches)} batches for correction: {list(unique_batches)}")
-                        adata_clustered = self._perform_batch_correction(adata_clustered, batch_key)
+                        logger.info(
+                            f"Found {len(unique_batches)} batches for correction: {list(unique_batches)}"
+                        )
+                        adata_clustered = self._perform_batch_correction(
+                            adata_clustered, batch_key
+                        )
                     else:
-                        logger.info("Only one batch found - proceeding without batch correction")
+                        logger.info(
+                            "Only one batch found - proceeding without batch correction"
+                        )
                         batch_correction = False
                 else:
-                    logger.warning("Batch correction requested but no valid batch key found")
+                    logger.warning(
+                        "Batch correction requested but no valid batch key found"
+                    )
                     batch_correction = False
-            
-            self._update_progress("Batch correction completed" if batch_correction else "Batch check completed")
+
+            self._update_progress(
+                "Batch correction completed"
+                if batch_correction
+                else "Batch check completed"
+            )
 
             # Perform clustering
             adata_clustered = self._perform_clustering(
                 adata_clustered, resolution, use_rep, demo_mode, skip_steps
             )
-            
+
             # Compile clustering statistics
             n_clusters = len(adata_clustered.obs["leiden"].unique())
             cluster_counts = adata_clustered.obs["leiden"].value_counts().to_dict()
-            
+
             clustering_stats = {
                 "analysis_type": "clustering",
                 "resolution": resolution,
@@ -203,20 +224,24 @@ class ClusteringService:
                 "final_shape": adata_clustered.shape,
                 "cluster_counts": cluster_counts,
                 "cluster_sizes": {
-                    str(cluster): int(count) for cluster, count in cluster_counts.items()
+                    str(cluster): int(count)
+                    for cluster, count in cluster_counts.items()
                 },
                 "has_umap": "X_umap" in adata_clustered.obsm,
                 "has_marker_genes": "rank_genes_groups" in adata_clustered.uns,
             }
-            
+
             # Add batch information if available
             if batch_correction and batch_key:
                 batch_counts = adata_clustered.obs[batch_key].value_counts().to_dict()
                 clustering_stats["batch_counts"] = batch_counts
                 clustering_stats["n_batches"] = len(batch_counts)
-            
+
             # Add marker gene information if available
-            if "rank_genes_groups" in adata_clustered.uns and "marker_genes" not in skip_steps:
+            if (
+                "rank_genes_groups" in adata_clustered.uns
+                and "marker_genes" not in skip_steps
+            ):
                 marker_genes = {}
                 for cluster in adata_clustered.obs["leiden"].unique():
                     genes = adata_clustered.uns["rank_genes_groups"]["names"][cluster]
@@ -228,51 +253,56 @@ class ClusteringService:
                 clustering_stats["top_marker_genes"] = marker_genes
 
             logger.info(f"Clustering completed: {n_clusters} clusters identified")
-            
+
             return adata_clustered, clustering_stats
 
         except Exception as e:
             logger.exception(f"Error during clustering: {e}")
             raise ClusteringError(f"Clustering failed: {str(e)}")
 
-    def _perform_batch_correction(self, adata: anndata.AnnData, batch_key: str) -> anndata.AnnData:
+    def _perform_batch_correction(
+        self, adata: anndata.AnnData, batch_key: str
+    ) -> anndata.AnnData:
         """
         Perform simple batch correction on the data.
-        
+
         Args:
             adata: AnnData object with batch information
             batch_key: Column name containing batch labels
-            
+
         Returns:
             anndata.AnnData: Batch-corrected AnnData object
         """
         logger.info(f"Performing batch correction using batch key: {batch_key}")
-        
+
         try:
             # Simple batch correction by normalizing each batch separately
             unique_batches = adata.obs[batch_key].unique()
             batch_list = []
-            
+
             for batch in unique_batches:
                 batch_mask = adata.obs[batch_key] == batch
                 batch_adata = adata[batch_mask].copy()
-                
+
                 # Normalize each batch separately
                 sc.pp.normalize_total(batch_adata, target_sum=1e4)
                 sc.pp.log1p(batch_adata)
-                
+
                 batch_list.append(batch_adata)
-            
+
             # Concatenate corrected batches
-            adata_corrected = anndata.concat(batch_list, label=batch_key, keys=unique_batches)
-            
+            adata_corrected = anndata.concat(
+                batch_list, label=batch_key, keys=unique_batches
+            )
+
             logger.info(f"Batch correction completed for {len(unique_batches)} batches")
             return adata_corrected
-            
-        except Exception as e:
-            logger.warning(f"Batch correction failed, proceeding without correction: {e}")
-            return adata
 
+        except Exception as e:
+            logger.warning(
+                f"Batch correction failed, proceeding without correction: {e}"
+            )
+            return adata
 
     def _perform_clustering(
         self,
@@ -304,15 +334,19 @@ class ClusteringService:
         # Check if using custom embeddings (e.g., scVI)
         if use_rep and use_rep in adata.obsm:
             logger.info(f"Using custom embedding '{use_rep}' for clustering")
-            
+
             # Validate custom embedding
             embedding_shape = adata.obsm[use_rep].shape
-            logger.info(f"Custom embedding shape: {embedding_shape[0]} cells × {embedding_shape[1]} dimensions")
-            
+            logger.info(
+                f"Custom embedding shape: {embedding_shape[0]} cells × {embedding_shape[1]} dimensions"
+            )
+
             # Store raw data for marker gene analysis
             adata.raw = adata.copy()
-            self._update_progress("Using custom embeddings (skipping normalization/PCA)")
-            
+            self._update_progress(
+                "Using custom embeddings (skipping normalization/PCA)"
+            )
+
             # Compute neighborhood graph using custom embedding
             logger.info("Computing neighborhood graph from custom embedding")
             n_neighbors = 10 if demo_mode else 15
@@ -321,16 +355,12 @@ class ClusteringService:
                 "Computing neighborhood graph from custom embedding",
                 self._create_progress_callback(),
                 update_interval=10,
-                show_elapsed=True
+                show_elapsed=True,
             ):
-                sc.pp.neighbors(
-                    adata,
-                    use_rep=use_rep,
-                    n_neighbors=n_neighbors
-                )
+                sc.pp.neighbors(adata, use_rep=use_rep, n_neighbors=n_neighbors)
 
             self._update_progress("Neighborhood graph computed from custom embedding")
-            
+
             # Run Leiden clustering
             logger.info(f"Running Leiden clustering with resolution {resolution}")
 
@@ -338,12 +368,12 @@ class ClusteringService:
                 f"Running Leiden clustering (resolution={resolution})",
                 self._create_progress_callback(),
                 update_interval=10,
-                show_elapsed=True
+                show_elapsed=True,
             ):
                 sc.tl.leiden(adata, resolution=resolution, key_added="leiden")
 
             self._update_progress("Leiden clustering completed")
-            
+
             # UMAP for visualization using custom embedding
             logger.info("Computing UMAP coordinates from custom embedding")
 
@@ -351,7 +381,7 @@ class ClusteringService:
                 "Computing UMAP coordinates from custom embedding",
                 self._create_progress_callback(),
                 update_interval=15,
-                show_elapsed=True
+                show_elapsed=True,
             ):
                 if demo_mode:
                     sc.tl.umap(adata, min_dist=0.5, spread=1.5)
@@ -359,12 +389,14 @@ class ClusteringService:
                     sc.tl.umap(adata)
 
             self._update_progress("UMAP coordinates computed from custom embedding")
-            
+
         else:
             # Standard workflow when no custom embedding specified
             if use_rep:
-                logger.warning(f"Custom embedding '{use_rep}' not found in adata.obsm, using standard PCA workflow")
-            
+                logger.warning(
+                    f"Custom embedding '{use_rep}' not found in adata.obsm, using standard PCA workflow"
+                )
+
             # Basic preprocessing (follows publication workflow)
             logger.info("Normalizing data")
             sc.pp.normalize_total(adata, target_sum=1e4)
@@ -423,7 +455,7 @@ class ClusteringService:
                 "Computing neighborhood graph",
                 self._create_progress_callback(),
                 update_interval=10,
-                show_elapsed=True
+                show_elapsed=True,
             ):
                 sc.pp.neighbors(adata_hvg, n_neighbors=n_neighbors, n_pcs=n_pcs)
 
@@ -436,7 +468,7 @@ class ClusteringService:
                 f"Running Leiden clustering (resolution={resolution})",
                 self._create_progress_callback(),
                 update_interval=10,
-                show_elapsed=True
+                show_elapsed=True,
             ):
                 sc.tl.leiden(adata_hvg, resolution=resolution, key_added="leiden")
 
@@ -449,7 +481,7 @@ class ClusteringService:
                 "Computing UMAP coordinates",
                 self._create_progress_callback(),
                 update_interval=15,
-                show_elapsed=True
+                show_elapsed=True,
             ):
                 if demo_mode:
                     # Use faster UMAP settings in demo mode
@@ -477,7 +509,7 @@ class ClusteringService:
                 operation_name,
                 self._create_progress_callback(),
                 update_interval=15,
-                show_elapsed=True
+                show_elapsed=True,
             ):
                 sc.tl.rank_genes_groups(adata, "leiden", method=method)
 
@@ -543,20 +575,19 @@ class ClusteringService:
             marker=dict(
                 size=marker_size,
                 opacity=0.7,
-                line=dict(width=0.5, color='rgba(50,50,50,0.4)')  # Add subtle borders
+                line=dict(width=0.5, color="rgba(50,50,50,0.4)"),  # Add subtle borders
             )
         )
-        
+
         fig.update_layout(
             title=dict(
                 text="UMAP Visualization with Leiden Clusters",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,  # Center the title
-                xanchor='center'
+                xanchor="center",
             ),
             legend_title=dict(
-                text="Cluster",
-                font=dict(size=16, family="Arial, sans-serif")
+                text="Cluster", font=dict(size=16, family="Arial, sans-serif")
             ),
             font=dict(size=14, family="Arial, sans-serif"),
             margin=dict(l=80, r=150, t=80, b=80),  # Increased margins
@@ -570,20 +601,20 @@ class ClusteringService:
                 font=dict(size=14),
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="rgba(0,0,0,0.2)",
-                borderwidth=1
+                borderwidth=1,
             ),
             xaxis=dict(
                 title=dict(text="UMAP_1", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             yaxis=dict(
                 title=dict(text="UMAP_2", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             plot_bgcolor="white",
-            paper_bgcolor="white"
+            paper_bgcolor="white",
         )
 
         return fig
@@ -599,7 +630,9 @@ class ClusteringService:
         Returns:
             go.Figure: Plotly figure with batch-colored UMAP plot
         """
-        logger.info(f"Creating high-quality batch-colored UMAP visualization using {batch_key}")
+        logger.info(
+            f"Creating high-quality batch-colored UMAP visualization using {batch_key}"
+        )
 
         umap_coords = adata.obsm["X_umap"]
         batches = adata.obs[batch_key].astype(str)
@@ -637,20 +670,19 @@ class ClusteringService:
             marker=dict(
                 size=marker_size,
                 opacity=0.7,
-                line=dict(width=0.5, color='rgba(50,50,50,0.4)')  # Add subtle borders
+                line=dict(width=0.5, color="rgba(50,50,50,0.4)"),  # Add subtle borders
             )
         )
-        
+
         fig.update_layout(
             title=dict(
                 text=f"UMAP Visualization by {batch_key}",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,  # Center the title
-                xanchor='center'
+                xanchor="center",
             ),
             legend_title=dict(
-                text=batch_key,
-                font=dict(size=16, family="Arial, sans-serif")
+                text=batch_key, font=dict(size=16, family="Arial, sans-serif")
             ),
             font=dict(size=14, family="Arial, sans-serif"),
             margin=dict(l=80, r=150, t=80, b=80),  # Increased margins
@@ -664,20 +696,20 @@ class ClusteringService:
                 font=dict(size=14),
                 bgcolor="rgba(255,255,255,0.8)",
                 bordercolor="rgba(0,0,0,0.2)",
-                borderwidth=1
+                borderwidth=1,
             ),
             xaxis=dict(
                 title=dict(text="UMAP_1", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             yaxis=dict(
                 title=dict(text="UMAP_2", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             plot_bgcolor="white",
-            paper_bgcolor="white"
+            paper_bgcolor="white",
         )
 
         return fig
@@ -696,12 +728,16 @@ class ClusteringService:
 
         # Get cluster counts
         cluster_counts = adata.obs["leiden"].value_counts().sort_index()
-        
+
         # Create gradient colors for better visual appeal
         n_clusters = len(cluster_counts)
         colors = px.colors.sample_colorscale(
-            "viridis", 
-            [i/(n_clusters-1) for i in range(n_clusters)] if n_clusters > 1 else [0]
+            "viridis",
+            (
+                [i / (n_clusters - 1) for i in range(n_clusters)]
+                if n_clusters > 1
+                else [0]
+            ),
         )
 
         # Create bar plot
@@ -711,16 +747,18 @@ class ClusteringService:
                 x=cluster_counts.index.astype(str),
                 y=cluster_counts.values,
                 marker=dict(
-                    color=colors,
-                    line=dict(color='rgba(50,50,50,0.8)', width=1)
+                    color=colors, line=dict(color="rgba(50,50,50,0.8)", width=1)
                 ),
                 text=cluster_counts.values,
                 textposition="outside",
                 textfont=dict(size=12, color="black"),
-                hovertemplate="<b>Cluster %{x}</b><br>" +
-                            "Cells: %{y}<br>" +
-                            "Percentage: %{customdata:.1f}%<extra></extra>",
-                customdata=[(count/cluster_counts.sum()*100) for count in cluster_counts.values]
+                hovertemplate="<b>Cluster %{x}</b><br>"
+                + "Cells: %{y}<br>"
+                + "Percentage: %{customdata:.1f}%<extra></extra>",
+                customdata=[
+                    (count / cluster_counts.sum() * 100)
+                    for count in cluster_counts.values
+                ],
             )
         )
 
@@ -729,21 +767,25 @@ class ClusteringService:
                 text="Cluster Size Distribution",
                 font=dict(size=20, family="Arial, sans-serif"),
                 x=0.5,
-                xanchor='center'
+                xanchor="center",
             ),
             xaxis=dict(
                 title=dict(text="Cluster", font=dict(size=16)),
                 tickfont=dict(size=14),
-                gridcolor="rgba(200,200,200,0.3)"
+                gridcolor="rgba(200,200,200,0.3)",
             ),
             yaxis=dict(
                 title=dict(text="Number of Cells", font=dict(size=16)),
                 tickfont=dict(size=14),
                 gridcolor="rgba(200,200,200,0.3)",
-                type="log" if max(cluster_counts) / min(cluster_counts) > 100 else "linear"
+                type=(
+                    "log"
+                    if max(cluster_counts) / min(cluster_counts) > 100
+                    else "linear"
+                ),
             ),
             width=1000,  # Increased from 800
-            height=700,   # Increased from 500
+            height=700,  # Increased from 500
             font=dict(size=14, family="Arial, sans-serif"),
             margin=dict(l=80, r=80, t=80, b=80),
             plot_bgcolor="white",

@@ -27,26 +27,17 @@ class LLMFactory:
     """Factory for creating provider-agnostic LLM instances."""
     
     # Model mapping: provider-agnostic name -> provider-specific IDs
+    # Simplified to 2 models for development and production
     MODEL_MAPPINGS = {
-        # Ultra tier models
+        # Development Model - Claude 3.7 Sonnet
         "claude-3-7-sonnet": {
             LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
-            LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"
+            LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"  # Fallback for direct API
         },
-        # Heavy tier models  
-        "claude-4-opus": {
-            LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-opus-4-20250514-v1:0",
-            LLMProvider.ANTHROPIC_DIRECT: "claude-3-opus-20240229"
-        },
-        # Standard tier models
-        "claude-4-sonnet": {
-            LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-sonnet-4-20250514-v1:0",
-            LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"
-        },
-        # Lightweight tier models
-        "claude-3-haiku": {
-            LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-3-haiku-20240307-v1:0",
-            LLMProvider.ANTHROPIC_DIRECT: "claude-3-haiku-20240307"
+        # Production Model - Claude 4.5 Sonnet
+        "claude-4-5-sonnet": {
+            LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"  # Fallback for direct API
         }
     }
     
@@ -173,11 +164,12 @@ class LLMFactory:
     def _translate_model_id(cls, bedrock_model_id: str, target_provider: LLMProvider) -> str:
         """
         Translate Bedrock model ID to provider-specific ID.
-        
+        Simplified to support only Claude 3.7 Sonnet and Claude 4.5 Sonnet.
+
         Args:
             bedrock_model_id: The Bedrock model ID to translate
             target_provider: The target provider to translate for
-            
+
         Returns:
             Translated model ID for the target provider
         """
@@ -187,18 +179,16 @@ class LLMFactory:
                 translated = mappings.get(target_provider)
                 if translated:
                     return translated
-        
-        # Fallback: try to extract model version from Bedrock ID
-        if "claude-3-5-sonnet" in bedrock_model_id or "claude-3-7-sonnet" in bedrock_model_id:
+
+        # Fallback: pattern matching for the 2 supported models
+        if "claude-3-7-sonnet" in bedrock_model_id:
+            # Claude 3.7 Sonnet
             return "claude-3-5-sonnet-20241022"
-        elif "claude-3-haiku" in bedrock_model_id:
-            return "claude-3-haiku-20240307"
-        elif "claude-3-opus" in bedrock_model_id or "claude-opus-4" in bedrock_model_id:
-            return "claude-3-opus-20240229"
-        elif "claude-sonnet-4" in bedrock_model_id:
+        elif "claude-sonnet-4-5" in bedrock_model_id or "claude-4-5-sonnet" in bedrock_model_id:
+            # Claude 4.5 Sonnet
             return "claude-3-5-sonnet-20241022"
-        
-        # Default fallback to Claude 3.5 Sonnet
+
+        # Default fallback to Claude 3.5 Sonnet for direct API
         print(f"Warning: Could not translate model ID '{bedrock_model_id}', using default Claude 3.5 Sonnet")
         return "claude-3-5-sonnet-20241022"
     
