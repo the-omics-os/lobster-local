@@ -100,7 +100,7 @@ class LobsterAgentConfigurator:
     - Thinking/reasoning support for compatible models
     """
 
-    # Pre-defined model configurations - Simplified to 2 models
+    # Pre-defined model configurations - 3 models
     MODEL_PRESETS = {
         # Development Model - Claude 3.7 Sonnet
         "claude-3-7-sonnet": ModelConfig(
@@ -112,14 +112,24 @@ class LobsterAgentConfigurator:
             description="Claude 3.7 Sonnet for development and worker agents",
             supports_thinking=True,
         ),
-        # Production Model - Claude 4.5 Sonnet
+        # Production Model - Claude 4 Sonnet
+        "claude-4-sonnet": ModelConfig(
+            provider=ModelProvider.BEDROCK_ANTHROPIC,
+            model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
+            tier=ModelTier.ULTRA,
+            temperature=1.0,
+            region="us-east-1",
+            description="Claude 4 Sonnet for production",
+            supports_thinking=True,
+        ),
+        # Godmode Model - Claude 4.5 Sonnet
         "claude-4-5-sonnet": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             tier=ModelTier.ULTRA,
             temperature=1.0,
             region="us-east-1",
-            description="Claude 4.5 Sonnet for production and supervisor",
+            description="Claude 4.5 Sonnet for godmode",
             supports_thinking=True,
         ),
     }
@@ -148,7 +158,7 @@ class LobsterAgentConfigurator:
         "deep": ThinkingConfig(enabled=True, budget_tokens=10000),
     }
 
-    # Pre-defined testing profiles - Simplified to 2 profiles
+    # Pre-defined testing profiles - 3 profiles
     TESTING_PROFILES = {
         "development": {
             # Supervisor uses Claude 4.5 Sonnet
@@ -167,6 +177,21 @@ class LobsterAgentConfigurator:
             "thinking": {},  # No thinking in development mode for faster testing
         },
         "production": {
+            # All agents including supervisor use Claude 4 Sonnet
+            "supervisor": "claude-4-sonnet",
+            "assistant": "claude-4-sonnet",
+            "singlecell_expert_agent": "claude-4-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "method_expert_agent": "claude-4-sonnet",
+            "data_expert_agent": "claude-4-sonnet",
+            "machine_learning_expert_agent": "claude-4-sonnet",
+            "research_agent": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-sonnet",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",
+            "thinking": {},  # No thinking configured for production
+        },
+        "godmode": {
             # All agents including supervisor use Claude 4.5 Sonnet
             "supervisor": "claude-4-5-sonnet",
             "assistant": "claude-4-5-sonnet",
@@ -179,7 +204,7 @@ class LobsterAgentConfigurator:
             "ms_proteomics_expert_agent": "claude-4-5-sonnet",
             "affinity_proteomics_expert_agent": "claude-4-5-sonnet",
             "visualization_expert_agent": "claude-4-5-sonnet",
-            "thinking": {},  # No thinking configured for production
+            "thinking": {},  # No thinking configured for godmode
         },
     }
 

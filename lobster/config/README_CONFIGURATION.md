@@ -74,76 +74,50 @@ LOBSTER_PROFILE=production
 ```
 
 Available profiles:
-- `development` - Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - fast development
-- `production` - Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant - production ready
-- `cost-optimized` - Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - cost optimized
+- `development` - Claude 4.5 Sonnet for supervisor, Claude 3.7 Sonnet for workers - fast development
+- `production` - Claude 4 Sonnet for all agents - production ready (default)
+- `godmode` - Claude 4.5 Sonnet for all agents - maximum performance
 
 ### 2. Override Specific Agents (Optional)
 ```bash
 # Use different models for different agents
-LOBSTER_SUPERVISOR_MODEL=claude-haiku              # Lightweight supervisor
-LOBSTER_TRANSCRIPTOMICS_EXPERT_MODEL=claude-opus   # Heavy model for complex analysis  
-LOBSTER_METHOD_AGENT_MODEL=claude-sonnet           # Balanced model for literature search
+LOBSTER_SUPERVISOR_MODEL=claude-3-7-sonnet                 # Development model
+LOBSTER_SINGLECELL_EXPERT_AGENT_MODEL=claude-4-5-sonnet   # Maximum capability
+LOBSTER_METHOD_EXPERT_AGENT_MODEL=claude-4-sonnet         # Production model
 ```
 
 ### 3. Global Override (Optional)
 ```bash
 # Override all agents with the same model
-LOBSTER_GLOBAL_MODEL=claude-sonnet
+LOBSTER_GLOBAL_MODEL=claude-4-5-sonnet
 ```
 
 ## Available Models
 
-### US Region Models
+The following models are available in the current configuration:
 
-| Model Name | Tier | Description |
-|------------|------|-------------|
-| `claude-3-haiku` | Lightweight | Fast, cost-effective Claude 3 Haiku |
-| `claude-3-5-haiku` | Lightweight | Fast, cost-effective Claude 3.5 Haiku |
-| `claude-3-sonnet` | Standard | Balanced Claude 3 Sonnet |
-| `claude-3-5-sonnet` | Standard | Enhanced Claude 3.5 Sonnet |
-| `claude-3-5-sonnet-v2` | Standard | Latest Claude 3.5 Sonnet v2 |
-| `claude-4-sonnet` | Standard | Next-generation Claude 4 Sonnet |
-| `claude-3-opus` | Heavy | Most capable Claude 3 Opus |
-| `claude-4-opus` | Heavy | Advanced Claude 4 Opus |
-| `claude-4-1-opus` | Heavy | Latest Claude 4.1 Opus |
-| `claude-3-7-sonnet` | Ultra | Highest-performance Claude 3.7 Sonnet |
+| Model Name | Tier | Description | Model ID |
+|------------|------|-------------|----------|
+| `claude-3-7-sonnet` | Ultra | Development and worker tier model | `us.anthropic.claude-3-7-sonnet-20250219-v1:0` |
+| `claude-4-sonnet` | Ultra | Production tier model (balanced) | `us.anthropic.claude-sonnet-4-20250514-v1:0` |
+| `claude-4-5-sonnet` | Ultra | Highest performance model | `us.anthropic.claude-sonnet-4-5-20250929-v1:0` |
 
-### EU Region Models (eu-central-1)
-
-| Model Name | Tier | Description |
-|------------|------|-------------|
-| `claude-3-5-haiku-eu` | Lightweight | EU region Claude 3.5 Haiku |
-| `claude-3-5-sonnet-eu` | Standard | EU region Claude 3.5 Sonnet |
-| `claude-3-5-sonnet-v2-eu` | Standard | EU region Claude 3.5 Sonnet v2 |
-| `claude-4-opus-eu` | Heavy | EU region Claude 4 Opus |
-| `claude-4-1-opus-eu` | Heavy | EU region Claude 4.1 Opus |
-| `claude-3-7-sonnet-eu` | Ultra | EU region Claude 3.7 Sonnet |
-
-### Convenience Aliases
-
-| Alias | Points To | Description |
-|-------|-----------|-------------|
-| `claude-haiku` | `claude-3-5-haiku` | Latest Claude 3.5 Haiku |
-| `claude-sonnet` | `claude-3-5-sonnet-v2` | Latest Claude 3.5 Sonnet v2 |
-| `claude-opus` | `claude-4-1-opus` | Latest Claude 4.1 Opus |
+All models support extended thinking/reasoning capabilities and are deployed in AWS Bedrock US East region by default.
 
 ## Configuration Profiles
 
 ### Development Profile
-- **Assistant**: `claude-3-5-sonnet-v2` (cost-effective interface)
-- **Supervisor**: `claude-3-7-sonnet` (development coordination)
-- **All Expert Agents**: `claude-3-7-sonnet` (balanced capability for development)
+- **Supervisor**: `claude-4-5-sonnet` (highest capability for coordination)
+- **All Worker Agents**: `claude-3-7-sonnet` (balanced capability for development)
+- **Use Case**: Fast development and testing with mixed performance tiers
 
-### Production Profile
-- **Assistant**: `claude-3-5-sonnet-v2` (cost-effective interface)
-- **Supervisor**: `claude-4-sonnet` (reliable production coordination)
-- **All Expert Agents**: `claude-4-sonnet` (maximum production capability)
+### Production Profile (Default)
+- **All Agents**: `claude-4-sonnet` (balanced production model)
+- **Use Case**: Production deployments with balanced performance and cost
 
-### Cost-Optimized Profile
-- **Assistant**: `claude-3-5-sonnet-v2` (cost-effective interface)
-- **Supervisor**: `claude-3-7-sonnet` (cost-effective coordination)
-- **All Expert Agents**: `claude-3-7-sonnet` (cost-effective analysis)
+### Godmode Profile
+- **All Agents**: `claude-4-5-sonnet` (highest capability model)
+- **Use Case**: Maximum performance for demanding analyses
 
 ## Environment Variables Reference
 
@@ -214,28 +188,28 @@ python config/config_manager.py generate-env
 ```bash
 # In your .env file
 LOBSTER_PROFILE=development
-# Uses Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant
+# Uses Claude 4.5 Sonnet for supervisor, Claude 3.7 Sonnet for workers
 ```
 
 ### Scenario 2: Production Deployment
 ```bash
 # In your .env file
 LOBSTER_PROFILE=production
-# Uses Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant
+# Uses Claude 4 Sonnet for all agents (default)
 ```
 
-### Scenario 3: Cost Optimization
+### Scenario 3: Maximum Performance
 ```bash
 # In your .env file
-LOBSTER_PROFILE=cost-optimized
-# Uses Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant
+LOBSTER_PROFILE=godmode
+# Uses Claude 4.5 Sonnet for all agents
 ```
 
 ### Scenario 4: Custom Agent Override
 ```bash
 # In your .env file
-LOBSTER_PROFILE=development
-LOBSTER_SINGLECELL_EXPERT_AGENT_MODEL=claude-4-sonnet  # Override specific agent
+LOBSTER_PROFILE=production
+LOBSTER_SINGLECELL_EXPERT_AGENT_MODEL=claude-4-5-sonnet  # Override specific agent
 ```
 
 ## Custom Configuration Files

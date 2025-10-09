@@ -430,6 +430,9 @@ class GEOProvider(BasePublicationProvider):
             max_results = self.config.max_results
             use_history = True
 
+        # Sanitize query first (fixes unmatched quotes)
+        complete_query = self.query_builder.sanitize_query(complete_query)
+
         # Validate query syntax
         if not self.query_builder.validate_query(complete_query):
             raise ValueError(f"Invalid query syntax: {complete_query}")

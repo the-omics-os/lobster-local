@@ -494,7 +494,61 @@ instead of User → Supervisor → Agent A → Agent B (direct handoff).
 
 
 # FUTURE IMPLEMENTATION STUBS - For maintaining interface compatibility
-# These functions are kept as stubs so existing imports don't break
+# These functions and schemas are kept as stubs so existing imports don't break
+
+from typing import Any, Dict, List, Optional, Type, Union
+
+# Schema definitions for common handoff types (kept as constants for import compatibility)
+SCVI_CONTEXT_SCHEMA: Dict[str, Type] = {
+    "modality_name": str,
+    "n_latent": int,
+    "batch_key": Optional[str],
+    "max_epochs": int,
+    "use_gpu": bool
+}
+
+PSEUDOBULK_CONTEXT_SCHEMA: Dict[str, Type] = {
+    "modality_name": str,
+    "groupby": str,
+    "layer": Optional[str],
+    "method": str,
+    "min_cells": int
+}
+
+DATA_LOADING_SCHEMA: Dict[str, Type] = {
+    "file_path": str,
+    "file_type": str,
+    "delimiter": Optional[str],
+    "header": Optional[Union[int, bool]]
+}
+
+METHOD_CONTEXT_SCHEMA: Dict[str, Type] = {
+    "publication_id": str,
+    "method_name": str,
+    "parameters_needed": List[str],
+    "context": str
+}
+
+
+def validate_context_schema(context: Dict[str, Any], schema: Dict[str, Type]) -> Dict[str, Any]:
+    """
+    STUB: Validate context data against a schema (disabled for supervisor-mediated flow).
+
+    This function is preserved for test compatibility but raises NotImplementedError.
+
+    Args:
+        context: Context data to validate
+        schema: Schema definition with field names and types
+
+    Returns:
+        Validated context data
+
+    Raises:
+        NotImplementedError: Direct sub-agent handoffs are currently disabled
+    """
+    raise NotImplementedError(
+        "Direct sub-agent handoffs are currently disabled. Use supervisor-mediated flow."
+    )
 
 
 def create_expert_handoff_tool(*args, **kwargs):
@@ -502,11 +556,6 @@ def create_expert_handoff_tool(*args, **kwargs):
     raise NotImplementedError(
         "Direct sub-agent handoffs are currently disabled. Use supervisor-mediated flow."
     )
-
-
-def SCVI_CONTEXT_SCHEMA():
-    """STUB: scVI context schema (disabled for supervisor-mediated flow)."""
-    return {}
 
 
 def create_singlecell_to_ml_handoff_tool():

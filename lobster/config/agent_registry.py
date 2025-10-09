@@ -131,57 +131,69 @@ def create_expert_handoff_tools(available_agents: List[str]) -> Dict[str, BaseTo
     Automatically create handoff tools between compatible experts
     based on available agents and handoff patterns.
 
+    ⚠️ CURRENTLY DISABLED: Direct sub-agent handoffs are disabled for supervisor-mediated flow.
+    This function returns an empty dict but is preserved for interface compatibility.
+
     Args:
         available_agents: List of available agent names
 
     Returns:
-        Dictionary of handoff tools keyed by tool name
+        Dictionary of handoff tools keyed by tool name (empty dict when disabled)
     """
-    from lobster.tools.enhanced_handoff_tool import create_expert_handoff_tool
-    from lobster.tools.expert_handoff_patterns import EXPERT_HANDOFF_PATTERNS
+    import logging
+    logger = logging.getLogger(__name__)
 
-    handoff_tools = {}
+    # Direct sub-agent handoffs are currently disabled
+    # Return empty dict to maintain interface compatibility
+    logger.debug("create_expert_handoff_tools called but handoffs are disabled for supervisor-mediated flow")
+    return {}
 
-    # Normalize agent names by removing '_agent' suffix if present
-    normalized_agents = {}
-    for agent_name in available_agents:
-        if agent_name.endswith("_agent"):
-            normalized_name = agent_name[:-6]  # Remove '_agent'
-        else:
-            normalized_name = agent_name
-        normalized_agents[normalized_name] = agent_name
-
-    for pattern_name, pattern in EXPERT_HANDOFF_PATTERNS.items():
-        from_expert_norm = pattern.from_expert
-        to_expert_norm = pattern.to_expert
-
-        # Check if both experts are available
-        if (
-            from_expert_norm in normalized_agents
-            and to_expert_norm in normalized_agents
-        ):
-            from_agent_name = normalized_agents[from_expert_norm]
-            to_agent_name = normalized_agents[to_expert_norm]
-
-            # Create handoff tools for each task type
-            for task_type in pattern.task_types:
-                tool_name = (
-                    f"handoff_{from_expert_norm}_to_{to_expert_norm}_{task_type}"
-                )
-
-                # Create the enhanced handoff tool
-                handoff_tool = create_expert_handoff_tool(
-                    from_expert=from_expert_norm,
-                    to_expert=to_expert_norm,
-                    task_type=task_type,
-                    context_schema=pattern.context_schema,
-                    return_to_sender=(pattern.return_flow == "sender"),
-                    custom_description=f"Hand off {task_type} task from {pattern.from_expert} to {pattern.to_expert}",
-                )
-
-                handoff_tools[tool_name] = handoff_tool
-
-    return handoff_tools
+    # COMMENTED OUT: Original implementation for when direct handoffs are re-enabled
+    # from lobster.tools.enhanced_handoff_tool import create_expert_handoff_tool
+    # from lobster.tools.expert_handoff_patterns import EXPERT_HANDOFF_PATTERNS
+    #
+    # handoff_tools = {}
+    #
+    # # Normalize agent names by removing '_agent' suffix if present
+    # normalized_agents = {}
+    # for agent_name in available_agents:
+    #     if agent_name.endswith("_agent"):
+    #         normalized_name = agent_name[:-6]  # Remove '_agent'
+    #     else:
+    #         normalized_name = agent_name
+    #     normalized_agents[normalized_name] = agent_name
+    #
+    # for pattern_name, pattern in EXPERT_HANDOFF_PATTERNS.items():
+    #     from_expert_norm = pattern.from_expert
+    #     to_expert_norm = pattern.to_expert
+    #
+    #     # Check if both experts are available
+    #     if (
+    #         from_expert_norm in normalized_agents
+    #         and to_expert_norm in normalized_agents
+    #     ):
+    #         from_agent_name = normalized_agents[from_expert_norm]
+    #         to_agent_name = normalized_agents[to_expert_norm]
+    #
+    #         # Create handoff tools for each task type
+    #         for task_type in pattern.task_types:
+    #             tool_name = (
+    #                 f"handoff_{from_expert_norm}_to_{to_expert_norm}_{task_type}"
+    #             )
+    #
+    #             # Create the enhanced handoff tool
+    #             handoff_tool = create_expert_handoff_tool(
+    #                 from_expert=from_expert_norm,
+    #                 to_expert=to_expert_norm,
+    #                 task_type=task_type,
+    #                 context_schema=pattern.context_schema,
+    #                 return_to_sender=(pattern.return_flow == "sender"),
+    #                 custom_description=f"Hand off {task_type} task from {pattern.from_expert} to {pattern.to_expert}",
+    #             )
+    #
+    #             handoff_tools[tool_name] = handoff_tool
+    #
+    # return handoff_tools
 
 
 def get_handoff_tools_for_agent(
@@ -190,31 +202,43 @@ def get_handoff_tools_for_agent(
     """
     Get all handoff tools relevant to a specific agent.
 
+    ⚠️ CURRENTLY DISABLED: Direct sub-agent handoffs are disabled for supervisor-mediated flow.
+    This function returns an empty list but is preserved for interface compatibility.
+
     Args:
         agent_name: Name of the agent to get handoff tools for
         available_agents: List of all available agent names
 
     Returns:
-        List of handoff tools that this agent can use
+        List of handoff tools that this agent can use (empty list when disabled)
     """
-    from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
+    import logging
+    logger = logging.getLogger(__name__)
 
-    # Normalize agent name
-    if agent_name.endswith("_agent"):
-        normalized_name = agent_name[:-6]
-    else:
-        normalized_name = agent_name
+    # Direct sub-agent handoffs are currently disabled
+    # Return empty list to maintain interface compatibility
+    logger.debug(f"get_handoff_tools_for_agent called for {agent_name} but handoffs are disabled")
+    return []
 
-    # Get all handoff tools
-    all_handoff_tools = create_expert_handoff_tools(available_agents)
-
-    # Filter tools relevant to this agent (outgoing handoffs)
-    relevant_tools = []
-    for tool_name, tool in all_handoff_tools.items():
-        if tool_name.startswith(f"handoff_{normalized_name}_to_"):
-            relevant_tools.append(tool)
-
-    return relevant_tools
+    # COMMENTED OUT: Original implementation for when direct handoffs are re-enabled
+    # from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
+    #
+    # # Normalize agent name
+    # if agent_name.endswith("_agent"):
+    #     normalized_name = agent_name[:-6]
+    # else:
+    #     normalized_name = agent_name
+    #
+    # # Get all handoff tools
+    # all_handoff_tools = create_expert_handoff_tools(available_agents)
+    #
+    # # Filter tools relevant to this agent (outgoing handoffs)
+    # relevant_tools = []
+    # for tool_name, tool in all_handoff_tools.items():
+    #     if tool_name.startswith(f"handoff_{normalized_name}_to_"):
+    #         relevant_tools.append(tool)
+    #
+    # return relevant_tools
 
 
 def get_available_handoff_destinations(from_agent: str) -> List[str]:

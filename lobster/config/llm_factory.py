@@ -27,14 +27,19 @@ class LLMFactory:
     """Factory for creating provider-agnostic LLM instances."""
     
     # Model mapping: provider-agnostic name -> provider-specific IDs
-    # Simplified to 2 models for development and production
+    # 3 models for development, production, and godmode
     MODEL_MAPPINGS = {
         # Development Model - Claude 3.7 Sonnet
         "claude-3-7-sonnet": {
             LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
             LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"  # Fallback for direct API
         },
-        # Production Model - Claude 4.5 Sonnet
+        # Production Model - Claude 4 Sonnet
+        "claude-4-sonnet": {
+            LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-sonnet-4-20250514-v1:0",
+            LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"  # Fallback for direct API
+        },
+        # Godmode Model - Claude 4.5 Sonnet
         "claude-4-5-sonnet": {
             LLMProvider.BEDROCK_ANTHROPIC: "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             LLMProvider.ANTHROPIC_DIRECT: "claude-3-5-sonnet-20241022"  # Fallback for direct API
@@ -164,7 +169,7 @@ class LLMFactory:
     def _translate_model_id(cls, bedrock_model_id: str, target_provider: LLMProvider) -> str:
         """
         Translate Bedrock model ID to provider-specific ID.
-        Simplified to support only Claude 3.7 Sonnet and Claude 4.5 Sonnet.
+        Supports Claude 3.7 Sonnet, Claude 4 Sonnet, and Claude 4.5 Sonnet.
 
         Args:
             bedrock_model_id: The Bedrock model ID to translate
@@ -180,9 +185,12 @@ class LLMFactory:
                 if translated:
                     return translated
 
-        # Fallback: pattern matching for the 2 supported models
+        # Fallback: pattern matching for the 3 supported models
         if "claude-3-7-sonnet" in bedrock_model_id:
             # Claude 3.7 Sonnet
+            return "claude-3-5-sonnet-20241022"
+        elif "claude-sonnet-4-20250514" in bedrock_model_id or ("claude-4-sonnet" in bedrock_model_id and "4-5" not in bedrock_model_id):
+            # Claude 4 Sonnet
             return "claude-3-5-sonnet-20241022"
         elif "claude-sonnet-4-5" in bedrock_model_id or "claude-4-5-sonnet" in bedrock_model_id:
             # Claude 4.5 Sonnet
