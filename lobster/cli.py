@@ -1415,7 +1415,7 @@ def display_welcome():
 {input_status}
 
 [bold {LobsterTheme.PRIMARY_ORANGE}]Key Tasks:[/bold {LobsterTheme.PRIMARY_ORANGE}]
-• Analyze RNA-seq & genomics data
+• Analyze RNA-seq data
 • Generate visualizations and plots
 • Extract insights from bioinformatics datasets
 • Access GEO & literature databases
