@@ -74,9 +74,9 @@ LOBSTER_PROFILE=production
 ```
 
 Available profiles:
-- `development` - Claude 4.5 Sonnet for supervisor, Claude 3.7 Sonnet for workers - fast development
-- `production` - Claude 4 Sonnet for all agents - production ready (default)
-- `godmode` - Claude 4.5 Sonnet for all agents - maximum performance
+- `development` - Supervisor & experts: Claude 4 Sonnet, Assistant: Claude 3.7 Sonnet - consistent expert-tier development
+- `production` - Supervisor: Claude 4.5 Sonnet, Experts: Claude 4 Sonnet, Assistant: Claude 3.7 Sonnet - optimal production (default)
+- `godmode` - All agents: Claude 4.5 Sonnet - maximum performance
 
 ### 2. Override Specific Agents (Optional)
 ```bash
@@ -107,16 +107,21 @@ All models support extended thinking/reasoning capabilities and are deployed in 
 ## Configuration Profiles
 
 ### Development Profile
-- **Supervisor**: `claude-4-5-sonnet` (highest capability for coordination)
-- **All Worker Agents**: `claude-3-7-sonnet` (balanced capability for development)
-- **Use Case**: Fast development and testing with mixed performance tiers
+- **Supervisor**: `claude-4-sonnet` (consistent expert-tier coordination)
+- **Expert Agents**: `claude-4-sonnet` (consistent expert-tier analysis)
+- **Assistant**: `claude-3-7-sonnet` (cost-effective interface)
+- **Use Case**: Fast development and testing with consistent expert-tier performance
 
 ### Production Profile (Default)
-- **All Agents**: `claude-4-sonnet` (balanced production model)
-- **Use Case**: Production deployments with balanced performance and cost
+- **Supervisor**: `claude-4-5-sonnet` (optimal production coordination)
+- **Expert Agents**: `claude-4-sonnet` (balanced expert analysis)
+- **Assistant**: `claude-3-7-sonnet` (cost-effective interface)
+- **Use Case**: Production deployments with optimal performance and cost balance
 
 ### Godmode Profile
-- **All Agents**: `claude-4-5-sonnet` (highest capability model)
+- **Supervisor**: `claude-4-5-sonnet` (maximum capability)
+- **Expert Agents**: `claude-4-5-sonnet` (maximum capability)
+- **Assistant**: `claude-4-5-sonnet` (maximum capability)
 - **Use Case**: Maximum performance for demanding analyses
 
 ## Environment Variables Reference
@@ -188,28 +193,28 @@ python config/config_manager.py generate-env
 ```bash
 # In your .env file
 LOBSTER_PROFILE=development
-# Uses Claude 4.5 Sonnet for supervisor, Claude 3.7 Sonnet for workers
+# Supervisor & experts: Claude 4 Sonnet, Assistant: Claude 3.7 Sonnet
 ```
 
 ### Scenario 2: Production Deployment
 ```bash
 # In your .env file
 LOBSTER_PROFILE=production
-# Uses Claude 4 Sonnet for all agents (default)
+# Supervisor: Claude 4.5 Sonnet, Experts: Claude 4 Sonnet, Assistant: Claude 3.7 Sonnet (default)
 ```
 
 ### Scenario 3: Maximum Performance
 ```bash
 # In your .env file
 LOBSTER_PROFILE=godmode
-# Uses Claude 4.5 Sonnet for all agents
+# All agents: Claude 4.5 Sonnet
 ```
 
 ### Scenario 4: Custom Agent Override
 ```bash
 # In your .env file
 LOBSTER_PROFILE=production
-LOBSTER_SINGLECELL_EXPERT_AGENT_MODEL=claude-4-5-sonnet  # Override specific agent
+LOBSTER_SINGLECELL_EXPERT_AGENT_MODEL=claude-4-5-sonnet  # Override specific agent to godmode
 ```
 
 ## Custom Configuration Files

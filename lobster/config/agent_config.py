@@ -161,25 +161,28 @@ class LobsterAgentConfigurator:
     # Pre-defined testing profiles - 3 profiles
     TESTING_PROFILES = {
         "development": {
-            # Supervisor uses Claude 4.5 Sonnet
-            "supervisor": "claude-4-5-sonnet",
-            # All worker agents use Claude 3.7 Sonnet
+            # Supervisor and expert agents use Claude 4 Sonnet
+            "supervisor": "claude-4-sonnet",
+            # Assistant uses Claude 3.7 Sonnet
             "assistant": "claude-3-7-sonnet",
-            "singlecell_expert_agent": "claude-3-7-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-3-7-sonnet",
-            "method_expert_agent": "claude-3-7-sonnet",
-            "data_expert_agent": "claude-3-7-sonnet",
-            "machine_learning_expert_agent": "claude-3-7-sonnet",
-            "research_agent": "claude-3-7-sonnet",
-            "ms_proteomics_expert_agent": "claude-3-7-sonnet",
-            "affinity_proteomics_expert_agent": "claude-3-7-sonnet",
-            "visualization_expert_agent": "claude-3-7-sonnet",
+            # All expert agents use Claude 4 Sonnet
+            "singlecell_expert_agent": "claude-4-sonnet",
+            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
+            "method_expert_agent": "claude-4-sonnet",
+            "data_expert_agent": "claude-4-sonnet",
+            "machine_learning_expert_agent": "claude-4-sonnet",
+            "research_agent": "claude-4-sonnet",
+            "ms_proteomics_expert_agent": "claude-4-sonnet",
+            "affinity_proteomics_expert_agent": "claude-4-sonnet",
+            "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {},  # No thinking in development mode for faster testing
         },
         "production": {
-            # All agents including supervisor use Claude 4 Sonnet
-            "supervisor": "claude-4-sonnet",
-            "assistant": "claude-4-sonnet",
+            # Supervisor uses Claude 4.5 Sonnet
+            "supervisor": "claude-4-5-sonnet",
+            # Assistant uses Claude 3.7 Sonnet
+            "assistant": "claude-3-7-sonnet",
+            # All expert agents use Claude 4 Sonnet
             "singlecell_expert_agent": "claude-4-sonnet",
             "bulk_rnaseq_expert_agent": "claude-4-sonnet",
             "method_expert_agent": "claude-4-sonnet",
@@ -192,7 +195,7 @@ class LobsterAgentConfigurator:
             "thinking": {},  # No thinking configured for production
         },
         "godmode": {
-            # All agents including supervisor use Claude 4.5 Sonnet
+            # All agents including supervisor and assistant use Claude 4.5 Sonnet
             "supervisor": "claude-4-5-sonnet",
             "assistant": "claude-4-5-sonnet",
             "singlecell_expert_agent": "claude-4-5-sonnet",
