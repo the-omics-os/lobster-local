@@ -680,6 +680,19 @@ config_app = typer.Typer(
 )
 app.add_typer(config_app, name="config")
 
+
+# App callback to show help when no subcommand is provided
+@app.callback(invoke_without_command=True)
+def default_callback(ctx: typer.Context):
+    """
+    Show friendly help guide when lobster is invoked without subcommands.
+    """
+    # If no subcommand was invoked, show the default help
+    if ctx.invoked_subcommand is None:
+        show_default_help()
+        raise typer.Exit()
+
+
 # Global client instance
 client: Optional[AgentClient] = None
 
@@ -1444,6 +1457,61 @@ def display_welcome():
     welcome_panel = LobsterTheme.create_panel(welcome_content, title=str(header_text))
 
     console_manager.print(welcome_panel)
+
+
+def show_default_help():
+    """Display default help guide when lobster is run without subcommands."""
+    # Create branded header
+    header_text = LobsterTheme.create_title_text("LOBSTER by Omics-OS", "🦞")
+
+    help_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]AVAILABLE COMMANDS:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster chat[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Start interactive chat session with AI agents
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster query[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Send a single analysis query
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster serve[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Start API server for web services
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Manage agent configuration
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]QUICK START:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Start interactive analysis with enhanced autocomplete[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster chat[/{LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Show agent reasoning during analysis[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster chat --reasoning[/{LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Send a single query and get results[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster query "Analyze my RNA-seq data"[/{LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Start API server on custom port[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster serve --port 8080[/{LobsterTheme.PRIMARY_ORANGE}]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]CONFIGURATION:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config list-models[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] List available AI models
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config list-profiles[/{LobsterTheme.PRIMARY_ORANGE}]  [grey50]-[/grey50] List testing profiles
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config show-config[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show current configuration
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]KEY FEATURES:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [white]Single-Cell & Bulk RNA-seq Analysis[/white]
+• [white]Mass Spectrometry & Affinity Proteomics[/white]
+• [white]GEO Dataset Access & Literature Mining[/white]
+• [white]Interactive Visualizations & Reports[/white]
+• [white]Natural Language Interface[/white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]HELP & DOCUMENTATION:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster --help[/{LobsterTheme.PRIMARY_ORANGE}]              [grey50]-[/grey50] Show detailed help
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster <command> --help[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show help for specific command
+
+[dim grey50]🌐 Website: https://omics-os.com | 📚 Docs: https://github.com/the-omics-os[/dim grey50]
+[dim grey50]Powered by LangGraph | © 2025 Omics-OS[/dim grey50]"""
+
+    # Create branded help panel
+    help_panel = LobsterTheme.create_panel(help_content, title=str(header_text))
+
+    console_manager.print(help_panel)
 
 
 # ============================================================================
