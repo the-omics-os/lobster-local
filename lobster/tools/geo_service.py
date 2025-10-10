@@ -457,7 +457,7 @@ class GEOService:
                     adapter_name = "transcriptomics_bulk"
                 else:
                     # Default to single-cell for GEO datasets (more common)
-                    adapter_name = "single_cell_rna_seq"
+                    adapter_name = "transcriptomics_single_cell"
             else:
                 adapter_name = adapter
 
