@@ -264,7 +264,7 @@ class PseudobulkAdapter(BaseAdapter):
 
         # Add per-gene metrics for pseudobulk samples
         if "n_pseudobulk_samples" not in adata.var.columns:
-            adata.var["n_pseudobulk_samples"] = (adata.X > 0).sum(axis=0)
+            adata.var["n_pseudobulk_samples"] = np.array((adata.X > 0).sum(axis=0)).flatten()
 
         if "mean_aggregated_counts" not in adata.var.columns:
             adata.var["mean_aggregated_counts"] = np.array(
@@ -278,7 +278,7 @@ class PseudobulkAdapter(BaseAdapter):
 
         # Add per-pseudobulk-sample metrics
         if "n_genes_detected" not in adata.obs.columns:
-            adata.obs["n_genes_detected"] = (adata.X > 0).sum(axis=1)
+            adata.obs["n_genes_detected"] = np.array((adata.X > 0).sum(axis=1)).flatten()
 
         if "total_aggregated_counts" not in adata.obs.columns:
             adata.obs["total_aggregated_counts"] = np.array(

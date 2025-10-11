@@ -259,17 +259,17 @@ class BaseAdapter(IModalityAdapter):
         """
         # Add basic observation metadata if missing
         if "n_genes" not in adata.obs.columns:
-            adata.obs["n_genes"] = (adata.X > 0).sum(axis=1)
+            adata.obs["n_genes"] = np.array((adata.X > 0).sum(axis=1)).flatten()
 
         if "total_counts" not in adata.obs.columns:
-            adata.obs["total_counts"] = adata.X.sum(axis=1)
+            adata.obs["total_counts"] = np.array(adata.X.sum(axis=1)).flatten()
 
         # Add basic variable metadata if missing
         if "n_cells" not in adata.var.columns:
-            adata.var["n_cells"] = (adata.X > 0).sum(axis=0)
+            adata.var["n_cells"] = np.array((adata.X > 0).sum(axis=0)).flatten()
 
         if "mean_counts" not in adata.var.columns:
-            adata.var["mean_counts"] = adata.X.mean(axis=0)
+            adata.var["mean_counts"] = np.array(adata.X.mean(axis=0)).flatten()
 
         # Add source information to uns
         if source_path:

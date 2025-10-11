@@ -420,14 +420,14 @@ class TranscriptomicsAdapter(BaseAdapter):
         if self.data_type == "single_cell":
             # Add cell metrics if not present
             if "n_genes_by_counts" not in adata.obs.columns:
-                adata.obs["n_genes_by_counts"] = (adata.X > 0).sum(axis=1)
+                adata.obs["n_genes_by_counts"] = np.array((adata.X > 0).sum(axis=1)).flatten()
 
             if "total_counts" not in adata.obs.columns:
                 adata.obs["total_counts"] = np.array(adata.X.sum(axis=1)).flatten()
 
         # Calculate per-gene metrics
         if "n_cells_by_counts" not in adata.var.columns:
-            adata.var["n_cells_by_counts"] = (adata.X > 0).sum(axis=0)
+            adata.var["n_cells_by_counts"] = np.array((adata.X > 0).sum(axis=0)).flatten()
 
         if "mean_counts" not in adata.var.columns:
             adata.var["mean_counts"] = np.array(adata.X.mean(axis=0)).flatten()
