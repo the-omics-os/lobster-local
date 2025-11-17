@@ -3,6 +3,8 @@ Quality assessment service for single-cell RNA-seq data.
 
 This service provides methods for evaluating the quality of single-cell
 RNA-seq data, generating quality metrics and plots.
+
+This service emits Intermediate Representation (IR) for automatic notebook export.
 """
 
 from typing import Any, Dict, List, Tuple
@@ -13,6 +15,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -32,13 +35,18 @@ class QualityService:
     visualizations for evaluating the quality of single-cell RNA-seq data.
     """
 
-    def __init__(self):
+    def __init__(self, config=None, **kwargs):
         """
         Initialize the quality assessment service.
+
+        Args:
+            config: Optional configuration dict (ignored, for backward compatibility)
+            **kwargs: Additional arguments (ignored, for backward compatibility)
 
         This service is stateless and doesn't require a data manager instance.
         """
         logger.debug("Initializing stateless QualityService")
+        self.config = config or {}
         logger.debug("QualityService initialized successfully")
 
     def assess_quality(
@@ -48,7 +56,7 @@ class QualityService:
         max_mt_pct: float = 20.0,
         max_ribo_pct: float = 50.0,
         min_housekeeping_score: float = 1.0,
-    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
         """
         Perform quality assessment on single-cell RNA-seq data.
 
@@ -60,7 +68,10 @@ class QualityService:
             min_housekeeping_score: Minimum housekeeping gene score
 
         Returns:
-            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with QC metrics and assessment stats
+            Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
+                - AnnData with QC metrics
+                - Assessment statistics dictionary
+                - AnalysisStep IR for notebook export
 
         Raises:
             QualityError: If quality assessment fails
@@ -142,7 +153,15 @@ class QualityService:
                 f"Quality assessment completed: {cells_after}/{cells_before} cells pass QC ({assessment_stats['cells_retained_pct']:.1f}%)"
             )
 
-            return adata_qc, assessment_stats
+            # Create IR for notebook export
+            ir = self._create_quality_ir(
+                min_genes=min_genes,
+                max_mt_pct=max_mt_pct,
+                max_ribo_pct=max_ribo_pct,
+                min_housekeeping_score=min_housekeeping_score,
+            )
+
+            return adata_qc, assessment_stats, ir
 
         except Exception as e:
             logger.exception(f"Error in quality assessment: {e}")
@@ -746,3 +765,113 @@ class QualityService:
 
 **Quality Assessment:**
 {summary}"""
+
+    def _create_quality_ir(
+        self,
+        min_genes: int,
+        max_mt_pct: float,
+        max_ribo_pct: float,
+        min_housekeeping_score: float,
+    ) -> AnalysisStep:
+        """
+        Create Intermediate Representation for quality assessment.
+
+        This IR enables automatic notebook generation without manual mapping.
+
+        Args:
+            min_genes: Minimum genes per cell threshold
+            max_mt_pct: Maximum mitochondrial percentage
+            max_ribo_pct: Maximum ribosomal percentage
+            min_housekeeping_score: Minimum housekeeping gene score
+
+        Returns:
+            AnalysisStep with complete code generation instructions
+        """
+        # Create parameter schema with Papermill flags
+        parameter_schema = {
+            "min_genes": ParameterSpec(
+                param_type="int",
+                papermill_injectable=True,
+                default_value=500,
+                required=False,
+                validation_rule="min_genes > 0",
+                description="Minimum genes per cell for QC pass",
+            ),
+            "max_mt_pct": ParameterSpec(
+                param_type="float",
+                papermill_injectable=True,
+                default_value=20.0,
+                required=False,
+                validation_rule="max_mt_pct > 0 and max_mt_pct <= 100",
+                description="Maximum mitochondrial percentage threshold",
+            ),
+            "max_ribo_pct": ParameterSpec(
+                param_type="float",
+                papermill_injectable=True,
+                default_value=50.0,
+                required=False,
+                validation_rule="max_ribo_pct > 0 and max_ribo_pct <= 100",
+                description="Maximum ribosomal percentage threshold",
+            ),
+            "min_housekeeping_score": ParameterSpec(
+                param_type="float",
+                papermill_injectable=True,
+                default_value=1.0,
+                required=False,
+                validation_rule="min_housekeeping_score >= 0",
+                description="Minimum housekeeping gene expression score",
+            ),
+        }
+
+        # Jinja2 template with parameter placeholders
+        code_template = """# Calculate QC metrics
+sc.pp.calculate_qc_metrics(
+    adata,
+    qc_vars=['mt', 'ribo'],
+    percent_top=None,
+    log1p=False,
+    inplace=True
+)
+
+# Add QC pass/fail flags
+adata.obs['qc_pass'] = (
+    (adata.obs['n_genes_by_counts'] >= {{ min_genes }}) &
+    (adata.obs['pct_counts_mt'] <= {{ max_mt_pct }}) &
+    (adata.obs['pct_counts_ribo'] <= {{ max_ribo_pct }})
+)
+
+# Display QC summary
+print(f"Cells before QC: {adata.n_obs}")
+print(f"Cells passing QC: {adata.obs['qc_pass'].sum()}")
+print(f"Cells removed: {(~adata.obs['qc_pass']).sum()}")
+print(f"Mean genes per cell: {adata.obs['n_genes_by_counts'].mean():.0f}")
+print(f"Mean mitochondrial %: {adata.obs['pct_counts_mt'].mean():.2f}")
+"""
+
+        # Create AnalysisStep
+        ir = AnalysisStep(
+            operation="scanpy.pp.calculate_qc_metrics",
+            tool_name="assess_quality",
+            description="Calculate quality control metrics and filter cells",
+            library="scanpy",
+            code_template=code_template,
+            imports=["import scanpy as sc", "import numpy as np"],
+            parameters={
+                "min_genes": min_genes,
+                "max_mt_pct": max_mt_pct,
+                "max_ribo_pct": max_ribo_pct,
+                "min_housekeeping_score": min_housekeeping_score,
+            },
+            parameter_schema=parameter_schema,
+            input_entities=["adata"],
+            output_entities=["adata"],
+            execution_context={
+                "qc_vars": ["mt", "ribo"],
+                "method": "scanpy",
+            },
+            validates_on_export=True,
+            requires_validation=False,
+        )
+
+        logger.debug(f"Created IR for quality assessment: {ir.operation}")
+        return ir

@@ -10,21 +10,15 @@ import time
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from threading import Lock
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-from rich import box
-from rich.align import Align
-from rich.columns import Columns
 from rich.layout import Layout
 from rich.live import Live
-from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     DownloadColumn,
-    FileSizeColumn,
     MofNCompleteColumn,
     Progress,
     SpinnerColumn,
@@ -36,7 +30,6 @@ from rich.progress import (
     TransferSpeedColumn,
 )
 from rich.table import Table
-from rich.text import Text
 
 from .console_manager import get_console_manager
 from .themes import LobsterTheme

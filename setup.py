@@ -30,11 +30,9 @@ install_requires = [
     # LangChain and AI
     "langchain>=0.1.0",
     "langchain-community>=0.0.10",
-    "langchain-openai>=0.0.5",
     "langchain-aws>=0.1.0",
     "langgraph>=0.0.20",
     "langgraph-supervisor>=0.0.1",
-    "openai>=1.0.0",
     
     # Bioinformatics
     "scanpy>=1.9.3",
@@ -116,7 +114,7 @@ setup(
             "lobster=lobster.cli:app",
         ],
     },
-    python_requires=">=3.12",
+    python_requires=">=3.11",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",

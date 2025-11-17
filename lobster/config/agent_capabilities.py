@@ -221,7 +221,7 @@ class AgentCapabilityExtractor:
                 )
 
             # Get the factory function
-            factory_func = getattr(module, factory_name)
+            getattr(module, factory_name)
 
             # Look for tool functions defined within the factory function's module
             # This requires parsing the source code of the factory function

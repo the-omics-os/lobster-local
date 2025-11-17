@@ -6,17 +6,18 @@ in the H5AD format with support for local storage and future
 S3 integration without API changes.
 """
 
-import collections
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
-from urllib.parse import urlparse
+from typing import Any, Dict, Optional, Union
 
 import anndata
 import numpy as np
+import pandas as pd
 import scanpy as sc
 
 from lobster.core.backends.base import BaseBackend
+from lobster.core.utils.h5ad_utils import sanitize_key as util_sanitize_key
+from lobster.core.utils.h5ad_utils import sanitize_value as util_sanitize_value
 
 logger = logging.getLogger(__name__)
 
@@ -114,38 +115,107 @@ class H5ADBackend(BaseBackend):
         - Converts tuple → list
         - Converts numpy scalars → Python scalars
         - Replaces '/' in keys with '__' (HDF5 safe)
+        - Converts boolean columns to strings (HDF5 requirement)
+        - Handles mixed-type columns (converts to strings)
+        - Converts None/NaN to "NA" for HDF5 compatibility
         - Recursively applies to .uns, .obsm, .varm, .layers
+
+        Note: Uses centralized sanitization utilities from lobster.core.utils.h5ad_utils
         """
 
-        def sanitize_key(key):
-            if isinstance(key, str) and "/" in key:
-                return key.replace("/", slash_replacement)
-            return key
-
-        def convert(obj):
-            if isinstance(obj, collections.OrderedDict):
-                return {sanitize_key(k): convert(v) for k, v in obj.items()}
-            if isinstance(obj, tuple):
-                return [convert(v) for v in obj]
-            if isinstance(obj, (np.generic,)):
-                return obj.item()
-            if isinstance(obj, dict):
-                return {sanitize_key(k): convert(v) for k, v in obj.items()}
-            if isinstance(obj, list):
-                return [convert(v) for v in obj]
-            return obj
-
-        # Sanitize uns
-        adata.uns = {sanitize_key(k): convert(v) for k, v in adata.uns.items()}
+        # Sanitize uns (unstructured metadata) using centralized utility
+        adata.uns = {
+            util_sanitize_key(k, slash_replacement): util_sanitize_value(v, slash_replacement)
+            for k, v in adata.uns.items()
+        }
 
         # Sanitize obsm, varm, layers (keys must be safe)
-        adata.obsm = {sanitize_key(k): v for k, v in adata.obsm.items()}
-        adata.varm = {sanitize_key(k): v for k, v in adata.varm.items()}
-        adata.layers = {sanitize_key(k): v for k, v in adata.layers.items()}
+        adata.obsm = {util_sanitize_key(k, slash_replacement): v for k, v in adata.obsm.items()}
+        adata.varm = {util_sanitize_key(k, slash_replacement): v for k, v in adata.varm.items()}
+        adata.layers = {util_sanitize_key(k, slash_replacement): v for k, v in adata.layers.items()}
 
         # Sanitize DataFrame column names in obs and var
-        adata.obs.columns = [sanitize_key(col) for col in adata.obs.columns]
-        adata.var.columns = [sanitize_key(col) for col in adata.var.columns]
+        adata.obs.columns = [util_sanitize_key(col, slash_replacement) for col in adata.obs.columns]
+        adata.var.columns = [util_sanitize_key(col, slash_replacement) for col in adata.var.columns]
+
+        # Sanitize DataFrame VALUES in obs and var (COMPREHENSIVE)
+        # This prevents serialization errors when writing to H5AD
+        for df in [adata.obs, adata.var]:
+            columns_to_drop = []
+            for col in df.columns:
+                # Step 1: Check if column is entirely None/NaN
+                if df[col].isna().all():
+                    columns_to_drop.append(col)
+                    logger.debug(f"Dropping column '{col}' - all values are None/NaN")
+                    continue
+
+                # Step 2: Handle boolean columns (convert to string)
+                if df[col].dtype == bool or df[col].dtype == "boolean":
+                    df[col] = df[col].astype(str)
+                    logger.debug(f"Sanitized column '{col}' - converted bool to string")
+                    continue
+
+                # Step 3: Handle None/NaN in numeric columns
+                if df[col].isna().any():
+                    if np.issubdtype(df[col].dtype, np.number):
+                        # Numeric column with NaN - fill with 0 or keep as NaN
+                        # Keep NaN for numeric columns (HDF5 can handle numeric NaN)
+                        pass
+                    else:
+                        # Object dtype with None - convert None to "NA"
+                        df[col] = df[col].fillna("NA")
+                        logger.debug(
+                            f"Sanitized column '{col}' - converted None to 'NA'"
+                        )
+
+                # Step 4: Handle mixed-type columns (object dtype)
+                if df[col].dtype == "object":
+                    # Check if column has multiple types
+                    non_null_values = df[col].dropna()
+                    if len(non_null_values) > 0:
+                        unique_types = non_null_values.apply(
+                            lambda x: type(x).__name__
+                        ).unique()
+
+                        if len(unique_types) > 1:
+                            # Mixed types detected - convert all to string
+                            df[col] = df[col].apply(
+                                lambda x: str(x) if x is not None else "NA"
+                            )
+                            logger.debug(
+                                f"Sanitized column '{col}' - mixed types {unique_types} converted to string"
+                            )
+                        else:
+                            # Single type but object dtype - try numeric conversion
+                            try:
+                                # Attempt numeric conversion
+                                df[col] = pd.to_numeric(df[col])
+                                logger.debug(
+                                    f"Sanitized column '{col}' - converted to numeric"
+                                )
+                            except (ValueError, TypeError):
+                                # Not numeric - ensure all are strings
+                                df[col] = df[col].astype(str)
+                                logger.debug(
+                                    f"Sanitized column '{col}' - ensured string type"
+                                )
+
+                # Step 5: Handle categorical columns with non-string categories
+                if hasattr(df[col], "cat"):
+                    # Check if categories contain non-strings
+                    categories = df[col].cat.categories
+                    if not all(isinstance(cat, str) for cat in categories):
+                        df[col] = df[col].astype(str).astype("category")
+                        logger.debug(
+                            f"Sanitized column '{col}' - converted categorical to string categories"
+                        )
+
+            # Drop columns that are entirely None/NaN
+            if columns_to_drop:
+                df.drop(columns=columns_to_drop, inplace=True)
+                logger.info(
+                    f"Dropped {len(columns_to_drop)} empty columns: {columns_to_drop}"
+                )
 
         return adata
 
@@ -220,7 +290,7 @@ class H5ADBackend(BaseBackend):
             if resolved_path.exists():
                 try:
                     resolved_path.unlink()
-                except:
+                except Exception:
                     pass
             raise ValueError(f"Failed to save H5AD file {resolved_path}: {e}")
 

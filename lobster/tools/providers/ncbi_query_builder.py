@@ -7,7 +7,6 @@ handling all the complexity of NCBI query syntax in a consistent way.
 
 import re
 import urllib.parse
-from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
@@ -337,7 +336,7 @@ class NCBIQueryBuilder:
             elif re.match(r"^\d{4}-\d{1,2}$", date_str):
                 parts = date_str.split("-")
                 return f"{parts[0]}/{parts[1].zfill(2)}/01"
-        except:
+        except Exception:
             pass
 
         # If we can't parse it, return as-is and let NCBI handle it
@@ -422,6 +421,82 @@ class NCBIQueryBuilder:
         qq = re.sub(r'"{2,}', '"', qq)
 
         return qq
+
+    def sanitize_query(self, query: str) -> str:
+        """
+        Fix common query syntax errors (unmatched quotes, parentheses, brackets).
+
+        This method automatically corrects queries with unmatched delimiters by adding
+        closing characters at the end. This is particularly useful for LLM-generated
+        queries that may have syntax errors.
+
+        Args:
+            query: Query string that may have syntax errors
+
+        Returns:
+            str: Sanitized query string with fixed delimiter matching
+
+        Examples:
+            >>> builder = NCBIQueryBuilder()
+            >>> builder.sanitize_query('"p21(Cip1/Waf1" lung cancer')
+            '"p21(Cip1/Waf1)" lung cancer'
+        """
+        if not query:
+            return query
+
+        # Import logger here to avoid circular imports
+        from lobster.utils.logger import get_logger
+
+        logger = get_logger(__name__)
+
+        original_query = query
+        fixes_applied = []
+
+        # Check and fix unmatched parentheses
+        paren_count = 0
+        for char in query:
+            if char == "(":
+                paren_count += 1
+            elif char == ")":
+                paren_count -= 1
+
+        if paren_count > 0:
+            query = query + ")" * paren_count
+            fixes_applied.append(f"added {paren_count} closing parenthesis/es")
+        elif paren_count < 0:
+            query = "(" * abs(paren_count) + query
+            fixes_applied.append(f"added {abs(paren_count)} opening parenthesis/es")
+
+        # Check and fix unmatched square brackets
+        bracket_count = 0
+        for char in query:
+            if char == "[":
+                bracket_count += 1
+            elif char == "]":
+                bracket_count -= 1
+
+        if bracket_count > 0:
+            query = query + "]" * bracket_count
+            fixes_applied.append(f"added {bracket_count} closing bracket(s)")
+        elif bracket_count < 0:
+            query = "[" * abs(bracket_count) + query
+            fixes_applied.append(f"added {abs(bracket_count)} opening bracket(s)")
+
+        # Check and fix unmatched quotes
+        quote_count = query.count('"')
+        if quote_count % 2 != 0:
+            query = query + '"'
+            fixes_applied.append("added closing quote")
+
+        # Log if fixes were applied
+        if fixes_applied:
+            logger.warning(
+                f"Detected query syntax errors, auto-fixing: {original_query[:80]}..."
+            )
+            logger.info(f"Applied fixes: {', '.join(fixes_applied)}")
+            logger.info(f"Fixed query: {query[:80]}...")
+
+        return query
 
     def validate_query(self, query: str) -> bool:
         """

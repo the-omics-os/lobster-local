@@ -4,15 +4,12 @@ Efficiently extract file metadata without loading full content for performance o
 """
 
 import gzip
-import os
-import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Union
 
 import h5py
-import pandas as pd
 import scanpy as sc
 from openpyxl import load_workbook
 

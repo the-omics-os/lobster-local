@@ -5,14 +5,11 @@ This module provides hierarchical file browsing with orange theming,
 status indicators, and interactive navigation capabilities.
 """
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, Optional, Set
 
-from rich.console import Console
 from rich.filesize import decimal
-from rich.markup import escape
 from rich.text import Text
 from rich.tree import Tree
 

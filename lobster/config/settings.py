@@ -7,7 +7,7 @@ including the new professional agent configuration system.
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from dotenv import load_dotenv
 
@@ -29,10 +29,12 @@ class Settings:
         # Load dotenv
         load_dotenv()
 
-        # CDK variables
+        # hackathon
+        self.LINKUP_API_KEY = os.environ.get("LINKUP_API_KEY", "")
+
+
+        # CDK variables (used by lobster-cloud deployment)
         self.STACK_NAME = "LobsterStack"
-        self.CUSTOM_HEADER_VALUE = "omics-osBeatsKepler"
-        self.SECRETS_MANAGER_ID = f"{self.STACK_NAME}ParamCognitoSecret"
         self.CDK_DEPLY_ACCOUNT = "649207544517"
         # AWS Fargate CPU/Memory options summary:
         # - 256 (.25 vCPU): 512 MiB, 1 GB, 2 GB (Linux)
@@ -62,19 +64,24 @@ class Settings:
         Path(self.CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
         # API keys
-        self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+        self.OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "") #TODO future support
         self.AWS_BEDROCK_ACCESS_KEY = os.environ.get("AWS_BEDROCK_ACCESS_KEY", "")
         self.AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get(
             "AWS_BEDROCK_SECRET_ACCESS_KEY", ""
         )
         self.ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
         self.NCBI_API_KEY = os.environ.get("NCBI_API_KEY", "")
+        self.NCBI_EMAIL = os.environ.get("NCBI_EMAIL", "")
+
+        # Git automation settings (for sync scripts and CI/CD)
+        self.GIT_USER_NAME = os.environ.get("GIT_USER_NAME", "")
+        self.GIT_USER_EMAIL = os.environ.get("GIT_USER_EMAIL", "")
 
         # AWS region (fallback for backward compatibility)
         self.REGION = os.environ.get("AWS_REGION", "us-east-1")
 
-        # Web server settings
-        self.PORT = int(os.environ.get("PORT", "8501"))
+        # Web server settings (for 'lobster serve' FastAPI server)
+        self.PORT = int(os.environ.get("PORT", "8000"))
         self.HOST = os.environ.get("HOST", "0.0.0.0")
         self.DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
@@ -146,9 +153,19 @@ class Settings:
             params["provider"] = self.llm_provider
             return params
         except KeyError as k:
-            # Fallback to legacy settings if agent not configured
-            print(f"FAILED TO GET PARAMS: {k}")
-            raise KeyError(f"{k}")
+            # Fallback to data_expert settings with warning
+            print(f"⚠️  WARNING: No configuration found for agent '{agent_name}'")
+            print("⚠️  Falling back to data_expert_agent configuration")
+            print(f"⚠️  To fix: Add '{agent_name}' to all profiles in agent_config.py")
+
+            try:
+                # Use data_expert as fallback
+                params = self.agent_configurator.get_llm_params("data_expert_agent")
+                params["provider"] = self.llm_provider
+                return params
+            except KeyError:
+                # If data_expert doesn't exist either, raise original error
+                raise KeyError(f"{k}")
 
     def get_assistant_llm_params(self, agent_name: str) -> Dict[str, Any]:
         """
@@ -163,9 +180,17 @@ class Settings:
         try:
             return self.agent_configurator.get_llm_params(agent_name)
         except KeyError as k:
-            # Fallback to legacy settings if agent not configured
-            print(f"FAILED TO GET PARAMS: {k}")
-            raise KeyError(f"{k}")
+            # Fallback to data_expert settings with warning
+            print(f"⚠️  WARNING: No configuration found for assistant '{agent_name}'")
+            print("⚠️  Falling back to data_expert_agent configuration")
+            print(f"⚠️  To fix: Add '{agent_name}' to all profiles in agent_config.py")
+
+            try:
+                # Use data_expert as fallback
+                return self.agent_configurator.get_llm_params("data_expert_agent")
+            except KeyError:
+                # If data_expert doesn't exist either, raise original error
+                raise KeyError(f"{k}")
 
     def get_agent_model_config(self, agent_name: str):
         """
@@ -191,6 +216,90 @@ class Settings:
     def print_agent_configuration(self):
         """Print current agent configuration."""
         self.agent_configurator.print_current_config()
+
+
+# Model pricing configuration (USD per million tokens)
+# Pricing as of January 2025 - Update as needed
+# Source: https://www.anthropic.com/pricing
+MODEL_PRICING = {
+    # AWS Bedrock Model IDs - Official Pricing (as of Nov 2024)
+    # Source: https://aws.amazon.com/bedrock/pricing/
+
+    # Claude Haiku 4.5
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "input_per_million": 1.00,  # $0.001 per 1K tokens
+        "output_per_million": 5.00,  # $0.005 per 1K tokens
+        "display_name": "Claude 4.5 Haiku"
+    },
+
+    # Claude Sonnet 4
+    "us.anthropic.claude-sonnet-4-20250514-v1:0": {
+        "input_per_million": 3.00,  # $0.003 per 1K tokens
+        "output_per_million": 15.00,  # $0.015 per 1K tokens
+        "display_name": "Claude 4 Sonnet"
+    },
+
+    # Claude Sonnet 4.5 (Standard Context)
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "input_per_million": 3.00,  # $0.003 per 1K tokens
+        "output_per_million": 15.00,  # $0.015 per 1K tokens
+        "display_name": "Claude 4.5 Sonnet"
+    },
+
+    # Note: Long Context variants use different pricing:
+    # - Sonnet 4 Long Context: $6.00/$22.50 per million ($0.006/$0.0225 per 1K)
+    # - Sonnet 4.5 Long Context: $6.00/$22.50 per million ($0.006/$0.0225 per 1K)
+    # Add model IDs here when they become available
+
+    # Anthropic Direct API Model IDs (same pricing)
+    "claude-4-5-haiku": {
+        "input_per_million": 1.00,
+        "output_per_million": 5.00,
+        "display_name": "Claude 4.5 Haiku"
+    },
+    "claude-4-sonnet": {
+        "input_per_million": 3.00,
+        "output_per_million": 15.00,
+        "display_name": "Claude 4 Sonnet"
+    },
+    "claude-4-5-sonnet": {
+        "input_per_million": 3.00,
+        "output_per_million": 15.00,
+        "display_name": "Claude 4.5 Sonnet"
+    },
+    # Legacy Claude 3.5 models (for backward compatibility)
+    "claude-3-5-sonnet-20240620": {
+        "input_per_million": 3.00,
+        "output_per_million": 15.00,
+        "display_name": "Claude 3.5 Sonnet"
+    },
+    "claude-3-5-sonnet-20241022": {
+        "input_per_million": 3.00,
+        "output_per_million": 15.00,
+        "display_name": "Claude 3.5 Sonnet (v2)"
+    },
+    "us.anthropic.claude-3-5-sonnet-20240620-v1:0": {
+        "input_per_million": 3.00,
+        "output_per_million": 15.00,
+        "display_name": "Claude 3.5 Sonnet"
+    },
+    "us.anthropic.claude-3-5-sonnet-20241022-v2:0": {
+        "input_per_million": 3.00,
+        "output_per_million": 15.00,
+        "display_name": "Claude 3.5 Sonnet (v2)"
+    },
+    # Claude 3 Opus (legacy)
+    "claude-3-opus-20240229": {
+        "input_per_million": 15.00,
+        "output_per_million": 75.00,
+        "display_name": "Claude 3 Opus"
+    },
+    "us.anthropic.claude-3-opus-20240229-v1:0": {
+        "input_per_million": 15.00,
+        "output_per_million": 75.00,
+        "display_name": "Claude 3 Opus"
+    },
+}
 
 
 # Create singleton instance

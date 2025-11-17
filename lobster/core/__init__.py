@@ -5,32 +5,15 @@ This module provides the core exception hierarchy and shared functionality
 for the Lobster AI system following a structured approach to error handling.
 """
 
-
-class LobsterCoreError(Exception):
-    """
-    Base exception class for all Lobster core errors.
-
-    This serves as the root of the exception hierarchy, allowing for
-    consistent error handling across all Lobster modules.
-    """
-
-    def __init__(self, message: str, details: dict = None):
-        """
-        Initialize the core error.
-
-        Args:
-            message: Human-readable error message
-            details: Optional dictionary with additional error context
-        """
-        super().__init__(message)
-        self.message = message
-        self.details = details or {}
-
-    def __str__(self):
-        """Return string representation of the error."""
-        if self.details:
-            return f"{self.message} (Details: {self.details})"
-        return self.message
+# Import new exceptions from exceptions module
+from lobster.core.exceptions import (
+    DataOrientationError,
+    DataTypeAmbiguityError,
+    FeatureNotImplementedError,
+    LobsterCoreError,
+    UnsupportedFormatError,
+    UnsupportedPlatformError,
+)
 
 
 class DataManagerError(LobsterCoreError):
@@ -90,7 +73,14 @@ class DesignMatrixError(PseudobulkError):
 
 # Export all exceptions for easy importing
 __all__ = [
+    # Base exception and new exceptions from exceptions.py
     "LobsterCoreError",
+    "UnsupportedFormatError",
+    "UnsupportedPlatformError",
+    "FeatureNotImplementedError",
+    "DataTypeAmbiguityError",
+    "DataOrientationError",
+    # Existing exceptions
     "DataManagerError",
     "AdapterError",
     "ValidationError",

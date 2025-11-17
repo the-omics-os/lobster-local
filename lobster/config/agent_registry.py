@@ -52,18 +52,18 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
     "research_agent": AgentRegistryConfig(
         name="research_agent",
         display_name="Research Agent",
-        description="Handles literature discovery and dataset identification tasks",
+        description="Handles literature discovery, dataset identification, PDF extraction with AUTOMATIC PMID/DOI resolution, batch method extraction (5 papers), computational method analysis, and parameter extraction from publications. Replaces deprecated method_expert_agent.",
         factory_function="lobster.agents.research_agent.research_agent",
         handoff_tool_name="handoff_to_research_agent",
-        handoff_tool_description="Assign literature search and dataset discovery tasks to the research agent",
+        handoff_tool_description="Assign literature search, dataset discovery, PDF extraction with auto-resolution (PMC/bioRxiv/preprints), batch method extraction, method analysis, parameter extraction, and supplementary downloads to the research agent",
     ),
-    "method_expert_agent": AgentRegistryConfig(
-        name="method_expert_agent",
-        display_name="Method Expert",
-        description="Handles computational method extraction and parameter analysis from publications",
-        factory_function="lobster.agents.method_expert.method_expert",
-        handoff_tool_name="handoff_to_method_expert_agent",
-        handoff_tool_description="Assign computational parameter extraction tasks to the method expert agent",
+    "metadata_assistant": AgentRegistryConfig(
+        name="metadata_assistant",
+        display_name="Metadata Assistant",
+        description="Handles cross-dataset metadata operations including sample ID mapping (exact/fuzzy/pattern/metadata strategies), metadata standardization using Pydantic schemas (transcriptomics/proteomics), dataset completeness validation (samples, conditions, controls, duplicates, platform), and sample metadata reading in multiple formats. Specialized in metadata harmonization for multi-omics integration.",
+        factory_function="lobster.agents.metadata_assistant.metadata_assistant",
+        handoff_tool_name="handoff_to_metadata_assistant",
+        handoff_tool_description="Assign metadata operations (cross-dataset sample mapping, metadata standardization to Pydantic schemas, dataset validation before download, metadata reading/formatting) to the metadata assistant",
     ),
     # 'ms_proteomics_expert_agent': AgentRegistryConfig(
     #     name='ms_proteomics_expert_agent',
@@ -96,6 +96,60 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         factory_function="lobster.agents.visualization_expert.visualization_expert",
         handoff_tool_name="handoff_to_visualization_expert_agent",
         handoff_tool_description="Delegate visualization tasks to the visualization expert agent",
+    ),
+    # 'custom_feature_agent': AgentRegistryConfig(
+    #     name='custom_feature_agent',
+    #     display_name='Custom Feature Agent',
+    #     description="""META-AGENT that generates new Lobster components using Claude Code SDK.
+    #
+    #     Capabilities:
+    #     - Generate new agents following Lobster architectural patterns (registry-driven, stateless services)
+    #     - Create services with 3-tuple return pattern (AnnData, stats, IR)
+    #     - Build providers for external data sources (PubMed, GEO, custom APIs)
+    #     - Generate adapters for new file formats (H5AD, CSV, custom formats)
+    #     - Create comprehensive test suites (unit, integration)
+    #     - Validate integration with registry patterns
+    #     - Research best practices via Linkup SDK (GitHub repos, Python packages)
+    #     - Generate complete documentation (wiki pages, usage examples)
+    #
+    #     When to delegate:
+    #     - User requests NEW CAPABILITIES or MODALITIES (e.g., metabolomics, metagenomics, spatial)
+    #     - Need to ADD NEW DATA SOURCES (e.g., PRIDE, Metabolomics Workbench)
+    #     - Request involves GENERATING CODE (not analyzing data)
+    #     - Building custom extensions for new analysis types
+    #     - Creating providers for external APIs
+    #     - Need adapters for specialized file formats
+    #
+    #     DO NOT delegate for:
+    #     - Standard data analysis tasks (use domain experts: singlecell, bulk, proteomics)
+    #     - Visualization requests (use visualization_expert)
+    #     - Literature search (use research_agent)
+    #     - Data loading/download (use data_expert)
+    #     - Metadata operations (use metadata_assistant)
+    #
+    #     Note: This is a CODE GENERATION agent, not a DATA ANALYSIS agent.
+    #     Uses Claude Code SDK for file creation and Linkup SDK for research.
+    #     """,
+    #     factory_function='lobster.agents.custom_feature_agent.custom_feature_agent',
+    #     handoff_tool_name='handoff_to_custom_feature_agent',
+    #     handoff_tool_description="""Delegate to Custom Feature Agent when user requests:
+    #     1. NEW CAPABILITIES: "Add support for metabolomics", "Create metagenomics analysis"
+    #     2. NEW DATA SOURCES: "Integrate PRIDE database", "Add Metabolomics Workbench"
+    #     3. CODE GENERATION: "Generate an agent for...", "Create a service for..."
+    #     4. CUSTOM EXTENSIONS: "Build adapter for X format", "Create provider for Y API"
+    #
+    #     Key indicators: "add support", "create agent", "generate", "build", "integrate new", "extend with"
+    #
+    #     DO NOT delegate for standard analysis (clustering, DE, QC, visualization, literature search).
+    #     """
+    # ),
+    "protein_structure_visualization_expert_agent": AgentRegistryConfig(
+        name="protein_structure_visualization_expert_agent",
+        display_name="Protein Structure Visualization Expert",
+        description="Handles 3D protein structure visualization, structural analysis, and integration with omics data using PDB and ChimeraX",
+        factory_function="lobster.agents.protein_structure_visualization_expert.protein_structure_visualization_expert",
+        handoff_tool_name="handoff_to_protein_structure_visualization_expert_agent",
+        handoff_tool_description="Assign protein structure visualization tasks (PDB structure fetching, ChimeraX visualization, RMSD calculation, secondary structure analysis, linking structures to gene expression data) to the protein structure visualization expert agent",
     ),
 }
 
@@ -131,57 +185,72 @@ def create_expert_handoff_tools(available_agents: List[str]) -> Dict[str, BaseTo
     Automatically create handoff tools between compatible experts
     based on available agents and handoff patterns.
 
+    ⚠️ CURRENTLY DISABLED: Direct sub-agent handoffs are disabled for supervisor-mediated flow.
+    This function returns an empty dict but is preserved for interface compatibility.
+
     Args:
         available_agents: List of available agent names
 
     Returns:
-        Dictionary of handoff tools keyed by tool name
+        Dictionary of handoff tools keyed by tool name (empty dict when disabled)
     """
-    from lobster.tools.enhanced_handoff_tool import create_expert_handoff_tool
-    from lobster.tools.expert_handoff_patterns import EXPERT_HANDOFF_PATTERNS
+    import logging
 
-    handoff_tools = {}
+    logger = logging.getLogger(__name__)
 
-    # Normalize agent names by removing '_agent' suffix if present
-    normalized_agents = {}
-    for agent_name in available_agents:
-        if agent_name.endswith("_agent"):
-            normalized_name = agent_name[:-6]  # Remove '_agent'
-        else:
-            normalized_name = agent_name
-        normalized_agents[normalized_name] = agent_name
+    # Direct sub-agent handoffs are currently disabled
+    # Return empty dict to maintain interface compatibility
+    logger.debug(
+        "create_expert_handoff_tools called but handoffs are disabled for supervisor-mediated flow"
+    )
+    return {}
 
-    for pattern_name, pattern in EXPERT_HANDOFF_PATTERNS.items():
-        from_expert_norm = pattern.from_expert
-        to_expert_norm = pattern.to_expert
-
-        # Check if both experts are available
-        if (
-            from_expert_norm in normalized_agents
-            and to_expert_norm in normalized_agents
-        ):
-            from_agent_name = normalized_agents[from_expert_norm]
-            to_agent_name = normalized_agents[to_expert_norm]
-
-            # Create handoff tools for each task type
-            for task_type in pattern.task_types:
-                tool_name = (
-                    f"handoff_{from_expert_norm}_to_{to_expert_norm}_{task_type}"
-                )
-
-                # Create the enhanced handoff tool
-                handoff_tool = create_expert_handoff_tool(
-                    from_expert=from_expert_norm,
-                    to_expert=to_expert_norm,
-                    task_type=task_type,
-                    context_schema=pattern.context_schema,
-                    return_to_sender=(pattern.return_flow == "sender"),
-                    custom_description=f"Hand off {task_type} task from {pattern.from_expert} to {pattern.to_expert}",
-                )
-
-                handoff_tools[tool_name] = handoff_tool
-
-    return handoff_tools
+    # COMMENTED OUT: Original implementation for when direct handoffs are re-enabled
+    # from lobster.tools.enhanced_handoff_tool import create_expert_handoff_tool
+    # from lobster.tools.expert_handoff_patterns import EXPERT_HANDOFF_PATTERNS
+    #
+    # handoff_tools = {}
+    #
+    # # Normalize agent names by removing '_agent' suffix if present
+    # normalized_agents = {}
+    # for agent_name in available_agents:
+    #     if agent_name.endswith("_agent"):
+    #         normalized_name = agent_name[:-6]  # Remove '_agent'
+    #     else:
+    #         normalized_name = agent_name
+    #     normalized_agents[normalized_name] = agent_name
+    #
+    # for pattern_name, pattern in EXPERT_HANDOFF_PATTERNS.items():
+    #     from_expert_norm = pattern.from_expert
+    #     to_expert_norm = pattern.to_expert
+    #
+    #     # Check if both experts are available
+    #     if (
+    #         from_expert_norm in normalized_agents
+    #         and to_expert_norm in normalized_agents
+    #     ):
+    #         from_agent_name = normalized_agents[from_expert_norm]
+    #         to_agent_name = normalized_agents[to_expert_norm]
+    #
+    #         # Create handoff tools for each task type
+    #         for task_type in pattern.task_types:
+    #             tool_name = (
+    #                 f"handoff_{from_expert_norm}_to_{to_expert_norm}_{task_type}"
+    #             )
+    #
+    #             # Create the enhanced handoff tool
+    #             handoff_tool = create_expert_handoff_tool(
+    #                 from_expert=from_expert_norm,
+    #                 to_expert=to_expert_norm,
+    #                 task_type=task_type,
+    #                 context_schema=pattern.context_schema,
+    #                 return_to_sender=(pattern.return_flow == "sender"),
+    #                 custom_description=f"Hand off {task_type} task from {pattern.from_expert} to {pattern.to_expert}",
+    #             )
+    #
+    #             handoff_tools[tool_name] = handoff_tool
+    #
+    # return handoff_tools
 
 
 def get_handoff_tools_for_agent(
@@ -190,31 +259,46 @@ def get_handoff_tools_for_agent(
     """
     Get all handoff tools relevant to a specific agent.
 
+    ⚠️ CURRENTLY DISABLED: Direct sub-agent handoffs are disabled for supervisor-mediated flow.
+    This function returns an empty list but is preserved for interface compatibility.
+
     Args:
         agent_name: Name of the agent to get handoff tools for
         available_agents: List of all available agent names
 
     Returns:
-        List of handoff tools that this agent can use
+        List of handoff tools that this agent can use (empty list when disabled)
     """
-    from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
+    import logging
 
-    # Normalize agent name
-    if agent_name.endswith("_agent"):
-        normalized_name = agent_name[:-6]
-    else:
-        normalized_name = agent_name
+    logger = logging.getLogger(__name__)
 
-    # Get all handoff tools
-    all_handoff_tools = create_expert_handoff_tools(available_agents)
+    # Direct sub-agent handoffs are currently disabled
+    # Return empty list to maintain interface compatibility
+    logger.debug(
+        f"get_handoff_tools_for_agent called for {agent_name} but handoffs are disabled"
+    )
+    return []
 
-    # Filter tools relevant to this agent (outgoing handoffs)
-    relevant_tools = []
-    for tool_name, tool in all_handoff_tools.items():
-        if tool_name.startswith(f"handoff_{normalized_name}_to_"):
-            relevant_tools.append(tool)
-
-    return relevant_tools
+    # COMMENTED OUT: Original implementation for when direct handoffs are re-enabled
+    # from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
+    #
+    # # Normalize agent name
+    # if agent_name.endswith("_agent"):
+    #     normalized_name = agent_name[:-6]
+    # else:
+    #     normalized_name = agent_name
+    #
+    # # Get all handoff tools
+    # all_handoff_tools = create_expert_handoff_tools(available_agents)
+    #
+    # # Filter tools relevant to this agent (outgoing handoffs)
+    # relevant_tools = []
+    # for tool_name, tool in all_handoff_tools.items():
+    #     if tool_name.startswith(f"handoff_{normalized_name}_to_"):
+    #         relevant_tools.append(tool)
+    #
+    # return relevant_tools
 
 
 def get_available_handoff_destinations(from_agent: str) -> List[str]:

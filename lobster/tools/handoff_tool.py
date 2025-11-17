@@ -1,6 +1,6 @@
-from typing import Annotated, TypeGuard, cast
+from typing import Annotated
 
-from langchain_core.messages import AIMessage, ToolCall, ToolMessage
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command, Send
@@ -24,7 +24,7 @@ def create_custom_handoff_tool(
         state: Annotated[dict, InjectedState],
         tool_call_id: Annotated[str, InjectedToolCallId],
     ):
-        tool_message = ToolMessage(
+        ToolMessage(
             content=f"Successfully transferred to {agent_name}",
             name=name,
             tool_call_id=tool_call_id,

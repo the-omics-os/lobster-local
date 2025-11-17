@@ -24,12 +24,6 @@ from lobster.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-class BulkRNASeqError(Exception):
-    """Base exception for bulk RNA-seq operations."""
-
-    pass
-
-
 class ModalityNotFoundError(BulkRNASeqError):
     """Raised when requested modality doesn't exist."""
 
@@ -257,7 +251,7 @@ Proceed with filtering and normalization for differential expression analysis.""
             )
 
             # Use preprocessing service with bulk RNA-seq optimized parameters
-            adata_processed, processing_stats = (
+            adata_processed, processing_stats, ir = (
                 preprocessing_service.filter_and_normalize_cells(
                     adata=adata,
                     min_genes_per_cell=min_genes_per_sample,
@@ -290,6 +284,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                     "target_sum": target_sum,
                 },
                 description=f"Bulk RNA-seq filtered and normalized {modality_name}",
+                ir=ir,
             )
 
             # Format professional response
@@ -317,7 +312,7 @@ Proceed with filtering and normalization for differential expression analysis.""
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\nNext recommended steps: differential expression analysis between experimental groups."
+            response += "\n\nNext recommended steps: differential expression analysis between experimental groups."
 
             analysis_results["details"]["filter_normalize"] = response
             return response
@@ -436,7 +431,7 @@ Proceed with filtering and normalization for differential expression analysis.""
             for gene in de_stats["top_upregulated"][:5]:
                 response += f"\n- {gene}"
 
-            response += f"\n\n🧬 **Top Downregulated Genes:**"
+            response += "\n\n🧬 **Top Downregulated Genes:**"
             for gene in de_stats["top_downregulated"][:5]:
                 response += f"\n- {gene}"
 
@@ -446,7 +441,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                 response += f"\n💾 **Saved to**: {save_path}"
 
             response += f"\n📈 **Access detailed results**: adata.uns['{de_stats['de_results_key']}']"
-            response += f"\n\nUse the significant genes for pathway enrichment analysis or gene set analysis."
+            response += "\n\nUse the significant genes for pathway enrichment analysis or gene set analysis."
 
             analysis_results["details"]["differential_expression"] = response
             return response
@@ -543,7 +538,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                 remaining = len(enrichment_stats["top_terms"]) - 8
                 response += f"\n... and {remaining} more pathways"
 
-            response += f"\n\nPathway enrichment reveals biological processes and pathways associated with bulk RNA-seq differential expression."
+            response += "\n\nPathway enrichment reveals biological processes and pathways associated with bulk RNA-seq differential expression."
 
             analysis_results["details"]["pathway_enrichment"] = response
             return response
@@ -579,7 +574,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                     or data_manager._detect_modality_type(mod) == "bulk_rna_seq"
                 ]
 
-                summary += f"## Current Bulk RNA-seq Modalities\n"
+                summary += "## Current Bulk RNA-seq Modalities\n"
                 summary += f"Bulk RNA-seq modalities ({len(bulk_modalities)}): {', '.join(bulk_modalities)}\n\n"
 
                 # Add modality details
@@ -606,7 +601,7 @@ Proceed with filtering and normalization for differential expression analysis.""
                             summary += (
                                 f"  - Experimental design: {', '.join(key_cols)}\n"
                             )
-                    except Exception as e:
+                    except Exception:
                         summary += f"- **{mod_name}**: Error accessing modality\n"
 
             analysis_results["summary"] = summary
@@ -674,6 +669,28 @@ You perform bulk RNA-seq analysis following current best practices:
 <Professional Bulk RNA-seq Workflows & Tool Usage Order>
 
 ## 1. BULK RNA-SEQ QC AND PREPROCESSING WORKFLOWS
+
+### Loading Kallisto/Salmon Quantification Files (Supervisor Request: "Load quantification files from directory")
+
+**IMPORTANT**: Kallisto/Salmon quantification directories are loaded via the CLI `/read` command, NOT through agent tools.
+
+When the supervisor requests loading quantification files:
+1. The user must use: `/read /path/to/quantification_directory`
+2. The CLI automatically detects Kallisto or Salmon signatures
+3. The system merges per-sample files and creates the modality
+4. Once loaded, verify data with `check_data_status()`
+
+**Agent Response Template**:
+"To load Kallisto/Salmon quantification files, please use the CLI command:
+`/read /path/to/quantification_directory`
+
+The system will automatically:
+- Detect whether files are Kallisto or Salmon format
+- Merge per-sample quantification files
+- Create an AnnData modality with correct orientation (samples × genes)
+
+After loading, I can help with quality control and downstream analysis."
+
 
 ### Basic Quality Control Assessment (Supervisor Request: "Run QC on bulk RNA-seq data")
 bash
@@ -774,6 +791,11 @@ run_differential_expression_analysis("bulk_gse12345_filtered_normalized",
 
 
 <Bulk RNA-seq Parameter Guidelines>
+
+**Data Loading:**
+- Kallisto/Salmon quantification files: Use CLI `/read /path/to/quantification_directory` command (automatic detection and loading)
+- Standard data files: Use CLI `/read` for CSV, TSV, H5AD, or other bioinformatics formats
+- All loaded data is accessible via `check_data_status()` for modality names and shapes
 
 **Quality Control:**
 - min_genes: 1000-5000 (filter low-complexity samples)

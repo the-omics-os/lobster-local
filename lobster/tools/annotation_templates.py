@@ -18,10 +18,9 @@ Templates include:
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 
 class TissueType(Enum):
@@ -49,6 +48,13 @@ class CellTypeTemplate:
     confidence_threshold: float = 0.5
     description: str = ""
     alternative_names: List[str] = None
+    validation_status: str = (
+        "preliminary"  # Options: "preliminary", "validated", "reference_based"
+    )
+    evidence_source: Optional[str] = (
+        None  # Source of markers (e.g., "Azimuth_v0.4.6", "CellTypist_v2.0", "PanglaoDB", "Manual")
+    )
+    species: str = "human"  # Options: "human", "mouse", "multi"
 
     def __post_init__(self):
         if self.alternative_names is None:
@@ -136,9 +142,24 @@ class AnnotationTemplateService:
                 description="Gamma delta T cells",
                 alternative_names=["γδ T cells", "Gamma delta T cells"],
             ),
+            "T cells exhausted": CellTypeTemplate(
+                name="T cells exhausted",
+                markers=["CD3D", "PDCD1", "CTLA4", "LAG3", "TIGIT", "HAVCR2", "CD57"],
+                category="T cells",
+                confidence_threshold=0.7,
+                description="Exhausted/senescent T cells (immunosenescence marker)",
+                alternative_names=[
+                    "Senescent T cells",
+                    "Immunosenescent T cells",
+                    "PD1+ T cells",
+                ],
+                validation_status="validated",
+                evidence_source="Multiple aging studies - robust RNA markers",
+                species="human",
+            ),
             "NK cells": CellTypeTemplate(
                 name="NK cells",
-                markers=["GNLY", "NKG7", "KLRD1", "KLRB1", "NCAM1", "KLRF1"],
+                markers=["GNLY", "NKG7", "KLRD1", "NCR1", "PRF1", "GZMB"],
                 category="NK cells",
                 confidence_threshold=0.6,
                 description="Natural killer cells",
@@ -146,6 +167,21 @@ class AnnotationTemplateService:
                     "Natural killer cells",
                     "Large granular lymphocytes",
                 ],
+            ),
+            "NK cells aged": CellTypeTemplate(
+                name="NK cells aged",
+                markers=["GNLY", "NKG7", "CD57", "KLRG1", "FCGR3A", "PRF1"],
+                category="NK cells",
+                confidence_threshold=0.7,
+                description="Aged/mature NK cells with reduced proliferative capacity",
+                alternative_names=[
+                    "CD57+ NK cells",
+                    "Mature NK cells",
+                    "Senescent NK cells",
+                ],
+                validation_status="validated",
+                evidence_source="Immunosenescence studies",
+                species="human",
             ),
             "B cells naive": CellTypeTemplate(
                 name="B cells naive",
@@ -157,7 +193,7 @@ class AnnotationTemplateService:
             ),
             "B cells memory": CellTypeTemplate(
                 name="B cells memory",
-                markers=["CD19", "MS4A1", "CD79A", "CD27", "CD38", "IGHG1"],
+                markers=["CD19", "MS4A1", "CD79A", "CD27", "TNFRSF13B", "IGHG1"],
                 category="B cells",
                 confidence_threshold=0.6,
                 description="Memory B cells",
@@ -179,6 +215,21 @@ class AnnotationTemplateService:
                 description="Classical CD14+ monocytes",
                 alternative_names=["Classical monocytes", "CD14+ monocytes"],
             ),
+            "Monocytes inflammatory": CellTypeTemplate(
+                name="Monocytes inflammatory",
+                markers=["CD14", "IL1B", "IL6", "TNF", "NLRP3", "CXCL8", "CCL2"],
+                category="Myeloid",
+                confidence_threshold=0.7,
+                description="Inflammatory monocytes with high cytokine expression (inflammaging)",
+                alternative_names=[
+                    "Inflammaging monocytes",
+                    "Cytokine-high monocytes",
+                    "Activated monocytes",
+                ],
+                validation_status="preliminary",
+                evidence_source="Nature Aging 2021 (PMID: 33564145)",
+                species="human",
+            ),
             "Monocytes CD16+": CellTypeTemplate(
                 name="Monocytes CD16+",
                 markers=["FCGR3A", "MS4A7", "LST1", "AIF1", "SERPINA1"],
@@ -191,17 +242,25 @@ class AnnotationTemplateService:
                     "FCGR3A+ monocytes",
                 ],
             ),
-            "Dendritic cells": CellTypeTemplate(
-                name="Dendritic cells",
-                markers=["FCER1A", "CST3", "CLEC9A", "XCR1", "BATF3", "IRF8"],
+            "Dendritic cells cDC1": CellTypeTemplate(
+                name="Dendritic cells cDC1",
+                markers=["CLEC9A", "XCR1", "BATF3", "IRF8"],
                 category="Myeloid",
                 confidence_threshold=0.7,
-                description="Conventional dendritic cells",
-                alternative_names=["cDC", "Conventional DC", "myeloid DC"],
+                description="Conventional type 1 dendritic cells",
+                alternative_names=["cDC1", "Type 1 DC", "CLEC9A+ DC"],
+            ),
+            "Dendritic cells cDC2": CellTypeTemplate(
+                name="Dendritic cells cDC2",
+                markers=["CD1C", "FCER1A", "ITGAX", "IRF4"],
+                category="Myeloid",
+                confidence_threshold=0.7,
+                description="Conventional type 2 dendritic cells",
+                alternative_names=["cDC2", "Type 2 DC", "CD1C+ DC"],
             ),
             "Plasmacytoid dendritic cells": CellTypeTemplate(
                 name="Plasmacytoid dendritic cells",
-                markers=["IL3RA", "GZMB", "SERPINF1", "ITM2C", "IRF7", "CLEC4C"],
+                markers=["IL3RA", "CLEC4C", "TCF4", "GZMB"],
                 category="Myeloid",
                 confidence_threshold=0.7,
                 description="Plasmacytoid dendritic cells",
@@ -209,20 +268,15 @@ class AnnotationTemplateService:
             ),
             "Platelets": CellTypeTemplate(
                 name="Platelets",
-                markers=["PPBP", "PF4", "NRGN", "GP9", "TUBB1", "CLU"],
+                markers=["PPBP", "PF4", "GP9", "GP1BA", "ITGA2B", "TUBB1"],
                 category="Platelets",
                 confidence_threshold=0.8,
                 description="Blood platelets",
                 alternative_names=["Thrombocytes", "Platelet-derived particles"],
             ),
-            "Debris": CellTypeTemplate(
-                name="Debris",
-                markers=["high_mt", "low_genes", "low_counts"],
-                category="Quality Control",
-                confidence_threshold=0.9,
-                description="Low-quality cells or debris",
-                alternative_names=["Low quality", "Dead cells", "Doublets"],
-            ),
+            # NOTE: "Debris" template removed - QC metrics (high_mt, low_genes, low_counts)
+            # are not gene markers and belong in QC pipeline, not annotation templates.
+            # Use quality_service.py for QC filtering instead.
         }
 
     def _create_brain_template(self) -> Dict[str, CellTypeTemplate]:
@@ -279,7 +333,7 @@ class AnnotationTemplateService:
             ),
             "Endothelial cells": CellTypeTemplate(
                 name="Endothelial cells",
-                markers=["PECAM1", "VWF", "CDH5", "FLT1", "CLDN5", "PLVAP"],
+                markers=["PECAM1", "CLDN5", "KDR", "FLT1", "ABCB1", "CDH5"],
                 category="Vascular",
                 confidence_threshold=0.6,
                 description="Blood-brain barrier endothelial cells",
@@ -287,11 +341,11 @@ class AnnotationTemplateService:
             ),
             "Pericytes": CellTypeTemplate(
                 name="Pericytes",
-                markers=["PDGFRB", "RGS5", "ACTA2", "CSPG4", "ANPEP", "MCAM"],
+                markers=["PDGFRB", "RGS5", "CSPG4", "KCNJ8", "ABCC9", "ANPEP"],
                 category="Vascular",
                 confidence_threshold=0.6,
                 description="Vascular mural cells",
-                alternative_names=["Vascular smooth muscle", "Mural cells"],
+                alternative_names=["Vascular pericytes", "Mural cells"],
             ),
         }
 
@@ -301,7 +355,7 @@ class AnnotationTemplateService:
         return {
             "Alveolar epithelial type I": CellTypeTemplate(
                 name="Alveolar epithelial type I",
-                markers=["AGER", "CAV1", "PDPN", "HOPX", "EMP2", "RTKN2"],
+                markers=["AGER", "CAV1", "PDPN", "HOPX", "EMP2", "CLIC5"],
                 category="Epithelial",
                 confidence_threshold=0.6,
                 description="Alveolar epithelial type I cells",
@@ -309,7 +363,16 @@ class AnnotationTemplateService:
             ),
             "Alveolar epithelial type II": CellTypeTemplate(
                 name="Alveolar epithelial type II",
-                markers=["SFTPC", "SFTPB", "SFTPD", "LAMP3", "PGC", "LPCAT1"],
+                markers=[
+                    "SFTPA1",
+                    "SFTPA2",
+                    "SFTPB",
+                    "SFTPC",
+                    "SFTPD",
+                    "ABCA3",
+                    "SLC34A2",
+                    "LPCAT1",
+                ],
                 category="Epithelial",
                 confidence_threshold=0.6,
                 description="Alveolar epithelial type II cells",
@@ -317,7 +380,7 @@ class AnnotationTemplateService:
             ),
             "Club cells": CellTypeTemplate(
                 name="Club cells",
-                markers=["SCGB1A1", "CYP2F2", "BPIFA1", "LYPD2", "CBR2"],
+                markers=["SCGB1A1", "SCGB3A1", "KRT13", "UGT1A6"],
                 category="Epithelial",
                 confidence_threshold=0.6,
                 description="Club cells (Clara cells)",
@@ -325,7 +388,7 @@ class AnnotationTemplateService:
             ),
             "Ciliated cells": CellTypeTemplate(
                 name="Ciliated cells",
-                markers=["FOXJ1", "DNAH5", "CCDC40", "RSPH1", "TUBA1A", "CETN2"],
+                markers=["FOXJ1", "DNAH5", "CCDC40", "RSPH1", "TPPP3", "CETN2"],
                 category="Epithelial",
                 confidence_threshold=0.6,
                 description="Ciliated epithelial cells",
@@ -341,7 +404,7 @@ class AnnotationTemplateService:
             ),
             "Alveolar macrophages": CellTypeTemplate(
                 name="Alveolar macrophages",
-                markers=["MARCO", "SIGLEC1", "C1QA", "C1QB", "APOE", "FABP1"],
+                markers=["MARCO", "PPARG", "MRC1", "SIGLEC1", "C1QA", "C1QB", "APOE"],
                 category="Immune",
                 confidence_threshold=0.6,
                 description="Tissue-resident alveolar macrophages",
@@ -428,7 +491,7 @@ class AnnotationTemplateService:
             ),
             "Proximal tubule": CellTypeTemplate(
                 name="Proximal tubule",
-                markers=["LRP2", "SLC34A1", "SLC5A2", "CUBN", "SLC22A8", "HAVCR1"],
+                markers=["LRP2", "SLC34A1", "SLC5A2", "CUBN", "SLC22A8", "SLC5A12"],
                 category="Epithelial",
                 confidence_threshold=0.6,
                 description="Proximal tubule epithelial cells",
@@ -436,19 +499,35 @@ class AnnotationTemplateService:
             ),
             "Distal tubule": CellTypeTemplate(
                 name="Distal tubule",
-                markers=["SLC12A3", "PVALB", "TRPM6", "CALB1", "EGF", "WNKK4"],
+                markers=["SLC12A3", "PVALB", "TRPM6", "CALB1", "EGF", "WNK4"],
                 category="Epithelial",
                 confidence_threshold=0.6,
                 description="Distal convoluted tubule cells",
                 alternative_names=["DCT cells", "Distal convoluted tubule"],
             ),
-            "Collecting duct": CellTypeTemplate(
-                name="Collecting duct",
-                markers=["AQP2", "AQP3", "SLC8A1", "ATP6V1G3", "ATP6V0D2", "SCNN1G"],
+            "Collecting duct principal": CellTypeTemplate(
+                name="Collecting duct principal",
+                markers=["AQP2", "AQP3", "SCNN1G", "AVPR2", "KCNJ10"],
                 category="Epithelial",
                 confidence_threshold=0.6,
-                description="Collecting duct epithelial cells",
-                alternative_names=["CD cells", "Principal cells"],
+                description="Collecting duct principal cells",
+                alternative_names=["CD principal cells", "Principal cells"],
+            ),
+            "Collecting duct intercalated alpha": CellTypeTemplate(
+                name="Collecting duct intercalated alpha",
+                markers=["SLC4A1", "ATP6V1B1", "ATP6V0D2"],
+                category="Epithelial",
+                confidence_threshold=0.6,
+                description="Collecting duct type A intercalated cells",
+                alternative_names=["IC-A cells", "Alpha intercalated cells"],
+            ),
+            "Collecting duct intercalated beta": CellTypeTemplate(
+                name="Collecting duct intercalated beta",
+                markers=["SLC26A4", "FOXI1", "ATP6V1B1"],
+                category="Epithelial",
+                confidence_threshold=0.6,
+                description="Collecting duct type B intercalated cells",
+                alternative_names=["IC-B cells", "Beta intercalated cells"],
             ),
             "Loop of Henle": CellTypeTemplate(
                 name="Loop of Henle",
@@ -460,7 +539,7 @@ class AnnotationTemplateService:
             ),
             "Glomerular endothelium": CellTypeTemplate(
                 name="Glomerular endothelium",
-                markers=["PECAM1", "PLVAP", "FENDRR", "PTPRB", "VEGFA", "CLDN5"],
+                markers=["PECAM1", "KDR", "PTPRB", "EMCN", "CLDN5", "PLVAP"],
                 category="Vascular",
                 confidence_threshold=0.6,
                 description="Glomerular capillary endothelium",
@@ -598,7 +677,7 @@ class AnnotationTemplateService:
             ),
             "Langerhans cells": CellTypeTemplate(
                 name="Langerhans cells",
-                markers=["CD1A", "CD68", "FCER1G", "CD207", "CLEC9A", "ETV3"],
+                markers=["CD207", "CD1A", "HLA-DRA", "ITGAX", "FCER1G"],
                 category="Immune",
                 confidence_threshold=0.7,
                 description="Epidermal dendritic cells",
@@ -610,17 +689,29 @@ class AnnotationTemplateService:
         """Create tumor microenvironment template."""
 
         return {
+            # WARNING: "Tumor cells" detection via proliferation markers is NOT RECOMMENDED
+            # This approach will:
+            #   1. Mislabel proliferating immune/stromal cells as "tumor"
+            #   2. Miss non-cycling malignant clones (often the most dangerous)
+            # RECOMMENDED: Use CNV inference (inferCNV, CopyKAT) to identify malignant cells
+            # Then annotate malignant lineage with tissue-specific markers:
+            #   - Carcinoma: EPCAM, KRT8, KRT18, KRT19
+            #   - Glioma: OLIG2, PDGFRA
+            #   - Sarcoma: VIM, COL1A1 (with CNV evidence)
+            # Keep this template ONLY for backward compatibility - prefer CNV-based detection
             "Tumor cells": CellTypeTemplate(
                 name="Tumor cells",
                 markers=["MKI67", "PCNA", "TOP2A", "CCNA2", "BIRC5", "CDK1"],
                 category="Malignant",
                 confidence_threshold=0.5,
-                description="Proliferating malignant cells",
+                description="Proliferating cells (WARNING: not reliable for tumor detection - use CNV inference)",
                 alternative_names=[
                     "Cancer cells",
                     "Malignant cells",
                     "Neoplastic cells",
                 ],
+                validation_status="deprecated",
+                evidence_source="Proliferation markers only - NOT tumor-specific",
             ),
             "T cells exhausted": CellTypeTemplate(
                 name="T cells exhausted",
@@ -670,6 +761,12 @@ class AnnotationTemplateService:
                 description="Immunosuppressive regulatory T cells",
                 alternative_names=["Tregs", "Suppressor T cells"],
             ),
+            # NOTE: SASP/Senescence templates removed (v0.1.0)
+            # Reason: Not RNA-robust - markers like GLB1 (SA-β-gal), TP53, RB1 confuse
+            # quiescence vs senescence. Requires protein-level assays or functional validation.
+            # For senescence detection, use: (1) custom validated markers for your context,
+            # (2) multi-marker scoring with lineage-specific SASP panels, (3) orthogonal
+            # validation (SA-β-gal staining, cell cycle analysis, secretome profiling).
         }
 
     def get_template(

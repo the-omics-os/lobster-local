@@ -7,10 +7,8 @@ embeddings for single-cell RNA-seq data.
 """
 
 import logging
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import numpy as np
 import scvi
 
 # Import GPU detector without ML dependencies

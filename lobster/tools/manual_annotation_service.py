@@ -16,27 +16,19 @@ Key Features:
 
 import json
 import logging
-import pickle
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import numpy as np
-import pandas as pd
 import scanpy as sc
 from rich import box
-from rich.columns import Columns
 from rich.console import Console
 from rich.layout import Layout
-from rich.live import Live
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm, Prompt
 from rich.style import Style
 from rich.table import Table
-from rich.text import Text
-from rich.tree import Tree
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -343,7 +335,7 @@ The colors in this terminal [bold]exactly match[/bold] your UMAP plot colors for
             self._annotate_single_cluster(cluster_id, info)
 
             if not Confirm.ask(
-                f"\nContinue annotating remaining clusters?", default=True
+                "\nContinue annotating remaining clusters?", default=True
             ):
                 break
 

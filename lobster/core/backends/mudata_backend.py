@@ -170,7 +170,7 @@ class MuDataBackend(BaseBackend):
             if resolved_path.exists():
                 try:
                     resolved_path.unlink()
-                except:
+                except Exception:
                     pass
             raise ValueError(f"Failed to save MuData file {resolved_path}: {e}")
 

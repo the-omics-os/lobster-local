@@ -7,7 +7,7 @@ system with proper modality handling and schema enforcement.
 
 import datetime
 from datetime import date
-from typing import List, Optional, Union
+from typing import List, Optional
 
 import pandas as pd
 from langchain_core.tools import tool
@@ -40,7 +40,6 @@ from lobster.tools.pseudobulk_service import PseudobulkService
 from lobster.tools.quality_service import QualityError, QualityService
 from lobster.tools.visualization_service import (
     SingleCellVisualizationService,
-    VisualizationError,
 )
 
 # COMMENTED OUT FOR SUPERVISOR-MEDIATED FLOW:
@@ -82,7 +81,7 @@ def singlecell_expert(
     quality_service = QualityService()
     clustering_service = ClusteringService()
     singlecell_service = EnhancedSingleCellService()
-    visualization_service = SingleCellVisualizationService()
+    SingleCellVisualizationService()
     pseudobulk_service = PseudobulkService()
     bulk_rnaseq_service = BulkRNASeqService()
 
@@ -188,7 +187,7 @@ def singlecell_expert(
             adata = data_manager.get_modality(modality_name)
 
             # Run quality assessment using service with single-cell specific parameters
-            adata_qc, assessment_stats = quality_service.assess_quality(
+            adata_qc, assessment_stats, ir = quality_service.assess_quality(
                 adata=adata,
                 min_genes=min_genes,
                 max_mt_pct=max_mt_pct,
@@ -210,6 +209,7 @@ def singlecell_expert(
                     "max_ribo_pct": max_ribo_pct,
                 },
                 description=f"Single-cell quality assessment for {modality_name}",
+                ir=ir,
             )
 
             # Format professional response with single-cell context
@@ -284,7 +284,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             )
 
             # Use preprocessing service with single-cell optimized parameters
-            adata_processed, processing_stats = (
+            adata_processed, processing_stats, ir = (
                 preprocessing_service.filter_and_normalize_cells(
                     adata=adata,
                     min_genes_per_cell=min_genes_per_cell,
@@ -317,6 +317,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                     "target_sum": target_sum,
                 },
                 description=f"Single-cell filtered and normalized {modality_name}",
+                ir=ir,
             )
 
             # Format professional response
@@ -345,7 +346,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\nNext recommended steps: doublet detection, then clustering and cell type annotation."
+            response += "\n\nNext recommended steps: doublet detection, then clustering and cell type annotation."
 
             analysis_results["details"]["filter_normalize"] = response
             return response
@@ -441,7 +442,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\nFilter doublets before clustering, or proceed with clustering and filter later based on results."
+            response += "\n\nFilter doublets before clustering, or proceed with clustering and filter later based on results."
 
             analysis_results["details"]["doublet_detection"] = response
             return response
@@ -490,7 +491,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             )
 
             # Use clustering service
-            adata_clustered, clustering_stats = (
+            adata_clustered, clustering_stats, ir = (
                 clustering_service.cluster_and_visualize(
                     adata=adata,
                     resolution=resolution,
@@ -520,6 +521,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                     "demo_mode": demo_mode,
                 },
                 description=f"Single-cell clustered {modality_name} into {clustering_stats['n_clusters']} clusters",
+                ir=ir,
             )
 
             # Format professional response
@@ -554,7 +556,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\nNext steps: find marker genes for clusters and annotate cell types."
+            response += "\n\nNext steps: find marker genes for clusters and annotate cell types."
 
             analysis_results["details"]["clustering"] = response
             return response
@@ -671,9 +673,9 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                 response += f"\n💾 **Saved to**: {save_path}"
 
             response += (
-                f"\n📈 **Access detailed results**: adata.uns['rank_genes_groups']"
+                "\n📈 **Access detailed results**: adata.uns['rank_genes_groups']"
             )
-            response += f"\n\nNext step: use marker genes to annotate cell types in each cluster."
+            response += "\n\nNext step: use marker genes to annotate cell types in each cluster."
 
             analysis_results["details"]["marker_genes"] = response
             return response
@@ -759,9 +761,9 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                 response += f"\n💾 **Saved to**: {save_path}"
 
             response += (
-                f"\n🔬 **Cell type annotations added to**: adata.obs['cell_type']"
+                "\n🔬 **Cell type annotations added to**: adata.obs['cell_type']"
             )
-            response += f"\n\nProceed with cell type-specific downstream analysis or comparative studies."
+            response += "\n\nProceed with cell type-specific downstream analysis or comparative studies."
 
             analysis_results["details"]["cell_type_annotation"] = response
             return response
@@ -885,7 +887,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\nNext step: Use 'prepare_differential_expression_design' to set up statistical design for DE analysis."
+            response += "\n\nNext step: Use 'prepare_differential_expression_design' to set up statistical design for DE analysis."
 
             analysis_results["details"]["pseudobulk_aggregation"] = response
             return response
@@ -988,9 +990,9 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                 response += f"\n- {factor}: {dict(list(counts.items())[:5])}"
 
             response += (
-                f"\n\n💾 **Design information stored in**: adata.uns['formula_design']"
+                "\n\n💾 **Design information stored in**: adata.uns['formula_design']"
             )
-            response += f"\n\nNext step: Run 'run_pseudobulk_differential_expression' to perform pyDESeq2 analysis."
+            response += "\n\nNext step: Run 'run_pseudobulk_differential_expression' to perform pyDESeq2 analysis."
 
             analysis_results["details"]["de_design"] = response
             return response
@@ -1120,7 +1122,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             if save_result:
                 response += f"\n💾 **Saved to**: {results_path} & {save_path}"
 
-            response += f"\n\nNext steps: Visualize results with volcano plots or run pathway enrichment analysis."
+            response += "\n\nNext steps: Visualize results with volcano plots or run pathway enrichment analysis."
 
             analysis_results["details"]["differential_expression"] = response
             return response
@@ -1162,7 +1164,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                     mod for mod in modalities if "pseudobulk" in mod.lower()
                 ]
 
-                summary += f"## Current Single-cell Modalities\n"
+                summary += "## Current Single-cell Modalities\n"
                 summary += f"Single-cell modalities ({len(sc_modalities)}): {', '.join(sc_modalities)}\n"
                 if pb_modalities:
                     summary += f"Pseudobulk modalities ({len(pb_modalities)}): {', '.join(pb_modalities)}\n"
@@ -1192,7 +1194,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                             summary += (
                                 f"  - Single-cell annotations: {', '.join(key_cols)}\n"
                             )
-                    except Exception as e:
+                    except Exception:
                         summary += f"- **{mod_name}**: Error accessing modality\n"
 
                 # Add pseudobulk modality details
@@ -1211,7 +1213,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                             ]
                             if de_keys:
                                 summary += f"  - DE analyses: {', '.join([key.replace('de_results_', '') for key in de_keys])}\n"
-                        except Exception as e:
+                        except Exception:
                             summary += f"- **{mod_name}**: Error accessing modality\n"
 
             analysis_results["summary"] = summary
@@ -1321,12 +1323,12 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                 response += f"\n- {cell_type}: {count} cells"
 
             response += f"\n\n💾 **New modality created**: '{annotated_modality_name}'"
-            response += f"\n🔬 **Manual annotations in**: adata.obs['cell_type_manual']"
+            response += "\n🔬 **Manual annotations in**: adata.obs['cell_type_manual']"
 
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\nManual annotation complete! Use for downstream analysis or pseudobulk aggregation."
+            response += "\n\nManual annotation complete! Use for downstream analysis or pseudobulk aggregation."
 
             analysis_results["details"]["manual_annotation"] = response
             return response
@@ -1619,7 +1621,7 @@ Proceed with filtering and normalization, then doublet detection before clusteri
                 remaining_cells = adata_copy.n_obs
                 response += f"\n🔬 **Remaining cells**: {remaining_cells:,} ({remaining_cells/adata.n_obs*100:.1f}%)"
             else:
-                response += f"\n🔬 **Debris flag added**: adata.obs['is_debris']"
+                response += "\n🔬 **Debris flag added**: adata.obs['is_debris']"
 
             return response
 
@@ -1702,8 +1704,8 @@ Proceed with filtering and normalization, then doublet detection before clusteri
             if len(suggested_debris) > 10:
                 response += f"\n... and {len(suggested_debris) - 10} more clusters"
 
-            response += f"\n\n💡 **Recommendation:**"
-            response += f"\nUse 'mark_clusters_as_debris' to apply these suggestions."
+            response += "\n\n💡 **Recommendation:**"
+            response += "\nUse 'mark_clusters_as_debris' to apply these suggestions."
             response += f"\nExample: mark_clusters_as_debris('{modality_name}', {suggested_debris[:5]})"
 
             return response
@@ -1769,11 +1771,11 @@ Proceed with filtering and normalization, then doublet detection before clusteri
 
             # Add quality assessment
             if validation["coverage_percentage"] >= 90:
-                response += f"\n\n✅ **Quality**: Excellent annotation coverage"
+                response += "\n\n✅ **Quality**: Excellent annotation coverage"
             elif validation["coverage_percentage"] >= 70:
-                response += f"\n\n⚠️ **Quality**: Good annotation coverage, consider annotating remaining clusters"
+                response += "\n\n⚠️ **Quality**: Good annotation coverage, consider annotating remaining clusters"
             else:
-                response += f"\n\n❌ **Quality**: Low annotation coverage, more annotation needed"
+                response += "\n\n❌ **Quality**: Low annotation coverage, more annotation needed"
 
             return response
 
@@ -1889,13 +1891,13 @@ Proceed with filtering and normalization, then doublet detection before clusteri
 
             response += f"\n\n💾 **New modality created**: '{template_modality_name}'"
             response += (
-                f"\n🔬 **Template suggestions in**: adata.obs['cell_type_template']"
+                "\n🔬 **Template suggestions in**: adata.obs['cell_type_template']"
             )
 
             if save_result:
                 response += f"\n💾 **Saved to**: {save_path}"
 
-            response += f"\n\n💡 **Next steps:** Review suggestions and refine with manual annotation if needed."
+            response += "\n\n💡 **Next steps:** Review suggestions and refine with manual annotation if needed."
 
             return response
 
@@ -2066,7 +2068,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                     response += f"\n- {cell_type}: {count} cells"
 
                 if "cluster_to_celltype" in mapping_data:
-                    response += f"\n\n🔗 **Cluster Mappings:**"
+                    response += "\n\n🔗 **Cluster Mappings:**"
                     cluster_mapping = mapping_data["cluster_to_celltype"]
                     for cluster_id, cell_type in list(cluster_mapping.items())[:10]:
                         response += f"\n- Cluster {cluster_id}: {cell_type}"
@@ -2140,7 +2142,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
 
             response += f"\n\n💾 **New modality created**: '{imported_modality_name}'"
             response += (
-                f"\n🔬 **Imported annotations in**: adata.obs['cell_type_imported']"
+                "\n🔬 **Imported annotations in**: adata.obs['cell_type_imported']"
             )
 
             if save_result:
@@ -2313,13 +2315,13 @@ Use this mapping to apply consistent annotations to similar datasets."""
             response = f"📊 **Formula Design Analysis for '{pseudobulk_modality}'**\n\n"
 
             if show_metadata_summary:
-                response += f"**Metadata Summary:**\n"
+                response += "**Metadata Summary:**\n"
                 response += f"• Samples: {n_samples}\n"
                 response += f"• Variables analyzed: {len(variable_analysis)}\n"
                 response += f"• Categorical variables: {len(categorical_vars)}\n"
                 response += f"• Continuous variables: {len(continuous_vars)}\n\n"
 
-                response += f"**Key Variables:**\n"
+                response += "**Key Variables:**\n"
                 for col, info in list(variable_analysis.items())[:6]:
                     if col in categorical_vars + continuous_vars:
                         response += f"• **{col}**: {info['type']}, {info['unique_values']} levels"
@@ -2327,14 +2329,14 @@ Use this mapping to apply consistent annotations to similar datasets."""
                             response += (
                                 f" ({', '.join(map(str, info['sample_values']))})"
                             )
-                        response += f"\n"
+                        response += "\n"
                 response += "\n"
 
             if analysis_goal:
                 response += f"**Analysis Goal**: {analysis_goal}\n\n"
 
             if suggestions:
-                response += f"📝 **Recommended Formula Options:**\n\n"
+                response += "📝 **Recommended Formula Options:**\n\n"
                 for i, suggestion in enumerate(suggestions, 1):
                     response += f"**{i}. {suggestion['complexity']} Model** *(recommended for {suggestion['recommended_for']})*\n"
                     response += f"   Formula: `{suggestion['formula']}`\n"
@@ -2345,17 +2347,17 @@ Use this mapping to apply consistent annotations to similar datasets."""
                         f"   Min samples needed: {suggestion['min_samples']}\n\n"
                     )
 
-                response += f"💡 **Recommendation**: Start with the simple model for exploration, then use the batch-corrected model if you see batch effects.\n\n"
-                response += f"**Next step**: Use `construct_de_formula_interactive` to build and validate your chosen formula."
+                response += "💡 **Recommendation**: Start with the simple model for exploration, then use the batch-corrected model if you see batch effects.\n\n"
+                response += "**Next step**: Use `construct_de_formula_interactive` to build and validate your chosen formula."
 
             else:
                 response += (
-                    f"⚠️ **No suitable variables found for standard DE analysis.**\n"
+                    "⚠️ **No suitable variables found for standard DE analysis.**\n"
                 )
-                response += f"Please ensure your pseudobulk data has:\n"
-                response += f"• At least one categorical variable with 2+ levels (main condition)\n"
-                response += f"• Sufficient samples per group (minimum 3-4 replicates)\n"
-                response += f"• Proper metadata annotation\n\n"
+                response += "Please ensure your pseudobulk data has:\n"
+                response += "• At least one categorical variable with 2+ levels (main condition)\n"
+                response += "• Sufficient samples per group (minimum 3-4 replicates)\n"
+                response += "• Proper metadata annotation\n\n"
                 response += f"Available variables: {list(variable_analysis.keys())}"
 
             # Log the operation
@@ -2444,7 +2446,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 response = f"📊 **Formula Construction Complete for '{pseudobulk_modality}'**\n\n"
                 response += f"🔧 **Constructed Formula**: `{formula}`\n\n"
 
-                response += f"**Formula Components:**\n"
+                response += "**Formula Components:**\n"
                 response += f"• Main variable: {main_variable} ({formula_components['variable_info'][main_variable]['type']})\n"
                 if covariates:
                     response += f"• Covariates: {', '.join(covariates)}\n"
@@ -2455,13 +2457,13 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 )
 
                 # Design matrix preview
-                response += f"📈 **Design Matrix Preview**:\n"
+                response += "📈 **Design Matrix Preview**:\n"
                 response += f"• Dimensions: {design_result['design_matrix'].shape[0]} samples × {design_result['design_matrix'].shape[1]} coefficients\n"
                 response += f"• Matrix rank: {design_result['rank']} (full rank: {'✓' if design_result['rank'] == design_result['n_coefficients'] else '⚠️'})\n"
                 response += f"• Coefficient names: {', '.join(design_result['coefficient_names'][:5])}{'...' if len(design_result['coefficient_names']) > 5 else ''}\n\n"
 
                 # Variable information
-                response += f"**Variable Details:**\n"
+                response += "**Variable Details:**\n"
                 for var, info in formula_components["variable_info"].items():
                     if info["type"] == "categorical":
                         response += f"• **{var}**: {info['n_levels']} levels, reference = '{info['reference_level']}'\n"
@@ -2475,7 +2477,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                         metadata, formula, min_replicates=2
                     )
 
-                    response += f"✅ **Design Validation**:\n"
+                    response += "✅ **Design Validation**:\n"
                     response += (
                         f"• Valid design: {'✓' if validation['valid'] else '✗'}\n"
                     )
@@ -2490,19 +2492,19 @@ Use this mapping to apply consistent annotations to similar datasets."""
                         for error in validation["errors"]:
                             response += f"  - {error}\n"
 
-                    response += f"\n**Sample Distribution:**\n"
+                    response += "\n**Sample Distribution:**\n"
                     for var, counts in validation.get("design_summary", {}).items():
                         response += f"• **{var}**: {dict(list(counts.items())[:4])}\n"
 
-                response += f"\n💡 **Recommendations**:\n"
+                response += "\n💡 **Recommendations**:\n"
                 if design_result["rank"] < design_result["n_coefficients"]:
-                    response += f"⚠️ Design matrix is rank deficient - consider removing correlated variables\n"
+                    response += "⚠️ Design matrix is rank deficient - consider removing correlated variables\n"
                 if validation.get("warnings"):
-                    response += f"⚠️ Review warnings above before proceeding\n"
+                    response += "⚠️ Review warnings above before proceeding\n"
                 else:
-                    response += f"✅ Design looks good! Ready for differential expression analysis\n"
+                    response += "✅ Design looks good! Ready for differential expression analysis\n"
 
-                response += f"\n**Next step**: Use `run_differential_expression_with_formula` to execute the analysis."
+                response += "\n**Next step**: Use `run_differential_expression_with_formula` to execute the analysis."
 
                 # Store formula in modality for later use
                 adata.uns["constructed_formula"] = {
@@ -2517,13 +2519,13 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 data_manager.modalities[pseudobulk_modality] = adata
 
             except (FormulaError, DesignMatrixError) as e:
-                response = f"❌ **Formula Construction Failed**\n\n"
+                response = "❌ **Formula Construction Failed**\n\n"
                 response += f"**Formula**: `{formula}`\n"
                 response += f"**Error**: {str(e)}\n\n"
-                response += f"💡 **Suggestions**:\n"
-                response += f"• Check variable names are spelled correctly\n"
-                response += f"• Ensure variables have multiple levels (for categorical) or variation (for continuous)\n"
-                response += f"• Reduce model complexity if you have limited samples\n"
+                response += "💡 **Suggestions**:\n"
+                response += "• Check variable names are spelled correctly\n"
+                response += "• Ensure variables have multiple levels (for categorical) or variation (for continuous)\n"
+                response += "• Reduce model complexity if you have limited samples\n"
                 response += f"• Available variables: {list(metadata.columns)[:10]}"
                 return response
 
@@ -2585,12 +2587,12 @@ Use this mapping to apply consistent annotations to similar datasets."""
                     formula = adata.uns["constructed_formula"]["formula"]
                     stored_info = adata.uns["constructed_formula"]
                     response_prefix = (
-                        f"Using stored formula from interactive construction:\n"
+                        "Using stored formula from interactive construction:\n"
                     )
                 else:
                     return "No formula provided and no stored formula found. Use `construct_de_formula_interactive` first or provide a formula."
             else:
-                response_prefix = f"Using provided formula:\n"
+                response_prefix = "Using provided formula:\n"
                 stored_info = None
 
             # Auto-detect contrast if not provided
@@ -2692,14 +2694,14 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 data_manager.save_modality(pseudobulk_modality, modality_path)
 
             # Format response
-            response = f"🧬 **Differential Expression Analysis Complete**\n\n"
+            response = "🧬 **Differential Expression Analysis Complete**\n\n"
             response += response_prefix
             response += f"**Formula**: `{formula}`\n"
             response += (
                 f"**Contrast**: {contrast[1]} vs {contrast[2]} (in {contrast[0]})\n\n"
             )
 
-            response += f"📊 **Results Summary**:\n"
+            response += "📊 **Results Summary**:\n"
             response += f"• Genes tested: {analysis_stats['n_genes_tested']:,}\n"
             response += f"• Significant genes (FDR < {alpha}): {analysis_stats['n_significant_genes']:,}\n"
             if lfc_threshold > 0:
@@ -2709,18 +2711,18 @@ Use this mapping to apply consistent annotations to similar datasets."""
             response += f"• Upregulated ({contrast[1]} > {contrast[2]}): {analysis_stats['n_upregulated']:,}\n"
             response += f"• Downregulated ({contrast[1]} < {contrast[2]}): {analysis_stats['n_downregulated']:,}\n\n"
 
-            response += f"🏆 **Top Differentially Expressed Genes**:\n"
-            response += f"**Most Upregulated**:\n"
+            response += "🏆 **Top Differentially Expressed Genes**:\n"
+            response += "**Most Upregulated**:\n"
             for gene in analysis_stats["top_upregulated"][:5]:
                 gene_data = results_df.loc[gene]
                 response += f"• {gene}: LFC = {gene_data['log2FoldChange']:.2f}, FDR = {gene_data['padj']:.2e}\n"
 
-            response += f"\n**Most Downregulated**:\n"
+            response += "\n**Most Downregulated**:\n"
             for gene in analysis_stats["top_downregulated"][:5]:
                 gene_data = results_df.loc[gene]
                 response += f"• {gene}: LFC = {gene_data['log2FoldChange']:.2f}, FDR = {gene_data['padj']:.2e}\n"
 
-            response += f"\n📈 **Experimental Design**:\n"
+            response += "\n📈 **Experimental Design**:\n"
             response += f"• Samples: {design_result['design_matrix'].shape[0]}\n"
             response += f"• Coefficients: {design_result['design_matrix'].shape[1]}\n"
             response += f"• Design rank: {design_result['rank']} (full rank: {'✓' if design_result['rank'] == design_result['n_coefficients'] else '⚠️'})\n"
@@ -2728,7 +2730,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
             if design_validation["warnings"]:
                 response += f"\n⚠️ **Design Warnings**: {'; '.join(design_validation['warnings'][:2])}\n"
 
-            response += f"\n💾 **Results Storage**:\n"
+            response += "\n💾 **Results Storage**:\n"
             response += (
                 f"• Stored in: adata.uns['de_results_formula_{contrast_name}']\n"
             )
@@ -2736,7 +2738,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 response += f"• CSV file: {results_path}\n"
                 response += f"• H5AD file: {modality_path}\n"
 
-            response += f"\n**Next steps**: Use `iterate_de_analysis` to try different formulas or `compare_de_iterations` to compare results."
+            response += "\n**Next steps**: Use `iterate_de_analysis` to try different formulas or `compare_de_iterations` to compare results."
 
             # Log the operation
             data_manager.log_tool_usage(
@@ -2842,7 +2844,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
             current_key = f"de_results_formula_{contrast_name}"
 
             if current_key not in adata.uns:
-                return f"Results not found after analysis. Analysis may have failed."
+                return "Results not found after analysis. Analysis may have failed."
 
             current_results = adata.uns[current_key]["results_df"]
             current_stats = adata.uns[current_key]["analysis_stats"]
@@ -2902,7 +2904,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
             response += f"**Formula**: `{new_formula}`\n"
             response += f"**Contrast**: {new_contrast[1]} vs {new_contrast[2]} (in {new_contrast[0]})\n\n"
 
-            response += f"📊 **Current Results**:\n"
+            response += "📊 **Current Results**:\n"
             response += (
                 f"• Significant genes: {current_stats['n_significant_genes']:,}\n"
             )
@@ -2910,7 +2912,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
             response += f"• Downregulated: {current_stats['n_downregulated']:,}\n"
 
             if comparison_results:
-                response += f"\n🔄 **Comparison with Previous Iteration**:\n"
+                response += "\n🔄 **Comparison with Previous Iteration**:\n"
                 response += f"• Overlapping significant genes: {comparison_results['overlap_genes']:,}\n"
                 response += (
                     f"• New in current: {comparison_results['current_only']:,}\n"
@@ -2921,14 +2923,14 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 if comparison_results["correlation"] is not None:
                     response += f"• Fold change correlation: {comparison_results['correlation']:.3f}\n"
 
-            response += f"\n📈 **Iteration Summary**:\n"
+            response += "\n📈 **Iteration Summary**:\n"
             response += f"• Total iterations: {len(iteration_tracker['iterations'])}\n"
             response += f"• Current iteration: {current_iter}\n"
 
             response += f"\n💾 **Results stored in**: adata.uns['de_results_formula_{contrast_name}']\n"
-            response += f"💾 **Iteration tracking**: adata.uns['de_iterations']\n"
+            response += "💾 **Iteration tracking**: adata.uns['de_iterations']\n"
 
-            response += f"\n**Next steps**: Use `compare_de_iterations` to compare all iterations or continue iterating with different parameters."
+            response += "\n**Next steps**: Use `compare_de_iterations` to compare all iterations or continue iterating with different parameters."
 
             # Log the operation
             data_manager.log_tool_usage(
@@ -3046,8 +3048,8 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 correlation = None
 
             # Format response
-            response = f"📊 **DE Iteration Comparison**\n\n"
-            response += f"**Comparing:**\n"
+            response = "📊 **DE Iteration Comparison**\n\n"
+            response += "**Comparing:**\n"
             response += (
                 f"• Iteration 1: '{iter1_info['name']}' - {iter1_info['formula']}\n"
             )
@@ -3055,7 +3057,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 f"• Iteration 2: '{iter2_info['name']}' - {iter2_info['formula']}\n\n"
             )
 
-            response += f"📈 **Results Summary:**\n"
+            response += "📈 **Results Summary:**\n"
             response += f"• Iteration 1 significant genes: {len(sig1):,}\n"
             response += f"• Iteration 2 significant genes: {len(sig2):,}\n"
             response += f"• Overlapping genes: {len(overlap):,} ({len(overlap)/max(len(sig1), len(sig2))*100:.1f}%)\n"
@@ -3066,7 +3068,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 response += f"• Fold change correlation: {correlation:.3f}\n"
 
             if show_overlap and len(overlap) > 0:
-                response += f"\n🔗 **Top Overlapping Genes:**\n"
+                response += "\n🔗 **Top Overlapping Genes:**\n"
                 # Get top overlapping genes by average absolute fold change
                 overlap_df = results1.loc[list(overlap)]
                 overlap_df = overlap_df.reindex(overlap_df["padj"].sort_values().index)
@@ -3077,7 +3079,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                     response += f"• {gene}: LFC1={lfc1:.2f}, LFC2={lfc2:.2f}\n"
 
             if show_unique and (len(unique1) > 0 or len(unique2) > 0):
-                response += f"\n🎯 **Unique Significant Genes:**\n"
+                response += "\n🎯 **Unique Significant Genes:**\n"
 
                 if len(unique1) > 0:
                     response += (
@@ -3098,7 +3100,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                         response += f"• {gene}: LFC={lfc:.2f}, FDR={fdr:.2e}\n"
 
             # Analysis interpretation
-            response += f"\n💡 **Interpretation:**\n"
+            response += "\n💡 **Interpretation:**\n"
             if correlation is not None:
                 if correlation > 0.8:
                     response += f"• High correlation ({correlation:.3f}) suggests similar biological effects\n"
@@ -3143,7 +3145,7 @@ Use this mapping to apply consistent annotations to similar datasets."""
                 data_manager.modalities[pseudobulk_modality] = adata
                 response += f"\n💾 **Comparison saved**: adata.uns['iteration_comparisons']['{comparison_key}']\n"
 
-            response += f"\n**Next steps**: Choose the most appropriate formula based on biological interpretation and statistical robustness."
+            response += "\n**Next steps**: Choose the most appropriate formula based on biological interpretation and statistical robustness."
 
             # Log the operation
             data_manager.log_tool_usage(
@@ -3481,13 +3483,40 @@ find_marker_genes_for_clusters("geo_gse12345_clustered", groupby="leiden", metho
 
 ### Cell Type Annotation (Supervisor Request: "Annotate cell types")
 
-# Step 1: Check for marker gene data
+**CRITICAL: Cell Type Annotation Protocol**
+
+IMPORTANT: Built-in marker gene lists are PRELIMINARY and NOT scientifically validated.
+They lack evidence scoring (AUC, logFC, specificity), reference atlas validation,
+and tissue/context-specific optimization.
+
+**MANDATORY STEPS before annotation:**
+
+# Step 0: ALWAYS ask supervisor to request custom markers from user
+Tell the supervisor:
+"Before proceeding with cell type annotation, I need to inform you that the built-in
+marker sets are preliminary and not scientifically validated. They do not have:
+- Evidence scoring (AUC, logFC, specificity metrics)
+- Validation against reference atlases (Azimuth, CellTypist, Human Cell Atlas)
+- Tissue/context-specific optimization
+
+For production-quality annotation, I recommend asking the user to provide:
+1. Custom validated markers specific to their tissue/context
+2. Reference-based annotations from tools like Azimuth, CellTypist, or scANVI
+3. Literature-derived markers with evidence scores
+
+Should I proceed with built-in preliminary markers, or would you like to request
+custom markers from the user?"
+
+# Step 1: ONLY after user explicitly confirms, check for marker gene data
 check_data_status("geo_gse12345_markers")
 
-# Step 2: Annotate cell types using marker gene patterns
-annotate_cell_types("geo_gse12345_markers", reference_markers=None)
+# Step 2: Annotate cell types (use custom markers if provided by user)
+annotate_cell_types("geo_gse12345_markers", reference_markers=None)  # or custom_markers_dict
 
-# Step 3: Report cell type annotations to supervisor
+# Step 3: Report cell type annotations to supervisor with disclaimer
+"Cell type annotation completed using [built-in/custom] markers.
+If using built-in markers, results should be validated manually with known markers
+for this tissue type."
 
 
 ## 3. VISUALIZATION WORKFLOWS

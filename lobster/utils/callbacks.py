@@ -6,6 +6,7 @@ Provides clean, informative display of agent reasoning and execution flow.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from langchain_core.agents import AgentAction, AgentFinish
@@ -577,3 +578,331 @@ class SimpleTerminalCallback(TerminalCallbackHandler):
         """Simplified agent completion."""
         formatted = self._format_agent_name(agent_name)
         self.console.print(f"[green]   ✓ {formatted} completed[/green]")
+
+
+@dataclass
+class TokenInvocation:
+    """Represents a single LLM invocation with token usage."""
+
+    timestamp: str
+    agent: str
+    model: str
+    tool: Optional[str] = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+
+
+class TokenTrackingCallback(BaseCallbackHandler):
+    """
+    Callback handler for tracking token usage and costs across all LLM invocations.
+
+    This callback automatically extracts token usage from LLMResult objects,
+    calculates costs based on model pricing, and aggregates data per agent/session.
+    Works with both AWS Bedrock and Anthropic Direct API providers.
+    """
+
+    def __init__(self, session_id: str, pricing_config: Optional[Dict[str, Dict[str, float]]] = None):
+        """
+        Initialize token tracking callback.
+
+        Args:
+            session_id: Unique session identifier
+            pricing_config: Model pricing configuration (input/output per million tokens)
+        """
+        self.session_id = session_id
+        self.pricing_config = pricing_config or {}
+
+        # Aggregated totals
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_tokens = 0
+        self.total_cost_usd = 0.0
+
+        # Per-agent aggregation
+        self.by_agent: Dict[str, Dict[str, Any]] = {}
+
+        # Detailed invocation log
+        self.invocations: List[TokenInvocation] = []
+
+        # Track current context
+        self.current_agent: Optional[str] = None
+        self.current_tool: Optional[str] = None
+
+    def on_llm_start(
+        self, serialized: Dict[str, Any], prompts: List[str], **kwargs
+    ) -> None:
+        """Track current agent context when LLM starts."""
+        if serialized is None:
+            serialized = {}
+        self.current_agent = kwargs.get("name") or serialized.get("name", "unknown")
+
+    def on_tool_start(
+        self, serialized: Dict[str, Any], input_str: str, **kwargs
+    ) -> None:
+        """Track current tool context."""
+        if serialized is None:
+            serialized = {}
+        self.current_tool = serialized.get("name", "unknown_tool")
+
+    def on_tool_end(self, output: str, **kwargs) -> None:
+        """Clear tool context when tool completes."""
+        self.current_tool = None
+
+    def on_llm_end(self, response: LLMResult, **kwargs) -> None:
+        """
+        Extract token usage from LLMResult and update tracking.
+
+        Handles multiple provider formats:
+        - Anthropic Direct API: llm_output["usage"]["input_tokens"]
+        - AWS Bedrock: llm_output["usage"] or response_metadata
+        - Standard LangChain: llm_output["token_usage"]["prompt_tokens"]
+        """
+        # Extract token usage from response
+        usage = self._extract_token_usage(response)
+        if not usage:
+            return  # No token data available, skip silently
+
+        # Extract model name
+        model = self._extract_model_name(response)
+
+        # Calculate cost
+        cost = self._calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
+
+        # Create invocation record
+        invocation = TokenInvocation(
+            timestamp=datetime.now().isoformat(),
+            agent=self.current_agent or "unknown",
+            model=model,
+            tool=self.current_tool,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+            total_tokens=usage["total_tokens"],
+            cost_usd=cost
+        )
+        self.invocations.append(invocation)
+
+        # Update session totals
+        self.total_input_tokens += usage["input_tokens"]
+        self.total_output_tokens += usage["output_tokens"]
+        self.total_tokens += usage["total_tokens"]
+        self.total_cost_usd += cost
+
+        # Update per-agent aggregation
+        agent_name = self.current_agent or "unknown"
+        if agent_name not in self.by_agent:
+            self.by_agent[agent_name] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "invocation_count": 0
+            }
+
+        self.by_agent[agent_name]["input_tokens"] += usage["input_tokens"]
+        self.by_agent[agent_name]["output_tokens"] += usage["output_tokens"]
+        self.by_agent[agent_name]["total_tokens"] += usage["total_tokens"]
+        self.by_agent[agent_name]["cost_usd"] += cost
+        self.by_agent[agent_name]["invocation_count"] += 1
+
+    def _extract_token_usage(self, response: LLMResult) -> Optional[Dict[str, int]]:
+        """
+        Extract token usage from LLMResult, handling different provider formats.
+
+        Args:
+            response: LLMResult object from LangChain
+
+        Returns:
+            Dict with input_tokens, output_tokens, total_tokens or None if not found
+        """
+        # Try newest LangChain format: usage_metadata in generations (LangChain 0.3+)
+        # This is the primary location for newer Bedrock/Anthropic integrations
+        if response.generations and len(response.generations) > 0:
+            first_generation_list = response.generations[0]
+            if first_generation_list and len(first_generation_list) > 0:
+                generation = first_generation_list[0]
+
+                # Check for usage_metadata on the generation's message
+                if hasattr(generation, "message") and hasattr(generation.message, "usage_metadata"):
+                    usage_metadata = generation.message.usage_metadata
+                    if isinstance(usage_metadata, dict):
+                        if "input_tokens" in usage_metadata and "output_tokens" in usage_metadata:
+                            return {
+                                "input_tokens": usage_metadata.get("input_tokens", 0),
+                                "output_tokens": usage_metadata.get("output_tokens", 0),
+                                "total_tokens": usage_metadata.get("total_tokens",
+                                    usage_metadata.get("input_tokens", 0) + usage_metadata.get("output_tokens", 0))
+                            }
+
+        llm_output = response.llm_output or {}
+
+        # Try Anthropic format (input_tokens, output_tokens)
+        if "usage" in llm_output:
+            usage = llm_output["usage"]
+            if "input_tokens" in usage and "output_tokens" in usage:
+                return {
+                    "input_tokens": usage.get("input_tokens", 0),
+                    "output_tokens": usage.get("output_tokens", 0),
+                    "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                }
+
+        # Try standard LangChain format (prompt_tokens, completion_tokens)
+        if "token_usage" in llm_output:
+            usage = llm_output["token_usage"]
+            return {
+                "input_tokens": usage.get("prompt_tokens", 0),
+                "output_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0)
+            }
+
+        # Try response metadata (Bedrock alternative)
+        if hasattr(response, "response_metadata") and response.response_metadata:
+            metadata = response.response_metadata
+            if "usage" in metadata:
+                usage = metadata["usage"]
+                if "input_tokens" in usage and "output_tokens" in usage:
+                    return {
+                        "input_tokens": usage.get("input_tokens", 0),
+                        "output_tokens": usage.get("output_tokens", 0),
+                        "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                    }
+
+        # No token data found
+        return None
+
+    def _extract_model_name(self, response: LLMResult) -> str:
+        """Extract model name from LLMResult."""
+        # Try newest LangChain format: model in generation message response_metadata
+        if response.generations and len(response.generations) > 0:
+            first_generation_list = response.generations[0]
+            if first_generation_list and len(first_generation_list) > 0:
+                generation = first_generation_list[0]
+
+                # Check for model in message's response_metadata (LangChain 0.3+)
+                if hasattr(generation, "message") and hasattr(generation.message, "response_metadata"):
+                    metadata = generation.message.response_metadata
+                    if isinstance(metadata, dict):
+                        if "model_name" in metadata:
+                            return metadata["model_name"]
+                        if "model_id" in metadata:
+                            return metadata["model_id"]
+
+        llm_output = response.llm_output or {}
+
+        # Try multiple common fields in llm_output
+        if "model_name" in llm_output:
+            return llm_output["model_name"]
+        if "model_id" in llm_output:
+            return llm_output["model_id"]
+        if "model" in llm_output:
+            return llm_output["model"]
+
+        # Try response metadata at response level
+        if hasattr(response, "response_metadata") and response.response_metadata:
+            metadata = response.response_metadata
+            if "model_name" in metadata:
+                return metadata["model_name"]
+            if "model_id" in metadata:
+                return metadata["model_id"]
+
+        return "unknown"
+
+    def _calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        """
+        Calculate cost based on model pricing.
+
+        Args:
+            model: Model identifier
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+
+        Returns:
+            Cost in USD
+        """
+        if model not in self.pricing_config:
+            return 0.0
+
+        pricing = self.pricing_config[model]
+        input_cost = (input_tokens / 1_000_000) * pricing.get("input_per_million", 0.0)
+        output_cost = (output_tokens / 1_000_000) * pricing.get("output_per_million", 0.0)
+        return input_cost + output_cost
+
+    def get_usage_summary(self) -> Dict[str, Any]:
+        """
+        Get comprehensive token usage summary.
+
+        Returns:
+            Dict with session totals, per-agent breakdown, and invocation log
+        """
+        return {
+            "session_id": self.session_id,
+            "total_input_tokens": self.total_input_tokens,
+            "total_output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_tokens,
+            "total_cost_usd": round(self.total_cost_usd, 4),
+            "by_agent": {
+                agent: {
+                    "input_tokens": stats["input_tokens"],
+                    "output_tokens": stats["output_tokens"],
+                    "total_tokens": stats["total_tokens"],
+                    "cost_usd": round(stats["cost_usd"], 4),
+                    "invocation_count": stats["invocation_count"]
+                }
+                for agent, stats in self.by_agent.items()
+            },
+            "invocations": [
+                {
+                    "timestamp": inv.timestamp,
+                    "agent": inv.agent,
+                    "model": inv.model,
+                    "tool": inv.tool,
+                    "input_tokens": inv.input_tokens,
+                    "output_tokens": inv.output_tokens,
+                    "total_tokens": inv.total_tokens,
+                    "cost_usd": round(inv.cost_usd, 4)
+                }
+                for inv in self.invocations
+            ]
+        }
+
+    def get_latest_cost(self) -> Dict[str, Any]:
+        """
+        Get cost info from the most recent invocation.
+
+        Returns:
+            Dict with latest cost and session total
+        """
+        latest_cost = 0.0
+        if self.invocations:
+            latest_cost = self.invocations[-1].cost_usd
+
+        return {
+            "latest_cost_usd": round(latest_cost, 4),
+            "session_total_usd": round(self.total_cost_usd, 4),
+            "total_tokens": self.total_tokens
+        }
+
+    def save_to_workspace(self, workspace_path: Path):
+        """
+        Save token usage data to workspace.
+
+        Args:
+            workspace_path: Path to session workspace directory
+        """
+        import json
+
+        usage_file = workspace_path / "token_usage.json"
+        with open(usage_file, "w") as f:
+            json.dump(self.get_usage_summary(), f, indent=2)
+
+    def reset(self):
+        """Reset all tracking data."""
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_tokens = 0
+        self.total_cost_usd = 0.0
+        self.by_agent = {}
+        self.invocations = []
+        self.current_agent = None
+        self.current_tool = None

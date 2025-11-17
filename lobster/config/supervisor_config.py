@@ -7,8 +7,8 @@ through environment variables while maintaining backward compatibility.
 """
 
 import os
-from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from dataclasses import dataclass
+from typing import Any, Dict
 
 from lobster.utils.logger import get_logger
 
@@ -96,11 +96,11 @@ class SupervisorConfig:
             value = os.environ.get(env_var)
             if value is not None:
                 try:
-                    if field_type == bool:
+                    if field_type is bool:
                         setattr(
                             config, field_name, value.lower() in ("true", "1", "yes")
                         )
-                    elif field_type == int:
+                    elif field_type is int:
                         setattr(config, field_name, int(value))
                     else:
                         setattr(config, field_name, value)

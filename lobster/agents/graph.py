@@ -22,6 +22,7 @@ from lobster.config.settings import get_settings
 from lobster.config.supervisor_config import SupervisorConfig
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.tools.handoff_tool import create_custom_handoff_tool
+from lobster.tools.workspace_tool import create_get_content_from_workspace_tool
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -135,6 +136,9 @@ def create_bioinformatics_graph(
             logger.error(f"Error listing available data: {e}")
             return f"Error listing available data: {str(e)}"
 
+    # Create workspace content retrieval tool with data_manager access
+    get_content_from_workspace = create_get_content_from_workspace_tool(data_manager)
+
     # Get list of active agents that were successfully created
     active_agent_names = [agent.name for agent in agents]
 
@@ -146,7 +150,7 @@ def create_bioinformatics_graph(
     )
 
     # add forwarding tool for supervisor. This is useful when the supervisor determines that the worker's response is sufficient and doesn't require further processing or summarization by the supervisor itself.
-    forwarding_tool = create_forward_message_tool("supervisor")
+    create_forward_message_tool("supervisor")
 
     # UPDATED CONFIGURATION - Changed output_mode
     workflow = create_supervisor(
@@ -161,9 +165,8 @@ def create_bioinformatics_graph(
         # Change from "full_history" to "messages" or "last_message"
         # output_mode="full_history",  # This ensures the actual messages are returned
         output_mode="last_message",  # This ensures the actual messages are returned
-        tools=handoff_tools
-        + [list_available_modalities]
-        + [forwarding_tool],  # Supervisor-only tools (handoff tools are auto-created)
+        tools=handoff_tools + [list_available_modalities, get_content_from_workspace],
+        # + [forwarding_tool],  # Supervisor-only tools (handoff tools are auto-created)
     )
 
     # Compile the graph with the provided checkpointer

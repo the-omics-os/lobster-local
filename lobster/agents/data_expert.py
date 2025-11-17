@@ -8,17 +8,18 @@ schema validation.
 """
 
 from datetime import date
-from typing import Dict, List
+from typing import List
 
 import pandas as pd
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-from lobster.agents.data_expert_assistant import DataExpertAssistant, StrategyConfig
+from lobster.agents.data_expert_assistant import DataExpertAssistant
 from lobster.agents.state import DataExpertState
 from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.core.schemas.download_queue import DownloadStatus
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -106,13 +107,14 @@ def data_expert(
             # ------------------------------------------------
             # Check if metadata already in store
             # ------------------------------------------------
-            if clean_geo_id in data_manager.metadata_store:
-                if data_manager.metadata_store[clean_geo_id]["strategy_config"]:
+            stored_entry = data_manager._get_geo_metadata(clean_geo_id)
+            if stored_entry:
+                if stored_entry.get("strategy_config"):
                     logger.debug(
                         f"Metadata already stored for: {geo_id}. returning summary"
                     )
                     summary = geo_service._format_metadata_summary(
-                        clean_geo_id, data_manager.metadata_store[clean_geo_id]
+                        clean_geo_id, stored_entry
                     )
                     return summary
                 logger.info(
@@ -194,10 +196,13 @@ def data_expert(
         console = getattr(data_manager, "console", None)
         geo_service = GEOService(data_manager, console=console)
 
+        # Get stored metadata using validated retrieval
+        stored_entry = data_manager._get_geo_metadata(geo_id)
+        if not stored_entry:
+            return f"Error: Metadata for {geo_id} not found"
+
         target_url = ""
-        for urls in data_manager.metadata_store[geo_id]["metadata"][
-            "supplementary_file"
-        ]:
+        for urls in stored_entry["metadata"].get("supplementary_file", []):
             if isinstance(urls, str):
                 if filename in urls:
                     target_url = urls
@@ -212,131 +217,293 @@ def data_expert(
             return msg
 
     @tool
-    def download_geo_dataset(
-        geo_id: str,
-        modality_type: str = "single_cell",
-        manual_strategy_override="MATRIX_FIRST",
-        **kwargs,
+    def execute_download_from_queue(
+        entry_id: str,
+        concatenation_strategy: str = "auto",
     ) -> str:
         """
-        Download dataset from GEO using accession number and load as a modality.
-        IMPORTANT: Use fetch_geo_metadata_and_strategy_config FIRST to preview dataset before downloading.
+        Execute download from queue entry prepared by research_agent.
+
+        This tool implements the queue consumer pattern where:
+        1. research_agent validates metadata and adds to queue (Task 2.2B)
+        2. Supervisor queries queue and extracts entry_id
+        3. data_expert downloads using queue entry metadata
 
         Args:
-            geo_id: GEO accession number (e.g., GSE12345 or GDS5826)
-            modality_type: Type of data modality ('single_cell', 'bulk', or 'auto_detect')
-            manual_strategy_override: Optional manual override for download strategy
+            entry_id: Download queue entry ID (format: queue_GSE12345_abc123)
+            concatenation_strategy: How to merge samples ("auto"|"union"|"intersection")
+                - 'auto' (RECOMMENDED): Intelligently decides based on DUAL CRITERIA
+                  * CV criterion: If coefficient of variation > 20% → UNION
+                  * Range criterion: If max/min gene ratio > 1.5x → UNION
+                  * BOTH criteria must pass (CV ≤ 20% AND ratio ≤ 1.5x) for INTERSECTION
+                - 'intersection': Keep only genes present in ALL samples (inner join)
+                - 'union': Include all genes from all samples (outer join with zero-filling)
 
         Returns:
-            str: Summary of downloaded data with modality information
+            Download report with modality name, status, and statistics
         """
         try:
-            # Clean the GEO ID
-            clean_geo_id = geo_id.strip().upper()
-            if not clean_geo_id.startswith("GSE") and not clean_geo_id.startswith(
-                "GDS"
-            ):
-                return f"Invalid GEO ID format: {geo_id}. Must be a GSE or GDS accession (e.g., GSE194247 or GDS5826)"
+            # 1. RETRIEVE QUEUE ENTRY
+            if entry_id not in [
+                e.entry_id for e in data_manager.download_queue.list_entries()
+            ]:
+                available = [
+                    e.entry_id for e in data_manager.download_queue.list_entries()
+                ]
+                return (
+                    f"Error: Queue entry '{entry_id}' not found. Available: {available}"
+                )
 
-            logger.info(
-                f"Processing GEO dataset request: {clean_geo_id} (modality: {modality_type})"
+            entry = data_manager.download_queue.get_entry(entry_id)
+
+            # Verify entry is downloadable
+            if entry.status == DownloadStatus.COMPLETED:
+                return (
+                    f"Entry '{entry_id}' already downloaded as '{entry.modality_name}'"
+                )
+            elif entry.status == DownloadStatus.IN_PROGRESS:
+                return (
+                    f"Entry '{entry_id}' is currently being downloaded by another agent"
+                )
+
+            # 2. UPDATE STATUS TO IN_PROGRESS
+            data_manager.download_queue.update_status(
+                entry_id=entry_id,
+                status=DownloadStatus.IN_PROGRESS,
+                downloaded_by="data_expert",
             )
 
-            # Check if modality already exists
-            modality_name = f"geo_{clean_geo_id.lower()}"
-            existing_modalities = data_manager.list_modalities()
+            logger.info(
+                f"Starting download for {entry.dataset_id} from queue entry {entry_id}"
+            )
 
-            if modality_name in existing_modalities:
-                adata = data_manager.get_modality(modality_name)
-                return f"""Found existing modality '{modality_name}'!
+            # 3. DETERMINE DOWNLOAD STRATEGY
+            # Use recommended_strategy from entry (if set by data_expert_assistant)
+            # Otherwise use default strategy based on available URLs
+            if entry.recommended_strategy:
+                download_strategy = entry.recommended_strategy.strategy_type
+                logger.info(f"Using recommended strategy: {download_strategy}")
+            else:
+                # Auto-determine strategy from available URLs
+                if entry.h5_url:
+                    download_strategy = "H5_FIRST"
+                elif entry.matrix_url:
+                    download_strategy = "MATRIX_FIRST"
+                elif entry.supplementary_urls:
+                    download_strategy = "SUPPLEMENTARY_FIRST"
+                else:
+                    download_strategy = "RAW_FIRST"
+                logger.info(f"Auto-selected strategy: {download_strategy}")
 
-📊 Matrix: {adata.n_obs} obs × {adata.n_vars} vars
-💾 No download needed - using cached modality
-⚡ Ready for immediate analysis!
-
-Use this modality for quality control, filtering, or downstream analysis."""
-
-            if clean_geo_id not in data_manager.metadata_store:
-                return f"Error: You forgot to fetch metdata. First go fetch the metadata for {clean_geo_id}"
-
-            # Use enhanced GEOService with modular architecture and fallbacks
+            # 4. EXECUTE DOWNLOAD USING GEO SERVICE
+            # Import GEO service
             from lobster.tools.geo_service import GEOService
 
-            console = getattr(data_manager, "console", None)
-            geo_service = GEOService(data_manager, console=console)
+            geo_service = GEOService(data_manager=data_manager)
 
-            # Use the enhanced download_dataset method (handles all scenarios with fallbacks)
-            result = geo_service.download_dataset(
-                geo_id=clean_geo_id,
-                # modality_type=modality_type,
-                manual_strategy_override=manual_strategy_override,
-                **kwargs,
-            )  # This kwargs contains the config dict
+            try:
+                # Map concatenation_strategy to use_intersecting_genes_only parameter
+                if concatenation_strategy == "auto":
+                    use_intersecting = None  # Triggers intelligent auto-detection
+                elif concatenation_strategy == "intersection":
+                    use_intersecting = True  # Inner join - only common genes
+                elif concatenation_strategy == "union":
+                    use_intersecting = False  # Outer join - all genes
+                else:
+                    logger.warning(
+                        f"Unknown concatenation_strategy '{concatenation_strategy}', defaulting to 'auto'"
+                    )
+                    use_intersecting = None
 
-            return result
+                # Download using GEOService.download_dataset()
+                # Note: GEOService internally stores modality in data_manager and returns success message
+                result_message = geo_service.download_dataset(
+                    geo_id=entry.dataset_id,
+                    manual_strategy_override=download_strategy,
+                    use_intersecting_genes_only=use_intersecting,
+                )
+
+                # Check if download was successful (result_message contains success indicators)
+                if "Failed" in result_message or "Error" in result_message:
+                    raise Exception(result_message)
+
+                # 5. RETRIEVE STORED MODALITY FROM DATA MANAGER
+                # GEOService stores modality with naming pattern: geo_{gse_id}_{adapter}
+                # We need to find the modality that matches our dataset_id
+                modalities = data_manager.list_modalities()
+                modality_name = None
+
+                # Look for modality matching pattern geo_{dataset_id}
+                dataset_pattern = f"geo_{entry.dataset_id.lower()}"
+                for mod_name in modalities:
+                    if mod_name.startswith(dataset_pattern):
+                        modality_name = mod_name
+                        break
+
+                if not modality_name:
+                    raise Exception(
+                        f"Modality not found after download. Expected pattern: {dataset_pattern}_*"
+                    )
+
+                result_adata = data_manager.get_modality(modality_name)
+
+                # Log provenance
+                data_manager.log_tool_usage(
+                    tool_name="execute_download_from_queue",
+                    parameters={
+                        "entry_id": entry_id,
+                        "dataset_id": entry.dataset_id,
+                        "strategy": download_strategy,
+                        "concatenation_strategy": concatenation_strategy,
+                    },
+                    result={
+                        "modality_name": modality_name,
+                        "n_obs": result_adata.n_obs,
+                        "n_vars": result_adata.n_vars,
+                    },
+                )
+
+                # 6. UPDATE QUEUE STATUS TO COMPLETED
+                data_manager.download_queue.update_status(
+                    entry_id=entry_id,
+                    status=DownloadStatus.COMPLETED,
+                    modality_name=modality_name,
+                )
+
+                logger.info(f"Download complete: {entry.dataset_id} → {modality_name}")
+
+                # 7. RETURN SUCCESS REPORT
+                response = f"## Download Complete: {entry.dataset_id}\n\n"
+                response += "✅ **Status**: Downloaded successfully\n"
+                response += f"- **Modality name**: `{modality_name}`\n"
+                response += f"- **Samples**: {result_adata.n_obs}\n"
+                response += f"- **Features**: {result_adata.n_vars}\n"
+                response += f"- **Strategy**: {download_strategy}\n"
+                response += f"- **Concatenation**: {concatenation_strategy}\n"
+                response += f"- **Queue entry**: `{entry_id}` (COMPLETED)\n"
+                response += f"\n**Available for analysis**: Use `get_modality_overview('{modality_name}')` to inspect\n"
+
+                return response
+
+            except Exception as download_error:
+                # 8. UPDATE QUEUE STATUS TO FAILED
+                error_msg = str(download_error)
+                data_manager.download_queue.update_status(
+                    entry_id=entry_id,
+                    status=DownloadStatus.FAILED,
+                    error=error_msg,
+                )
+
+                logger.error(f"Download failed for {entry.dataset_id}: {error_msg}")
+
+                response = f"## Download Failed: {entry.dataset_id}\n\n"
+                response += "❌ **Status**: Download failed\n"
+                response += f"- **Error**: {error_msg}\n"
+                response += f"- **Queue entry**: `{entry_id}` (FAILED)\n"
+                response += "\n**Troubleshooting**:\n"
+                response += f"1. Check GEO dataset availability: {entry.dataset_id}\n"
+                response += "2. Verify URLs are accessible\n"
+                response += "3. Review error log in queue entry\n"
+
+                return response
 
         except Exception as e:
-            logger.error(f"Error processing GEO dataset {geo_id}: {e}")
-            return f"Error processing dataset: {str(e)}"
+            logger.error(f"Error in execute_download_from_queue: {e}")
+            return f"Error processing queue entry '{entry_id}': {str(e)}"
 
     @tool
-    def get_data_summary(modality_name: str = "") -> str:
+    def get_modality_overview(
+        modality_name: str = "",
+        detail_level: str = "summary",
+        include_provenance: bool = False,
+    ) -> str:
         """
-        Get summary of currently loaded modalities or list available datasets.
+        Get overview of available modalities with flexible detail levels.
+
+        Consolidates previous get_data_summary + list_available_modalities tools.
 
         Args:
-            modality_name: Optional modality name (leave empty to list all)
+            modality_name: Specific modality (empty string = all modalities)
+            detail_level: "summary" | "detailed"
+            include_provenance: Include W3C-PROV tracking info
 
         Returns:
-            str: Data summary or list of available modalities
+            Formatted overview with modality statistics
         """
         try:
             if modality_name == "" or modality_name.lower() == "all":
-                # List all loaded modalities
+                # List all modalities (summary mode)
                 modalities = data_manager.list_modalities()
                 if not modalities:
                     return "No modalities currently loaded. Use download_geo_dataset to load data."
 
-                response = "Currently loaded modalities:\n\n"
+                response = f"## Available Modalities ({len(modalities)})\n\n"
                 for mod_name in modalities:
-                    adata = data_manager.get_modality(mod_name)
-                    metrics = data_manager.get_quality_metrics(mod_name)
-                    response += (
-                        f"- **{mod_name}**: {adata.n_obs} obs × {adata.n_vars} vars\n"
-                    )
-                    if "total_counts" in metrics:
-                        response += f"  Total counts: {metrics['total_counts']:,.0f}\n"
+                    try:
+                        adata = data_manager.get_modality(mod_name)
+                        response += f"- **{mod_name}**: {adata.n_obs} samples × {adata.n_vars} features\n"
+                    except Exception as e:
+                        response += (
+                            f"- **{mod_name}**: Error retrieving info - {str(e)}\n"
+                        )
 
-                # Also show workspace status
+                # Add workspace status
                 workspace_status = data_manager.get_workspace_status()
-                response += f"\nWorkspace: {workspace_status['workspace_path']}"
-                response += f"\nAvailable adapters: {', '.join(workspace_status['registered_adapters'])}"
+                response += f"\n**Workspace**: {workspace_status['workspace_path']}\n"
+                response += f"**Available adapters**: {', '.join(workspace_status['registered_adapters'])}\n"
+
+                return response
+            else:
+                # Single modality (detailed mode)
+                if modality_name not in data_manager.list_modalities():
+                    available = data_manager.list_modalities()
+                    return f"Error: Modality '{modality_name}' not found. Available: {', '.join(available) if available else 'none'}"
+
+                adata = data_manager.get_modality(modality_name)
+                metrics = data_manager.get_quality_metrics(modality_name)
+
+                response = f"## Modality: {modality_name}\n\n"
+                response += (
+                    f"**Shape**: {adata.n_obs} samples × {adata.n_vars} features\n"
+                )
+                response += (
+                    f"**Obs Columns**: {', '.join(list(adata.obs.columns)[:5])}\n"
+                )
+                response += (
+                    f"**Var Columns**: {', '.join(list(adata.var.columns)[:5])}\n"
+                )
+
+                if "total_counts" in metrics:
+                    response += f"**Total counts**: {metrics['total_counts']:,.0f}\n"
+                if "mean_counts_per_obs" in metrics:
+                    response += f"**Mean counts per obs**: {metrics['mean_counts_per_obs']:.1f}\n"
+
+                if detail_level == "detailed":
+                    response += f"\n**Layers**: {list(adata.layers.keys())}\n"
+
+                    # Add obsm/varm/uns info
+                    if hasattr(adata, "obsm") and len(adata.obsm.keys()) > 0:
+                        response += f"**Obsm Keys**: {list(adata.obsm.keys())}\n"
+                    if hasattr(adata, "varm") and len(adata.varm.keys()) > 0:
+                        response += f"**Varm Keys**: {list(adata.varm.keys())}\n"
+                    if hasattr(adata, "uns") and len(adata.uns.keys()) > 0:
+                        response += f"**Uns Keys**: {list(adata.uns.keys())}\n"
+
+                if include_provenance:
+                    # Add W3C-PROV info from DataManagerV2
+                    try:
+                        prov_info = data_manager.get_provenance_summary(modality_name)
+                        if prov_info:
+                            response += f"\n**Provenance**: {prov_info}\n"
+                    except AttributeError:
+                        # Fallback if method doesn't exist
+                        response += "\n**Provenance**: Not available\n"
 
                 return response
 
-            else:
-                # Get summary of specific modality
-                try:
-                    adata = data_manager.get_modality(modality_name)
-                    metrics = data_manager.get_quality_metrics(modality_name)
-
-                    response = f"Modality: {modality_name}\n"
-                    response += f"Shape: {adata.n_obs} obs × {adata.n_vars} vars\n"
-                    response += f"Obs columns: {list(adata.obs.columns)[:5]}\n"
-                    response += f"Var columns: {list(adata.var.columns)[:5]}\n"
-
-                    if "total_counts" in metrics:
-                        response += f"Total counts: {metrics['total_counts']:,.0f}\n"
-                    if "mean_counts_per_obs" in metrics:
-                        response += f"Mean counts per obs: {metrics['mean_counts_per_obs']:.1f}\n"
-
-                    return response
-                except ValueError:
-                    return f"Modality '{modality_name}' not found. Available modalities: {data_manager.list_modalities()}"
-
         except Exception as e:
-            logger.error(f"Error getting data summary: {e}")
-            return f"Error getting data summary: {str(e)}"
+            logger.error(f"Error in get_modality_overview: {e}")
+            return f"Error retrieving modality overview: {str(e)}"
 
     @tool
     def upload_data_file(
@@ -365,9 +532,9 @@ Use this modality for quality control, filtering, or downstream analysis."""
                 return f"File not found: {file_path}"
 
             if not isinstance(adapter, str):
-                return f"Modality type must be a string"
+                return "Modality type must be a string"
             elif not adapter:
-                return f"Modality type can not be None"
+                return "Modality type can not be None"
 
             # Auto-detect modality type if requested
             if adapter == "auto_detect":
@@ -391,7 +558,7 @@ Use this modality for quality control, filtering, or downstream analysis."""
                     logger.info(
                         f"Auto-detected modality type: {adapter} (based on {n_cols} features)"
                     )
-                except:
+                except Exception:
                     adapter = "single_cell"  # Safe default
 
             modality_name = f"{dataset_type}_{dataset_id}"
@@ -408,18 +575,18 @@ Use this modality for quality control, filtering, or downstream analysis."""
 
             # Save to workspace
             save_path = f"{dataset_id}_{adapter}.h5ad"
-            saved_path = data_manager.save_modality(modality_name, save_path)
+            data_manager.save_modality(modality_name, save_path)
 
             # Get quality metrics
             metrics = data_manager.get_quality_metrics(modality_name)
 
-            return f"""Successfully uploaded and processed file {file_path.name}!
+            return f"""Successfully uploaded and processed file {file_path.name}.
 
-📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
-🔬 Data type: {adapter}
-🎯 Adapter: {adapter}
-💾 Saved to: {save_path}
-📈 Quality metrics: {len([k for k, v in metrics.items() if isinstance(v, (int, float))])} metrics calculated
+Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
+Data type: {adapter}
+Adapter: {adapter}
+Saved to: {save_path}
+Quality metrics: {len([k for k, v in metrics.items() if isinstance(v, (int, float))])} metrics calculated
 
 The dataset is now available as modality '{modality_name}' for analysis."""
 
@@ -444,7 +611,6 @@ The dataset is now available as modality '{modality_name}' for analysis."""
             str: Status of loading operation
         """
         try:
-            from pathlib import Path
 
             file_path = data_manager.data_dir / file_path
 
@@ -472,60 +638,18 @@ The dataset is now available as modality '{modality_name}' for analysis."""
             # Get quality metrics
             metrics = data_manager.get_quality_metrics(modality_name)
 
-            return f"""Successfully loaded modality '{modality_name}'!
+            return f"""Successfully loaded modality '{modality_name}'.
 
-📊 Shape: {adata.n_obs} obs × {adata.n_vars} vars
-🔬 Adapter: {adapter}
-📁 Source: {file_path.name}
-📈 Quality metrics: {len([k for k, v in metrics.items() if isinstance(v, (int, float))])} metrics calculated
+Shape: {adata.n_obs} obs × {adata.n_vars} vars
+Adapter: {adapter}
+Source: {file_path.name}
+Quality metrics: {len([k for k, v in metrics.items() if isinstance(v, (int, float))])} metrics calculated
 
 The modality is now available for analysis and can be used by other agents."""
 
         except Exception as e:
             logger.error(f"Error loading modality {modality_name}: {e}")
             return f"Error loading modality: {str(e)}"
-
-    @tool
-    def list_available_modalities() -> str:
-        """
-        List all currently loaded modalities and their details.
-
-        Returns:
-            str: Formatted list of available modalities
-        """
-        try:
-            modalities = data_manager.list_modalities()
-
-            if not modalities:
-                return "No modalities currently loaded. Use download_geo_dataset or upload_data_file to load data."
-
-            response = f"Currently loaded modalities ({len(modalities)}):\n\n"
-
-            for mod_name in modalities:
-                adata = data_manager.get_modality(mod_name)
-                response += f"**{mod_name}**:\n"
-                response += f"  - Shape: {adata.n_obs} obs × {adata.n_vars} vars\n"
-                response += f"  - Obs columns: {len(adata.obs.columns)} ({', '.join(list(adata.obs.columns)[:3])}...)\n"
-                response += f"  - Var columns: {len(adata.var.columns)} ({', '.join(list(adata.var.columns)[:3])}...)\n"
-                if adata.layers:
-                    response += f"  - Layers: {', '.join(list(adata.layers.keys()))}\n"
-                response += "\n"
-
-            # Add workspace information
-            workspace_status = data_manager.get_workspace_status()
-            response += f"Workspace: {workspace_status['workspace_path']}\n"
-            response += (
-                f"Available adapters: {len(workspace_status['registered_adapters'])}\n"
-            )
-            response += (
-                f"Available backends: {len(workspace_status['registered_backends'])}"
-            )
-
-            return response
-
-        except Exception as e:
-            logger.error(f"Error listing available data: {e}")
-            return f"Error listing available data: {str(e)}"
 
     @tool
     def remove_modality(modality_name: str) -> str:
@@ -577,16 +701,16 @@ The modality is now available for analysis and can be used by other agents."""
 
             # Save the MuData object
             mudata_path = f"{output_name}.h5mu"
-            saved_path = data_manager.save_mudata(
+            data_manager.save_mudata(
                 mudata_path, modalities=modality_names
             )
 
-            return f"""Successfully created MuData from {len(modality_names)} modalities!
+            return f"""Successfully created MuData from {len(modality_names)} modalities.
 
-🔗 Combined modalities: {', '.join(modality_names)}
-📊 Global shape: {mdata.n_obs} obs across {len(mdata.mod)} modalities
-💾 Saved to: {mudata_path}
-🎯 Ready for integrated multi-omics analysis!
+Combined modalities: {', '.join(modality_names)}
+Global shape: {mdata.n_obs} obs across {len(mdata.mod)} modalities
+Saved to: {mudata_path}
+Ready for integrated multi-omics analysis
 
 The MuData object contains all selected modalities and is ready for cross-modal analysis."""
 
@@ -687,11 +811,13 @@ The MuData object contains all selected modalities and is ready for cross-modal 
                 return f"Modality '{output_modality_name}' already exists. Use remove_modality first or choose a different name."
 
             # Use ConcatenationService for the actual concatenation
-            concatenated_adata, statistics = concat_service.concatenate_from_modalities(
-                modality_names=sample_modalities,
-                output_name=output_modality_name if save_to_file else None,
-                use_intersecting_genes_only=use_intersecting_genes_only,
-                batch_key="batch",
+            concatenated_adata, statistics, ir = (
+                concat_service.concatenate_from_modalities(
+                    modality_names=sample_modalities,
+                    output_name=output_modality_name if save_to_file else None,
+                    use_intersecting_genes_only=use_intersecting_genes_only,
+                    batch_key="batch",
+                )
             )
 
             # Add concatenation metadata for provenance tracking
@@ -718,27 +844,27 @@ The MuData object contains all selected modalities and is ready for cross-modal 
                     "save_to_file": save_to_file,
                 },
                 description=f"Concatenated {len(sample_modalities)} samples into modality '{output_modality_name}'",
+                ir=ir,
             )
 
             # Format results for user display
             if save_to_file:
-                save_path = f"{output_modality_name}.h5ad"
-                return f"""Successfully concatenated {statistics['n_samples']} samples using ConcatenationService!
+                return f"""Successfully concatenated {statistics['n_samples']} samples using ConcatenationService.
 
-📊 Output modality: '{output_modality_name}'
-📈 Shape: {statistics['final_shape'][0]} obs × {statistics['final_shape'][1]} vars
-🔗 Join type: {statistics['join_type']}
-⚡ Strategy: {statistics['strategy_used']}
-⏱️ Processing time: {statistics.get('processing_time_seconds', 0):.2f}s
-💾 Saved and stored as modality for analysis
+Output modality: '{output_modality_name}'
+Shape: {statistics['final_shape'][0]} obs × {statistics['final_shape'][1]} vars
+Join type: {statistics['join_type']}
+Strategy: {statistics['strategy_used']}
+Processing time: {statistics.get('processing_time_seconds', 0):.2f}s
+Saved and stored as modality for analysis
 
 The concatenated dataset is now available as modality '{output_modality_name}' for analysis."""
             else:
                 return f"""Concatenation preview (not saved):
 
-📊 Shape: {statistics['final_shape'][0]} obs × {statistics['final_shape'][1]} vars
-🔗 Join type: {statistics['join_type']}
-⚡ Strategy: {statistics['strategy_used']}
+Shape: {statistics['final_shape'][0]} obs × {statistics['final_shape'][1]} vars
+Join type: {statistics['join_type']}
+Strategy: {statistics['strategy_used']}
 
 To save, run again with save_to_file=True"""
 
@@ -746,101 +872,16 @@ To save, run again with save_to_file=True"""
             logger.error(f"Error concatenating samples: {e}")
             return f"Error concatenating samples: {str(e)}"
 
-    @tool
-    def restore_workspace_datasets(pattern: str = "recent") -> str:
-        """
-        Restore datasets from workspace based on pattern matching.
-
-        This tool loads previously saved datasets back into memory from the workspace.
-        Useful for continuing analysis sessions or loading specific datasets.
-
-        Args:
-            pattern: Dataset pattern to match. Options:
-                    - "recent": Load most recently used datasets (default)
-                    - "all": Load all available datasets
-                    - "*": Load all datasets (same as "all")
-                    - "<dataset_name>": Load specific dataset by name
-                    - "<partial_name>*": Load datasets matching partial name
-
-        Returns:
-            str: Summary of loaded datasets with details
-        """
-        try:
-            logger.info(f"Restoring workspace datasets with pattern: {pattern}")
-
-            # Check available datasets first
-            available = data_manager.available_datasets
-            if not available:
-                return "No datasets available in workspace. Use download_geo_dataset to create datasets first."
-
-            # Show what's available for context
-            available_info = f"Available datasets: {len(available)} total\n"
-            for name, info in list(available.items())[:3]:  # Show first 3
-                available_info += f"  • {name} ({info['size_mb']:.1f} MB)\n"
-            if len(available) > 3:
-                available_info += f"  • ... and {len(available) - 3} more\n"
-
-            # Perform restoration
-            result = data_manager.restore_session(pattern)
-
-            if result["restored"]:
-                # Format success response
-                response = f"""Successfully restored {len(result['restored'])} dataset(s) from workspace!
-
-📊 **Loaded Datasets:**
-"""
-                for dataset_name in result["restored"]:
-                    try:
-                        adata = data_manager.get_modality(dataset_name)
-                        response += f"  • **{dataset_name}**: {adata.n_obs} obs × {adata.n_vars} vars\n"
-                    except Exception:
-                        response += (
-                            f"  • **{dataset_name}**: (loaded, details unavailable)\n"
-                        )
-
-                response += f"\n💾 **Total Size**: {result['total_size_mb']:.1f} MB\n"
-                response += f"⚡ **Pattern Used**: {pattern}\n"
-
-                if result.get("skipped"):
-                    response += f"\n⚠️ **Skipped**: {len(result['skipped'])} datasets (size limits)\n"
-
-                response += f"\n✅ All restored datasets are now available as modalities for analysis."
-
-                # Log the operation
-                data_manager.log_tool_usage(
-                    tool_name="restore_workspace_datasets",
-                    parameters={"pattern": pattern},
-                    description=f"Restored {len(result['restored'])} datasets from workspace",
-                )
-
-                return response
-            else:
-                return f"""No datasets matched pattern '{pattern}'.
-
-{available_info}
-
-💡 **Try these patterns:**
-  • "recent" - Load most recently used datasets
-  • "all" - Load all available datasets
-  • "<dataset_name>" - Load specific dataset
-  • "geo_*" - Load all GEO datasets"""
-
-        except Exception as e:
-            logger.error(f"Error restoring workspace datasets: {e}")
-            return f"Error restoring datasets: {str(e)}"
-
     base_tools = [
         # CORE
         fetch_geo_metadata_and_strategy_config,
         check_file_head_from_supplementary_files,
-        download_geo_dataset,
+        execute_download_from_queue,
         concatenate_samples,
-        restore_workspace_datasets,
         # HELPER
         check_tmp_metadata_keys,
-        get_data_summary,
+        get_modality_overview,
         upload_data_file,
-        list_available_modalities,
         load_modality_from_file,
         remove_modality,
         get_adapter_info,
@@ -884,9 +925,31 @@ Depending on the return of the tool you have to decide if the given files are re
 This tool is used to understand certain files in the metadata better to finaly choose the download strategy. 
 It returns the head of a file (for example annoation, txt, csv, xlsx etc) to understand the columns and row logic and to see if this file is relevant for the final annotation. 
 
-- **download_geo_dataset**: 
-This tool is used after understanding the metadata logic of a GEO entry. This tool downloads data from GEO and load as modality. 
-Before using this tool always fetch metadata first and get a good understand what the relevant files are. 
+- **execute_download_from_queue**:
+This tool is used to download datasets from the download queue prepared by research_agent.
+The queue entry contains all metadata, URLs, and validation results - you don't need to fetch metadata again.
+Call this tool with the entry_id from the queue (format: queue_GSE12345_abc123).
+The download strategy is automatically determined from the queue entry's recommended_strategy.
+
+**Intelligent Concatenation Strategy**
+When downloading datasets with multiple samples (e.g., SAMPLES_FIRST strategy), the system automatically decides how to merge samples:
+  - `concatenation_strategy='auto'` (DEFAULT & RECOMMENDED): Intelligently analyzes gene coverage using DUAL CRITERIA
+    * CV criterion: If coefficient of variation > 20% → UNION
+    * Range criterion: If max/min gene ratio > 1.5x → UNION (e.g., 5400/2700 = 2.0x triggers union)
+    * BOTH criteria must pass for INTERSECTION, otherwise uses UNION (preserves genes)
+    * Decision is logged to console with detailed reasoning and stored in provenance for transparency
+  - `concatenation_strategy='union'`: Force include all genes (outer join with zero-filling)
+    * Use when samples have different gene coverage
+    * Preserves maximum biological information
+  - `concatenation_strategy='intersection'`: Force only common genes (inner join)
+    * Use when samples should have similar gene coverage
+    * May lose genes unique to specific samples
+
+**IMPORTANT**: The concatenation decision is automatically:
+  - Logged to console with detailed reasoning (INFO level)
+  - Stored in DataManager.metadata_store["geo_gseXXXXX"]["concatenation_decision"]
+  - Tracked in W3C-PROV compliant provenance chain (tool_usage_history)
+  - Accessible to supervisor for reporting to user
 
 - **concatenate_samples**:
 This tool concatenates multiple sample modalities into a single combined modality. This is particularly useful after downloading individual samples with the SAMPLES_FIRST strategy.
@@ -899,15 +962,15 @@ Use this after downloading samples individually when you need a single combined 
 </Available Core Tools>
 
 <Available helper Tools>
-- **restore_workspace_datasets**: Restore datasets from workspace based on pattern matching for session continuation
-  - Supports flexible patterns: "recent", "all", specific names, or wildcards
-  - Automatically loads datasets back into memory from workspace
-  - Provides detailed summaries of restored data with modality information
-  - Use for continuing previous sessions or loading specific datasets for analysis
 - check_tmp_metadata_keys: Check for which identifiers the metadata is currently temporary stored (returns a list of identifiers)
-- get_data_summary: Get summary of loaded modalities or specific modality
+- **get_modality_overview**: Get overview of available modalities with flexible detail levels
+  - Consolidates previous get_data_summary + list_available_modalities tools
+  - Use with modality_name="" to list all loaded modalities
+  - Use with specific modality_name for detailed information
+  - Supports detail_level="summary" or "detailed" for granular control
+  - Optional include_provenance=True to see W3C-PROV tracking info
+  - Example: get_modality_overview("geo_gse123456", detail_level="detailed")
 - upload_data_file: Upload local files and create modalities with auto-detection
-- list_available_modalities: Show all currently loaded modalities with details
 - load_modality_from_file: Load specific file as named modality with chosen adapter
 - remove_modality: Remove modality from memory
 - get_adapter_info: Show available adapters and their capabilities
@@ -942,8 +1005,8 @@ your main guide will be the supervisor. You do not sequentially execute multiple
 
 Step 1: Receive dataset accessions from supervisor
 
-Step 2: Check current workspace status  
-get_data_summary()  # Shows all loaded modalities
+Step 2: Check current workspace status
+get_modality_overview()  # Shows all loaded modalities
 
 Step 3: Fetch metadata for the dataset first
 fetch_geo_metadata_and_strategy_config("GSE123456")
@@ -954,56 +1017,55 @@ In this step you already need to inform the supervisor to ask the user download 
 Step 5: Report back to the supervisor
 
 
-### Download strategy
-There are different ways on how to load the dataset and each way depends on the user requirement. 
-Entries in GEO either have already processed matrizes that can be taken directly, but there is a lack of control about filtering and pre-processing. 
-Entries can also have raw UMI count matrizes which contain the transcript counts but the sample or cell annotation is in another annotation file. 
-Entries can also have only raw files as large .tar files. In this case the best option would be to go directly to the samples
-And in rare cases entries only contain raw .tar files which need to be extracted first and the file structure needs to be understood
+### Queue Consumer Pattern (Post Phase 2 Refactoring)
+**IMPORTANT**: You now download datasets from the download queue prepared by research_agent.
 
-For each case there is another strategy to use: 
-'MATRIX_FIRST' : pre-processed matrix available, annotation data available
-'RAW_FIRST' : raw matrix available, annotation data available
-'H5_FIRST' : Prepared annotated object available
-'SAMPLES_FIRST' : raw-data must be available. Mostly user choice to work directly with the raw count data.
-'SUPPLEMENTARY_FIRST' : compressed large supplementary file available which contains more information. Needs to be further checked. 
+**New Workflow**:
+1. research_agent validates metadata and adds to queue with recommended strategy
+2. Supervisor queries download_queue workspace to get entry_id
+3. You execute download using entry_id from queue
 
-<Fallbacks>
-Sometimes these strategies do not work, even multiple ones. In this case the downloaded folders need to be analyzed manually.
-</Fallbacks>
+**Download from Queue**:
+```
+# Get entry_id from supervisor (format: queue_GSE12345_abc123)
+execute_download_from_queue(entry_id="queue_GSE180759_5c1fb112")
 
-<important: Before choosing a download strategy>
-You will receive metadata information AND supplementary files information. Its crucial that you tell the supervisor to ask the user which approach they want to take or if they want you (data expert) to decide (no input)
-Always report back after fetching the metadata. Once confirmed by the supervisor you can continue
-</important>
+# Override concatenation strategy if needed
+execute_download_from_queue(
+    entry_id="queue_GSE180759_5c1fb112",
+    concatenation_strategy="union"  # or "intersection"
+)
+```
 
-Step 1: Download the dataset with appropriate modality type and strategy:
-Scenario A: Let the system decide which strategy
-download_geo_dataset("<GEO ID>", modality_type="<Adapters>")
+**Queue Entry Contains**:
+- Dataset ID (GSE12345)
+- All download URLs (H5, matrix, supplementary, raw)
+- Validated metadata
+- Recommended strategy (H5_FIRST, MATRIX_FIRST, etc.)
+- Validation results
 
-Scenario B: Download the dataset with appropriate modality type, choice of strategy was MATRIX_FIRST:
-download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='MATRIX_FIRST')
+**Available Concatenation Strategies**:
+- `auto` (RECOMMENDED): Intelligently decides based on gene coverage analysis
+  * CV criterion: If coefficient of variation > 20% → UNION
+  * Range criterion: If max/min gene ratio > 1.5x → UNION
+- `union`: Include all genes from all samples (outer join with zero-filling)
+- `intersection`: Keep only genes present in ALL samples (inner join)
 
-Scenario C: Download the dataset with appropriate modality type, choice of strategy was SAMPLES_FIRST:
-download_geo_dataset("<GEO ID>", modality_type="<Adapters>", manual_strategy_override='SAMPLES_FIRST')
-
-Other strategies include: 
-RAW_FIRST               # Prioritize raw UMI/count matrices
-SAMPLES_FIRST           # Download individual samples
-H5_FIRST                # Prioritize H5/H5AD files
-ARCHIVE_FIRST           # Extract from archives first
-FALLBACK                # Use fallback mechanisms
+**Status Management**:
+- Queue status automatically updated: PENDING → IN_PROGRESS → COMPLETED/FAILED
+- Modality name stored in queue entry after successful download
+- Error logs captured in queue entry if download fails
 
 once the dataset is downloaded you will see summary information about the download with the exact name of the modality ID
 
 # Step 5: Verify and explore the loaded data
-get_data_summary("geo_gse123456")  # Get detailed summary of specific modality
+get_modality_overview("geo_gse123456", detail_level="detailed")  # Get detailed summary of specific modality
 
 
 ### Sample Concatenation Workflow (After SAMPLES_FIRST Download)
 
 # Step 1: Check what sample modalities were downloaded
-list_available_modalities()  # Look for patterns like geo_gse123456_sample_*
+get_modality_overview()  # Look for patterns like geo_gse123456_sample_*
 
 #  Step 2: manually specify samples
 concatenate_samples(
@@ -1012,7 +1074,7 @@ concatenate_samples(
 )
 
 # Step 3: Verify the concatenated modality
-get_data_summary("geo_gse123456_concatenated")
+get_modality_overview("geo_gse123456_concatenated")
 
 # Step 4: The concatenated data is now ready for analysis by other agents
 
@@ -1020,58 +1082,34 @@ get_data_summary("geo_gse123456_concatenated")
 ### Workspace Exploration
 
 # Step 1: Check what's already loaded
-list_available_modalities()
+get_modality_overview()
 
 # Step 2: Get workspace and adapter information
 get_adapter_info()
 
 # Step 3: Examine specific modality if exists
-get_data_summary("<existing_modality_name>")
-
-
-### Workspace Restoration (Session Continuation)
-
-# Step 1: Check what's currently loaded vs what's available
-list_available_modalities()  # See what's currently in memory
-
-# Step 2: Restore recent datasets for continued analysis
-restore_workspace_datasets("recent")  # Load most recently used datasets
-
-# Step 3: Load specific dataset by name
-restore_workspace_datasets("geo_gse123456")
-
-# Step 4: Load all datasets matching pattern
-restore_workspace_datasets("geo_*")  # Load all GEO datasets
-
-# Step 5: Load all available datasets (use with caution for memory)
-restore_workspace_datasets("all")
-
-# Step 6: Verify restored data and continue analysis
-get_data_summary()
+get_modality_overview("<existing_modality_name>", detail_level="detailed")
 
 
 ## 2. DATA LOADING WORKFLOWS
 
-### GEO Dataset Loading with Metadata-First Approach (Most Common)
+### GEO Dataset Loading with Queue Consumer Pattern (Post Phase 2)
 
 # Step 1: Always check if data already exists first
-get_data_summary()
+get_modality_overview()
 
-# Step 2: REQUIRED - Fetch metadata first to preview dataset
-fetch_geo_metadata_and_strategy_config("GSE67310")
-# OR for GDS identifiers (automatically converted to corresponding GSE):
-fetch_geo_metadata_and_strategy_config("GDS5826")
+# Step 2: Receive entry_id from supervisor (research_agent prepares queue entry)
+# The supervisor will query download_queue and provide the entry_id
 
-# Step 3: Review metadata summary, then download with appropriate modality type
-download_geo_dataset("GSE67310", modality_type="<adapter>")
-# OR with auto-detection based on metadata recommendation:
-download_geo_dataset("GSE67310", modality_type="<adapter>")
+# Step 3: Execute download from queue
+execute_download_from_queue(entry_id="queue_GSE67310_abc123")
+# The queue entry contains all metadata, URLs, and recommended strategy
 
 # Step 4: Verify successful loading
-get_data_summary("geo_gse67310")
+get_modality_overview("geo_gse67310")
 
 # Step 5: List all available modalities to confirm
-list_available_modalities()
+get_modality_overview()
 
 
 ### Custom File Upload Workflow
@@ -1089,10 +1127,10 @@ upload_data_file(file_path = "/path/to/data.csv", dataset_id = "internal_liver_S
 upload_data_file(file_path = "/path/to/data.csv", dataset_id = "internal_liver_SC_01", adapter="<Adapters>", dataset_type="processed")
 
 # Step 4: Verify upload success
-get_data_summary("internal_liver_SC_01")
+get_modality_overview("internal_liver_SC_01")
 
 # Step 5: List all to see the new modality
-list_available_modalities()
+get_modality_overview()
 
 
 ## 4. WORKSPACE MANAGEMENT WORKFLOWS
@@ -1102,17 +1140,17 @@ Onlt important if the supervisor instructs you to do so.
 ### Cleaning and Organizing
 
 # Step 1: Review all loaded modalities
-list_available_modalities()
+get_modality_overview()
 
 # Step 2: Remove unwanted modalities to free memory
 remove_modality("temporary_test_data")
 remove_modality("outdated_modality")
 
 # Step 3: Verify cleanup
-list_available_modalities()
+get_modality_overview()
 
 # Step 4: Get workspace status
-get_data_summary()
+get_modality_overview()
 
 
 ## 5. ERROR HANDLING & TROUBLESHOOTING WORKFLOWS
@@ -1120,7 +1158,7 @@ get_data_summary()
 ### When Download Fails
 
 # Step 1: Check if modality already exists (common issue)
-get_data_summary()
+get_modality_overview()
 
 # Step 2: Try different modality type if auto-detect failed
 download_geo_dataset("GSE123456", modality_type="bulk")  # Instead of single_cell
@@ -1135,9 +1173,9 @@ load_modality_from_file("manual_load", "/path/to/file.csv", "transcriptomics_bul
 ## 6. TOOL USAGE GUIDELINES
 
 ### Tool Order Best Practices:
-1. **Always start with**: `list_available_modalities()` or `get_data_summary()`
+1. **Always start with**: `get_modality_overview()` to see all loaded modalities
 2. **Before loading**: Check if data already exists
-3. **After loading**: Verify with `get_data_summary(modality_name)`
+3. **After loading**: Verify with `get_modality_overview(modality_name, detail_level="detailed")`
 4. **For troubleshooting**: Use `get_adapter_info()` to understand available options
 
 ### Modality Naming Conventions:

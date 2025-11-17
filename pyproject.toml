@@ -3,14 +3,14 @@ requires = ["setuptools>=65.0", "wheel", "setuptools-scm[toml]>=6.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lobster"
+name = "lobster-ai"
 dynamic = ["version"]
 authors = [
     {name = "Omics-OS", email = "info@omics-os.com"}
 ]
 description = "Multi-Agent Bioinformatics Analysis System powered by LangGraph"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 license = {text = "MIT"}
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -71,12 +71,15 @@ dependencies = [
     "aiofiles>=23.0.0",
     "xmltodict>=0.13.0",
     "boto3>=1.26.0",
+    # PDF and HTML parsing (for publication intelligence)
+    "pypdf2>=3.0.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
     # API support
     "fastapi>=0.100.0",
     "uvicorn>=0.23.0",
     "scikit-misc>=0.5.1",
     "python-multipart>=0.0.20",
-    "streamlit>=1.48.1",
     "GEOparse",
     "packaging>=25.0",
     "tabulate>=0.9.0",
@@ -90,6 +93,19 @@ dependencies = [
     # PyTorch support (required by scvi-tools)
     "torch>=2.0.0",
     "langchain-anthropic>=0.3.20",
+    "responses>=0.25.8",
+    # Jupyter notebook support for pipeline replay
+    "nbformat>=5.9.0",
+    "papermill>=2.4.0",
+    "nbconvert>=7.0.0",
+    "jupytext>=1.15.0",
+    "docling>=2.60.0",
+    "docling-core>=2.50.0",
+    "redis>=6.4.0",
+    "pysradb>=2.5.1",
+    # Custom Feature Agent (META-AGENT for code generation)
+    "claude-agent-sdk>=0.1.0",  # Claude Code SDK for programmatic agent creation
+    "linkup>=0.1.0",  # Linkup SDK for web research (GitHub repos, packages, best practices)
 ]
 
 [project.optional-dependencies]
@@ -129,6 +145,7 @@ dev = [
     "mypy>=1.0.0",
     "bandit>=1.7.0",
     "ruff>=0.0.300",
+    "responses>=0.25.8",
     
     # Development tools
     "pre-commit>=3.0.0",
@@ -191,7 +208,7 @@ local_scheme = "node-and-date"
 # Development tools configurations
 [tool.black]
 line-length = 88
-target-version = ["py312"]
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
@@ -216,11 +233,12 @@ addopts = [
 ]
 markers = [
     "unit: Unit tests for individual components",
-    "integration: Integration tests for multi-component workflows", 
+    "integration: Integration tests for multi-component workflows",
     "system: System tests for complete workflows",
     "performance: Performance and benchmarking tests",
     "slow: Tests that take more than 30 seconds",
     "requires_api: Tests that require external API access",
+    "real_api: Tests that make real API calls to external services (PubMed, GEO, etc.)",
     "requires_gpu: Tests that require GPU resources",
 ]
 filterwarnings = [
@@ -232,14 +250,14 @@ minversion = "7.0"
 timeout = 300
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
 [tool.bumpversion]
-current_version = "0.1.0"
+current_version = "0.2.0"
 commit = true
 tag = true
 

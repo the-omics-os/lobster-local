@@ -1,14 +1,20 @@
 """
-Research Agent Assistant for metadata validation and LLM-based operations.
+Metadata Validation Service for GEO dataset validation.
 
-This module handles metadata validation for datasets to help the Research Agent
-quickly identify datasets with required fields before downloading, saving time
-and computational resources.
+This service provides focused functionality for validating dataset metadata
+against required fields using LLM-based analysis.
+
+Extracted from ResearchAgentAssistant during Phase 2 refactoring to follow
+the Single Responsibility Principle.
+
+Note: FIELD_MAPPINGS and normalization methods are temporary and will be
+replaced with vector database embedding searches for semantic field matching
+in a future release.
 """
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 from langchain_aws import ChatBedrockConverse
 from pydantic import BaseModel, Field, validator
@@ -82,10 +88,21 @@ class FieldMapping(BaseModel):
     )
 
 
-class ResearchAgentAssistant:
-    """Assistant class for handling metadata validation for Research Agent."""
+class MetadataValidationService:
+    """
+    Service for validating dataset metadata against required fields.
+
+    This service was extracted from ResearchAgentAssistant during Phase 2
+    refactoring to follow the Single Responsibility Principle.
+
+    Note: The field mapping and normalization approach is temporary and will
+    be replaced with vector database embedding searches for semantic field
+    matching in a future release. This transition will provide more flexible
+    and accurate field recognition.
+    """
 
     # Common field name variations for normalization
+    # NOTE: This is temporary - will be replaced with vector DB embedding search
     FIELD_MAPPINGS = {
         "smoking_status": FieldMapping(
             canonical_name="smoking_status",
@@ -159,8 +176,14 @@ class ResearchAgentAssistant:
         ),
     }
 
-    def __init__(self):
-        """Initialize the Research Agent Assistant."""
+    def __init__(self, data_manager=None):
+        """
+        Initialize the Metadata Validation Service.
+
+        Args:
+            data_manager: Optional DataManagerV2 instance for provenance tracking
+        """
+        self.data_manager = data_manager
         self.settings = get_settings()
         self._llm = None
 
@@ -173,7 +196,17 @@ class ResearchAgentAssistant:
         return self._llm
 
     def normalize_field_name(self, field: str) -> str:
-        """Normalize field name to canonical form."""
+        """
+        Normalize field name to canonical form.
+
+        NOTE: This is temporary - will be replaced with vector DB embedding search.
+
+        Args:
+            field: Field name to normalize
+
+        Returns:
+            Canonical field name or lowercase input if no match
+        """
         field_lower = field.lower().strip()
 
         for canonical, mapping in self.FIELD_MAPPINGS.items():
@@ -183,7 +216,18 @@ class ResearchAgentAssistant:
         return field_lower
 
     def normalize_field_value(self, field: str, value: str) -> str:
-        """Normalize field value to canonical form."""
+        """
+        Normalize field value to canonical form.
+
+        NOTE: This is temporary - will be replaced with vector DB embedding search.
+
+        Args:
+            field: Field name
+            value: Field value to normalize
+
+        Returns:
+            Canonical value or lowercase input if no match
+        """
         field_norm = self.normalize_field_name(field)
         value_lower = value.lower().strip()
 
@@ -226,8 +270,27 @@ class ResearchAgentAssistant:
             title = metadata.get("title", "N/A")
             summary = metadata.get("summary", "N/A")
             overall_design = metadata.get("overall_design", "N/A")
-            characteristics = metadata.get("characteristics_ch1", [])
-            sample_count = metadata.get("n_samples", 0)
+
+            # Extract characteristics from individual samples (not top-level)
+            # GEO metadata stores characteristics at sample level, not series level
+            characteristics = []
+            samples = metadata.get("samples", {})
+
+            for sample_id, sample in samples.items():
+                # Handle both dict and object samples (GEOparse can return either)
+                chars = None
+                if isinstance(sample, dict):
+                    chars = sample.get("characteristics_ch1", [])
+                elif hasattr(sample, "characteristics_ch1"):
+                    chars = sample.characteristics_ch1
+
+                if chars:
+                    characteristics.append(
+                        {"sample_id": sample_id, "characteristics": chars}
+                    )
+
+            # Use actual sample count from samples dict
+            sample_count = len(samples)
 
             # Get the schema from MetadataValidationConfig
             validation_schema = MetadataValidationConfig.model_json_schema()
@@ -282,7 +345,7 @@ Remember: Return ONLY the JSON object, nothing else."""
 Metadata to analyze:
 {metadata_context}
 
-IMPORTANT: 
+IMPORTANT:
 1. Check each required field for actual presence in sample characteristics
 2. Count how many samples have each field (not just if it exists somewhere)
 3. Calculate coverage percentage for each field
@@ -448,19 +511,19 @@ IMPORTANT:
         # Add missing fields
         missing = config_dict.get("missing_fields", [])
         if missing:
-            report += f"\n### Missing Required Fields:\n"
+            report += "\n### Missing Required Fields:\n"
             for field in missing:
                 report += f"- ❌ {field}\n"
 
         # Add warnings
         warnings = config_dict.get("warnings", [])
         if warnings:
-            report += f"\n### ⚠️ Warnings:\n"
+            report += "\n### ⚠️ Warnings:\n"
             for warning in warnings:
                 report += f"- {warning}\n"
 
         # Add recommendation explanation
-        report += f"\n### 💡 Recommendation Rationale:\n"
+        report += "\n### 💡 Recommendation Rationale:\n"
         if config_dict.get("recommendation") == "proceed":
             report += "All required fields are present with sufficient coverage. Dataset is suitable for analysis.\n"
         elif config_dict.get("recommendation") == "skip":

@@ -13,29 +13,19 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.tools.providers.base_provider import (
     BasePublicationProvider,
-    DatasetMetadata,
     DatasetType,
     PublicationMetadata,
     PublicationSource,
 )
-from lobster.tools.providers.ncbi_query_builder import (
-    NCBIDatabase,
-)
-from lobster.tools.providers.ncbi_query_builder import (
-    PubMedQueryBuilder as QueryBuilder,
-)
-from lobster.tools.providers.ncbi_query_builder import (
-    build_pubmed_query,
-)
+from lobster.tools.rate_limiter import NCBIRateLimiter
 from lobster.utils.logger import get_logger
 from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 
@@ -51,7 +41,7 @@ class PubMedProviderConfig(BaseModel):
     doc_content_chars_max: int = Field(default=6000, ge=1000, le=20000)
 
     # NCBI API settings
-    email: str = "kevin.yar@omics-os.com"
+    email: str = Field(default_factory=lambda: get_settings().NCBI_EMAIL)
     api_key: Optional[str] = None
 
     # Rate limiting and retry settings
@@ -150,6 +140,9 @@ class PubMedProvider(BasePublicationProvider):
         self._circuit_breaker_until = 0.0
         self._api_key_notified = False
 
+        # Redis-based distributed rate limiter (with graceful degradation)
+        self._rate_limiter = NCBIRateLimiter()
+
     @property
     def source(self) -> PublicationSource:
         """Return PubMed as the publication source."""
@@ -159,6 +152,62 @@ class PubMedProvider(BasePublicationProvider):
     def supported_dataset_types(self) -> List[DatasetType]:
         """Return list of dataset types supported by NCBI."""
         return [DatasetType.BIOPROJECT, DatasetType.BIOSAMPLE, DatasetType.DBGAP]
+
+    @property
+    def priority(self) -> int:
+        """
+        Return provider priority for capability-based routing.
+
+        PubMed has high priority (10) due to fast NCBI API access and
+        authoritative metadata. Ideal for literature search and finding
+        linked datasets via ELink.
+
+        Returns:
+            int: Priority 10 (high priority)
+        """
+        return 10
+
+    def get_supported_capabilities(self) -> Dict[str, bool]:
+        """
+        Return capabilities supported by PubMed provider.
+
+        PubMed excels at literature search, metadata extraction, and linking
+        publications to datasets via NCBI ELink API. It provides fast abstract
+        retrieval but does not offer full-text access (PMC handles that).
+
+        Supported capabilities:
+        - SEARCH_LITERATURE: ESearch API for PubMed/bioRxiv/medRxiv
+        - FIND_LINKED_DATASETS: ELink API to connect PMID → GEO/SRA/BioProject
+        - EXTRACT_METADATA: ESummary API for structured publication metadata
+        - QUERY_CAPABILITIES: Dynamic capability discovery
+        - GET_ABSTRACT: EFetch API for fast abstract retrieval (<500ms)
+
+        Not supported:
+        - DISCOVER_DATASETS: Links to datasets but doesn't search GEO directly
+        - GET_FULL_CONTENT: No full-text access (use PMCProvider)
+        - EXTRACT_METHODS: No methods extraction (use PMCProvider)
+        - EXTRACT_PDF: No PDF processing
+        - VALIDATE_METADATA: No dataset validation
+        - INTEGRATE_MULTI_OMICS: No multi-omics integration
+
+        Returns:
+            Dict[str, bool]: Capability support mapping
+        """
+        from lobster.tools.providers.base_provider import ProviderCapability
+
+        return {
+            ProviderCapability.SEARCH_LITERATURE: True,
+            ProviderCapability.DISCOVER_DATASETS: False,
+            ProviderCapability.FIND_LINKED_DATASETS: True,
+            ProviderCapability.EXTRACT_METADATA: True,
+            ProviderCapability.VALIDATE_METADATA: False,
+            ProviderCapability.QUERY_CAPABILITIES: True,
+            ProviderCapability.GET_ABSTRACT: True,
+            ProviderCapability.GET_FULL_CONTENT: False,
+            ProviderCapability.EXTRACT_METHODS: False,
+            ProviderCapability.EXTRACT_PDF: False,
+            ProviderCapability.INTEGRATE_MULTI_OMICS: False,
+        }
 
     def validate_identifier(self, identifier: str) -> bool:
         """
@@ -192,7 +241,7 @@ class PubMedProvider(BasePublicationProvider):
             "literature_search": True,
             "dataset_discovery": True,
             "metadata_extraction": True,
-            "full_text_access": False,
+            "full_text_access": True,  # NOW SUPPORTED via PMC XML API
             "advanced_filtering": True,
             "computational_methods": True,
             "github_extraction": True,
@@ -281,6 +330,9 @@ class PubMedProvider(BasePublicationProvider):
             str: Formatted list of discovered datasets
         """
         logger.info(f"Finding datasets from publication: {identifier}")
+        logger.debug(
+            f"[DEFENSIVE] dataset_types parameter: type={type(dataset_types)}, value={dataset_types}"
+        )
 
         try:
             include_related = kwargs.get("include_related", True)
@@ -307,11 +359,20 @@ class PubMedProvider(BasePublicationProvider):
 
             # Extract datasets using comprehensive approach
             datasets = self._extract_dataset_accessions(article.get("Summary", ""))
+            logger.debug(
+                f"[DEFENSIVE] After _extract_dataset_accessions: type={type(datasets)}, keys={list(datasets.keys()) if isinstance(datasets, dict) else 'NOT_DICT'}, datasets={datasets}"
+            )
 
             # Use NCBI E-link to find linked datasets
             if pmid and include_related:
                 linked_datasets = self._find_linked_datasets(pmid)
+                logger.debug(
+                    f"[DEFENSIVE] After _find_linked_datasets: type={type(linked_datasets)}, keys={list(linked_datasets.keys()) if isinstance(linked_datasets, dict) else 'NOT_DICT'}, linked_datasets={linked_datasets}"
+                )
                 datasets.update(linked_datasets)
+                logger.debug(
+                    f"[DEFENSIVE] After merge: type={type(datasets)}, keys={list(datasets.keys()) if isinstance(datasets, dict) else 'NOT_DICT'}, datasets={datasets}"
+                )
 
             # Check for supplementary materials if enabled
             if self.config.include_supplementary:
@@ -320,6 +381,9 @@ class PubMedProvider(BasePublicationProvider):
 
             # Filter by requested dataset types if specified
             if dataset_types:
+                logger.debug(
+                    f"[DEFENSIVE] Filtering datasets. Input dataset_types: {dataset_types}"
+                )
                 filtered_datasets = {}
                 type_map = {
                     DatasetType.GEO: "GEO",
@@ -328,11 +392,20 @@ class PubMedProvider(BasePublicationProvider):
                     DatasetType.ENA: "ENA",
                 }
                 for dtype in dataset_types:
+                    logger.debug(
+                        f"[DEFENSIVE] Processing dtype: type={type(dtype)}, value={dtype}, in_type_map={dtype in type_map}"
+                    )
                     if dtype in type_map and type_map[dtype] in datasets:
                         filtered_datasets[type_map[dtype]] = datasets[type_map[dtype]]
                 datasets = filtered_datasets
+                logger.debug(
+                    f"[DEFENSIVE] After filtering: type={type(datasets)}, keys={list(datasets.keys()) if isinstance(datasets, dict) else 'NOT_DICT'}, datasets={datasets}"
+                )
 
             # Format comprehensive response
+            logger.debug(
+                f"[DEFENSIVE] Before _format_comprehensive_dataset_report: type={type(datasets)}, structure={datasets}"
+            )
             response = self._format_comprehensive_dataset_report(
                 article, datasets, identifier if is_doi else None, pmid
             )
@@ -354,6 +427,7 @@ class PubMedProvider(BasePublicationProvider):
 
         except Exception as e:
             logger.error(f"Error finding datasets: {e}")
+            logger.exception("[DEFENSIVE] Full traceback for slice bug investigation:")
             return f"Error finding datasets from publication: {str(e)}"
 
     def extract_publication_metadata(
@@ -555,7 +629,15 @@ class PubMedProvider(BasePublicationProvider):
         raise Exception(error_msg)
 
     def _apply_request_throttling(self) -> None:
-        """Apply rate limiting between requests."""
+        """Apply rate limiting between requests using Redis + in-memory fallback."""
+        # Layer 1: Redis-based distributed rate limiting
+        # This ensures rate limits work across multiple processes/users
+        if not self._rate_limiter.wait_for_slot("ncbi_esearch", max_wait=10.0):
+            logger.warning(
+                "Redis rate limiter timeout - falling back to in-memory throttling"
+            )
+
+        # Layer 2: In-memory rate limiting (backward compatibility + fallback)
         current_time = time.time()
         time_since_last = current_time - self._last_request_time
 
@@ -644,6 +726,10 @@ class PubMedProvider(BasePublicationProvider):
         """
         Extract computational methods and parameters from a publication.
 
+        This method prioritizes PMC full text extraction (95% accuracy, structured XML)
+        over abstract-only extraction (70% accuracy). Falls back to abstract if PMC
+        full text is not available.
+
         Args:
             identifier: DOI or PMID of the publication
             method_type: Type of methods to extract
@@ -655,22 +741,64 @@ class PubMedProvider(BasePublicationProvider):
         logger.info(f"Extracting computational methods from: {identifier}")
 
         try:
-            # Get publication metadata first
-            metadata = self.extract_publication_metadata(identifier)
+            # PRIORITY: Try PMC full text first (95% accuracy, structured XML)
+            pmc_full_text = self._get_pmc_full_text(identifier)
 
-            if not metadata.abstract:
-                return f"No abstract available for method extraction: {identifier}"
+            if pmc_full_text:
+                logger.info(f"Using PMC full text for method extraction: {identifier}")
+                # Extract methods from full text (methods section + full text)
+                methods_text = (
+                    pmc_full_text.methods_section
+                    if pmc_full_text.methods_section
+                    else pmc_full_text.full_text
+                )
+                methods = self._extract_methods_from_text(
+                    methods_text, method_type, include_parameters
+                )
 
-            # Extract methods using pattern matching
-            methods = self._extract_methods_from_text(
-                metadata.abstract, method_type, include_parameters
-            )
+                # Add PMC-specific extractions
+                if pmc_full_text.software_tools:
+                    methods["tools"] = [
+                        {"text": tool, "value": None}
+                        for tool in pmc_full_text.software_tools
+                    ]
+
+                if pmc_full_text.github_repos:
+                    methods.setdefault("github_repos", [])
+                    methods["github_repos"] = pmc_full_text.github_repos
+
+                metadata_source = "PMC full text"
+            else:
+                # Fallback: Use abstract (70% accuracy)
+                logger.info(
+                    f"PMC full text not available, using abstract for: {identifier}"
+                )
+                metadata = self.extract_publication_metadata(identifier)
+
+                if not metadata.abstract:
+                    return f"No abstract or PMC full text available for method extraction: {identifier}"
+
+                # Extract methods using pattern matching from abstract
+                methods = self._extract_methods_from_text(
+                    metadata.abstract, method_type, include_parameters
+                )
+                methods_text = metadata.abstract
+                metadata_source = "abstract"
+
+            # Get metadata for response formatting
+            if not pmc_full_text:
+                # Already have metadata from extract_publication_metadata above
+                pass
+            else:
+                # Build minimal metadata from PMC result
+                metadata = self.extract_publication_metadata(identifier)
 
             # Format response
             response = f"## Computational Methods Extracted from {identifier}\n\n"
             response += f"**Title**: {metadata.title}\n"
             response += f"**PMID**: {metadata.pmid or 'N/A'}\n"
-            response += f"**DOI**: {metadata.doi or 'N/A'}\n\n"
+            response += f"**DOI**: {metadata.doi or 'N/A'}\n"
+            response += f"**Source**: {metadata_source}\n\n"
 
             # Add extracted methods
             for mtype, mlist in methods.items():
@@ -1005,10 +1133,10 @@ class PubMedProvider(BasePublicationProvider):
         """Find datasets linked to a PubMed article using E-link, including GSE series accessions."""
         linked = {"GEO": [], "SRA": [], "BioProject": [], "BioSample": []}
 
-        # Database configs: include GEO (for GSE series), GDS (legacy), SRA, etc.
+        # Database configs: GEO (GSE/GSM), SRA, BioProject, BioSample
+        # Note: GDS (legacy GEO DataSets) removed - deprecated by NCBI, causes malformed accessions
         db_configs = [
             {"db": "geo", "key": "GEO", "prefix": ""},  # Will fetch GSE/GSM
-            {"db": "gds", "key": "GEO", "prefix": "GDS"},  # Legacy GEO DataSets
             {"db": "sra", "key": "SRA", "prefix": "SRA"},
             {"db": "bioproject", "key": "BioProject", "prefix": "PRJNA"},
             {"db": "biosample", "key": "BioSample", "prefix": "SAMN"},
@@ -1091,10 +1219,14 @@ class PubMedProvider(BasePublicationProvider):
         pmid: Optional[str],
     ) -> str:
         """Format a comprehensive dataset discovery report with GSE prioritized."""
+        logger.debug(
+            f"[DEFENSIVE] _format_comprehensive_dataset_report called with: datasets type={type(datasets)}, datasets={datasets}"
+        )
         response = "## Dataset Discovery Report\n\n"
 
         # Publication info (compact)
-        response += f"**Publication**: {article.get('Title', 'N/A')[:100]}...\n"
+        title = str(article.get("Title", "N/A"))  # Ensure string before slicing
+        response += f"**Publication**: {title[:100]}...\n"
         response += f"**PMID**: {pmid or 'N/A'} | **DOI**: {doi or 'N/A'}\n"
         response += f"**Journal**: {article.get('Journal', 'N/A')} ({article.get('Published', 'N/A')})\n\n"
 
@@ -1104,15 +1236,21 @@ class PubMedProvider(BasePublicationProvider):
         if total_datasets == 0:
             response += "**No datasets found**. Check supplementary materials or contact authors.\n"
         else:
-            response += f"**Found dataset(s)**:\n\n"
+            response += "**Found dataset(s)**:\n\n"
 
             dataset_lines = []
 
             # --- GEO prioritization: GSE > GSM > GDS ---
             if datasets.get("GEO"):
+                logger.debug(
+                    f"[DEFENSIVE] Processing GEO datasets: type={type(datasets['GEO'])}, value={datasets['GEO']}"
+                )
                 gse = [x for x in datasets["GEO"] if x.startswith("GSE")]
                 gsm = [x for x in datasets["GEO"] if x.startswith("GSM")]
                 gds = [x for x in datasets["GEO"] if x.startswith("GDS")]
+                logger.debug(
+                    f"[DEFENSIVE] After GEO categorization: gse={gse}, gsm={gsm}, gds={gds}"
+                )
 
                 if gse:
                     for acc in gse:
@@ -1169,10 +1307,14 @@ class PubMedProvider(BasePublicationProvider):
         response += "**Next steps**: "
         steps = []
         if datasets.get("GEO"):
+            logger.debug(
+                f"[DEFENSIVE] Building next steps. datasets['GEO']: type={type(datasets['GEO'])}, len={len(datasets['GEO']) if isinstance(datasets['GEO'], list) else 'NOT_LIST'}, value={datasets['GEO']}"
+            )
             # Prefer GSE if present, otherwise first available accession
             preferred_geo = next(
                 (x for x in datasets["GEO"] if x.startswith("GSE")), datasets["GEO"][0]
             )
+            logger.debug(f"[DEFENSIVE] Selected preferred_geo: {preferred_geo}")
             steps.append(f"`download_geo_dataset('{preferred_geo}')`")
         steps.append("`extract_computational_methods()`")
         response += " → ".join(steps) + "\n"
@@ -1258,3 +1400,41 @@ class PubMedProvider(BasePublicationProvider):
         github_pattern = r"github\.com/([\w-]+)/([\w-]+)"
         github_matches = re.finditer(github_pattern, text, re.IGNORECASE)
         return [f"https://github.com/{m.group(1)}/{m.group(2)}" for m in github_matches]
+
+    def _get_pmc_full_text(self, identifier: str):
+        """
+        Get PMC full text for an identifier if available.
+
+        This method uses PMCProvider to extract structured full text from PMC XML API.
+        Returns None if PMC full text is not available.
+
+        Args:
+            identifier: PMID or DOI
+
+        Returns:
+            PMCFullText object if available, None otherwise
+        """
+        try:
+            from lobster.tools.providers.pmc_provider import (
+                PMCNotAvailableError,
+                PMCProvider,
+            )
+
+            # Initialize PMC provider (reuses same config)
+            pmc_provider = PMCProvider(
+                data_manager=self.data_manager, config=self.config
+            )
+
+            # Try to extract PMC full text
+            pmc_result = pmc_provider.extract_full_text(identifier)
+            logger.info(
+                f"PMC full text retrieved: {len(pmc_result.methods_section)} chars methods"
+            )
+            return pmc_result
+
+        except PMCNotAvailableError:
+            logger.debug(f"PMC full text not available for: {identifier}")
+            return None
+        except Exception as e:
+            logger.warning(f"Error retrieving PMC full text: {e}")
+            return None

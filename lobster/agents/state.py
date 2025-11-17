@@ -186,3 +186,59 @@ class VisualizationExpertState(AgentState):
     intermediate_outputs: Dict[
         str, Any
     ]  # For partial visualization work before returning to supervisor
+
+
+class CustomFeatureAgentState(AgentState):
+    """
+    State for the custom feature creation agent.
+
+    This agent uses Claude Code SDK to generate new agents, services,
+    providers, tools, tests, and documentation following Lobster patterns.
+    """
+
+    next: str
+
+    # Feature creation specific context
+    task_description: str  # Description of the feature creation task
+    feature_name: str  # Name of the feature being created
+    feature_type: str  # Type: agent, service, provider, agent_with_service
+    requirements: str  # Detailed feature requirements
+    research_findings: Dict[str, Any]  # Internet research results (Linkup)
+    created_files: List[str]  # List of files created during feature generation
+    validation_errors: List[str]  # Validation errors encountered
+    sdk_output: str  # Output from Claude Code SDK
+    integration_instructions: str  # Instructions for manual integration steps
+    test_results: Dict[str, Any]  # Results from automated testing
+    file_paths: List[str]  # Paths to created files
+    methodology_parameters: Dict[str, Any]  # Feature creation parameters
+    data_context: str  # Context about the feature being created
+    intermediate_outputs: Dict[
+        str, Any
+    ]  # For partial feature creation work before returning to supervisor
+
+
+class ProteinStructureVisualizationExpertState(AgentState):
+    """
+    State for the protein structure visualization expert agent.
+
+    This agent specializes in fetching protein structures from PDB,
+    creating ChimeraX visualizations, performing structural analysis,
+    and linking structures to omics data.
+    """
+
+    next: str
+
+    # Protein structure specific context
+    task_description: str  # Description of the current task
+    structure_data: Dict[str, Any]  # Current protein structure data
+    pdb_ids: List[str]  # List of PDB IDs being worked with
+    visualization_settings: Dict[str, Any]  # ChimeraX visualization parameters
+    analysis_results: Dict[str, Any]  # Structure analysis results (RMSD, secondary structure, geometry)
+    comparison_results: Dict[str, Any]  # RMSD comparison results between structures
+    metadata: Dict[str, Any]  # PDB metadata (organism, resolution, experiment method)
+    file_paths: List[str]  # Paths to structure files and visualizations
+    methodology_parameters: Dict[str, Any]  # Analysis parameters and settings
+    data_context: str  # Structural biology context
+    intermediate_outputs: Dict[
+        str, Any
+    ]  # For partial structure analysis work before returning to supervisor

@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional, Union
 import anndata
 import pandas as pd
 
+from lobster.core.interfaces.validator import ValidationResult
+
 
 class IModalityAdapter(ABC):
     """

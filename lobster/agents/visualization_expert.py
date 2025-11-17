@@ -5,14 +5,12 @@ This agent specializes in creating interactive visualizations for all data types
 through supervisor-mediated workflows. No direct agent handoffs.
 """
 
-import json
 import uuid
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
@@ -22,7 +20,6 @@ from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.tools.visualization_service import (
     SingleCellVisualizationService,
-    VisualizationError,
 )
 from lobster.utils.logger import get_logger
 

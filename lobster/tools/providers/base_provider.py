@@ -20,6 +20,83 @@ class PublicationSource(Enum):
     MEDRXIV = "medrxiv"
     ARXIV = "arxiv"
     GEO = "geo"
+    SRA = "sra"
+
+
+class ProviderCapability:
+    """
+    Standard capability identifiers for publication providers.
+
+    These constants define the operations that providers can support,
+    enabling capability-based routing through the provider registry.
+    Each capability maps to specific provider operations and tool names.
+    """
+
+    SEARCH_LITERATURE = "search_literature"
+    """Search for publications across databases (PubMed, bioRxiv, medRxiv).
+
+    Example: PubMedProvider uses ESearch API for literature discovery.
+    """
+
+    DISCOVER_DATASETS = "discover_datasets"
+    """Search for datasets in repositories (GEO, SRA, PRIDE, ENA, ArrayExpress).
+
+    Example: GEOProvider searches NCBI GEO database (db=gds parameter).
+    """
+
+    FIND_LINKED_DATASETS = "find_linked_datasets"
+    """Find datasets associated with a specific publication.
+
+    Example: PubMedProvider uses ELink API to connect PMID → GEO datasets.
+    """
+
+    EXTRACT_METADATA = "extract_metadata"
+    """Extract structured metadata from publications or datasets.
+
+    Example: PMCProvider parses JATS XML; GEOProvider parses SOFT files.
+    """
+
+    VALIDATE_METADATA = "validate_metadata"
+    """Validate completeness and quality of dataset metadata.
+
+    Example: GEOProvider checks sample count, platform info, experimental design.
+    """
+
+    QUERY_CAPABILITIES = "query_capabilities"
+    """Query provider capabilities and supported operations.
+
+    All providers should support this to enable dynamic capability discovery.
+    """
+
+    GET_ABSTRACT = "get_abstract"
+    """Fast retrieval of publication abstracts (<500ms target).
+
+    Example: AbstractProvider and PubMedProvider via EFetch API.
+    """
+
+    GET_FULL_CONTENT = "get_full_content"
+    """Extract full-text content from publications.
+
+    Example: PMCProvider (PMC XML, 30-40% coverage), WebpageProvider (HTML parsing).
+    """
+
+    EXTRACT_METHODS = "extract_methods"
+    """Extract methods section from publications.
+
+    Example: PMCProvider uses semantic JATS parsing; WebpageProvider uses heuristics.
+    """
+
+    EXTRACT_PDF = "extract_pdf"
+    """Structure-aware extraction from PDF files.
+
+    Example: WebpageProvider delegates to DoclingService for PDF processing.
+    """
+
+    INTEGRATE_MULTI_OMICS = "integrate_multi_omics"
+    """Cross-dataset sample mapping for multi-omics integration.
+
+    Example: GEOProvider maps sample identifiers across GEO SuperSeries datasets.
+    """
 
 
 class DatasetType(Enum):
@@ -140,6 +217,67 @@ class BasePublicationProvider(ABC):
         """
         pass
 
+    @property
+    def priority(self) -> int:
+        """
+        Return provider priority for capability-based routing.
+
+        Lower values indicate higher priority. Providers with the same
+        capability are sorted by priority, with ties broken by registration order.
+
+        Priority Guidelines:
+        - 10: High priority (fast, authoritative sources like NCBI APIs)
+        - 50: Medium priority (fallback sources like web scraping)
+        - 100: Low priority (slow or last-resort sources like PDF extraction)
+
+        Returns:
+            int: Provider priority (default 100 = lowest priority)
+        """
+        return 100
+
+    def get_supported_capabilities(self) -> Dict[str, bool]:
+        """
+        Return capabilities supported by this provider.
+
+        This method should be overridden by each provider to declare which
+        operations it can perform. Used by ProviderRegistry for capability-based
+        routing to select the appropriate provider for each operation.
+
+        Returns:
+            Dict[str, bool]: Mapping of capability identifiers to support status.
+                Keys should use ProviderCapability constants.
+                Default implementation returns all capabilities as False.
+
+        Example:
+            >>> provider.get_supported_capabilities()
+            {
+                'search_literature': True,
+                'discover_datasets': False,
+                'find_linked_datasets': True,
+                'extract_metadata': True,
+                'validate_metadata': False,
+                'query_capabilities': True,
+                'get_abstract': True,
+                'get_full_content': False,
+                'extract_methods': False,
+                'extract_pdf': False,
+                'integrate_multi_omics': False
+            }
+        """
+        return {
+            ProviderCapability.SEARCH_LITERATURE: False,
+            ProviderCapability.DISCOVER_DATASETS: False,
+            ProviderCapability.FIND_LINKED_DATASETS: False,
+            ProviderCapability.EXTRACT_METADATA: False,
+            ProviderCapability.VALIDATE_METADATA: False,
+            ProviderCapability.QUERY_CAPABILITIES: False,
+            ProviderCapability.GET_ABSTRACT: False,
+            ProviderCapability.GET_FULL_CONTENT: False,
+            ProviderCapability.EXTRACT_METHODS: False,
+            ProviderCapability.EXTRACT_PDF: False,
+            ProviderCapability.INTEGRATE_MULTI_OMICS: False,
+        }
+
     def validate_identifier(self, identifier: str) -> bool:
         """
         Validate that an identifier is supported by this provider.
@@ -229,7 +367,7 @@ class BasePublicationProvider(ABC):
         if not datasets:
             return f"No datasets found for publication: {publication_id}"
 
-        formatted = f"## Dataset Discovery Results\n\n"
+        formatted = "## Dataset Discovery Results\n\n"
         formatted += f"**Publication**: {publication_id}\n"
         formatted += f"**Datasets Found**: {len(datasets)}\n\n"
 

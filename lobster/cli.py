@@ -12,17 +12,15 @@ os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = "900000"
 import ast
 import inspect
 import json
+import logging
 import shutil
-import subprocess
 import time
 from typing import Any, Dict, Iterable, List
 
 import numpy as np
 import pandas as pd
-import tabulate
 import typer
-from rich import box, console
-from rich import get_console as rich_get_console
+from rich import box
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -30,7 +28,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
-from tabulate import tabulate
 
 from lobster.config.agent_config import (
     LobsterAgentConfigurator,
@@ -40,19 +37,14 @@ from lobster.config.agent_config import (
 from lobster.core.client import AgentClient
 
 # Import new UI system
-from lobster.ui import LobsterTheme, get_console, get_progress_manager, setup_logging
+from lobster.ui import LobsterTheme, setup_logging
 from lobster.ui.components import (
-    create_analysis_dashboard,
     create_file_tree,
-    create_multi_progress_layout,
-    create_system_dashboard,
-    create_workspace_dashboard,
     create_workspace_tree,
     get_multi_progress_manager,
     get_status_display,
 )
 from lobster.ui.console_manager import get_console_manager
-from lobster.ui.live_dashboard import get_dashboard
 
 # Import the proper callback handler and system utilities
 from lobster.utils import SimpleTerminalCallback, TerminalCallbackHandler, open_path
@@ -75,6 +67,8 @@ try:
 except ImportError:
     PROMPT_TOOLKIT_AVAILABLE = False
 
+# Module logger
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Progress Management
@@ -273,7 +267,7 @@ class CloudAwareCache:
                     if key in self.cache:
                         console = console_manager.get_console()
                         console.print(
-                            f"[dim yellow]Using cached data due to connection issue[/dim yellow]"
+                            "[dim yellow]Using cached data due to connection issue[/dim yellow]"
                         )
                         return self.cache[key]["data"]
                 raise e
@@ -314,7 +308,7 @@ def _add_command_to_history(
         else:
             # Fallback for other client types (cloud, API, etc.)
             console.print(
-                f"[dim yellow]Command history not supported for this client type[/dim yellow]",
+                "[dim yellow]Command history not supported for this client type[/dim yellow]",
                 style="dim",
             )
 
@@ -346,7 +340,6 @@ def check_for_missing_slash_command(user_input: str) -> Optional[str]:
 
 def extract_available_commands() -> Dict[str, str]:
     """Extract commands dynamically from _execute_command implementation."""
-    commands = {}
 
     # Static command definitions with descriptions (extracted from help text)
     command_descriptions = {
@@ -598,7 +591,7 @@ if PROMPT_TOOLKIT_AVAILABLE:
                                     meta = (
                                         f"{adata.n_obs:,} obs × {adata.n_vars:,} vars"
                                     )
-                                except:
+                                except Exception:
                                     meta = "modality"
 
                                 yield Completion(
@@ -679,6 +672,19 @@ config_app = typer.Typer(
     help="Configuration management for Lobster agents",
 )
 app.add_typer(config_app, name="config")
+
+
+# App callback to show help when no subcommand is provided
+@app.callback(invoke_without_command=True)
+def default_callback(ctx: typer.Context):
+    """
+    Show friendly help guide when lobster is invoked without subcommands.
+    """
+    # If no subcommand was invoked, show the default help
+    if ctx.invoked_subcommand is None:
+        show_default_help()
+        raise typer.Exit()
+
 
 # Global client instance
 client: Optional[AgentClient] = None
@@ -817,6 +823,15 @@ def init_client(
 
     # Use local client (existing code)
     console.print("[bold red]💻 Using Lobster Local[/bold red]")
+
+    # Configure logging level based on debug flag
+    import logging
+
+
+    if debug:
+        setup_logging(logging.DEBUG)
+    else:
+        setup_logging(logging.WARNING)  # Suppress INFO logs
 
     # Set workspace
     if workspace is None:
@@ -1134,7 +1149,6 @@ def execute_shell_command(command: str) -> bool:
                     content = file_path.read_text(encoding="utf-8", errors="replace")
 
                     # Try to guess syntax from extension for highlighting
-                    import mimetypes
 
                     ext = file_path.suffix.lower()
 
@@ -1408,14 +1422,14 @@ def display_welcome():
     elif PROMPT_TOOLKIT_AVAILABLE:
         input_status = f"[dim {LobsterTheme.PRIMARY_ORANGE}]✨ Enhanced input: Tab autocomplete enabled[/dim {LobsterTheme.PRIMARY_ORANGE}]"
     else:
-        input_status = f"[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
+        input_status = "[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
 
     welcome_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
 
 {input_status}
 
 [bold {LobsterTheme.PRIMARY_ORANGE}]Key Tasks:[/bold {LobsterTheme.PRIMARY_ORANGE}]
-• Analyze RNA-seq & genomics data
+• Analyze RNA-seq data
 • Generate visualizations and plots
 • Extract insights from bioinformatics datasets
 • Access GEO & literature databases
@@ -1444,6 +1458,61 @@ def display_welcome():
     welcome_panel = LobsterTheme.create_panel(welcome_content, title=str(header_text))
 
     console_manager.print(welcome_panel)
+
+
+def show_default_help():
+    """Display default help guide when lobster is run without subcommands."""
+    # Create branded header
+    header_text = LobsterTheme.create_title_text("LOBSTER by Omics-OS", "🦞")
+
+    help_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]AVAILABLE COMMANDS:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster chat[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Start interactive chat session with AI agents
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster query[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Send a single analysis query
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster serve[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Start API server for web services
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Manage agent configuration
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]QUICK START:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Start interactive analysis with enhanced autocomplete[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster chat[/{LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Show agent reasoning during analysis[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster chat --reasoning[/{LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Send a single query and get results[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster query "Analyze my RNA-seq data"[/{LobsterTheme.PRIMARY_ORANGE}]
+
+  [white]# Start API server on custom port[/white]
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster serve --port 8080[/{LobsterTheme.PRIMARY_ORANGE}]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]CONFIGURATION:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config list-models[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] List available AI models
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config list-profiles[/{LobsterTheme.PRIMARY_ORANGE}]  [grey50]-[/grey50] List testing profiles
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster config show-config[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show current configuration
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]KEY FEATURES:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+• [white]Single-Cell & Bulk RNA-seq Analysis[/white]
+• [white]Mass Spectrometry & Affinity Proteomics[/white]
+• [white]GEO Dataset Access & Literature Mining[/white]
+• [white]Interactive Visualizations & Reports[/white]
+• [white]Natural Language Interface[/white]
+
+[bold {LobsterTheme.PRIMARY_ORANGE}]HELP & DOCUMENTATION:[/bold {LobsterTheme.PRIMARY_ORANGE}]
+
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster --help[/{LobsterTheme.PRIMARY_ORANGE}]              [grey50]-[/grey50] Show detailed help
+  [{LobsterTheme.PRIMARY_ORANGE}]lobster <command> --help[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show help for specific command
+
+[dim grey50]🌐 Website: https://omics-os.com | 📚 Docs: https://github.com/the-omics-os[/dim grey50]
+[dim grey50]Powered by LangGraph | © 2025 Omics-OS[/dim grey50]"""
+
+    # Create branded help panel
+    help_panel = LobsterTheme.create_panel(help_content, title=str(header_text))
+
+    console_manager.print(help_panel)
 
 
 # ============================================================================
@@ -1671,7 +1740,7 @@ def init_client_with_animation(
 
     from lobster.config.agent_registry import AGENT_REGISTRY
 
-    console_manager = get_console_manager()
+    get_console_manager()
 
     # Agent emojis
     agent_emojis = {
@@ -1679,7 +1748,6 @@ def init_client_with_animation(
         "singlecell_expert_agent": "🧬",
         "bulk_rnaseq_expert_agent": "📊",
         "research_agent": "📚",
-        "method_expert_agent": "🔬",
         "ms_proteomics_expert_agent": "🧪",
         "affinity_proteomics_expert_agent": "🔗",
         "machine_learning_expert_agent": "🤖",
@@ -1705,7 +1773,7 @@ def init_client_with_animation(
     )
     client = init_client(workspace, reasoning, verbose, debug)
 
-    console.print(f"[bold green]✅ Lobster is cooked and ready![/bold green]\n")
+    console.print("[bold green]✅ Lobster is cooked and ready![/bold green]\n")
     return client
 
 
@@ -1742,6 +1810,15 @@ def chat(
             suppress=[],
             max_frames=30,
         )
+
+    # Configure logging level based on debug flag
+    import logging
+
+
+    if debug:
+        setup_logging(logging.DEBUG)
+    else:
+        setup_logging(logging.WARNING)  # Suppress INFO logs
 
     display_welcome()
 
@@ -1809,7 +1886,7 @@ def chat(
             if should_show_progress(client):
                 # Normal mode: show progress spinner
                 with create_progress(client_arg=client) as progress:
-                    task = progress.add_task(
+                    progress.add_task(
                         f"🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}",
                         total=None,
                     )
@@ -1834,6 +1911,23 @@ def chat(
                 )
                 console_manager.print(response_panel)
 
+                # Show token usage and cost if available
+                if result.get("token_usage"):
+                    token_info = result["token_usage"]
+                    latest_cost = token_info.get("latest_cost_usd", 0.0)
+                    session_total = token_info.get("session_total_usd", 0.0)
+                    total_tokens = token_info.get("total_tokens", 0)
+
+                    # Format cost display
+                    cost_display = f"💰 Session cost: ${session_total:.4f}"
+                    if latest_cost > 0:
+                        cost_display += f" (+${latest_cost:.4f} this response)"
+                    cost_display += f" | Total tokens: {total_tokens:,}"
+
+                    console_manager.print(
+                        f"[dim grey50]{cost_display}[/dim grey50]"
+                    )
+
                 # Show any generated plots with orange styling
                 if result.get("plots"):
                     plot_text = f"📊 Generated {len(result['plots'])} visualization(s)"
@@ -1847,8 +1941,20 @@ def chat(
             if Confirm.ask(
                 f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Exit Lobster?[/{LobsterTheme.PRIMARY_ORANGE}]"
             ):
-                goodbye_message = f"""👋 Thank you for using Lobster by Omics-OS!
+                # Get final token usage
+                try:
+                    token_usage = client.get_token_usage()
+                    if token_usage and "error" not in token_usage:
+                        total_cost = token_usage.get("total_cost_usd", 0.0)
+                        total_tokens = token_usage.get("total_tokens", 0)
+                        cost_info = f"\n[bold white]💰 Session Summary:[/bold white]\nTotal tokens used: {total_tokens:,}\nTotal cost: ${total_cost:.4f}\n"
+                    else:
+                        cost_info = ""
+                except Exception:
+                    cost_info = ""
 
+                goodbye_message = f"""👋 Thank you for using Lobster by Omics-OS!
+{cost_info}
 [bold white]🌟 Help us improve Lobster![/bold white]
 Your feedback matters! Please take 1 minute to share your experience:
 
@@ -1941,11 +2047,66 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
                       or None if command should not be logged to history.
     """
 
+    # -------------------------------------------------------------------------
+    # Helper function for quantification directory detection
+    # -------------------------------------------------------------------------
+    def _is_quantification_directory(path: Path) -> Optional[str]:
+        """
+        Detect if directory contains Kallisto or Salmon quantification files.
+
+        Args:
+            path: Path object to check
+
+        Returns:
+            Tool type ('kallisto' or 'salmon') if quantification directory, None otherwise
+
+        Detection criteria:
+        - Kallisto: Looks for abundance.tsv, abundance.h5, or abundance.txt files
+        - Salmon: Looks for quant.sf or quant.genes.sf files
+        - Requires at least 2 sample subdirectories to avoid false positives
+        """
+        if not path.is_dir():
+            return None
+
+        kallisto_count = 0
+        salmon_count = 0
+
+        try:
+            for subdir in path.iterdir():
+                if not subdir.is_dir():
+                    continue
+
+                # Check for Kallisto signatures
+                if (
+                    (subdir / "abundance.tsv").exists()
+                    or (subdir / "abundance.h5").exists()
+                    or (subdir / "abundance.txt").exists()
+                ):
+                    kallisto_count += 1
+
+                # Check for Salmon signatures
+                if (subdir / "quant.sf").exists() or (
+                    subdir / "quant.genes.sf"
+                ).exists():
+                    salmon_count += 1
+        except (PermissionError, OSError):
+            return None
+
+        # Require at least 2 samples to identify as quantification directory
+        # This avoids false positives from directories with only 1 sample
+        if kallisto_count >= 2:
+            return "kallisto"
+        elif salmon_count >= 2:
+            return "salmon"
+
+        return None
+
     if cmd == "/help":
         help_text = f"""[bold white]Available Commands:[/bold white]
 
 [{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show this help message
 [{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Show system status
+[{LobsterTheme.PRIMARY_ORANGE}]/tokens[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Show token usage and cost for this session
 [{LobsterTheme.PRIMARY_ORANGE}]/input-features[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show input capabilities and navigation features
 [{LobsterTheme.PRIMARY_ORANGE}]/dashboard[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show comprehensive system dashboard
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace-info[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show detailed workspace overview
@@ -1968,6 +2129,10 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/save[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Save current state to workspace
 [{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
 [{LobsterTheme.PRIMARY_ORANGE}]/export[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Export session data
+[{LobsterTheme.PRIMARY_ORANGE}]/pipeline export[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Export session as Jupyter notebook
+[{LobsterTheme.PRIMARY_ORANGE}]/pipeline list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available notebooks
+[{LobsterTheme.PRIMARY_ORANGE}]/pipeline run[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Execute saved notebook with new data
+[{LobsterTheme.PRIMARY_ORANGE}]/pipeline info[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show notebook details
 [{LobsterTheme.PRIMARY_ORANGE}]/reset[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Reset conversation
 [{LobsterTheme.PRIMARY_ORANGE}]/mode[/{LobsterTheme.PRIMARY_ORANGE}] <name>  [grey50]-[/grey50] Change operation mode
 [{LobsterTheme.PRIMARY_ORANGE}]/modes[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List available modes
@@ -1999,6 +2164,69 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 
     elif cmd == "/status":
         display_status(client)
+
+    elif cmd == "/tokens":
+        # Display token usage and cost information
+        try:
+            token_usage = client.get_token_usage()
+
+            if not token_usage or "error" in token_usage:
+                console_manager.print(
+                    "[yellow]Token tracking not available for this client type[/yellow]"
+                )
+                return
+
+            # Create summary table
+            summary_table = Table(title="💰 Session Token Usage & Cost", box=box.ROUNDED)
+            summary_table.add_column("Metric", style="cyan", no_wrap=True)
+            summary_table.add_column("Value", style="green")
+
+            summary_table.add_row("Session ID", token_usage["session_id"])
+            summary_table.add_row(
+                "Total Input Tokens", f"{token_usage['total_input_tokens']:,}"
+            )
+            summary_table.add_row(
+                "Total Output Tokens", f"{token_usage['total_output_tokens']:,}"
+            )
+            summary_table.add_row(
+                "Total Tokens", f"{token_usage['total_tokens']:,}"
+            )
+            summary_table.add_row(
+                "Total Cost (USD)", f"${token_usage['total_cost_usd']:.4f}"
+            )
+
+            console_manager.print(summary_table)
+
+            # Create per-agent breakdown table if agents have been used
+            if token_usage.get("by_agent"):
+                agent_table = Table(
+                    title="📊 Cost by Agent", box=box.ROUNDED
+                )
+                agent_table.add_column("Agent", style="cyan")
+                agent_table.add_column("Input", style="blue", justify="right")
+                agent_table.add_column("Output", style="magenta", justify="right")
+                agent_table.add_column("Total", style="yellow", justify="right")
+                agent_table.add_column("Cost (USD)", style="green", justify="right")
+                agent_table.add_column("Calls", style="grey50", justify="right")
+
+                for agent_name, stats in token_usage["by_agent"].items():
+                    agent_display = agent_name.replace("_", " ").title()
+                    agent_table.add_row(
+                        agent_display,
+                        f"{stats['input_tokens']:,}",
+                        f"{stats['output_tokens']:,}",
+                        f"{stats['total_tokens']:,}",
+                        f"${stats['cost_usd']:.4f}",
+                        str(stats['invocation_count'])
+                    )
+
+                console_manager.print("\n")
+                console_manager.print(agent_table)
+
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to retrieve token usage: {str(e)}"
+            )
 
     elif cmd == "/input-features":
         # Show input capabilities and navigation features
@@ -2286,6 +2514,64 @@ when they are started by agents or analysis workflows.
     elif cmd.startswith("/read "):
         filename = cmd[6:].strip()
 
+        # Convert to Path object for directory checking
+        file_path = (
+            Path(filename)
+            if Path(filename).is_absolute()
+            else current_directory / filename
+        )
+
+        # Check if this is a quantification directory BEFORE checking glob patterns
+        tool_type = _is_quantification_directory(file_path)
+        if tool_type:
+            # This is a Kallisto or Salmon quantification directory
+            console.print(
+                f"[cyan]🧬 Detected {tool_type.title()} quantification directory[/cyan]"
+            )
+            console.print(
+                f"[dim]Loading quantification files from: {file_path}[/dim]\n"
+            )
+
+            try:
+                with create_progress(client_arg=client) as progress:
+                    task = progress.add_task(
+                        f"[cyan]Loading {tool_type.title()} quantification files...",
+                        total=None,
+                    )
+
+                    # Route to client method for quantification loading
+                    load_result = client.load_quantification_directory(
+                        directory_path=str(file_path), tool_type=tool_type
+                    )
+
+                    progress.remove_task(task)
+
+                # Display results
+                if load_result["success"]:
+                    console.print(f"[green]✅ {load_result['message']}[/green]\n")
+                    console.print("[cyan]📊 Data Summary:[/cyan]")
+                    console.print(
+                        f"  • Modality: [bold]{load_result['modality_name']}[/bold]"
+                    )
+                    console.print(f"  • Tool: {load_result['tool_type'].title()}")
+                    console.print(
+                        f"  • Shape: {load_result['n_samples']} samples × {load_result['n_genes']:,} genes"
+                    )
+                    console.print(f"  • Source: {load_result['file_path']}\n")
+                else:
+                    console.print(
+                        f"[bold red on white] ⚠️  Error [/bold red on white] "
+                        f"[red]{load_result['error']}[/red]"
+                    )
+
+            except Exception as e:
+                console.print(
+                    f"[bold red on white] ⚠️  Error [/bold red on white] "
+                    f"[red]Failed to load quantification directory: {str(e)}[/red]"
+                )
+
+            return None  # Skip the rest of the /read logic (quantification handled)
+
         # Check if filename contains glob patterns
         import glob as glob_module
 
@@ -2441,15 +2727,15 @@ when they are started by agents or analysis workflows.
                 console.print(summary_table)
 
                 # Show next steps
-                console.print(f"\n[bold white]🎯 Ready for Analysis![/bold white]")
+                console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
                 console.print(
-                    f"[white]Use these commands to work with your data:[/white]"
+                    "[white]Use these commands to work with your data:[/white]"
                 )
                 console.print(
-                    f"  • [yellow]/data[/yellow] - View data summary for all loaded datasets"
+                    "  • [yellow]/data[/yellow] - View data summary for all loaded datasets"
                 )
                 console.print(
-                    f"  • [yellow]/modalities[/yellow] - View detailed information for each modality"
+                    "  • [yellow]/modalities[/yellow] - View detailed information for each modality"
                 )
                 console.print(
                     f"  • [yellow]Compare the {loaded_files[0]['modality_name']} and {loaded_files[-1]['modality_name']} datasets[/yellow] - Start comparative analysis"
@@ -2508,7 +2794,7 @@ when they are started by agents or analysis workflows.
             and file_type in ["delimited_data", "spreadsheet_data"]
         ):
             # This is a data file - load it into DataManager
-            console.print(f"[cyan]🧬 Loading data into workspace...[/cyan]")
+            console.print("[cyan]🧬 Loading data into workspace...[/cyan]")
 
             with create_progress(client_arg=client) as progress:
                 progress.add_task("Loading data...", total=None)
@@ -2550,11 +2836,11 @@ when they are started by agents or analysis workflows.
                 console.print(info_table)
 
                 # Provide next step suggestions
-                console.print(f"\n[bold white]🎯 Ready for Analysis![/bold white]")
+                console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
                 console.print(
-                    f"[white]Use these commands to analyze your data:[/white]"
+                    "[white]Use these commands to analyze your data:[/white]"
                 )
-                console.print(f"  • [yellow]/data[/yellow] - View data summary")
+                console.print("  • [yellow]/data[/yellow] - View data summary")
                 console.print(
                     f"  • [yellow]Analyze the {load_result['modality_name']} dataset[/yellow] - Start analysis"
                 )
@@ -2639,7 +2925,7 @@ when they are started by agents or analysis workflows.
                     return f"Displayed text file '{filename}' ({file_description}, {len(content.splitlines())} lines)"
                 else:
                     console.print(
-                        f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]"
+                        "[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]"
                     )
                     return f"Failed to read text file '{filename}'"
             except Exception as e:
@@ -2651,30 +2937,417 @@ when they are started by agents or analysis workflows.
         else:
             # Binary file or unsupported type
             console.print(
-                f"[bold yellow on black] ℹ️  File Info [/bold yellow on black]"
+                "[bold yellow on black] ℹ️  File Info [/bold yellow on black]"
             )
             console.print(
                 f"[white]File type '[yellow]{file_description}[/yellow]' is not supported for reading or loading.[/white]"
             )
             console.print(
-                f"[grey50]This appears to be a binary file or unsupported format.[/grey50]"
+                "[grey50]This appears to be a binary file or unsupported format.[/grey50]"
             )
 
             if file_category == "image":
                 console.print(
-                    f"[cyan]💡 This is an image file. Use your system's image viewer to open it.[/cyan]"
+                    "[cyan]💡 This is an image file. Use your system's image viewer to open it.[/cyan]"
                 )
             elif file_category == "archive":
+                # Smart archive handling - inspect first for nested archives
                 console.print(
-                    f"[cyan]💡 This is an archive file. Extract it first to access the contents.[/cyan]"
+                    "[bold cyan on black] 📦 Archive Detected [/bold cyan on black]"
                 )
+                console.print(
+                    f"[white]Archive type: [yellow]{file_description}[/yellow][/white]"
+                )
+                console.print(
+                    f"[white]Size: [yellow]{file_info['size_bytes'] / 1024 / 1024:.2f} MB[/yellow][/white]"
+                )
+                console.print("\n[cyan]🔍 Inspecting archive structure...[/cyan]")
+
+                # Inspect archive to detect nested structures
+                with console.status("[cyan]Analyzing archive contents...[/cyan]"):
+                    inspection = client.inspect_archive(filename)
+
+                if not inspection["success"]:
+                    console.print("\n[red]✗ Archive inspection failed[/red]")
+                    console.print(f"[red]{inspection['error']}[/red]")
+                    return (
+                        f"Failed to inspect archive '{filename}': {inspection['error']}"
+                    )
+
+                # Handle nested archives with inspection workflow
+                if inspection["type"] == "nested_archive":
+                    nested_info = inspection["nested_info"]
+
+                    # Display inspection report
+                    console.print(
+                        "\n[bold green]✓ Detected Nested Archive Structure[/bold green]"
+                    )
+                    console.print(
+                        f"[white]Total nested archives: [yellow]{nested_info.total_count}[/yellow][/white]"
+                    )
+                    console.print(
+                        f"[white]Estimated memory: [yellow]{nested_info.estimated_memory / (1024**3):.1f} GB[/yellow][/white]"
+                    )
+
+                    # Show condition groups
+                    if nested_info.groups:
+                        console.print(
+                            "\n[bold white]📂 Condition Groups:[/bold white]"
+                        )
+                        groups_table = Table(box=box.ROUNDED, border_style="cyan")
+                        groups_table.add_column("Condition", style="bold orange1")
+                        groups_table.add_column("Samples", style="white")
+                        groups_table.add_column("GSM Range", style="grey70")
+
+                        for condition, samples in nested_info.groups.items():
+                            gsm_ids = [s["gsm_id"] for s in samples]
+                            groups_table.add_row(
+                                condition,
+                                str(len(samples)),
+                                f"{min(gsm_ids)}-{max(gsm_ids)}" if gsm_ids else "N/A",
+                            )
+
+                        console.print(groups_table)
+
+                    # Memory warning
+                    if nested_info.estimated_memory > 5 * 1024**3:
+                        console.print(
+                            f"\n[yellow]⚠️  Loading all samples requires ~{nested_info.estimated_memory / (1024**3):.1f} GB memory[/yellow]"
+                        )
+
+                    # Recommended actions
+                    console.print("\n[bold white]🎯 Next Steps:[/bold white]")
+                    console.print(
+                        "[orange1]  • /archive list[/orange1]           - Show detailed sample list"
+                    )
+                    console.print(
+                        "[orange1]  • /archive load <pattern>[/orange1] - Load specific samples"
+                    )
+                    console.print("[dim]    Examples:[/dim]")
+                    console.print("[dim]      /archive load GSM4710689[/dim]")
+                    console.print("[dim]      /archive load TISSUE[/dim]")
+                    console.print("[dim]      /archive load PDAC_* --limit 3[/dim]")
+
+                    # Store cache ID for subsequent commands
+                    client._last_archive_cache = inspection["cache_id"]
+                    client._last_archive_info = nested_info
+
+                    return f"Inspected nested archive: {nested_info.total_count} samples found. Use /archive commands to load selectively."
+
+                # Handle regular archives with auto-load
+                else:
+                    console.print("[cyan]🔄 Extracting and loading archive...[/cyan]")
+
+                    with console.status("[cyan]Extracting archive...[/cyan]"):
+                        extract_result = client.extract_and_load_archive(filename)
+
+                    if extract_result["success"]:
+                        console.print(
+                            "\n[green]✓ Successfully loaded archive contents[/green]"
+                        )
+                        console.print(
+                            f"[white]Modality: [bold cyan]{extract_result['modality_name']}[/bold cyan][/white]"
+                        )
+                        console.print(
+                            f"[white]Shape: [yellow]{extract_result['data_shape']}[/yellow][/white]"
+                        )
+
+                        if "n_samples" in extract_result:
+                            console.print(
+                                f"[white]Samples: [yellow]{extract_result['n_samples']}[/yellow][/white]"
+                            )
+
+                        console.print(
+                            f"\n[dim]{extract_result.get('message', '')}[/dim]"
+                        )
+
+                        return f"Successfully loaded archive '{filename}' as modality '{extract_result['modality_name']}' with shape {extract_result['data_shape']}"
+
+                    else:
+                        console.print("\n[red]✗ Archive extraction failed[/red]")
+                        console.print(f"[red]{extract_result['error']}[/red]")
+
+                        if "suggestion" in extract_result:
+                            console.print(
+                                f"\n[yellow]💡 Suggestion: {extract_result['suggestion']}[/yellow]"
+                            )
+
+                        if "manifest" in extract_result:
+                            manifest = extract_result["manifest"]
+                            console.print("\n[dim]Archive contents:[/dim]")
+                            console.print(
+                                f"[dim]  Files: {manifest['file_count']}[/dim]"
+                            )
+                            console.print(
+                                f"[dim]  Extensions: {dict(manifest['extensions'])}[/dim]"
+                            )
+
+                        return f"Failed to extract archive '{filename}': {extract_result['error']}"
+
             else:
                 console.print(
-                    f"[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]"
+                    "[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]"
                 )
 
-            # Return summary for conversation history
-            return f"Identified file '{filename}' as {file_description} ({file_category}) - not supported for loading or display"
+            # Return summary for conversation history (for non-archive unsupported files)
+            if file_category != "archive":
+                return f"Identified file '{filename}' as {file_description} ({file_category}) - not supported for loading or display"
+
+    elif cmd.startswith("/archive"):
+        # Handle nested archive commands
+        parts = cmd.split(maxsplit=2)
+        subcommand = parts[1] if len(parts) > 1 else "help"
+
+        # Check if we have a cached archive from /read
+        if not hasattr(client, "_last_archive_cache"):
+            console.print("[red]❌ No archive inspection cached[/red]")
+            console.print(
+                "[yellow]💡 Run /read <archive.tar> first to inspect an archive[/yellow]"
+            )
+            return None
+
+        if subcommand == "list":
+            # Show detailed list of all nested samples
+            nested_info = client._last_archive_info
+
+            console.print("\n[bold white]📋 Archive Contents:[/bold white]")
+            console.print(f"[dim]Cache ID: {client._last_archive_cache}[/dim]\n")
+
+            samples_table = Table(
+                box=box.ROUNDED, border_style="cyan", title="All Samples"
+            )
+            samples_table.add_column("GSM ID", style="bold orange1")
+            samples_table.add_column("Condition", style="white")
+            samples_table.add_column("Number", style="grey70")
+            samples_table.add_column("Filename", style="dim")
+
+            for condition, samples in nested_info.groups.items():
+                for sample in samples:
+                    samples_table.add_row(
+                        sample["gsm_id"],
+                        condition,
+                        sample["number"],
+                        sample["filename"],
+                    )
+
+            console.print(samples_table)
+            return f"Listed {nested_info.total_count} samples from cached archive"
+
+        elif subcommand == "groups":
+            # Show condition groups summary
+            nested_info = client._last_archive_info
+
+            console.print("\n[bold white]📂 Condition Groups:[/bold white]\n")
+
+            groups_table = Table(box=box.ROUNDED, border_style="cyan")
+            groups_table.add_column("Condition", style="bold orange1")
+            groups_table.add_column("Sample Count", style="white")
+            groups_table.add_column("GSM IDs", style="grey70")
+
+            for condition, samples in nested_info.groups.items():
+                gsm_ids = [s["gsm_id"] for s in samples]
+                groups_table.add_row(
+                    condition,
+                    str(len(samples)),
+                    f"{min(gsm_ids)}-{max(gsm_ids)}" if gsm_ids else "N/A",
+                )
+
+            console.print(groups_table)
+            return f"Displayed {len(nested_info.groups)} condition groups"
+
+        elif subcommand == "load":
+            # Load samples by pattern
+            if len(parts) < 3:
+                console.print(
+                    "[yellow]Usage: /archive load <pattern|GSM_ID|condition>[/yellow]"
+                )
+                console.print("[dim]Examples:[/dim]")
+                console.print("[dim]  /archive load GSM4710689[/dim]")
+                console.print("[dim]  /archive load TISSUE[/dim]")
+                console.print("[dim]  /archive load PDAC_* --limit 3[/dim]")
+                return None
+
+            pattern_arg = parts[2]
+
+            # Parse limit flag
+            limit = None
+            if "--limit" in pattern_arg:
+                pattern, limit_str = pattern_arg.split("--limit")
+                pattern = pattern.strip()
+                try:
+                    limit = int(limit_str.strip())
+                except ValueError:
+                    console.print("[red]❌ Invalid limit value[/red]")
+                    return None
+            else:
+                pattern = pattern_arg
+
+            console.print(
+                f"[cyan]🔄 Loading samples matching '[bold]{pattern}[/bold]'...[/cyan]"
+            )
+
+            with console.status("[cyan]Loading samples...[/cyan]"):
+                result = client.load_from_cache(
+                    client._last_archive_cache, pattern, limit
+                )
+
+            if result["success"]:
+                console.print(f"\n[green]✓ {result['message']}[/green]")
+
+                # Display merged dataset if auto-concatenation occurred
+                if "merged_modality" in result:
+                    merged_name = result["merged_modality"]
+
+                    # Get merged dataset details
+                    try:
+                        merged_adata = client.data_manager.get_modality(merged_name)
+
+                        # Create prominent merged dataset panel
+                        merged_info = f"""[bold white]Merged Dataset:[/bold white] [orange1]{merged_name}[/orange1]
+
+[white]Shape:[/white] [cyan]{merged_adata.n_obs:,} cells × {merged_adata.n_vars:,} genes[/cyan]
+[white]Batches:[/white] [cyan]{result['loaded_count']} samples merged[/cyan]
+[white]Batch key:[/white] [cyan]sample_id[/cyan]
+
+[bold white]🎯 Ready for Analysis![/bold white]
+[grey70]  • Say: "Show me a UMAP of this dataset"[/grey70]
+[grey70]  • Say: "Perform quality control"[/grey70]
+[grey70]  • Or use: /data to inspect the dataset[/grey70]"""
+
+                        panel = Panel(
+                            merged_info,
+                            title="✨ Auto-Merged Dataset",
+                            border_style="green",
+                            padding=(1, 2),
+                        )
+                        console.print(panel)
+
+                    except Exception as e:
+                        console.print(
+                            f"\n[yellow]⚠️  Could not display merged dataset details: {e}[/yellow]"
+                        )
+
+                    # Show individual modalities in collapsed format
+                    console.print(
+                        f"\n[dim]Individual modalities (merged into '{merged_name}'):[/dim]"
+                    )
+                    for i, modality in enumerate(result["modalities"][:5], 1):
+                        console.print(f"  [dim]{i}. {modality}[/dim]")
+                    if len(result["modalities"]) > 5:
+                        console.print(
+                            f"  [dim]... and {len(result['modalities'])-5} more[/dim]"
+                        )
+
+                else:
+                    # Single sample or no auto-concatenation
+                    console.print("\n[bold white]Loaded Modalities:[/bold white]")
+                    for modality in result["modalities"]:
+                        console.print(f"  • [cyan]{modality}[/cyan]")
+
+                    # Suggest next steps
+                    console.print("\n[bold white]🎯 Next Steps:[/bold white]")
+                    console.print(
+                        "[grey70]  • Use /data to inspect the dataset[/grey70]"
+                    )
+                    console.print(
+                        "[grey70]  • Say: 'Analyze this dataset' for natural language analysis[/grey70]"
+                    )
+
+                if result["failed"]:
+                    console.print(
+                        f"\n[yellow]⚠️  Failed to load {len(result['failed'])} samples:[/yellow]"
+                    )
+                    for failed in result["failed"][:5]:
+                        console.print(f"  • [dim]{failed}[/dim]")
+                    if len(result["failed"]) > 5:
+                        console.print(
+                            f"  • [dim]... and {len(result['failed'])-5} more[/dim]"
+                        )
+
+                # Return summary
+                if "merged_modality" in result:
+                    return f"Merged {result['loaded_count']} samples into '{result['merged_modality']}'"
+                else:
+                    return f"Loaded {result['loaded_count']} samples: {', '.join(result['modalities'][:3])}{'...' if len(result['modalities']) > 3 else ''}"
+
+            else:
+                console.print(f"\n[red]❌ {result['error']}[/red]")
+                if "suggestion" in result:
+                    console.print(f"[yellow]💡 {result['suggestion']}[/yellow]")
+                return f"Failed to load samples: {result['error']}"
+
+        elif subcommand == "status":
+            # Show cache status
+            from lobster.core.extraction_cache import ExtractionCacheManager
+
+            cache_manager = ExtractionCacheManager(client.workspace_path)
+            all_caches = cache_manager.list_all_caches()
+
+            console.print("\n[bold white]📊 Extraction Cache Status:[/bold white]\n")
+            console.print(
+                f"[white]Total cached extractions: [yellow]{len(all_caches)}[/yellow][/white]"
+            )
+
+            if all_caches:
+                cache_table = Table(box=box.ROUNDED, border_style="cyan")
+                cache_table.add_column("Cache ID", style="bold orange1")
+                cache_table.add_column("Archive", style="white")
+                cache_table.add_column("Samples", style="yellow")
+                cache_table.add_column("Extracted At", style="dim")
+
+                for cache in all_caches:
+                    from datetime import datetime
+
+                    extracted_at = datetime.fromisoformat(cache["extracted_at"])
+                    cache_table.add_row(
+                        cache["cache_id"],
+                        Path(cache["archive_path"]).name,
+                        str(cache["nested_info"]["total_count"]),
+                        extracted_at.strftime("%Y-%m-%d %H:%M"),
+                    )
+
+                console.print(cache_table)
+
+            return f"Cache status: {len(all_caches)} active extractions"
+
+        elif subcommand == "cleanup":
+            # Clean up old caches
+            from lobster.core.extraction_cache import ExtractionCacheManager
+
+            cache_manager = ExtractionCacheManager(client.workspace_path)
+
+            console.print("[cyan]🧹 Cleaning up old cached extractions...[/cyan]")
+            removed_count = cache_manager.cleanup_old_caches(max_age_days=7)
+
+            console.print(f"[green]✓ Removed {removed_count} old cache(s)[/green]")
+            return f"Cleaned up {removed_count} old cached extractions"
+
+        else:
+            # Show help
+            console.print("\n[bold white]📦 /archive Commands:[/bold white]\n")
+            console.print(
+                "[orange1]/archive list[/orange1]             - List all samples in inspected archive"
+            )
+            console.print(
+                "[orange1]/archive groups[/orange1]           - Show condition groups"
+            )
+            console.print(
+                "[orange1]/archive load <pattern>[/orange1]   - Load samples by pattern"
+            )
+            console.print(
+                "[orange1]/archive status[/orange1]           - Show extraction cache status"
+            )
+            console.print(
+                "[orange1]/archive cleanup[/orange1]          - Clear old cached extractions\n"
+            )
+
+            console.print("[bold white]Loading Patterns:[/bold white]")
+            console.print("[grey70]• GSM ID:[/grey70]        GSM4710689")
+            console.print("[grey70]• Condition:[/grey70]     TISSUE, PDAC_TISSUE")
+            console.print("[grey70]• Glob:[/grey70]          PDAC_*, *_TISSUE_*")
+            console.print("[grey70]• With limit:[/grey70]    TISSUE --limit 3")
+
+            return None
 
     elif cmd == "/export":
         # Create progress bar
@@ -2734,6 +3407,291 @@ when they are started by agents or analysis workflows.
             f"[bold red]✓[/bold red] [white]Session exported to:[/white] [grey74]{export_path}[/grey74]"
         )
         return f"Session exported to: {export_path}"
+
+    elif cmd == "/pipeline export":
+        """Export current session as Jupyter notebook."""
+        try:
+            # Check if data manager supports notebook export
+            if not hasattr(client, "data_manager"):
+                console.print(
+                    "[red]Notebook export not available for cloud client[/red]"
+                )
+                return "Notebook export only available for local client"
+
+            if not hasattr(client.data_manager, "export_notebook"):
+                console.print(
+                    "[red]Notebook export not available - update Lobster[/red]"
+                )
+                return "Notebook export not available"
+
+            # Interactive prompts
+            console.print(
+                "[bold white]📓 Export Session as Jupyter Notebook[/bold white]\n"
+            )
+
+            name = Prompt.ask(
+                "Notebook name (no extension)", default="analysis_workflow"
+            )
+            if not name:
+                console.print("[red]Name required[/red]")
+                return "Export cancelled - no name provided"
+
+            description = Prompt.ask("Description (optional)", default="")
+
+            # Export via DataManagerV2
+            console.print("\n[yellow]Exporting notebook...[/yellow]")
+            path = client.data_manager.export_notebook(name, description)
+
+            console.print(f"\n[green]✓ Notebook exported:[/green] {path}")
+            console.print("\n[bold white]Next steps:[/bold white]")
+            console.print(f"  1. [yellow]Review:[/yellow]  jupyter notebook {path}")
+            console.print(
+                f"  2. [yellow]Commit:[/yellow]  git add {path} && git commit -m 'Add {name}'"
+            )
+            console.print(
+                f"  3. [yellow]Run:[/yellow]     /pipeline run {path.name} <modality>"
+            )
+
+            return f"Exported notebook: {path}"
+
+        except ValueError as e:
+            console.print(f"[red]Export failed: {e}[/red]")
+            return f"Export failed: {e}"
+        except Exception as e:
+            console.print(f"[red]Export error: {e}[/red]")
+            logger.exception("Notebook export error")
+            return f"Export error: {e}"
+
+    elif cmd == "/pipeline list":
+        """List available notebooks."""
+        try:
+            if not hasattr(client, "data_manager"):
+                console.print(
+                    "[red]Notebook listing not available for cloud client[/red]"
+                )
+                return "Notebook listing only available for local client"
+
+            notebooks = client.data_manager.list_notebooks()
+
+            if not notebooks:
+                console.print(
+                    "[yellow]No notebooks found in .lobster/notebooks/[/yellow]"
+                )
+                console.print("Export one with: [green]/pipeline export[/green]")
+                return "No notebooks found"
+
+            # Create table
+            table = Table(
+                title="📓 Available Notebooks",
+                box=box.ROUNDED,
+                border_style="blue",
+                title_style="bold blue on white",
+            )
+            table.add_column("Name", style="cyan")
+            table.add_column("Steps", justify="right")
+            table.add_column("Created By")
+            table.add_column("Created", style="dim")
+            table.add_column("Size", justify="right")
+
+            for nb in notebooks:
+                created_date = (
+                    nb["created_at"].split("T")[0] if nb["created_at"] else "unknown"
+                )
+                table.add_row(
+                    nb["name"],
+                    str(nb["n_steps"]),
+                    nb["created_by"],
+                    created_date,
+                    f"{nb['size_kb']:.1f} KB",
+                )
+
+            console.print(table)
+            return f"Found {len(notebooks)} notebooks"
+
+        except Exception as e:
+            console.print(f"[red]List error: {e}[/red]")
+            logger.exception("Notebook list error")
+            return f"List error: {e}"
+
+    elif cmd.startswith("/pipeline run"):
+        """Run saved notebook with new data."""
+        try:
+            if not hasattr(client, "data_manager"):
+                console.print(
+                    "[red]Notebook execution not available for cloud client[/red]"
+                )
+                return "Notebook execution only available for local client"
+
+            parts = cmd.split()
+
+            # Get notebook name
+            if len(parts) > 2:
+                notebook_name = parts[2]
+            else:
+                # Interactive selection
+                notebooks = client.data_manager.list_notebooks()
+                if not notebooks:
+                    console.print("[red]No notebooks available[/red]")
+                    return "No notebooks available"
+
+                console.print("[bold]Available notebooks:[/bold]")
+                for i, nb in enumerate(notebooks, 1):
+                    console.print(
+                        f"  {i}. [cyan]{nb['name']}[/cyan] ({nb['n_steps']} steps)"
+                    )
+
+                selection = Prompt.ask("Select notebook number", default="1")
+                try:
+                    idx = int(selection) - 1
+                    notebook_name = notebooks[idx]["filename"]
+                except (ValueError, IndexError):
+                    console.print("[red]Invalid selection[/red]")
+                    return "Invalid notebook selection"
+
+            # Get input modality
+            if len(parts) > 3:
+                input_modality = parts[3]
+            else:
+                modalities = client.data_manager.list_modalities()
+                if not modalities:
+                    console.print("[red]No data loaded. Use /read first.[/red]")
+                    return "No data loaded"
+
+                console.print("[bold]Available modalities:[/bold]")
+                for i, mod in enumerate(modalities, 1):
+                    adata = client.data_manager.modalities[mod]
+                    console.print(
+                        f"  {i}. [cyan]{mod}[/cyan] ({adata.n_obs} obs × {adata.n_vars} vars)"
+                    )
+
+                selection = Prompt.ask("Select modality number", default="1")
+                try:
+                    idx = int(selection) - 1
+                    input_modality = modalities[idx]
+                except (ValueError, IndexError):
+                    console.print("[red]Invalid selection[/red]")
+                    return "Invalid modality selection"
+
+            # Dry run first
+            console.print("\n[yellow]Running validation...[/yellow]")
+            dry_result = client.data_manager.run_notebook(
+                notebook_name, input_modality, dry_run=True
+            )
+
+            # Show validation
+            validation = dry_result.get("validation")
+            if (
+                validation
+                and hasattr(validation, "has_errors")
+                and validation.has_errors
+            ):
+                console.print("[red]✗ Validation failed:[/red]")
+                for error in validation.errors:
+                    console.print(f"  • {error}")
+                return "Validation failed"
+
+            if (
+                validation
+                and hasattr(validation, "has_warnings")
+                and validation.has_warnings
+            ):
+                console.print("[yellow]⚠ Warnings:[/yellow]")
+                for warning in validation.warnings:
+                    console.print(f"  • {warning}")
+
+            console.print("\n[green]✓ Validation passed[/green]")
+            console.print(f"  Steps to execute: {dry_result['steps_to_execute']}")
+            console.print(
+                f"  Estimated time: {dry_result['estimated_duration_minutes']} min"
+            )
+
+            # Confirm execution
+            if not Confirm.ask("\nExecute notebook?"):
+                console.print("Cancelled")
+                return "Execution cancelled"
+
+            # Execute
+            console.print("\n[yellow]Executing notebook...[/yellow]")
+            with create_progress(client_arg=client) as progress:
+                task = progress.add_task("Running analysis...", total=None)
+                result = client.data_manager.run_notebook(notebook_name, input_modality)
+
+            if result["status"] == "success":
+                console.print("\n[green]✓ Execution complete![/green]")
+                console.print(f"  Output: {result['output_notebook']}")
+                console.print(f"  Duration: {result['execution_time']:.1f}s")
+                return (
+                    f"Notebook executed successfully in {result['execution_time']:.1f}s"
+                )
+            else:
+                console.print("\n[red]✗ Execution failed[/red]")
+                console.print(f"  Error: {result.get('error', 'Unknown')}")
+                console.print(
+                    f"  Partial output: {result.get('output_notebook', 'N/A')}"
+                )
+                return f"Execution failed: {result.get('error', 'Unknown')}"
+
+        except FileNotFoundError as e:
+            console.print(f"[red]File not found: {e}[/red]")
+            return f"Notebook not found: {e}"
+        except Exception as e:
+            console.print(f"[red]Execution error: {e}[/red]")
+            logger.exception("Notebook execution error")
+            return f"Execution error: {e}"
+
+    elif cmd == "/pipeline info":
+        """Show notebook details."""
+        try:
+            if not hasattr(client, "data_manager"):
+                console.print("[red]Notebook info not available for cloud client[/red]")
+                return "Notebook info only available for local client"
+
+            notebooks = client.data_manager.list_notebooks()
+            if not notebooks:
+                console.print("[red]No notebooks found[/red]")
+                return "No notebooks found"
+
+            console.print("[bold]Select notebook:[/bold]")
+            for i, nb in enumerate(notebooks, 1):
+                console.print(f"  {i}. [cyan]{nb['name']}[/cyan]")
+
+            selection = Prompt.ask("Selection", default="1")
+            try:
+                idx = int(selection) - 1
+                nb = notebooks[idx]
+            except (ValueError, IndexError):
+                console.print("[red]Invalid selection[/red]")
+                return "Invalid selection"
+
+            # Load full notebook
+            import nbformat
+
+            nb_path = Path(nb["path"])
+            with open(nb_path) as f:
+                notebook = nbformat.read(f, as_version=4)
+
+            metadata = notebook.metadata.get("lobster", {})
+
+            # Display info
+            console.print(f"\n[bold cyan]{nb['name']}[/bold cyan]")
+            console.print(f"Created by: {metadata.get('created_by', 'unknown')}")
+            console.print(f"Date: {metadata.get('created_at', 'unknown')}")
+            console.print(
+                f"Lobster version: {metadata.get('lobster_version', 'unknown')}"
+            )
+            console.print("\nDependencies:")
+            for pkg, ver in metadata.get("dependencies", {}).items():
+                console.print(f"  {pkg}: {ver}")
+
+            console.print(f"\nSteps: {nb['n_steps']}")
+            console.print(f"Size: {nb['size_kb']:.1f} KB")
+
+            return f"Notebook info: {nb['name']}"
+
+        except Exception as e:
+            console.print(f"[red]Info error: {e}[/red]")
+            logger.exception("Notebook info error")
+            return f"Info error: {e}"
 
     elif cmd == "/reset":
         if Confirm.ask("[red]🦞 Reset conversation?[/red]"):
@@ -2838,7 +3796,7 @@ when they are started by agents or analysis workflows.
 
             # Show individual modality details if multiple modalities are loaded
             if summary.get("modalities"):
-                console.print(f"\n[bold red]🧬 Individual Modality Details[/bold red]")
+                console.print("\n[bold red]🧬 Individual Modality Details[/bold red]")
 
                 modalities_table = Table(
                     box=box.SIMPLE, border_style="red", show_header=True
@@ -2963,7 +3921,7 @@ when they are started by agents or analysis workflows.
                             timestamp.replace("Z", "+00:00")
                         )
                         cached_str = cached_time.strftime("%Y-%m-%d %H:%M")
-                    except:
+                    except Exception:
                         cached_str = timestamp[:16] if timestamp else "N/A"
 
                     store_table.add_row(
@@ -3029,12 +3987,12 @@ when they are started by agents or analysis workflows.
                 workspace_path = client.data_manager.workspace_path
                 data_dir = workspace_path / "data"
 
-                console.print(f"[yellow]📂 No datasets found in workspace[/yellow]")
+                console.print("[yellow]📂 No datasets found in workspace[/yellow]")
                 console.print(f"[grey70]Workspace: {workspace_path}[/grey70]")
                 console.print(f"[grey70]Data directory: {data_dir}[/grey70]")
 
                 if not data_dir.exists():
-                    console.print(f"[red]⚠️  Data directory doesn't exist[/red]")
+                    console.print("[red]⚠️  Data directory doesn't exist[/red]")
                     console.print(
                         f"[cyan]💡 Create it with: mkdir -p {data_dir}[/cyan]"
                     )
@@ -3057,14 +4015,29 @@ when they are started by agents or analysis workflows.
 
                 return "No datasets found in workspace"
 
-            table = Table(title="Available Datasets", box=box.ROUNDED)
-            table.add_column("Status", style="green")
-            table.add_column("Name", style="bold")
-            table.add_column("Size", style="cyan")
-            table.add_column("Shape", style="white")
-            table.add_column("Modified", style="dim")
+            # Helper function for intelligent truncation (middle ellipsis)
+            def truncate_middle(text: str, max_length: int = 60) -> str:
+                """Truncate text in the middle with ellipsis, preserving start and end."""
+                if len(text) <= max_length:
+                    return text
 
-            for name, info in sorted(available.items()):
+                # Calculate how much to keep on each side
+                # Reserve 3 characters for "..."
+                available_chars = max_length - 3
+                start_length = (available_chars + 1) // 2  # Slightly prefer start
+                end_length = available_chars // 2
+
+                return f"{text[:start_length]}...{text[-end_length:]}"
+
+            table = Table(title="Available Datasets", box=box.ROUNDED)
+            table.add_column("#", style="dim", width=4)
+            table.add_column("Status", style="green", width=6)
+            table.add_column("Name", style="bold", no_wrap=False)
+            table.add_column("Size", style="cyan", width=10)
+            table.add_column("Shape", style="white", width=15)
+            table.add_column("Modified", style="dim", width=12)
+
+            for idx, (name, info) in enumerate(sorted(available.items()), start=1):
                 status = "✓" if name in loaded else "○"
                 size = f"{info['size_mb']:.1f} MB"
                 shape = (
@@ -3073,32 +4046,192 @@ when they are started by agents or analysis workflows.
                     else "N/A"
                 )
                 modified = info["modified"].split("T")[0]
-                table.add_row(status, name, size, shape, modified)
+
+                # Use intelligent truncation for long names
+                display_name = truncate_middle(name, max_length=60)
+
+                table.add_row(str(idx), status, display_name, size, shape, modified)
 
             console.print(table)
+            console.print("\n[dim]Use '/workspace info <#>' to see full details[/dim]")
             return f"Listed {len(available)} available datasets"
 
-        elif subcommand == "load":
-            # Load specific datasets
+        elif subcommand == "info":
+            # Show detailed information for specific dataset(s)
             if len(parts) < 3:
-                console.print("[red]Usage: /workspace load <pattern>[/red]")
-                return None
-            else:
-                pattern = parts[2]
-
-                # Show what will be loaded
+                console.print("[red]Usage: /workspace info <#|pattern>[/red]")
                 console.print(
-                    f"[yellow]Loading workspace datasets (pattern: {pattern})...[/yellow]"
+                    "[dim]Examples: /workspace info 1, /workspace info gse12345, /workspace info *clustered*[/dim]"
+                )
+                return None
+
+            selector = parts[2]
+
+            # Re-scan workspace to ensure we have latest files
+            if hasattr(client.data_manager, "_scan_workspace"):
+                client.data_manager._scan_workspace()
+
+            available = client.data_manager.available_datasets
+            loaded = set(client.data_manager.modalities.keys())
+
+            if not available:
+                console.print("[yellow]No datasets found in workspace[/yellow]")
+                return None
+
+            # Determine if selector is an index or pattern
+            matched_datasets = []
+
+            if selector.isdigit():
+                # Index-based selection
+                idx = int(selector)
+                sorted_names = sorted(available.keys())
+                if 1 <= idx <= len(sorted_names):
+                    matched_datasets = [
+                        (sorted_names[idx - 1], available[sorted_names[idx - 1]])
+                    ]
+                else:
+                    console.print(
+                        f"[red]Index {idx} out of range (1-{len(sorted_names)})[/red]"
+                    )
+                    return None
+            else:
+                # Pattern-based selection
+                import fnmatch
+
+                for name, info in sorted(available.items()):
+                    if fnmatch.fnmatch(name.lower(), selector.lower()):
+                        matched_datasets.append((name, info))
+
+                if not matched_datasets:
+                    console.print(
+                        f"[yellow]No datasets match pattern: {selector}[/yellow]"
+                    )
+                    return None
+
+            # Display detailed information for matched datasets
+            for name, info in matched_datasets:
+                status = "✓ Loaded" if name in loaded else "○ Not Loaded"
+
+                # Create detailed info table
+                detail_table = Table(
+                    title=f"Dataset: {name}",
+                    box=box.ROUNDED,
+                    border_style="cyan",
+                    show_header=False,
+                )
+                detail_table.add_column("Property", style="bold cyan")
+                detail_table.add_column("Value", style="white")
+
+                detail_table.add_row("Name", name)
+                detail_table.add_row("Status", status)
+                detail_table.add_row("Path", info["path"])
+                detail_table.add_row("Size", f"{info['size_mb']:.2f} MB")
+                detail_table.add_row(
+                    "Shape",
+                    (
+                        f"{info['shape'][0]:,} observations × {info['shape'][1]:,} variables"
+                        if info["shape"]
+                        else "N/A"
+                    ),
+                )
+                detail_table.add_row("Type", info["type"])
+                detail_table.add_row("Modified", info["modified"])
+
+                # Try to detect lineage from name (basic version)
+                if "_" in name:
+                    parts_list = name.split("_")
+                    possible_stages = [
+                        p
+                        for p in parts_list
+                        if any(
+                            keyword in p.lower()
+                            for keyword in [
+                                "quality",
+                                "filter",
+                                "normal",
+                                "doublet",
+                                "cluster",
+                                "marker",
+                                "annot",
+                                "pseudobulk",
+                            ]
+                        )
+                    ]
+                    if possible_stages:
+                        detail_table.add_row(
+                            "Processing Stages", " → ".join(possible_stages)
+                        )
+
+                console.print(detail_table)
+                console.print()  # Add spacing between datasets
+
+            return f"Displayed details for {len(matched_datasets)} dataset(s)"
+
+        elif subcommand == "load":
+            # Load specific datasets by index or pattern
+            if len(parts) < 3:
+                console.print("[red]Usage: /workspace load <#|pattern>[/red]")
+                console.print(
+                    "[dim]Examples: /workspace load 1, /workspace load recent, /workspace load *clustered*[/dim]"
+                )
+                return None
+
+            selector = parts[2]
+
+            # Re-scan workspace to ensure we have latest files
+            if hasattr(client.data_manager, "_scan_workspace"):
+                client.data_manager._scan_workspace()
+
+            available = client.data_manager.available_datasets
+
+            if not available:
+                console.print("[yellow]No datasets found in workspace[/yellow]")
+                return None
+
+            # Determine if selector is an index or pattern
+            if selector.isdigit():
+                # Index-based loading (single dataset)
+                idx = int(selector)
+                sorted_names = sorted(available.keys())
+                if 1 <= idx <= len(sorted_names):
+                    dataset_name = sorted_names[idx - 1]
+
+                    console.print(
+                        f"[yellow]Loading dataset: {dataset_name}...[/yellow]"
+                    )
+
+                    # Load single dataset directly
+                    success = client.data_manager.load_dataset(dataset_name)
+
+                    if success:
+                        console.print(
+                            f"[green]✓ Loaded dataset: {dataset_name} ({available[dataset_name]['size_mb']:.1f} MB)[/green]"
+                        )
+                        return "Loaded dataset from workspace"
+                    else:
+                        console.print(
+                            f"[red]Failed to load dataset: {dataset_name}[/red]"
+                        )
+                        return None
+                else:
+                    console.print(
+                        f"[red]Index {idx} out of range (1-{len(sorted_names)})[/red]"
+                    )
+                    return None
+            else:
+                # Pattern-based loading (potentially multiple datasets)
+                console.print(
+                    f"[yellow]Loading workspace datasets (pattern: {selector})...[/yellow]"
                 )
 
                 # Create progress bar
                 with create_progress(client_arg=client) as progress:
                     task = progress.add_task(
-                        f"Loading datasets matching '{pattern}'...", total=None
+                        f"Loading datasets matching '{selector}'...", total=None
                     )
 
                     # Perform workspace loading
-                    result = client.data_manager.restore_session(pattern)
+                    result = client.data_manager.restore_session(selector)
 
                 # Display results
                 if result["restored"]:
@@ -3161,22 +4294,22 @@ when they are started by agents or analysis workflows.
             # Show directories
             if workspace_status.get("directories"):
                 dirs = workspace_status["directories"]
-                console.print(f"\n[bold white]📁 Directories:[/bold white]")
+                console.print("\n[bold white]📁 Directories:[/bold white]")
                 for dir_type, path in dirs.items():
                     console.print(f"  • {dir_type.title()}: [grey74]{path}[/grey74]")
 
             # Show loaded modalities
             if workspace_status.get("modality_names"):
-                console.print(f"\n[bold white]🧬 Loaded Modalities:[/bold white]")
+                console.print("\n[bold white]🧬 Loaded Modalities:[/bold white]")
                 for modality in workspace_status["modality_names"]:
                     console.print(f"  • {modality}")
 
             # Show available backends and adapters
-            console.print(f"\n[bold white]🔧 Available Backends:[/bold white]")
+            console.print("\n[bold white]🔧 Available Backends:[/bold white]")
             for backend in workspace_status.get("registered_backends", []):
                 console.print(f"  • {backend}")
 
-            console.print(f"\n[bold white]🔌 Available Adapters:[/bold white]")
+            console.print("\n[bold white]🔌 Available Adapters:[/bold white]")
             for adapter in workspace_status.get("registered_adapters", []):
                 console.print(f"  • {adapter}")
 
@@ -3290,7 +4423,7 @@ when they are started by agents or analysis workflows.
 
                 # Basic Information
                 matrix_info = _get_matrix_info(adata.X)
-                console.print(f"\n[bold white]📊 Basic Information[/bold white]")
+                console.print("\n[bold white]📊 Basic Information[/bold white]")
                 basic_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
                 basic_table.add_column("Property", style="grey70")
                 basic_table.add_column("Value", style="white")
@@ -3313,8 +4446,8 @@ when they are started by agents or analysis workflows.
                 console.print(basic_table)
 
                 # Data Matrix (X) Preview
-                console.print(f"\n[bold white]📈 Data Matrix (X)[/bold white]")
-                console.print(f"[grey70]Preview (first 5×5 cells):[/grey70]")
+                console.print("\n[bold white]📈 Data Matrix (X)[/bold white]")
+                console.print("[grey70]Preview (first 5×5 cells):[/grey70]")
                 x_preview = _format_data_preview(adata.X)
                 console.print(x_preview)
 
@@ -3340,7 +4473,7 @@ when they are started by agents or analysis workflows.
 
                     # Preview table
                     if len(adata.obs) > 0:
-                        console.print(f"[grey70]Preview:[/grey70]")
+                        console.print("[grey70]Preview:[/grey70]")
                         obs_preview = _format_dataframe_preview(adata.obs)
                         console.print(obs_preview)
 
@@ -3366,13 +4499,13 @@ when they are started by agents or analysis workflows.
 
                     # Preview table
                     if len(adata.var) > 0:
-                        console.print(f"[grey70]Preview:[/grey70]")
+                        console.print("[grey70]Preview:[/grey70]")
                         var_preview = _format_dataframe_preview(adata.var)
                         console.print(var_preview)
 
                 # Additional Data Structures
                 console.print(
-                    f"\n[bold white]📦 Additional Data Structures[/bold white]"
+                    "\n[bold white]📦 Additional Data Structures[/bold white]"
                 )
 
                 # Layers
@@ -3386,35 +4519,35 @@ when they are started by agents or analysis workflows.
 
                 # Obsm (observation matrices)
                 if adata.obsm:
-                    console.print(f"\n[cyan]Observation Matrices (obsm):[/cyan]")
+                    console.print("\n[cyan]Observation Matrices (obsm):[/cyan]")
                     obsm_table = _format_array_info(dict(adata.obsm))
                     if obsm_table:
                         console.print(obsm_table)
 
                 # Varm (variable matrices)
                 if adata.varm:
-                    console.print(f"\n[cyan]Variable Matrices (varm):[/cyan]")
+                    console.print("\n[cyan]Variable Matrices (varm):[/cyan]")
                     varm_table = _format_array_info(dict(adata.varm))
                     if varm_table:
                         console.print(varm_table)
 
                 # Obsp (observation pairwise)
                 if adata.obsp:
-                    console.print(f"\n[cyan]Observation Pairwise (obsp):[/cyan]")
+                    console.print("\n[cyan]Observation Pairwise (obsp):[/cyan]")
                     for key in adata.obsp.keys():
                         matrix = adata.obsp[key]
                         console.print(f"  • {key}: {matrix.shape[0]}×{matrix.shape[1]}")
 
                 # Varp (variable pairwise)
                 if adata.varp:
-                    console.print(f"\n[cyan]Variable Pairwise (varp):[/cyan]")
+                    console.print("\n[cyan]Variable Pairwise (varp):[/cyan]")
                     for key in adata.varp.keys():
                         matrix = adata.varp[key]
                         console.print(f"  • {key}: {matrix.shape[0]}×{matrix.shape[1]}")
 
                 # Unstructured data (uns)
                 if adata.uns:
-                    console.print(f"\n[cyan]Unstructured Data (uns):[/cyan]")
+                    console.print("\n[cyan]Unstructured Data (uns):[/cyan]")
                     uns_items = []
                     for key, value in adata.uns.items():
                         if isinstance(value, dict):
@@ -3444,7 +4577,7 @@ when they are started by agents or analysis workflows.
                     and modality_name in client.data_manager.metadata_store
                 ):
                     metadata = client.data_manager.metadata_store[modality_name]
-                    console.print(f"\n[bold white]📋 Metadata[/bold white]")
+                    console.print("\n[bold white]📋 Metadata[/bold white]")
                     meta_table = Table(
                         box=box.SIMPLE, show_header=False, padding=(0, 2)
                     )
@@ -3496,7 +4629,7 @@ when they are started by agents or analysis workflows.
                         plot["timestamp"].replace("Z", "+00:00")
                     )
                     created_str = created.strftime("%Y-%m-%d %H:%M")
-                except:
+                except Exception:
                     created_str = plot["timestamp"][:16] if plot["timestamp"] else "N/A"
 
                 table.add_row(
@@ -3606,7 +4739,7 @@ when they are started by agents or analysis workflows.
                         )
                 else:
                     console.print(
-                        f"[bold red on white] ⚠️  Error [/bold red on white] [red]Plot file not found. Try running /save first.[/red]"
+                        "[bold red on white] ⚠️  Error [/bold red on white] [red]Plot file not found. Try running /save first.[/red]"
                     )
             else:
                 console.print(
@@ -3687,7 +4820,7 @@ when they are started by agents or analysis workflows.
         saved_items = client.data_manager.auto_save_state()
 
         if saved_items:
-            console.print(f"[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
+            console.print("[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
             for item in saved_items:
                 console.print(f"  • {item}")
             return f"Saved {len(saved_items)} items to workspace: {', '.join(saved_items[:3])}{'...' if len(saved_items) > 3 else ''}"
@@ -3827,13 +4960,16 @@ def query(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show detailed tool usage and agent activity"
     ),
+    debug: bool = typer.Option(
+        False, "--debug", "-d", help="Enable debug mode with detailed logging"
+    ),
     output: Optional[Path] = typer.Option(None, "--output", "-o"),
 ):
     """
     Send a single query to the agent system.
     """
     # Initialize client
-    client = init_client(workspace, reasoning, verbose)
+    client = init_client(workspace, reasoning, verbose, debug)
 
     # Process query
     if should_show_progress(client):
@@ -3992,7 +5128,7 @@ def test(
             # Test specific agent
             try:
                 config = configurator.get_agent_model_config(agent)
-                params = configurator.get_llm_params(agent)
+                configurator.get_llm_params(agent)
 
                 console.print(
                     f"\n[green]✅ Agent '{agent}' configuration is valid[/green]"
@@ -4017,7 +5153,7 @@ def test(
             for agent_name in available_agents:
                 try:
                     config = configurator.get_agent_model_config(agent_name)
-                    params = configurator.get_llm_params(agent_name)
+                    configurator.get_llm_params(agent_name)
                     console.print(
                         f"   [green]✅ {agent_name}: {config.model_config.model_id}[/green]"
                     )
@@ -4121,7 +5257,6 @@ def generate_env():
 # =============================================================================
 # API KEYS (Required)
 # =============================================================================
-OPENAI_API_KEY="your-openai-api-key-here"
 AWS_BEDROCK_ACCESS_KEY="your-aws-access-key-here"
 AWS_BEDROCK_SECRET_ACCESS_KEY="your-aws-secret-key-here"
 NCBI_API_KEY="your-ncbi-api-key-here"
