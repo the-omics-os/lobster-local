@@ -16,12 +16,9 @@ Features:
 import csv
 import gzip
 import io
-import os
-import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 import psutil
 
@@ -129,14 +126,14 @@ class GEOParser:
             available_memory = vm.available
             total_required = int(required_memory * safety_factor)
 
-            # Keep at least 20% of total memory free
-            min_free_memory = vm.total * 0.2
+            # Keep a reasonable safety buffer (500 MB)
+            safety_buffer = 500 * 1024 * 1024  # 500 MB
 
-            if available_memory - total_required < min_free_memory:
+            if available_memory < total_required + safety_buffer:
                 logger.warning(
                     f"Insufficient memory: Required={self._format_bytes(total_required)}, "
                     f"Available={self._format_bytes(available_memory)}, "
-                    f"Minimum free={self._format_bytes(int(min_free_memory))}"
+                    f"Safety buffer={self._format_bytes(safety_buffer)}"
                 )
                 return False
 
@@ -537,7 +534,6 @@ class GEOParser:
             # Import scipy for sparse matrix handling
             try:
                 import scipy.io as sio
-                from scipy.sparse import csr_matrix
             except ImportError:
                 logger.error(
                     "scipy is required for parsing Matrix Market files but not available"
@@ -615,7 +611,6 @@ class GEOParser:
             # Import scipy for sparse matrix handling
             try:
                 import scipy.io as sio
-                from scipy.sparse import csr_matrix
             except ImportError:
                 logger.error(
                     "scipy is required for parsing Matrix Market files but not available"
@@ -818,7 +813,6 @@ class GEOParser:
             # Import scipy for sparse matrix handling
             try:
                 import scipy.io as sio
-                from scipy.sparse import csr_matrix
             except ImportError:
                 logger.error("scipy is required for parsing 10X data but not available")
                 return None
@@ -1220,11 +1214,11 @@ class GEOParser:
 
             # Extract relevant information from metadata
             series_info = metadata.get("series", {})
-            platform_info = metadata.get("platforms", {})
-            sample_info = metadata.get("samples", {})
+            metadata.get("platforms", {})
+            metadata.get("samples", {})
 
             # Look for clues in the metadata about data format
-            data_type = series_info.get("Series_type", "").lower()
+            series_info.get("Series_type", "").lower()
             raw_data_mentioned = False
             processed_data_mentioned = False
 
@@ -1288,7 +1282,7 @@ class GEOParser:
                             analysis["reason"] = (
                                 "Supplementary file appears adequate based on size comparison"
                             )
-                    except:
+                    except Exception:
                         # Default to TAR if we can't compare sizes
                         analysis["recommended_source"] = "tar"
                         analysis["reason"] = (
@@ -1373,8 +1367,8 @@ class GEOParser:
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
                         handle_ssl_error(e, target_url, logger)
                         raise Exception(
-                            f"SSL certificate verification failed when downloading file. "
-                            f"See error message above for solutions."
+                            "SSL certificate verification failed when downloading file. "
+                            "See error message above for solutions."
                         )
                     raise
 

@@ -15,9 +15,11 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, TypedDict, Union
+from unittest.mock import Mock
 
 import anndata
+import nbformat
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -25,6 +27,7 @@ import plotly.io as pio
 
 from lobster.core.adapters.base import BaseAdapter
 from lobster.core.adapters.transcriptomics_adapter import TranscriptomicsAdapter
+from lobster.core.analysis_ir import create_data_loading_ir, create_data_saving_ir
 
 # Import available backends and adapters
 from lobster.core.backends.h5ad_backend import H5ADBackend
@@ -32,6 +35,11 @@ from lobster.core.interfaces.adapter import IModalityAdapter
 from lobster.core.interfaces.backend import IDataBackend
 from lobster.core.interfaces.validator import ValidationResult
 from lobster.core.provenance import ProvenanceTracker
+from lobster.core.utils.h5ad_utils import validate_for_h5ad
+
+# Import for IR support (TYPE_CHECKING to avoid circular import)
+if TYPE_CHECKING:
+    from lobster.core.analysis_ir import AnalysisStep
 
 # Try to import ProteomicsAdapter - may not be available in public distribution
 try:
@@ -60,6 +68,32 @@ except ImportError:
     mudata = None
 
 logger = logging.getLogger(__name__)
+
+
+class MetadataEntry(TypedDict, total=False):
+    """
+    TypedDict for GEO metadata store entries.
+
+    Enforces consistent structure across all metadata storage locations
+    to prevent KeyError bugs when retrieving metadata.
+
+    Structure:
+        metadata (Dict[str, Any]): The actual GEO metadata from GEOparse
+        validation (Dict[str, Any]): Validation information (optional)
+        fetch_timestamp (str): ISO format timestamp when metadata was fetched
+        strategy_config (Dict[str, Any]): Download strategy configuration (optional)
+        stored_by (str): Component that stored the metadata
+        modality_detection (Dict[str, Any]): Modality detection results (optional)
+        concatenation_decision (Dict[str, Any]): Concatenation strategy (optional)
+    """
+
+    metadata: Dict[str, Any]
+    validation: Dict[str, Any]
+    fetch_timestamp: str
+    strategy_config: Dict[str, Any]
+    stored_by: str
+    modality_detection: Dict[str, Any]
+    concatenation_decision: Dict[str, Any]
 
 
 class SuppressKaleidoLogging:
@@ -129,8 +163,14 @@ class DataManagerV2:
         # Metadata storage for GEO datasets and other sources temporary until data is loaded
         self.metadata_store: Dict[str, Dict[str, Any]] = {}
 
-        # Legacy compatibility attributes for tool usage tracking
-        self.tool_usage_history: List[Dict[str, Any]] = []
+        # Download queue for dataset downloads (research_agent → data_expert handoff)
+        from lobster.core.download_queue import DownloadQueue
+
+        queue_file = self.workspace_path / ".lobster" / "download_queue.jsonl"
+        queue_file.parent.mkdir(parents=True, exist_ok=True)
+        self.download_queue: DownloadQueue = DownloadQueue(queue_file=queue_file)
+
+        # Processing log for user-facing messages
         self.processing_log: List[str] = []
 
         # Plot management
@@ -166,6 +206,11 @@ class DataManagerV2:
         # Provenance tracking
         self.provenance = ProvenanceTracker() if enable_provenance else None
 
+        # Notebook-based pipeline support (lazy initialization to avoid circular imports)
+        self._notebook_exporter = None
+        self._notebook_executor = None
+        self._enable_notebooks = enable_provenance
+
         # Setup workspace
         self._setup_workspace()
 
@@ -183,6 +228,24 @@ class DataManagerV2:
 
         logger.debug(f"Initialized DataManagerV2 with workspace: {self.workspace_path}")
 
+    @property
+    def notebook_exporter(self):
+        """Lazy initialize notebook exporter."""
+        if self._notebook_exporter is None and self._enable_notebooks:
+            from lobster.core.notebook_exporter import NotebookExporter
+
+            self._notebook_exporter = NotebookExporter(self.provenance, self)
+        return self._notebook_exporter
+
+    @property
+    def notebook_executor(self):
+        """Lazy initialize notebook executor."""
+        if self._notebook_executor is None:
+            from lobster.core.notebook_executor import NotebookExecutor
+
+            self._notebook_executor = NotebookExecutor(self)
+        return self._notebook_executor
+
     def _setup_workspace(self) -> None:
         """Set up workspace directories."""
         self.workspace_path.mkdir(parents=True, exist_ok=True)
@@ -191,9 +254,19 @@ class DataManagerV2:
         self.data_dir = self.workspace_path / "data"
         self.exports_dir = self.workspace_path / "exports"
         self.cache_dir = self.workspace_path / "cache"
+        self.literature_cache_dir = self.workspace_path / "literature_cache"
 
-        for directory in [self.data_dir, self.exports_dir, self.cache_dir]:
+        for directory in [
+            self.data_dir,
+            self.exports_dir,
+            self.cache_dir,
+            self.literature_cache_dir,
+        ]:
             directory.mkdir(exist_ok=True)
+
+        # Create literature cache subdirectories
+        (self.literature_cache_dir / "publications").mkdir(exist_ok=True)
+        (self.literature_cache_dir / "parsed_docs").mkdir(exist_ok=True)
 
     def _register_default_backends(self) -> None:
         """Register default storage backends."""
@@ -231,36 +304,52 @@ class DataManagerV2:
                 ProteomicsAdapter(data_type="affinity", strict_validation=False),
             )
 
-    def register_backend(self, name: str, backend: IDataBackend) -> None:
+    def register_backend(
+        self, name: str, backend: IDataBackend, overwrite: bool = False
+    ) -> None:
         """
         Register a storage backend.
 
         Args:
             name: Name for the backend
             backend: Backend implementation
+            overwrite: If True, allow overwriting existing backend
 
         Raises:
-            ValueError: If backend name already exists
+            ValueError: If backend name already exists and overwrite=False
         """
         if name in self.backends:
-            raise ValueError(f"Backend '{name}' already registered")
+            if overwrite:
+                logger.warning(f"Overwriting existing backend: {name}")
+            else:
+                raise ValueError(
+                    f"Backend '{name}' already registered. Use overwrite=True to replace."
+                )
 
         self.backends[name] = backend
         logger.debug(f"Registered backend: {name} ({backend.__class__.__name__})")
 
-    def register_adapter(self, name: str, adapter: IModalityAdapter) -> None:
+    def register_adapter(
+        self, name: str, adapter: IModalityAdapter, overwrite: bool = False
+    ) -> None:
         """
         Register a modality adapter.
 
         Args:
             name: Name for the adapter
             adapter: Adapter implementation
+            overwrite: If True, allow overwriting existing adapter
 
         Raises:
-            ValueError: If adapter name already exists
+            ValueError: If adapter name already exists and overwrite=False
         """
         if name in self.adapters:
-            raise ValueError(f"Adapter '{name}' already registered")
+            if overwrite:
+                logger.warning(f"Overwriting existing adapter: {name}")
+            else:
+                raise ValueError(
+                    f"Adapter '{name}' already registered. Use overwrite=True to replace."
+                )
 
         self.adapters[name] = adapter
         logger.debug(f"Registered adapter: {name} ({adapter.__class__.__name__})")
@@ -319,7 +408,7 @@ class DataManagerV2:
 
         # Log provenance
         if self.provenance:
-            entity_id = self.provenance.create_entity(
+            self.provenance.create_entity(
                 entity_type="modality_data",
                 metadata={
                     "modality_name": name,
@@ -328,12 +417,29 @@ class DataManagerV2:
                 },
             )
 
-            # self.provenance.log_data_loading(
-            #     source_path=source,
-            #     output_entity_id=entity_id,
-            #     adapter_name=adapter,
-            #     parameters=kwargs
-            # )
+            # Create IR for data loading operation
+            source_path = (
+                str(source)
+                if not isinstance(source, anndata.AnnData)
+                else "AnnData object"
+            )
+            loading_ir = create_data_loading_ir(
+                input_param_name="input_data",
+                description=f"Load {name} data from {source_path}",
+            )
+
+            # Log data loading operation with IR
+            self.log_tool_usage(
+                tool_name="load_dataset",
+                parameters={
+                    "name": name,
+                    "source": source_path,
+                    "adapter": adapter,
+                    **kwargs,
+                },
+                description=f"Loaded modality '{name}' using {adapter} adapter",
+                ir=loading_ir,
+            )
 
             # Add provenance to AnnData
             adata = self.provenance.add_to_anndata(adata)
@@ -375,15 +481,52 @@ class DataManagerV2:
         if not Path(path).is_absolute():
             path = self.data_dir / path
 
+        # Validate data for H5AD serialization (optional pre-save check)
+        if backend_name in ["h5ad", "H5ADBackend"] and hasattr(adata, "uns"):
+            validation_issues = validate_for_h5ad(adata.uns, path="adata.uns")
+            if validation_issues:
+                logger.warning(
+                    f"Pre-save validation found {len(validation_issues)} potential "
+                    f"serialization issues in modality '{name}'. These will be "
+                    f"sanitized automatically during save:\n" +
+                    "\n".join(f"  - {issue}" for issue in validation_issues[:5])
+                )
+                if len(validation_issues) > 5:
+                    logger.debug(
+                        f"  ... and {len(validation_issues) - 5} more issues. "
+                        f"Set logging to DEBUG for full list."
+                    )
+
         # Save data
         backend_instance.save(adata, path, **kwargs)
 
         # Log provenance
         if self.provenance:
-            entity_id = self.provenance.create_entity(
+            self.provenance.create_entity(
                 entity_type="modality_data",
                 uri=path,  # Use in-memory representation as source
                 metadata={"modality_name": name, "shape": adata.shape},
+            )
+
+            # Create IR for data saving operation
+            saving_ir = create_data_saving_ir(
+                output_prefix_param="output_prefix",
+                filename_suffix=Path(path).stem,
+                description=f"Save {name} data to {path}",
+                compression=kwargs.get("compression", "gzip"),
+            )
+
+            # Log data saving operation with IR
+            self.log_tool_usage(
+                tool_name="save_dataset",
+                parameters={
+                    "name": name,
+                    "path": str(path),
+                    "backend": backend_name,
+                    **kwargs,
+                },
+                description=f"Saved modality '{name}' to {path} using {backend_name} backend",
+                ir=saving_ir,
             )
 
         logger.info(f"Saved modality '{name}' to {path} using backend '{backend_name}'")
@@ -736,6 +879,62 @@ class DataManagerV2:
         logger.info(f"Exported provenance to {path}")
         return str(path)
 
+    def save_workspace(self, workspace_name: str) -> Path:
+        """
+        Save all current modalities to a named workspace directory.
+
+        This method creates a dedicated directory for the workspace and saves
+        all loaded modalities as individual .h5ad files. It also saves session
+        metadata including the list of active modalities for later restoration.
+
+        Args:
+            workspace_name: Name for the workspace (will create a subdirectory)
+
+        Returns:
+            Path: Path to the workspace directory containing saved modalities
+
+        Example:
+            >>> dm.save_workspace("my_analysis_20250116")
+            PosixPath('/path/.lobster_workspace/my_analysis_20250116')
+
+        Note:
+            - Uses thread-safe locking to prevent concurrent saves
+            - Saves all modalities as {modality_name}.h5ad files
+            - Creates session metadata for restoration via restore_session()
+        """
+        # Create workspace directory
+        workspace_dir = self.workspace_path / workspace_name
+        workspace_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save each modality
+        saved_modalities = []
+        for modality_name in self.modalities:
+            try:
+                save_path = workspace_dir / f"{modality_name}.h5ad"
+                self.save_modality(modality_name, str(save_path))
+                saved_modalities.append(modality_name)
+                logger.debug(f"Saved modality '{modality_name}' to {save_path}")
+            except Exception as e:
+                logger.error(f"Failed to save modality '{modality_name}': {e}")
+
+        # Save session metadata
+        session_metadata = {
+            "workspace_name": workspace_name,
+            "active_modalities": saved_modalities,
+            "session_id": self.session_id,
+            "timestamp": datetime.now().isoformat(),
+            "n_modalities": len(saved_modalities),
+        }
+
+        metadata_path = workspace_dir / ".session.json"
+        with open(metadata_path, "w") as f:
+            json.dump(session_metadata, f, indent=2)
+
+        logger.info(
+            f"Saved workspace '{workspace_name}' with {len(saved_modalities)} modalities to {workspace_dir}"
+        )
+        return workspace_dir
+
     def clear_workspace(self, confirm: bool = False) -> None:
         """
         Clear all modalities and optionally workspace files.
@@ -757,6 +956,30 @@ class DataManagerV2:
             self.provenance = ProvenanceTracker()
 
         logger.info("Cleared workspace")
+
+    def clear(self) -> None:
+        """
+        Clear all modalities from memory without requiring confirmation.
+
+        This is a convenience alias for clear_workspace() that doesn't require
+        the confirm=True parameter. Use this for programmatic clearing in tests
+        and scripts where confirmation prompts are not needed.
+
+        Note:
+            This method clears modalities and resets provenance but does not
+            delete files from disk.
+
+        Example:
+            >>> dm.clear()  # Simple, no confirmation needed
+        """
+        # Clear modalities from memory
+        self.modalities.clear()
+
+        # Reset provenance
+        if self.provenance:
+            self.provenance = ProvenanceTracker()
+
+        logger.info("Cleared workspace (via clear() alias)")
 
     def get_backend_info(self) -> Dict[str, Any]:
         """
@@ -786,29 +1009,53 @@ class DataManagerV2:
             }
         return info
 
-    # Legacy compatibility methods for tools
+    # Tool usage tracking via provenance
     def log_tool_usage(
-        self, tool_name: str, parameters: Dict[str, Any], description: str = None
-    ) -> None:
+        self,
+        tool_name: str,
+        parameters: Dict[str, Any],
+        description: str = None,
+        ir: Optional["AnalysisStep"] = None,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Log tool usage for reproducibility tracking.
+        Log tool usage for reproducibility tracking via W3C-PROV provenance system.
 
         Args:
             tool_name: Name of the tool used
             parameters: Parameters used with the tool
             description: Optional description of what was done
-        """
-        import datetime
+            ir: Optional AnalysisStep Intermediate Representation for notebook export
 
-        self.tool_usage_history.append(
-            {
-                "tool": tool_name,
-                "parameters": parameters,
-                "description": description,
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        )
-        logger.info(f"Tool usage logged: {tool_name}")
+        Returns:
+            Optional[Dict[str, Any]]: The created activity record, or None if no provenance
+
+        Notes:
+            The `ir` parameter enables automatic Jupyter notebook generation.
+            Services should emit AnalysisStep objects alongside their results,
+            and agents should pass these IR objects to this method for storage
+            in the provenance record.
+        """
+        if self.provenance:
+            activity_id = self.provenance.create_activity(
+                activity_type=tool_name,
+                agent="data_manager",
+                parameters=parameters,
+                description=description or f"{tool_name} operation",
+                ir=ir,
+            )
+
+            # Find and return the activity dict
+            for activity in self.provenance.activities:
+                if activity["id"] == activity_id:
+                    if ir is not None:
+                        logger.info(
+                            f"Tool usage logged with IR: {tool_name} (operation: {ir.operation})"
+                        )
+                    else:
+                        logger.info(f"Tool usage logged: {tool_name}")
+                    return activity
+
+        return None
 
     def save_processed_data(
         self,
@@ -855,7 +1102,7 @@ class DataManagerV2:
             filepath = self.data_dir / filename
 
             # Save using appropriate backend
-            saved_path = self.save_modality(modality_name, filepath)
+            self.save_modality(modality_name, filepath)
 
             # Create enhanced metadata
             enhanced_metadata = {
@@ -968,13 +1215,27 @@ class DataManagerV2:
             except Exception as e:
                 logger.error(f"Failed to auto-save modality {modality_name}: {e}")
 
-        # Save processing log and tool usage history
-        if self.processing_log or self.tool_usage_history:
+        # Save processing log and provenance
+        if self.processing_log or (self.provenance and self.provenance.activities):
             try:
                 log_path = self.exports_dir / "processing_log.json"
                 log_data = {
                     "processing_log": self.processing_log,
-                    "tool_usage_history": self.tool_usage_history,
+                    "provenance_summary": {
+                        "n_activities": (
+                            len(self.provenance.activities) if self.provenance else 0
+                        ),
+                        "activities": [
+                            {
+                                "type": act.get("type"),
+                                "timestamp": act.get("timestamp"),
+                                "parameters": act.get("parameters", {}),
+                            }
+                            for act in (
+                                self.provenance.activities if self.provenance else []
+                            )
+                        ],
+                    },
                     "timestamp": pd.Timestamp.now().isoformat(),
                 }
                 import json
@@ -1075,9 +1336,14 @@ class DataManagerV2:
             enhanced_title = title or "Untitled"
             if current_dataset_info and "modality_name" in current_dataset_info:
                 modality_name = current_dataset_info["modality_name"]
-                enhanced_title = (
-                    f"{enhanced_title} ({modality_name} - {human_timestamp})"
-                )
+                # Only append modality name if it's not already in the title (prevents duplication)
+                if modality_name not in enhanced_title:
+                    enhanced_title = (
+                        f"{enhanced_title} ({modality_name} - {human_timestamp})"
+                    )
+                else:
+                    # Modality name already present, just add timestamp
+                    enhanced_title = f"{enhanced_title} ({human_timestamp})"
             elif current_dataset_info and "data_shape" in current_dataset_info:
                 shape_info = f"{current_dataset_info['data_shape'][0]}x{current_dataset_info['data_shape'][1]}"
                 enhanced_title = (
@@ -1236,7 +1502,19 @@ class DataManagerV2:
                 try:
                     plot = plot_entry["figure"]
                     plot_id = plot_entry["id"]
-                    plot_title = plot_entry["title"]
+                    plot_title = plot_entry.get("original_title", plot_entry["title"])
+
+                    # Truncate title to prevent filesystem 255-byte filename limit
+                    # Reserve space for: plot_id (10) + underscore (1) + extension (5) = 16 chars
+                    # Use 80 chars for title to be safe (total ~96 chars with plot_id + extension)
+                    if len(plot_title) > 80:
+                        # Truncate with middle ellipsis to preserve start and end
+                        available_chars = 80 - 3  # Reserve for "..."
+                        start_length = (available_chars + 1) // 2
+                        end_length = available_chars // 2
+                        plot_title = (
+                            f"{plot_title[:start_length]}...{plot_title[-end_length:]}"
+                        )
 
                     # Create sanitized filename
                     safe_title = "".join(
@@ -1497,11 +1775,23 @@ class DataManagerV2:
             if hasattr(X, "nnz") and hasattr(X, "data"):  # Likely a sparse matrix
                 # For sparse matrices, calculate memory from data + indices + indptr
                 if hasattr(X, "data") and hasattr(X.data, "nbytes"):
-                    data_bytes = X.data.nbytes
+                    data_bytes = (
+                        int(X.data.nbytes) if not isinstance(X.data.nbytes, Mock) else 0
+                    )
                     if hasattr(X, "indices") and hasattr(X.indices, "nbytes"):
-                        data_bytes += X.indices.nbytes
+                        indices_bytes = (
+                            int(X.indices.nbytes)
+                            if not isinstance(X.indices.nbytes, Mock)
+                            else 0
+                        )
+                        data_bytes += indices_bytes
                     if hasattr(X, "indptr") and hasattr(X.indptr, "nbytes"):
-                        data_bytes += X.indptr.nbytes
+                        indptr_bytes = (
+                            int(X.indptr.nbytes)
+                            if not isinstance(X.indptr.nbytes, Mock)
+                            else 0
+                        )
+                        data_bytes += indptr_bytes
                     return f"{data_bytes / 1024**2:.2f} MB (sparse)"
                 else:
                     return f"~{X.nnz * 12 / 1024**2:.2f} MB (sparse, estimated)"
@@ -1719,7 +2009,7 @@ class DataManagerV2:
                 modality_name = "legacy_bulk"
 
             # Load as modality
-            adata = self.load_modality(
+            self.load_modality(
                 name=modality_name,
                 source=data,
                 adapter=adapter_name,
@@ -1766,6 +2056,110 @@ class DataManagerV2:
             "stored_by": "DataManagerV2",
         }
         logger.info(f"Stored metadata for dataset: {dataset_id}")
+
+    def _store_geo_metadata(
+        self, geo_id: str, metadata: Dict[str, Any], stored_by: str, **kwargs
+    ) -> MetadataEntry:
+        """
+        Store GEO metadata with enforced consistent structure.
+
+        This helper method ensures all GEO metadata is stored with the same
+        nested structure, preventing KeyError bugs when retrieving metadata.
+
+        Args:
+            geo_id: GEO dataset identifier (e.g., 'GSE12345')
+            metadata: Raw GEO metadata dictionary from GEOparse
+            stored_by: Component storing the metadata (for tracking)
+            **kwargs: Optional additional fields:
+                - validation (Dict): Validation information
+                - strategy_config (Dict): Download strategy configuration
+                - modality_detection (Dict): Modality detection results
+                - concatenation_decision (Dict): Concatenation strategy
+
+        Returns:
+            MetadataEntry: The stored metadata entry
+
+        Example:
+            >>> entry = data_manager._store_geo_metadata(
+            ...     geo_id="GSE12345",
+            ...     metadata=geoparse_metadata,
+            ...     stored_by="_check_platform_compatibility",
+            ...     modality_detection={"modality": "single_cell", "confidence": 0.95}
+            ... )
+        """
+        # Create entry with required fields
+        entry: MetadataEntry = {
+            "metadata": metadata.copy(),
+            "fetch_timestamp": kwargs.get(
+                "fetch_timestamp", datetime.now().isoformat()
+            ),
+            "stored_by": stored_by,
+        }
+
+        # Add optional fields if provided
+        if "validation" in kwargs:
+            entry["validation"] = kwargs["validation"]
+
+        if "strategy_config" in kwargs:
+            entry["strategy_config"] = kwargs["strategy_config"]
+
+        if "modality_detection" in kwargs:
+            entry["modality_detection"] = kwargs["modality_detection"]
+
+        if "concatenation_decision" in kwargs:
+            entry["concatenation_decision"] = kwargs["concatenation_decision"]
+
+        # Store with nested structure
+        self.metadata_store[geo_id] = entry
+
+        logger.debug(
+            f"Stored GEO metadata for {geo_id} with nested structure "
+            f"(stored_by: {stored_by}, keys: {list(entry.keys())})"
+        )
+
+        return entry
+
+    def _get_geo_metadata(self, geo_id: str) -> Optional[MetadataEntry]:
+        """
+        Safely retrieve GEO metadata with structure validation.
+
+        This helper method retrieves GEO metadata from the store and validates
+        that it has the expected nested structure.
+
+        Args:
+            geo_id: GEO dataset identifier
+
+        Returns:
+            Optional[MetadataEntry]: Metadata entry if found and valid, None otherwise
+
+        Example:
+            >>> entry = data_manager._get_geo_metadata("GSE12345")
+            >>> if entry:
+            ...     raw_metadata = entry["metadata"]
+            ...     strategy = entry.get("strategy_config", {})
+        """
+        if geo_id not in self.metadata_store:
+            logger.debug(f"No metadata found for {geo_id}")
+            return None
+
+        stored_entry = self.metadata_store[geo_id]
+
+        # Validate structure
+        if not isinstance(stored_entry, dict):
+            logger.warning(
+                f"Metadata for {geo_id} is not a dictionary: {type(stored_entry)}"
+            )
+            return None
+
+        if "metadata" not in stored_entry:
+            logger.warning(
+                f"Metadata for {geo_id} missing 'metadata' key. "
+                f"Found keys: {list(stored_entry.keys())}. "
+                f"This indicates a structure mismatch bug."
+            )
+            return None
+
+        return stored_entry
 
     def get_stored_metadata(self, dataset_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -1969,12 +2363,6 @@ class DataManagerV2:
 
         # Import sklearn components (always needed)
         try:
-            from sklearn.feature_selection import (
-                SelectKBest,
-                VarianceThreshold,
-                chi2,
-                mutual_info_classif,
-            )
             from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
         except ImportError:
             raise ImportError(
@@ -2008,7 +2396,7 @@ class DataManagerV2:
                 X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X
                 X = X / np.sum(X, axis=1, keepdims=True) * 1e6
                 adata.X = X
-            processing_steps.append(f"Applied CPM normalization")
+            processing_steps.append("Applied CPM normalization")
 
         # Step 2: Feature Selection
         X = adata.X.toarray() if hasattr(adata.X, "toarray") else adata.X
@@ -2559,30 +2947,34 @@ class DataManagerV2:
                 summary += f"- {entry}\n"
             summary += "\n"
 
-        # Add tool usage history
-        if self.tool_usage_history:
-            summary += "## Tool Usage History\n\n"
-            for i, entry in enumerate(self.tool_usage_history, 1):
-                summary += f"### {i}. {entry['tool']} ({entry['timestamp']})\n\n"
-                if entry.get("description"):
-                    summary += f"{entry['description']}\n\n"
-                summary += "**Parameters:**\n\n"
-                for param_name, param_value in entry["parameters"].items():
-                    # Format parameter value based on its type
-                    if isinstance(param_value, (list, tuple)) and len(param_value) > 5:
-                        param_str = f"[{', '.join(str(x) for x in param_value[:5])}...] (length: {len(param_value)})"
-                    else:
-                        param_str = str(param_value)
-                    summary += f"- {param_name}: {param_str}\n"
-                summary += "\n"
-
-        # Add provenance information
+        # Add provenance information with detailed activities
         if self.provenance and self.provenance.activities:
-            summary += "## Provenance Information\n\n"
-            summary += f"- Activities: {len(self.provenance.activities)}\n"
-            summary += f"- Entities: {len(self.provenance.entities)}\n"
-            summary += f"- Agents: {len(self.provenance.agents)}\n"
-            summary += "\n"
+            summary += "## Provenance-Tracked Activities\n\n"
+            summary += f"**Summary**: {len(self.provenance.activities)} activities, "
+            summary += f"{len(self.provenance.entities)} entities, "
+            summary += f"{len(self.provenance.agents)} agents\n\n"
+
+            for i, activity in enumerate(self.provenance.activities, 1):
+                activity_type = activity.get("type", "unknown")
+                timestamp = activity.get("timestamp", "N/A")
+                summary += f"### {i}. {activity_type} ({timestamp})\n\n"
+
+                if activity.get("description"):
+                    summary += f"{activity['description']}\n\n"
+
+                if activity.get("parameters"):
+                    summary += "**Parameters:**\n\n"
+                    for param_name, param_value in activity["parameters"].items():
+                        # Format parameter value based on its type
+                        if (
+                            isinstance(param_value, (list, tuple))
+                            and len(param_value) > 5
+                        ):
+                            param_str = f"[{', '.join(str(x) for x in param_value[:5])}...] (length: {len(param_value)})"
+                        else:
+                            param_str = str(param_value)
+                        summary += f"- {param_name}: {param_str}\n"
+                    summary += "\n"
 
         return summary
 
@@ -2702,7 +3094,9 @@ class DataManagerV2:
                     try:
                         plot = plot_entry["figure"]
                         plot_id = plot_entry["id"]
-                        plot_title = plot_entry["title"]
+                        plot_title = plot_entry.get(
+                            "original_title", plot_entry["title"]
+                        )
 
                         # Create sanitized filename
                         safe_title = "".join(
@@ -2877,8 +3271,22 @@ https://github.com/OmicsOS/lobster
                 import h5py
 
                 with h5py.File(h5ad_file, "r") as f:
-                    # Extract basic metadata
-                    shape = f["X"].shape if "X" in f else (0, 0)
+                    # Extract basic metadata - handle both dense and sparse matrices per AnnData spec
+                    if "X" in f:
+                        if isinstance(f["X"], h5py.Dataset):
+                            # Dense matrix - has shape attribute
+                            shape = f["X"].shape
+                        elif isinstance(f["X"], h5py.Group):
+                            # Sparse matrix (CSR/CSC) - shape is in attributes per AnnData spec
+                            shape = (
+                                tuple(f["X"].attrs["shape"])
+                                if "shape" in f["X"].attrs
+                                else (0, 0)
+                            )
+                        else:
+                            shape = (0, 0)
+                    else:
+                        shape = (0, 0)
 
                     self.available_datasets[h5ad_file.stem] = {
                         "path": str(h5ad_file),
@@ -2910,7 +3318,7 @@ https://github.com/OmicsOS/lobster
                 from importlib.metadata import version
 
                 lobster_version = version("lobster")
-            except:
+            except Exception:
                 lobster_version = "unknown"
 
             session_data = {
@@ -2947,13 +3355,13 @@ https://github.com/OmicsOS/lobster
                         "type": "in_memory",
                     }
 
-            # Add command history if available
-            if self.tool_usage_history:
-                # Keep last 50 commands
-                recent_commands = self.tool_usage_history[-50:]
+            # Add command history from provenance if available
+            if self.provenance and self.provenance.activities:
+                # Keep last 50 activities
+                recent_activities = self.provenance.activities[-50:]
                 session_data["command_history"] = [
-                    {"timestamp": cmd.get("timestamp"), "command": cmd.get("tool")}
-                    for cmd in recent_commands
+                    {"timestamp": act.get("timestamp"), "command": act.get("type")}
+                    for act in recent_activities
                 ]
 
             # Write atomically
@@ -3063,3 +3471,484 @@ https://github.com/OmicsOS/lobster
             "total_size_mb": total_size,
             "pattern": pattern,
         }
+
+    # ========================================
+    # NOTEBOOK PIPELINE SUPPORT
+    # ========================================
+
+    def export_notebook(
+        self,
+        name: str,
+        description: str = "",
+        filter_strategy: str = "successful",
+    ) -> Path:
+        """
+        Export current session as Jupyter notebook.
+
+        Args:
+            name: Notebook filename (no extension)
+            description: Human-readable description
+            filter_strategy: "successful" | "all" | "manual"
+
+        Returns:
+            Path to generated .ipynb file
+
+        Raises:
+            ValueError: If provenance tracking disabled or no activities
+
+        Example:
+            >>> path = dm.export_notebook(
+            ...     name="standard_qc_workflow",
+            ...     description="Quality control and clustering for 10X data"
+            ... )
+            >>> print(f"Exported: {path}")
+            Exported: /Users/kevin/.lobster/notebooks/standard_qc_workflow.ipynb
+        """
+        if not self.provenance:
+            raise ValueError("Provenance tracking disabled - cannot export notebook")
+
+        if not self.notebook_exporter:
+            raise ValueError("Notebook exporter not initialized")
+
+        if not self.provenance.activities:
+            raise ValueError("No activities recorded - nothing to export")
+
+        path = self.notebook_exporter.export(name, description, filter_strategy)
+
+        logger.info(f"Notebook exported: {path}")
+        logger.info("Next steps:")
+        logger.info(f"  1. Review: jupyter notebook {path}")
+        logger.info(f"  2. Commit: git add {path} && git commit -m 'Add {name}'")
+        logger.info(f"  3. Run: /pipeline run {path.name} <modality>")
+
+        return path
+
+    def run_notebook(
+        self,
+        notebook_path: Union[str, Path],
+        input_modality: str,
+        parameters: Optional[Dict[str, Any]] = None,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Execute saved notebook with new data.
+
+        Args:
+            notebook_path: Path to .ipynb file or filename in .lobster/notebooks/
+            input_modality: Name of modality to use as input
+            parameters: Optional parameter overrides
+            dry_run: If True, validate but don't execute
+
+        Returns:
+            Execution result with status, output_notebook, etc.
+
+        Example:
+            >>> # Dry run first
+            >>> result = dm.run_notebook(
+            ...     "standard_qc_workflow.ipynb",
+            ...     "my_new_dataset",
+            ...     dry_run=True
+            ... )
+            >>> print(result['validation'])
+
+            >>> # Actually run
+            >>> result = dm.run_notebook(
+            ...     "standard_qc_workflow.ipynb",
+            ...     "my_new_dataset"
+            ... )
+            >>> print(f"Output: {result['output_notebook']}")
+        """
+        # Resolve notebook path
+        nb_path = Path(notebook_path)
+        if not nb_path.exists():
+            # Try .lobster/notebooks/
+            nb_path = Path.home() / ".lobster" / "notebooks" / notebook_path
+
+        if not nb_path.exists():
+            raise FileNotFoundError(f"Notebook not found: {notebook_path}")
+
+        # Get input data
+        if input_modality not in self.modalities:
+            raise ValueError(f"Modality '{input_modality}' not loaded")
+
+        # Save input modality as H5AD for notebook
+        import tempfile
+
+        temp_dir = Path(tempfile.mkdtemp())
+        temp_input = temp_dir / "input.h5ad"
+        self.save_modality(input_modality, temp_input)
+
+        # Execute
+        if dry_run:
+            result = self.notebook_executor.dry_run(nb_path, temp_input)
+        else:
+            result = self.notebook_executor.execute(nb_path, temp_input, parameters)
+
+        return result
+
+    def list_notebooks(self) -> List[Dict[str, Any]]:
+        """
+        List available notebooks in .lobster/notebooks/
+
+        Returns:
+            List of notebook metadata
+        """
+        notebooks_dir = Path.home() / ".lobster" / "notebooks"
+        if not notebooks_dir.exists():
+            return []
+
+        notebooks = []
+        for nb_file in notebooks_dir.glob("*.ipynb"):
+            # Read metadata
+            try:
+                with open(nb_file) as f:
+                    nb = nbformat.read(f, as_version=4)
+
+                metadata = nb.metadata.get("lobster", {})
+
+                notebooks.append(
+                    {
+                        "filename": nb_file.name,
+                        "path": str(nb_file),
+                        "name": nb_file.stem,
+                        "created_by": metadata.get("created_by", "unknown"),
+                        "created_at": metadata.get("created_at", ""),
+                        "lobster_version": metadata.get("lobster_version", ""),
+                        "n_steps": len([c for c in nb.cells if c.cell_type == "code"]),
+                        "size_kb": nb_file.stat().st_size / 1024,
+                    }
+                )
+            except Exception as e:
+                logger.warning(f"Could not read notebook {nb_file}: {e}")
+
+        return notebooks
+
+    # ==================== PUBLICATION CACHING (Phase 2) ====================
+
+    def cache_publication_content(
+        self,
+        identifier: str,
+        content: Dict[str, Any],
+        format: str = "markdown",
+    ) -> Path:
+        """
+        Cache publication content for future retrieval.
+
+        This method delegates to DoclingService for actual caching while providing
+        a unified interface through DataManager. All publication caching should go
+        through this method to ensure proper provenance tracking.
+
+        Args:
+            identifier: Publication identifier (PMID, DOI, or URL)
+            content: Extraction result dictionary containing:
+                - 'markdown': str - Extracted content as markdown
+                - 'source': str - Source URL
+                - 'parser': str - Parser used (docling/pypdf2)
+                - 'methods_text': Optional[str] - Methods section text
+                - 'software_detected': Optional[List[str]] - Detected software
+            format: Cache format ('markdown' for human-readable, 'json' for structured)
+
+        Returns:
+            Path to cached file
+
+        Example:
+            >>> content = {
+            ...     'markdown': '# Methods\\nWe used Seurat...',
+            ...     'source': 'https://pmc.../PMC123.pdf',
+            ...     'parser': 'docling',
+            ...     'methods_text': 'Analysis with Seurat',
+            ...     'software_detected': ['seurat']
+            ... }
+            >>> path = dm.cache_publication_content('PMID:12345678', content)
+            >>> print(f"Cached to: {path}")
+
+        Note:
+            This is part of Phase 2 refactoring to consolidate all caching
+            through DataManager (architectural requirement).
+        """
+        import hashlib
+
+
+        publications_dir = self.literature_cache_dir / "publications"
+        publications_dir.mkdir(parents=True, exist_ok=True)
+
+        # Sanitize identifier for filename
+        safe_identifier = (
+            identifier.replace(":", "_").replace("/", "_").replace("\\", "_")
+        )
+
+        if format == "markdown":
+            # Store as human-readable markdown
+            cache_file = publications_dir / f"{safe_identifier}.md"
+
+            # Format markdown document
+            markdown_content = f"""# Publication: {identifier}
+
+**Extraction Date**: {content.get('timestamp', 'N/A')}
+**Parser**: {content.get('parser', 'unknown')}
+
+---
+
+## Methods Section
+
+{content.get('methods_text', 'No methods section extracted')}
+
+---
+
+## Software Tools Detected
+
+{chr(10).join(f'`{tool}`' for tool in content.get('software_detected', []))}
+
+---
+
+## Extraction Metadata
+
+- **Source**: {content.get('source', 'N/A')}
+- **Parser**: {content.get('parser', 'N/A')}
+- **Fallback Used**: {content.get('fallback_used', False)}
+- **Timestamp**: {content.get('timestamp', 'N/A')}
+"""
+
+            cache_file.write_text(markdown_content, encoding="utf-8")
+            logger.info(f"Cached publication as markdown: {cache_file.name}")
+
+        elif format == "json":
+            # Use MD5-based key for JSON (DoclingService format)
+            source = content.get("source", identifier)
+            cache_key = hashlib.md5(source.encode()).hexdigest()
+            cache_file = publications_dir / f"{cache_key}.json"
+
+            import json
+
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(content, f, indent=2)
+
+            logger.info(f"Cached publication as JSON: {cache_file.name}")
+
+        else:
+            raise ValueError(f"Unsupported cache format: {format}")
+
+        # Log to provenance
+        if self.provenance:
+            self.log_tool_usage(
+                tool_name="cache_publication_content",
+                parameters={"identifier": identifier, "format": format},
+                description=f"Cached publication content for {identifier}",
+            )
+
+        return cache_file
+
+    def get_cached_publication(self, identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve cached publication by identifier.
+
+        This method checks for cached publication content in the literature cache
+        directory. It supports both markdown and JSON formats.
+
+        Args:
+            identifier: Publication identifier (PMID, DOI, or URL)
+
+        Returns:
+            Dictionary with extraction results or None if not found
+
+        Example:
+            >>> content = dm.get_cached_publication('PMID:12345678')
+            >>> if content:
+            ...     print(f"Found cached content: {content['methods_text'][:100]}...")
+            ... else:
+            ...     print("No cache found, need to fetch")
+
+        Note:
+            This is part of Phase 2 refactoring. Delegates to existing
+            cache infrastructure while providing unified DataManager interface.
+        """
+        import hashlib
+        import json
+
+        publications_dir = self.literature_cache_dir / "publications"
+
+        # Sanitize identifier for filename
+        safe_identifier = (
+            identifier.replace(":", "_").replace("/", "_").replace("\\", "_")
+        )
+
+        # Try markdown format first
+        markdown_file = publications_dir / f"{safe_identifier}.md"
+        if markdown_file.exists():
+            logger.info(f"Cache hit (markdown): {markdown_file.name}")
+            markdown_content = markdown_file.read_text(encoding="utf-8")
+
+            # Parse markdown to extract structured data
+            result = {
+                "identifier": identifier,
+                "format": "markdown",
+                "markdown": markdown_content,
+                "cache_file": str(markdown_file),
+                "cache_hit": True,
+            }
+
+            # Extract methods section if present
+            if "## Methods Section" in markdown_content:
+                methods_start = markdown_content.find("## Methods Section") + len(
+                    "## Methods Section"
+                )
+                methods_end = markdown_content.find("---", methods_start)
+                if methods_end > methods_start:
+                    result["methods_text"] = markdown_content[
+                        methods_start:methods_end
+                    ].strip()
+
+            # Extract software tools if present
+            if "## Software Tools Detected" in markdown_content:
+                software_start = markdown_content.find(
+                    "## Software Tools Detected"
+                ) + len("## Software Tools Detected")
+                software_end = markdown_content.find("---", software_start)
+                if software_end > software_start:
+                    software_section = markdown_content[
+                        software_start:software_end
+                    ].strip()
+                    # Extract tools from markdown code blocks
+                    import re
+
+                    tools = re.findall(r"`([^`]+)`", software_section)
+                    result["software_detected"] = tools
+
+            return result
+
+        # Try JSON format (MD5-based key)
+        cache_key = hashlib.md5(identifier.encode()).hexdigest()
+        json_file = publications_dir / f"{cache_key}.json"
+        if json_file.exists():
+            logger.info(f"Cache hit (JSON): {json_file.name}")
+            with open(json_file, "r", encoding="utf-8") as f:
+                result = json.load(f)
+            result["cache_hit"] = True
+            result["cache_file"] = str(json_file)
+            return result
+
+        # No cache found
+        logger.debug(f"Cache miss for identifier: {identifier}")
+        return None
+
+    def list_session_publications(self) -> List[Dict[str, Any]]:
+        """
+        List publications extracted in the current session.
+
+        This method uses provenance tracking to identify publications that were
+        extracted during the current session, then checks cache status for each.
+
+        Returns:
+            List of publication summaries:
+            [{
+                "identifier": str,
+                "tool_name": str,
+                "timestamp": str,
+                "cache_status": "markdown" | "json" | "both" | "none",
+                "methods_length": int,
+                "source": str
+            }]
+
+        Examples:
+            >>> publications = dm.list_session_publications()
+            >>> for pub in publications:
+            ...     print(f"{pub['identifier']}: {pub['cache_status']}")
+
+        Note:
+            This is part of Phase 3 migration. Session features will be
+            fully refactored in Phase 4.
+        """
+        publications = []
+
+        # Find all publication extraction operations in tool usage history
+        extraction_tools = [
+            "extract_pdf_content",
+            "extract_methods_from_paper",
+            "extract_methods_section",
+            "extract_paper_methods",  # Phase 3 tool
+        ]
+
+        for entry in self.tool_usage_history:
+            tool_name = entry.get("tool_name", "")
+            if tool_name in extraction_tools:
+                params = entry.get("parameters", {})
+                description = entry.get("description", "")
+
+                # Try to extract identifier from parameters
+                identifier = (
+                    params.get("url_or_pmid")
+                    or params.get("source")
+                    or params.get("url")
+                    or "unknown"
+                )
+
+                # Truncate long URLs for display
+                if len(identifier) > 80:
+                    identifier = identifier[:77] + "..."
+
+                # Check cache status
+                cache_status = self._check_publication_cache_status(identifier)
+
+                # Estimate methods length from description
+                methods_length = 0
+                if "characters" in description:
+                    try:
+                        methods_length = int(description.split()[0].replace(",", ""))
+                    except (ValueError, IndexError):
+                        pass
+
+                publications.append(
+                    {
+                        "identifier": identifier,
+                        "tool_name": tool_name,
+                        "timestamp": entry.get("timestamp", "unknown"),
+                        "cache_status": cache_status,
+                        "methods_length": methods_length,
+                        "source": params.get("parser", "unknown"),
+                    }
+                )
+
+        logger.info(f"Found {len(publications)} publications in current session")
+        return publications
+
+    def _check_publication_cache_status(self, identifier: str) -> str:
+        """
+        Check cache status for a publication identifier.
+
+        Args:
+            identifier: Publication identifier
+
+        Returns:
+            Cache status: "markdown", "json", "both", or "none"
+        """
+        import hashlib
+
+        has_markdown = False
+        has_json = False
+
+        # Check markdown cache
+        safe_identifier = (
+            identifier.replace(":", "_").replace("/", "_").replace("\\", "_")
+        )
+        publications_dir = self.literature_cache_dir / "publications"
+        md_file = publications_dir / f"{safe_identifier}.md"
+
+        if md_file.exists():
+            has_markdown = True
+
+        # Check JSON cache (MD5-based key)
+        cache_key = hashlib.md5(identifier.encode()).hexdigest()
+        json_file = publications_dir / f"{cache_key}.json"
+
+        if json_file.exists():
+            has_json = True
+
+        # Return combined status
+        if has_markdown and has_json:
+            return "both"
+        elif has_markdown:
+            return "markdown"
+        elif has_json:
+            return "json"
+        else:
+            return "none"

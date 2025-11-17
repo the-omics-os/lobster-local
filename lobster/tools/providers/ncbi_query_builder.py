@@ -7,7 +7,6 @@ handling all the complexity of NCBI query syntax in a consistent way.
 
 import re
 import urllib.parse
-from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
@@ -337,7 +336,7 @@ class NCBIQueryBuilder:
             elif re.match(r"^\d{4}-\d{1,2}$", date_str):
                 parts = date_str.split("-")
                 return f"{parts[0]}/{parts[1].zfill(2)}/01"
-        except:
+        except Exception:
             pass
 
         # If we can't parse it, return as-is and let NCBI handle it
@@ -447,6 +446,7 @@ class NCBIQueryBuilder:
 
         # Import logger here to avoid circular imports
         from lobster.utils.logger import get_logger
+
         logger = get_logger(__name__)
 
         original_query = query

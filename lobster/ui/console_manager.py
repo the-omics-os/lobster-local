@@ -6,10 +6,9 @@ enhanced logging integration, and session capture capabilities.
 """
 
 import logging
-import os
 from getpass import getpass
 from pathlib import Path
-from typing import Any, Dict, Optional, TextIO
+from typing import Any, Dict, Optional
 
 from rich.console import Capture, Console
 from rich.live import Live
@@ -205,6 +204,9 @@ class LobsterConsoleManager:
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+        # Suppress docling formatting clash warnings (non-fatal cosmetic issues)
+        logging.getLogger("docling_core.transforms").setLevel(logging.ERROR)
 
     def _setup_traceback(self):
         """Setup Rich traceback integration."""
@@ -442,9 +444,14 @@ def get_console_manager() -> LobsterConsoleManager:
 
 
 def setup_logging(level: int = logging.INFO):
-    """Setup logging with Rich handlers."""
-    console_manager = get_console_manager()
-    logging.getLogger().setLevel(level)
+    """Setup logging with Rich handlers and update all handler levels."""
+    get_console_manager()
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    # Update all existing handlers to respect the new level
+    for handler in root_logger.handlers:
+        handler.setLevel(level)
 
 
 def print_lobster(*args, **kwargs):

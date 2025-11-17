@@ -6,11 +6,10 @@ This module provides validators that can operate in both strict mode
 """
 
 import logging
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, Optional, Set
 
 import anndata
 import numpy as np
-import pandas as pd
 
 from lobster.core.interfaces.validator import IValidator, ValidationResult
 
@@ -171,7 +170,7 @@ class SchemaValidator(IValidator):
         result = ValidationResult()
 
         required_cols = var_schema.get("required", [])
-        optional_cols = var_schema.get("optional", [])
+        var_schema.get("optional", [])
         types = var_schema.get("types", {})
 
         # Check required columns
@@ -201,7 +200,7 @@ class SchemaValidator(IValidator):
         result = ValidationResult()
 
         required_layers = layers_schema.get("required", [])
-        optional_layers = layers_schema.get("optional", [])
+        layers_schema.get("optional", [])
 
         # Check required layers
         for layer_name in required_layers:
@@ -299,10 +298,12 @@ class SchemaValidator(IValidator):
             result.add_error("No variables in dataset")
 
         # Check sparsity
-        if hasattr(adata.X, "nnz") and hasattr(adata.X, "size"):
-            sparsity = 1.0 - (adata.X.nnz / adata.X.size)
-            if sparsity > 0.95:
-                result.add_warning(f"Very sparse data: {sparsity:.1%} zeros")
+        if hasattr(adata.X, "nnz"):
+            total_elements = adata.X.shape[0] * adata.X.shape[1]
+            if total_elements > 0:
+                sparsity = 1.0 - (adata.X.nnz / total_elements)
+                if sparsity > 0.95:
+                    result.add_warning(f"Very sparse data: {sparsity:.1%} zeros")
 
         return result
 

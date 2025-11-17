@@ -22,6 +22,9 @@ __all__ = [
     "DatasetType",
     "PublicationMetadata",
     "DatasetMetadata",
+    # GEO provider
+    "GEOProvider",
+    "GEOProviderConfig",
     # PubMed provider
     "PubMedProvider",
     "PubMedProviderConfig",

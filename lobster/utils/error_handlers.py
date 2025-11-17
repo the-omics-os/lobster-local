@@ -108,7 +108,7 @@ class RateLimitErrorHandler(ErrorHandler):
             ),
             solutions=[
                 "Wait a few minutes and try again (limits reset periodically)",
-                "Request a rate increase at: https://docs.anthropic.com/en/api/rate-limits",
+                "Request an Anthropic rate increase at: https://docs.anthropic.com/en/api/rate-limits",
                 "Switch to AWS Bedrock (recommended for production): See installation docs",
                 "Contact us for assistance: info@omics-os.com",
             ],
@@ -345,8 +345,8 @@ class ErrorHandlerRegistry:
         handler matches the error pattern.
         """
         # Truncate very long error messages
-        display_error = error_str[:200]
-        if len(error_str) > 200:
+        display_error = error_str[:500]
+        if len(error_str) > 500:
             display_error += "..."
 
         return ErrorGuidance(

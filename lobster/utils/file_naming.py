@@ -8,7 +8,7 @@ throughout the lobster system, ensuring consistency and traceability.
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 
 class BioinformaticsFileNaming:
@@ -198,7 +198,6 @@ class BioinformaticsFileNaming:
             # Handle timestamp (last two parts: YYYYMMDD_HHMMSS)
             if len(name_parts) >= 4:
                 # Find timestamp pattern (YYYYMMDD_HHMMSS)
-                timestamp_pattern = r"\d{8}_\d{6}"
                 timestamp_parts = []
                 processing_parts = []
 
@@ -296,7 +295,7 @@ class BioinformaticsFileNaming:
             try:
                 parsed = self.parse_filename(filepath.name)
                 return parsed["timestamp"]
-            except:
+            except Exception:
                 return "00000000_000000"
 
         matching_files.sort(key=extract_timestamp, reverse=True)

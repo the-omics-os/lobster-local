@@ -17,7 +17,7 @@ from tabulate import tabulate
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from lobster.config.agent_config import (
+from lobster.config.agent_config import (  # noqa: E402
     LobsterAgentConfigurator,
     initialize_configurator,
 )
@@ -100,7 +100,7 @@ def test_configuration(profile: str, agent: str = None):
             # Test specific agent
             try:
                 config = configurator.get_agent_model_config(agent)
-                params = configurator.get_llm_params(agent)
+                configurator.get_llm_params(agent)
 
                 print_colored(f"\n✅ Agent '{agent}' configuration is valid", "green")
                 print(f"   Model: {config.model_config.model_id}")
@@ -123,7 +123,7 @@ def test_configuration(profile: str, agent: str = None):
             for agent_name in available_agents:
                 try:
                     config = configurator.get_agent_model_config(agent_name)
-                    params = configurator.get_llm_params(agent_name)
+                    configurator.get_llm_params(agent_name)
                     print_colored(
                         f"   ✅ {agent_name}: {config.model_config.model_id}", "green"
                     )
@@ -221,7 +221,6 @@ def generate_env_template():
 # =============================================================================
 # API KEYS (Required)
 # =============================================================================
-OPENAI_API_KEY="your-openai-api-key-here"
 AWS_BEDROCK_ACCESS_KEY="your-aws-access-key-here"
 AWS_BEDROCK_SECRET_ACCESS_KEY="your-aws-secret-key-here"
 NCBI_API_KEY="your-ncbi-api-key-here"

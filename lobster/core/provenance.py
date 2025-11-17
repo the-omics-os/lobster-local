@@ -10,9 +10,14 @@ import hashlib
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+
+# Import for IR support (TYPE_CHECKING to avoid circular import)
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import anndata
+
+if TYPE_CHECKING:
+    from lobster.core.analysis_ir import AnalysisStep
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,7 @@ class ProvenanceTracker:
         outputs: Optional[List[Dict[str, Any]]] = None,
         parameters: Optional[Dict[str, Any]] = None,
         description: Optional[str] = None,
+        ir: Optional["AnalysisStep"] = None,
     ) -> str:
         """
         Create a new provenance activity record.
@@ -57,9 +63,15 @@ class ProvenanceTracker:
             outputs: List of output entities
             parameters: Parameters used in the activity
             description: Human-readable description
+            ir: Optional AnalysisStep Intermediate Representation for notebook export
 
         Returns:
             str: Unique activity ID
+
+        Notes:
+            The `ir` parameter enables automatic Jupyter notebook generation.
+            Services should emit AnalysisStep objects that contain complete
+            information for reproducible code generation without manual mapping.
         """
         activity_id = f"{self.namespace}:activity:{uuid.uuid4()}"
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -75,6 +87,13 @@ class ProvenanceTracker:
             "description": description,
             "software_versions": self._get_software_versions(),
         }
+
+        # Store IR if provided (serialize to dict for JSON compatibility)
+        if ir is not None:
+            activity["ir"] = ir.to_dict()
+            self.logger.debug(f"Stored IR for operation: {ir.operation}")
+        else:
+            activity["ir"] = None
 
         self.activities.append(activity)
         self.logger.debug(f"Created activity: {activity_id} ({activity_type})")
@@ -187,7 +206,7 @@ class ProvenanceTracker:
         agent_id = self.create_agent(
             name=adapter_name,
             agent_type="software",
-            description=f"Data adapter for loading biological data",
+            description="Data adapter for loading biological data",
         )
 
         # Create loading activity
@@ -227,7 +246,7 @@ class ProvenanceTracker:
         """
         # Create agent
         agent_id = self.create_agent(
-            name=agent_name, agent_type="software", description=f"Data processing agent"
+            name=agent_name, agent_type="software", description="Data processing agent"
         )
 
         # Create processing activity
@@ -272,7 +291,7 @@ class ProvenanceTracker:
         agent_id = self.create_agent(
             name=backend_name,
             agent_type="software",
-            description=f"Data storage backend",
+            description="Data storage backend",
         )
 
         # Create saving activity
@@ -359,6 +378,35 @@ class ProvenanceTracker:
                     break
 
         return lineage
+
+    def get_all_activities(self) -> List[Dict[str, Any]]:
+        """
+        Get all provenance activities recorded in this tracker.
+
+        This method provides direct access to the complete list of activities
+        for inspection, analysis, or export. It's particularly useful for
+        system tests, debugging, and provenance auditing.
+
+        Returns:
+            List[Dict[str, Any]]: List of all activity records, each containing:
+                - id: Unique activity identifier
+                - type: Activity type (e.g., 'data_loading', 'normalization')
+                - agent: Agent that performed the activity
+                - timestamp: ISO format timestamp
+                - inputs: List of input entities
+                - outputs: List of output entities
+                - parameters: Parameters used
+                - description: Human-readable description
+                - ir: Intermediate representation (if available)
+
+        Example:
+            >>> tracker = ProvenanceTracker()
+            >>> # ... perform some operations ...
+            >>> activities = tracker.get_all_activities()
+            >>> print(f"Recorded {len(activities)} activities")
+            Recorded 5 activities
+        """
+        return self.activities
 
     def to_dict(self) -> Dict[str, Any]:
         """

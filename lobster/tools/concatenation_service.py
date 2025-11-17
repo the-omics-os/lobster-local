@@ -7,14 +7,10 @@ and geo_service.py, implementing a strategy pattern for different data types
 with advanced memory management and progress tracking.
 """
 
-import gc
-import os
 from abc import ABC, abstractmethod
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -22,10 +18,13 @@ import pandas as pd
 import psutil
 
 try:
+    import anndata
     import anndata as ad
 except ImportError:
     ad = None
+    anndata = None
 
+from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.utils.logger import get_logger
 
@@ -416,7 +415,7 @@ class MemoryEfficientStrategy(BaseConcatenationStrategy):
         """Concatenate using memory-efficient chunked processing."""
         import time
 
-        start_time = time.time()
+        time.time()
 
         try:
             validation = self.validate(sample_data)
@@ -496,13 +495,108 @@ class ConcatenationService:
             "ConcatenationService initialized with modality-agnostic concatenation support"
         )
 
+    def _create_concatenation_ir(
+        self,
+        n_samples: int,
+        join_type: str,
+        batch_key: str,
+        use_intersecting_genes_only: bool,
+        sample_ids: Optional[List[str]] = None,
+    ) -> AnalysisStep:
+        """
+        Create Intermediate Representation for sample concatenation.
+
+        Args:
+            n_samples: Number of samples being concatenated
+            join_type: Type of join ("inner" or "outer")
+            batch_key: Key for batch information
+            use_intersecting_genes_only: Whether using only common genes
+            sample_ids: Optional list of sample IDs
+
+        Returns:
+            AnalysisStep with concatenation code template
+        """
+        # Parameter schema
+        parameter_schema = {
+            "join_type": ParameterSpec(
+                param_type="str",
+                papermill_injectable=True,
+                default_value=join_type,
+                required=True,
+                validation_rule="join_type in ['inner', 'outer']",
+                description="Type of join for gene union/intersection",
+            ),
+            "batch_key": ParameterSpec(
+                param_type="str",
+                papermill_injectable=True,
+                default_value=batch_key,
+                required=False,
+                validation_rule="len(batch_key) > 0",
+                description="Column name for batch information",
+            ),
+            "use_intersecting_genes_only": ParameterSpec(
+                param_type="bool",
+                papermill_injectable=True,
+                default_value=use_intersecting_genes_only,
+                required=False,
+                validation_rule="isinstance(use_intersecting_genes_only, bool)",
+                description="Whether to use only genes common to all samples",
+            ),
+        }
+
+        # Jinja2 template with parameters
+        sample_ids_str = (
+            str(sample_ids)
+            if sample_ids
+            else "[f'sample_{i}' for i in range(n_samples)]"
+        )
+        code_template = f"""# Concatenate samples
+# Join type: {{{{ join_type }}}} ({'inner join = common genes only' if join_type == 'inner' else 'outer join = all genes, fill missing with 0'})
+concatenated_adata = ad.concat(
+    sample_adatas,
+    axis=0,
+    join={{{{ join_type }}}},
+    merge='unique',
+    {'fill_value=0,' if join_type == 'outer' else ''}
+    label='{{{{ batch_key }}}}',
+    keys={sample_ids_str},
+)
+print(f"Concatenated {{len(sample_adatas)}} samples: {{concatenated_adata.n_obs}} cells × {{concatenated_adata.n_vars}} genes")
+"""
+
+        return AnalysisStep(
+            operation="anndata.concat",
+            tool_name="concatenate_samples",
+            description=f"Concatenate {n_samples} samples using {join_type} join",
+            library="anndata",
+            code_template=code_template,
+            imports=["import anndata as ad"],
+            parameters={
+                "join_type": join_type,
+                "batch_key": batch_key,
+                "use_intersecting_genes_only": use_intersecting_genes_only,
+                "n_samples": n_samples,
+            },
+            parameter_schema=parameter_schema,
+            input_entities=["sample_adatas"],
+            output_entities=["concatenated_adata"],
+            execution_context={
+                "operation_type": "data_integration",
+                "n_samples": n_samples,
+                "join_strategy": join_type,
+                "batch_tracking": batch_key,
+            },
+            validates_on_export=True,
+            requires_validation=False,
+        )
+
     def concatenate_samples(
         self,
         sample_adatas: List["anndata.AnnData"],
         strategy: ConcatenationStrategy = ConcatenationStrategy.SMART_SPARSE,
         batch_key: str = "batch",
         **kwargs,
-    ) -> Tuple["anndata.AnnData", Dict[str, Any]]:
+    ) -> Tuple["anndata.AnnData", Dict[str, Any], AnalysisStep]:
         """
         Main concatenation method that handles AnnData objects.
 
@@ -513,7 +607,7 @@ class ConcatenationService:
             **kwargs: Additional parameters for the strategy
 
         Returns:
-            Tuple of (concatenated_adata, statistics_dict)
+            Tuple of (concatenated_adata, statistics_dict, ir)
         """
         try:
             # Validate inputs
@@ -545,7 +639,20 @@ class ConcatenationService:
                 }
             )
 
-            return result.data, statistics
+            # Create IR for notebook export
+            join_type = statistics.get("join_type", "inner")
+            use_intersecting_genes = kwargs.get("use_intersecting_genes_only", True)
+            sample_ids = kwargs.get("sample_ids", None)
+
+            ir = self._create_concatenation_ir(
+                n_samples=len(sample_adatas),
+                join_type=join_type,
+                batch_key=batch_key,
+                use_intersecting_genes_only=use_intersecting_genes,
+                sample_ids=sample_ids,
+            )
+
+            return result.data, statistics, ir
 
         except Exception as e:
             logger.error(f"Error in concatenate_samples: {e}")
@@ -559,7 +666,7 @@ class ConcatenationService:
         use_intersecting_genes_only: bool = True,
         batch_key: str = "batch",
         **kwargs,
-    ) -> Tuple["anndata.AnnData", Dict[str, Any]]:
+    ) -> Tuple["anndata.AnnData", Dict[str, Any], AnalysisStep]:
         """
         Concatenate samples from modality names stored in DataManagerV2.
 
@@ -572,7 +679,7 @@ class ConcatenationService:
             **kwargs: Additional parameters
 
         Returns:
-            Tuple of (concatenated_adata, statistics_dict)
+            Tuple of (concatenated_adata, statistics_dict, ir)
         """
         try:
             # Load modalities from data manager
@@ -606,7 +713,7 @@ class ConcatenationService:
             kwargs["sample_ids"] = sample_ids
             kwargs["use_intersecting_genes_only"] = use_intersecting_genes_only
 
-            concatenated_adata, statistics = self.concatenate_samples(
+            concatenated_adata, statistics, ir = self.concatenate_samples(
                 sample_adatas=sample_adatas,
                 strategy=strategy,
                 batch_key=batch_key,
@@ -614,7 +721,7 @@ class ConcatenationService:
             )
 
             # Service remains stateless - storage is handled by the calling agent tool
-            return concatenated_adata, statistics
+            return concatenated_adata, statistics, ir
 
         except Exception as e:
             logger.error(f"Error in concatenate_from_modalities: {e}")

@@ -6,9 +6,11 @@ database, providing structured access to gene expression datasets.
 """
 
 import ftplib
+import hashlib
 import os
 import re
 import tarfile
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
@@ -193,7 +195,7 @@ class GEODownloadManager:
                     )
 
                     # Setup progress tracking for extraction
-                    total_size = sum(member.size for member in safe_members)
+                    sum(member.size for member in safe_members)
                     progress_columns = [
                         BarColumn(),
                         "•",
@@ -598,15 +600,217 @@ class GEODownloadManager:
                             progress.update(task_id, completed=downloaded)
 
             logger.info(f"Downloaded to: {local_path}")
+
+            # Validate gzip files before considering download successful
+            if local_path.name.endswith(".gz"):
+                if not self._validate_gzip_integrity(local_path):
+                    logger.error(
+                        f"Gzip validation failed, removing corrupted file: {local_path}"
+                    )
+                    local_path.unlink()
+                    return False
+
             return True
 
         except requests.exceptions.RequestException as e:
             logger.warning(f"Failed to download HTTP {url}: {e}")
             return False
 
+    def _calculate_md5(self, file_path: Path) -> str:
+        """
+        Calculate MD5 checksum for file integrity verification.
+
+        Args:
+            file_path: Path to file to checksum
+
+        Returns:
+            str: Hexadecimal MD5 checksum
+        """
+        md5 = hashlib.md5()
+        with open(file_path, "rb") as f:
+            # Read in 8KB chunks for memory efficiency
+            for chunk in iter(lambda: f.read(8192), b""):
+                md5.update(chunk)
+        return md5.hexdigest()
+
+    def _chunked_ftp_download(
+        self,
+        ftp: ftplib.FTP,
+        remote_path: str,
+        local_path: Path,
+        file_size: int,
+        description: str,
+        chunk_size: int = 8192,
+    ) -> bool:
+        """
+        Download file from FTP in chunks to prevent corruption during large transfers.
+
+        Args:
+            ftp: Connected FTP instance
+            remote_path: Remote file path on FTP server
+            local_path: Local destination path
+            file_size: Total file size for progress tracking
+            description: Description for progress bar
+            chunk_size: Size of chunks to download (default: 8KB)
+
+        Returns:
+            bool: True if download succeeded, False otherwise
+        """
+        try:
+            # Create progress columns for rich display
+            progress_columns = [
+                BarColumn(),
+                DownloadColumn(),
+                TransferSpeedColumn(),
+                "•",
+                TimeElapsedColumn(),
+                "•",
+                TimeRemainingColumn(),
+            ]
+
+            # Download with progress tracking
+            with Progress(*progress_columns, console=self.console) as progress:
+                task_id = progress.add_task(description, total=file_size)
+
+                with open(local_path, "wb") as f:
+                    downloaded = 0
+
+                    def callback(data):
+                        nonlocal downloaded
+                        f.write(data)
+                        downloaded += len(data)
+                        progress.update(task_id, completed=downloaded)
+
+                    # Set binary mode and download with specified chunk size
+                    ftp.voidcmd("TYPE I")  # Set binary mode
+                    ftp.retrbinary(
+                        f"RETR {remote_path}", callback, blocksize=chunk_size
+                    )
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Chunked FTP download failed: {e}")
+            return False
+
+    def _download_with_retry(
+        self,
+        url: str,
+        local_path: Path,
+        description: str,
+        max_retries: int = 3,
+        md5_checksum: Optional[str] = None,
+    ) -> bool:
+        """
+        Download file with retry logic and integrity verification.
+
+        Implements exponential backoff for transient network errors and validates
+        downloaded files using gzip integrity checks and optional MD5 verification.
+
+        Args:
+            url: FTP URL to download from
+            local_path: Local destination path
+            description: Description for progress bar
+            max_retries: Maximum retry attempts (default: 3)
+            md5_checksum: Optional MD5 checksum for verification
+
+        Returns:
+            bool: True if download successful and validated, False otherwise
+        """
+        parsed_url = urlparse(url)
+        hostname = parsed_url.hostname
+        username = parsed_url.username or "anonymous"
+        password = parsed_url.password or "anonymous@"
+        filepath = parsed_url.path
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Exponential backoff: 2^attempt seconds (2s, 4s, 8s)
+                if attempt > 1:
+                    wait_time = 2**attempt
+                    logger.info(
+                        f"Retry attempt {attempt}/{max_retries} after {wait_time}s delay..."
+                    )
+                    time.sleep(wait_time)
+
+                # Connect to FTP server
+                ftp = ftplib.FTP()
+                ftp.connect(hostname, parsed_url.port or 21, timeout=30)
+                ftp.login(username, password)
+
+                try:
+                    # Get file size for progress tracking
+                    file_size = ftp.size(filepath)
+                    if file_size is None:
+                        file_size = 0
+
+                    # Perform chunked download (8KB chunks for stability)
+                    success = self._chunked_ftp_download(
+                        ftp,
+                        filepath,
+                        local_path,
+                        file_size,
+                        description,
+                        chunk_size=8192,
+                    )
+
+                    if not success:
+                        logger.warning(
+                            f"Chunked download failed on attempt {attempt}/{max_retries}"
+                        )
+                        if local_path.exists():
+                            local_path.unlink()
+                        continue
+
+                    # Verify MD5 checksum if provided
+                    if md5_checksum:
+                        calculated_md5 = self._calculate_md5(local_path)
+                        if calculated_md5 != md5_checksum:
+                            logger.warning(
+                                f"MD5 mismatch on attempt {attempt}: "
+                                f"expected {md5_checksum}, got {calculated_md5}"
+                            )
+                            local_path.unlink()
+                            continue
+
+                    # Verify gzip integrity for compressed files
+                    if local_path.name.endswith(".gz"):
+                        if not self._validate_gzip_integrity(local_path):
+                            logger.warning(
+                                f"Gzip validation failed on attempt {attempt}/{max_retries}"
+                            )
+                            local_path.unlink()
+                            continue
+
+                    # Success - all validations passed
+                    logger.info(
+                        f"Download successful: {local_path.name} "
+                        f"({file_size / (1024**2):.1f} MB)"
+                    )
+                    return True
+
+                finally:
+                    ftp.quit()
+
+            except (*ftplib.all_errors, OSError) as e:
+                logger.error(f"Download attempt {attempt}/{max_retries} failed: {e}")
+                if local_path.exists():
+                    local_path.unlink()
+
+                if attempt == max_retries:
+                    logger.error(
+                        f"All {max_retries} download attempts failed for {url}"
+                    )
+                    return False
+
+        return False
+
     def _download_ftp(self, url: str, local_path: Path, description: str) -> bool:
         """
-        Download file from FTP URL with progress tracking.
+        Download file from FTP URL with retry logic and progress tracking.
+
+        This method wraps _download_with_retry() to provide automatic retry
+        with exponential backoff for transient network errors and corrupted downloads.
 
         Args:
             url: FTP URL to download from
@@ -616,60 +820,39 @@ class GEODownloadManager:
         Returns:
             bool: True if download succeeded, False otherwise
         """
+        # Delegate to retry wrapper with exponential backoff
+        return self._download_with_retry(url, local_path, description)
+
+    def _validate_gzip_integrity(self, file_path: Path) -> bool:
+        """
+        Validate gzip file can be fully decompressed.
+
+        This prevents corrupted gzip files from poisoning the cache by
+        attempting to decompress the entire file in chunks.
+
+        Args:
+            file_path: Path to gzip file to validate
+
+        Returns:
+            bool: True if file can be fully decompressed, False otherwise
+        """
         try:
-            parsed_url = urlparse(url)
-            hostname = parsed_url.hostname
-            username = parsed_url.username or "anonymous"
-            password = parsed_url.password or "anonymous@"
-            filepath = parsed_url.path
+            import gzip
 
-            # Connect to FTP server
-            ftp = ftplib.FTP()
-            ftp.connect(hostname, parsed_url.port or 21, timeout=30)
-            ftp.login(username, password)
+            # Read entire file in chunks to verify complete decompression
+            # Using 32KB chunks for memory efficiency
+            with gzip.open(file_path, "rb") as f:
+                while _ := f.read(32768):
+                    pass
 
-            try:
-                # Get file size for progress tracking
-                file_size = ftp.size(filepath)
-                if file_size is None:
-                    file_size = 0
+            logger.debug(f"Gzip validation passed: {file_path.name}")
+            return True
 
-                # Create progress columns for a rich display
-                progress_columns = [
-                    BarColumn(),
-                    DownloadColumn(),
-                    TransferSpeedColumn(),
-                    "•",
-                    TimeElapsedColumn(),
-                    "•",
-                    TimeRemainingColumn(),
-                ]
-
-                # Download with progress tracking
-                with Progress(*progress_columns, console=self.console) as progress:
-                    task_id = progress.add_task(description, total=file_size)
-
-                    with open(local_path, "wb") as f:
-                        downloaded = 0
-
-                        def callback(data):
-                            nonlocal downloaded
-                            f.write(data)
-                            downloaded += len(data)
-                            progress.update(task_id, completed=downloaded)
-
-                        # Set binary mode and download
-                        ftp.voidcmd("TYPE I")  # Set binary mode
-                        ftp.retrbinary(f"RETR {filepath}", callback, blocksize=32768)
-
-                logger.info(f"Downloaded FTP file to: {local_path}")
-                return True
-
-            finally:
-                ftp.quit()
-
-        except (ftplib.all_errors, OSError) as e:
-            logger.warning(f"Failed to download FTP {url}: {e}")
+        except (OSError, gzip.BadGzipFile, EOFError) as e:
+            logger.warning(f"Gzip validation failed for {file_path.name}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected error validating {file_path.name}: {e}")
             return False
 
     # FIXME remove soonish

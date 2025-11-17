@@ -8,7 +8,7 @@ appropriate schema enforcement.
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Union
 
 import anndata
 import numpy as np
@@ -17,7 +17,7 @@ import pandas as pd
 from lobster.core import AdapterError, ValidationError
 from lobster.core.adapters.base import BaseAdapter
 from lobster.core.interfaces.validator import ValidationResult
-from lobster.core.schemas.pseudobulk import PseudobulkSchema
+from lobster.core.schemas.transcriptomics import TranscriptomicsSchema
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +43,14 @@ class PseudobulkAdapter(BaseAdapter):
         self.strict_validation = strict_validation
 
         # Create validator
-        self.validator = PseudobulkSchema.create_validator(strict=strict_validation)
+        self.validator = TranscriptomicsSchema.create_validator(
+            schema_type="pseudobulk", strict=strict_validation
+        )
 
         # Get QC thresholds
-        self.qc_thresholds = PseudobulkSchema.get_recommended_qc_thresholds()
+        self.qc_thresholds = TranscriptomicsSchema.get_recommended_qc_thresholds(
+            schema_type="pseudobulk"
+        )
 
     def from_source(
         self, source: Union[str, Path, pd.DataFrame, anndata.AnnData], **kwargs
@@ -100,7 +104,7 @@ class PseudobulkAdapter(BaseAdapter):
             # Validate schema if requested
             if validate_schema:
                 validation_result = self.validate(adata, strict=self.strict_validation)
-                if validation_result.has_errors():
+                if validation_result.has_errors:
                     if self.strict_validation:
                         raise ValidationError(
                             f"Pseudobulk schema validation failed: {validation_result.get_error_summary()}",
@@ -264,7 +268,9 @@ class PseudobulkAdapter(BaseAdapter):
 
         # Add per-gene metrics for pseudobulk samples
         if "n_pseudobulk_samples" not in adata.var.columns:
-            adata.var["n_pseudobulk_samples"] = np.array((adata.X > 0).sum(axis=0)).flatten()
+            adata.var["n_pseudobulk_samples"] = np.array(
+                (adata.X > 0).sum(axis=0)
+            ).flatten()
 
         if "mean_aggregated_counts" not in adata.var.columns:
             adata.var["mean_aggregated_counts"] = np.array(
@@ -278,7 +284,9 @@ class PseudobulkAdapter(BaseAdapter):
 
         # Add per-pseudobulk-sample metrics
         if "n_genes_detected" not in adata.obs.columns:
-            adata.obs["n_genes_detected"] = np.array((adata.X > 0).sum(axis=1)).flatten()
+            adata.obs["n_genes_detected"] = np.array(
+                (adata.X > 0).sum(axis=1)
+            ).flatten()
 
         if "total_aggregated_counts" not in adata.obs.columns:
             adata.obs["total_aggregated_counts"] = np.array(
@@ -375,7 +383,7 @@ class PseudobulkAdapter(BaseAdapter):
         Returns:
             Dict[str, Any]: Schema definition
         """
-        return PseudobulkSchema.get_pseudobulk_schema()
+        return TranscriptomicsSchema.get_pseudobulk_schema()
 
     def get_supported_formats(self) -> List[str]:
         """

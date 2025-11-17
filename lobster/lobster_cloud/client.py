@@ -241,7 +241,7 @@ class CloudLobsterClient(BaseClient):
 
             return response.json().get("files", [])
 
-        except Exception as e:
+        except Exception:
             # Fallback to empty list on error
             return []
 
@@ -315,7 +315,7 @@ class CloudLobsterClient(BaseClient):
                 json={"session_id": self.session_id},
                 timeout=10,
             )
-        except:
+        except Exception:
             # Silently fail - local reset is sufficient
             pass
 
@@ -352,7 +352,7 @@ class CloudLobsterClient(BaseClient):
             if response.status_code == 200:
                 cloud_data = response.json()
                 export_data.update(cloud_data)
-        except:
+        except Exception:
             # Continue with local data only
             pass
 

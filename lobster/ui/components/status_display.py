@@ -5,20 +5,16 @@ This module provides sophisticated status displays using Rich Layout,
 multi-panel views, and real-time system monitoring with orange theming.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Optional
 
 import psutil
 from rich import box
 from rich.align import Align
-from rich.columns import Columns
-from rich.console import Group
 from rich.layout import Layout
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, TextColumn
 from rich.table import Table
-from rich.text import Text
 
 from ..console_manager import get_console_manager
 from ..themes import LobsterTheme
@@ -475,16 +471,16 @@ class EnhancedStatusDisplay:
                             time_str = datetime.fromisoformat(
                                 timestamp.replace("Z", "+00:00")
                             ).strftime("%H:%M")
-                        except:
+                        except Exception:
                             time_str = "N/A"
                     else:
                         time_str = "N/A"
 
                     success = operation.get("success", True)
                     status = (
-                        f"[green]✅ Success[/green]"
+                        "[green]✅ Success[/green]"
                         if success
-                        else f"[red]❌ Failed[/red]"
+                        else "[red]❌ Failed[/red]"
                     )
 
                     table.add_row(op_name, status, time_str)
@@ -534,7 +530,7 @@ class EnhancedStatusDisplay:
                             plot["timestamp"].replace("Z", "+00:00")
                         )
                         created_str = created.strftime("%H:%M")
-                    except:
+                    except Exception:
                         created_str = "N/A"
 
                     table.add_row(plot_title, plot_type, created_str)

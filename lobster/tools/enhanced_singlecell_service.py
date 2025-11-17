@@ -200,7 +200,7 @@ class EnhancedSingleCellService:
         """
         logger.info("Using fallback doublet detection method")
 
-        n_cells = counts_matrix.shape[0]
+        counts_matrix.shape[0]
 
         # Calculate per-cell metrics that indicate doublets
         total_counts = np.sum(counts_matrix, axis=1)
@@ -348,14 +348,20 @@ class EnhancedSingleCellService:
             adata_markers = adata.copy()
 
             # Run differential expression analysis
-            sc.tl.rank_genes_groups(
-                adata_markers,
-                groupby=groupby,
-                groups=groups,
-                method=method,
-                n_genes=n_genes,
-                use_raw=True,
-            )
+            # Note: Only pass 'groups' parameter if explicitly set (not None)
+            # Scanpy distinguishes between "parameter not provided" vs "parameter=None"
+            # When groups=None is explicitly passed, scanpy's legacy_api_wrap fails
+            scanpy_kwargs = {
+                "groupby": groupby,
+                "method": method,
+                "n_genes": n_genes,
+                "use_raw": True,
+            }
+
+            if groups is not None:
+                scanpy_kwargs["groups"] = groups
+
+            sc.tl.rank_genes_groups(adata_markers, **scanpy_kwargs)
 
             # Extract marker genes into structured format
             marker_genes_df = self._extract_marker_genes(adata_markers, groupby)
@@ -468,130 +474,6 @@ class EnhancedSingleCellService:
                     cluster_scores[cluster][cell_type] = 0.0
 
         logger.info(f"Calculated marker scores for {len(unique_clusters)} clusters")
-        return cluster_scores
-
-    def run_pathway_analysis(self, cell_type: Optional[str] = None) -> str:
-        """
-        Run pathway analysis on marker genes.
-
-        Args:
-            cell_type: Specific cell type for analysis
-
-        Returns:
-            str: Pathway analysis results
-        """
-        try:
-            logger.info(f"Running pathway analysis for {cell_type or 'all cell types'}")
-
-            # Get marker genes from metadata
-            if "marker_genes" not in self.data_manager.current_metadata:
-                return "No marker genes found. Please run marker gene analysis first."
-
-            marker_genes = self.data_manager.current_metadata["marker_genes"]
-
-            # Extract gene list (simplified approach)
-            if isinstance(marker_genes, dict) and "names" in marker_genes:
-                gene_list = list(marker_genes["names"].values())[0][:50]  # Top 50 genes
-            else:
-                return "Invalid marker gene format. Please rerun marker gene analysis."
-
-            # Run mock pathway analysis (replace with actual GO/KEGG analysis)
-            pathway_results = self._run_mock_pathway_analysis(gene_list)
-
-            # Create pathway plot
-            pathway_plot = self._create_pathway_plot(pathway_results)
-            analysis_target = cell_type if cell_type else "All Cell Types"
-            self.data_manager.add_plot(
-                pathway_plot,
-                title=f"Pathway Analysis for {analysis_target}",
-                source="enhanced_singlecell_service",
-            )
-
-            return f"""Pathway Analysis Complete!
-
-**Genes Analyzed:** {len(gene_list)}
-**Significant Pathways:** {len([p for p in pathway_results if p['p_value'] < 0.05])}
-
-**Top Enriched Pathways:**
-{self._format_pathway_results(pathway_results)}
-
-Pathway enrichment plot shows the most significantly enriched biological processes.
-
-Next suggested step: Export results or perform additional downstream analysis."""
-
-        except Exception as e:
-            logger.exception(f"Error in pathway analysis: {e}")
-            return f"Error in pathway analysis: {str(e)}"
-
-    def _calculate_marker_scores(
-        self, markers: Dict[str, List[str]]
-    ) -> Dict[str, Dict[str, float]]:
-        """Calculate marker gene scores for each cluster."""
-        adata = self.data_manager.adata
-
-        # Ensure unique observation indices to prevent reindexing errors
-        if not adata.obs_names.is_unique:
-            logger.warning(
-                "Non-unique observation indices detected in AnnData. Using index positions instead."
-            )
-            # Create a copy to avoid modifying the original
-            adata = adata.copy()
-            adata.obs_names_make_unique()
-
-        # Ensure unique variable names (gene names) to prevent reindexing errors
-        if not adata.var_names.is_unique:
-            logger.warning(
-                "Non-unique variable names (genes) detected in AnnData. Making them unique."
-            )
-            # Create a copy to avoid modifying the original
-            adata = adata.copy()
-            adata.var_names_make_unique()
-
-        cluster_scores = {}
-
-        # Get unique clusters and handle potential duplicate indices
-        unique_clusters = adata.obs["leiden"].astype(str).unique()
-
-        for cluster in unique_clusters:
-            cluster_scores[cluster] = {}
-            # Use string comparison to avoid type issues
-            cluster_cells = adata.obs["leiden"].astype(str) == cluster
-
-            for cell_type, marker_genes in markers.items():
-                # Find available markers in the dataset
-                available_markers = [
-                    gene for gene in marker_genes if gene in adata.var_names
-                ]
-
-                if available_markers:
-                    try:
-                        # Calculate mean expression of markers in this cluster
-                        subset = adata[cluster_cells, available_markers]
-
-                        if subset.shape[0] > 0:  # Check if any cells match
-                            marker_expression = subset.X.mean(axis=0)
-                            if hasattr(
-                                marker_expression, "A1"
-                            ):  # Handle sparse matrices
-                                marker_expression = marker_expression.A1
-
-                            # Calculate score as mean of available markers
-                            score = (
-                                np.mean(marker_expression)
-                                if len(available_markers) > 0
-                                else 0
-                            )
-                            cluster_scores[cluster][cell_type] = score
-                        else:
-                            cluster_scores[cluster][cell_type] = 0
-                    except Exception as e:
-                        logger.warning(
-                            f"Error calculating marker score for cluster {cluster}, cell type {cell_type}: {e}"
-                        )
-                        cluster_scores[cluster][cell_type] = 0
-                else:
-                    cluster_scores[cluster][cell_type] = 0
-
         return cluster_scores
 
     def _create_doublet_plot(

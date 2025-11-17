@@ -6,17 +6,9 @@ data from the Gene Expression Omnibus (GEO) database when the standard GEOparse 
 It includes TAR processing, supplementary file handling, and alternative download strategies.
 """
 
-import json
-import os
-import re
-import tarfile
-import time
-import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional
 
-import numpy as np
 import pandas as pd
 
 try:
@@ -24,11 +16,8 @@ try:
 except ImportError:
     GEOparse = None
 
-from lobster.core.data_manager_v2 import DataManagerV2
 
 # Import helper modules for fallback functionality
-from lobster.tools.geo_downloader import GEODownloadManager
-from lobster.tools.geo_parser import GEOParser
 
 # Import the main service classes and enums
 from lobster.tools.geo_service import GEODataSource, GEOResult
@@ -343,7 +332,7 @@ class GEOFallbackService:
 
                 # Save to workspace
                 save_path = f"{clean_geo_id.lower()}_bulk_raw.h5ad"
-                saved_file = self.data_manager.save_modality(modality_name, save_path)
+                self.data_manager.save_modality(modality_name, save_path)
 
                 return f"""Successfully downloaded bulk dataset {clean_geo_id}!
 
@@ -424,7 +413,7 @@ class GEOFallbackService:
 
             # Save to workspace
             save_path = f"{clean_geo_id.lower()}_tar_processed.h5ad"
-            saved_file = self.data_manager.save_modality(modality_name, save_path)
+            self.data_manager.save_modality(modality_name, save_path)
 
             self.data_manager.log_tool_usage(
                 tool_name="process_supplementary_tar_files",

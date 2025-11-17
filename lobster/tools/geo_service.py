@@ -8,6 +8,7 @@ data from the Gene Expression Omnibus (GEO) database using a layered approach:
 3. Integration: Full DataManagerV2 compatibility with comprehensive error handling
 """
 
+import ftplib
 import json
 import os
 import re
@@ -16,12 +17,12 @@ import time
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import anndata
 import numpy as np
 import pandas as pd
 
@@ -30,13 +31,21 @@ try:
 except ImportError:
     GEOparse = None
 
+from lobster.agents.data_expert_assistant import DataExpertAssistant
+from lobster.core.adapters.transcriptomics_adapter import TranscriptomicsAdapter
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.core.exceptions import (
+    FeatureNotImplementedError,
+    UnsupportedPlatformError,
+)
+
+# Import bulk RNA-seq and adapter support for quantification files
+from lobster.tools.bulk_rnaseq_service import BulkRNASeqService
 
 # Import helper modules for fallback functionality
 from lobster.tools.geo_downloader import GEODownloadManager
 from lobster.tools.geo_parser import GEOParser
 from lobster.tools.pipeline_strategy import (
-    PipelineContext,
     PipelineStrategyEngine,
     PipelineType,
     create_pipeline_context,
@@ -108,6 +117,101 @@ class GEOFallbackError(Exception):
     pass
 
 
+class PlatformCompatibility(Enum):
+    """Platform support status for early validation."""
+
+    SUPPORTED = "supported"  # RNA-seq, fully supported
+    UNSUPPORTED = "unsupported"  # Microarrays, clear rejection
+    EXPERIMENTAL = "experimental"  # Partial support, warning only
+    UNKNOWN = "unknown"  # Not in registry, conservative approach
+
+
+# Comprehensive Platform Registry for Early Validation
+# This registry enables rejecting unsupported platforms BEFORE downloading files
+PLATFORM_REGISTRY: Dict[str, PlatformCompatibility] = {
+    # === SUPPORTED RNA-SEQ PLATFORMS ===
+    # Illumina RNA-seq platforms
+    "GPL16791": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 2500
+    "GPL18573": PlatformCompatibility.SUPPORTED,  # Illumina NextSeq 500
+    "GPL20301": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 4000
+    "GPL21290": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 3000
+    "GPL24676": PlatformCompatibility.SUPPORTED,  # Illumina NovaSeq 6000
+    "GPL13112": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 2000 (mouse)
+    "GPL11154": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 2000 (humanb)
+    "GPL10999": PlatformCompatibility.SUPPORTED,  # Illumina Genome Analyzer IIx
+    "GPL9115": PlatformCompatibility.SUPPORTED,  # Illumina Genome Analyzer II
+    "GPL9052": PlatformCompatibility.SUPPORTED,  # Illumina Genome Analyzer
+    # Single-cell platforms
+    "GPL24247": PlatformCompatibility.SUPPORTED,  # 10X Chromium (NovaSeq)
+    "GPL26966": PlatformCompatibility.SUPPORTED,  # 10X Chromium (HiSeq X)
+    "GPL21103": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 2500 (single-cell)
+    "GPL19057": PlatformCompatibility.SUPPORTED,  # Illumina NextSeq 500 (single-cell)
+    # === UNSUPPORTED MICROARRAY PLATFORMS ===
+    # Affymetrix arrays
+    "GPL570": PlatformCompatibility.UNSUPPORTED,  # Affymetrix U133 Plus 2.0
+    "GPL96": PlatformCompatibility.UNSUPPORTED,  # Affymetrix U133A
+    "GPL97": PlatformCompatibility.UNSUPPORTED,  # Affymetrix U133B
+    "GPL571": PlatformCompatibility.UNSUPPORTED,  # Affymetrix U133 A 2.0
+    "GPL1352": PlatformCompatibility.UNSUPPORTED,  # Affymetrix U133 A2
+    "GPL6244": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Gene 1.0 ST
+    "GPL6246": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Mouse Gene 1.0 ST
+    "GPL6247": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Rat Gene 1.0 ST
+    "GPL91": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Mu11KsubA
+    "GPL92": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Mu11KsubB
+    "GPL339": PlatformCompatibility.UNSUPPORTED,  # Affymetrix MOE430A
+    "GPL340": PlatformCompatibility.UNSUPPORTED,  # Affymetrix MOE430B
+    "GPL8321": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Mouse Genome 430A 2.0
+    "GPL1261": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Mouse Genome 430 2.0
+    # Illumina BeadArray (microarray, NOT RNA-seq)
+    "GPL10558": PlatformCompatibility.UNSUPPORTED,  # Illumina HumanHT-12 V4.0
+    "GPL6947": PlatformCompatibility.UNSUPPORTED,  # Illumina HumanHT-12 V3.0
+    "GPL6883": PlatformCompatibility.UNSUPPORTED,  # Illumina HumanRef-8 V3.0
+    "GPL6887": PlatformCompatibility.UNSUPPORTED,  # Illumina MouseRef-8 V2.0
+    "GPL6885": PlatformCompatibility.UNSUPPORTED,  # Illumina MouseRef-8 V1.1
+    "GPL6102": PlatformCompatibility.UNSUPPORTED,  # Illumina human-6 V2.0
+    "GPL6104": PlatformCompatibility.UNSUPPORTED,  # Illumina mouse Ref-8 V2.0
+    # Agilent microarrays
+    "GPL6480": PlatformCompatibility.UNSUPPORTED,  # Agilent-014850
+    "GPL13497": PlatformCompatibility.UNSUPPORTED,  # Agilent-026652
+    "GPL17077": PlatformCompatibility.UNSUPPORTED,  # Agilent-039494
+    "GPL4133": PlatformCompatibility.UNSUPPORTED,  # Agilent-014850 Whole Human Genome
+    "GPL1708": PlatformCompatibility.UNSUPPORTED,  # Agilent-012391 Whole Human Genome
+    "GPL7202": PlatformCompatibility.UNSUPPORTED,  # Agilent-014868 Whole Mouse Genome
+    # Other microarray platforms
+    "GPL341": PlatformCompatibility.UNSUPPORTED,  # Affymetrix RG_U34A
+    "GPL85": PlatformCompatibility.UNSUPPORTED,  # Affymetrix RG_U34B
+    "GPL1355": PlatformCompatibility.UNSUPPORTED,  # Affymetrix Rat Genome 230 2.0
+}
+
+# Keyword patterns for unknown platform detection
+UNSUPPORTED_KEYWORDS = [
+    "affymetrix",
+    "agilent",
+    "beadarray",
+    "beadchip",
+    "genechip",
+    "microarray",
+    "array",
+    "snp chip",
+    "exon array",
+    "gene chip",
+]
+
+SUPPORTED_KEYWORDS = [
+    "rna-seq",
+    "rnaseq",
+    "rna seq",
+    "illumina hiseq",
+    "illumina nextseq",
+    "illumina novaseq",
+    "10x",
+    "chromium",
+    "single cell",
+    "single-cell",
+    "sequencing",
+]
+
+
 # ████████████████████████████████████████████████████████████████████████████████
 # ██                                                                            ██
 # ██                           MAIN SERVICE CLASS                               ██
@@ -125,7 +229,11 @@ class GEOService:
     """
 
     def __init__(
-        self, data_manager: DataManagerV2, cache_dir: Optional[str] = None, console=None
+        self,
+        data_manager: DataManagerV2,
+        cache_dir: Optional[str] = None,
+        console=None,
+        email: Optional[str] = None,
     ):
         """
         Initialize the GEO service with modular architecture.
@@ -134,6 +242,7 @@ class GEOService:
             data_manager: DataManagerV2 instance for storing processed data as modalities
             cache_dir: Directory to cache downloaded files
             console: Rich console instance for display (creates new if None)
+            email: Optional email for NCBI Entrez (for backward compatibility, not currently used)
         """
         if GEOparse is None:
             raise ImportError(
@@ -165,11 +274,217 @@ class GEOService:
 
     # ████████████████████████████████████████████████████████████████████████████████
     # ██                                                                            ██
+    # ██                      RETRY LOGIC WITH EXPONENTIAL BACKOFF                 ██
+    # ██                                                                            ██
+    # ████████████████████████████████████████████████████████████████████████████████
+
+    def _retry_with_backoff(
+        self,
+        operation: Callable[[], Any],
+        operation_name: str,
+        max_retries: int = 5,
+        base_delay: float = 1.0,
+        is_ftp: bool = False,
+    ) -> Optional[Any]:
+        """
+        Retry operation with exponential backoff, jitter, and progress reporting.
+
+        Implements production-grade retry logic for transient failures:
+        - Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        - Jitter: 0.5-1.5x random multiplier (prevents thundering herd)
+        - Progress reporting: Updates console during retry delays
+        - FTP optimization: Reduced retry count for fast-failing FTP
+        - Conservative return: Returns None rather than raising on final failure
+
+        Args:
+            operation: Function to retry (must be idempotent)
+            operation_name: Human-readable name for logging
+            max_retries: Maximum number of attempts (default: 5, FTP: 2)
+            base_delay: Base delay in seconds (default: 1.0)
+            is_ftp: Whether this is an FTP operation (affects retry count)
+
+        Returns:
+            Result of operation or None if all retries fail
+
+        Example:
+            result = self._retry_with_backoff(
+                operation=lambda: requests.get(url),
+                operation_name=f"Download {geo_id}",
+                max_retries=5,
+                is_ftp=False
+            )
+            if result is None:
+                raise DownloadError(f"Failed after {max_retries} attempts")
+        """
+        import random
+
+        import requests
+
+        # FTP connections often fail permanently, not transiently
+        if is_ftp:
+            max_retries = min(max_retries, 2)
+
+        retry_count = 0
+        total_delay = 0.0
+
+        while retry_count < max_retries:
+            try:
+                result = operation()
+
+                if retry_count > 0:
+                    logger.info(
+                        f"{operation_name} succeeded after {retry_count} retries "
+                        f"(total delay: {total_delay:.1f}s)"
+                    )
+
+                return result
+
+            except requests.exceptions.HTTPError as e:
+                # Special handling for rate limiting
+                if e.response and e.response.status_code == 429:
+                    delay = base_delay * 10  # Much longer backoff for rate limits
+                    retry_count += 1
+                    logger.warning(
+                        f"{operation_name} rate limited (429). "
+                        f"Waiting {delay:.0f}s before retry {retry_count}/{max_retries}..."
+                    )
+                    total_delay += delay
+
+                    # Progress reporting (if console available)
+                    if hasattr(self, "console") and self.console:
+                        self.console.print(
+                            f"[yellow]⚠ {operation_name} rate limited (attempt {retry_count}/{max_retries})[/yellow]"
+                        )
+                        self.console.print(
+                            f"[yellow]  Retrying in {delay:.1f}s...[/yellow]"
+                        )
+
+                    time.sleep(delay)
+                    continue
+                else:
+                    retry_count += 1
+                    if retry_count >= max_retries:
+                        logger.error(
+                            f"{operation_name} failed after {max_retries} attempts: {e}"
+                        )
+                        return None
+
+                    delay = (
+                        base_delay * (2 ** (retry_count - 1)) * (0.5 + random.random())
+                    )
+                    total_delay += delay
+
+                    # Progress reporting (if console available)
+                    if hasattr(self, "console") and self.console:
+                        self.console.print(
+                            f"[yellow]⚠ {operation_name} failed (attempt {retry_count}/{max_retries})[/yellow]"
+                        )
+                        self.console.print(f"[yellow]  Error: {str(e)[:100]}[/yellow]")
+                        self.console.print(
+                            f"[yellow]  Retrying in {delay:.1f}s...[/yellow]"
+                        )
+                    else:
+                        logger.warning(
+                            f"{operation_name} failed (attempt {retry_count}/{max_retries}). "
+                            f"Retrying in {delay:.1f}s... Error: {e}"
+                        )
+
+                    time.sleep(delay)
+
+            except OSError as e:
+                # GEOparse wraps ftplib.error_perm (550) as OSError with specific message
+                error_str = str(e)
+                if "Download failed" in error_str and (
+                    "No such file" in error_str or "not public yet" in error_str
+                ):
+                    logger.warning(
+                        f"{operation_name} OSError indicates missing file: {error_str[:100]}. "
+                        "Skipping retries, triggering fallback mechanism."
+                    )
+                    return "SOFT_FILE_MISSING"  # Sentinel value to signal fallback
+                # Other OSErrors may be transient, fall through to generic handler
+                logger.warning(
+                    f"{operation_name} OSError (may retry): {error_str[:100]}"
+                )
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(
+                        f"{operation_name} failed after {max_retries} attempts: {e}"
+                    )
+                    return None
+                # Continue with exponential backoff
+                delay = base_delay * (2 ** (retry_count - 1)) * (0.5 + random.random())
+                total_delay += delay
+                logger.warning(
+                    f"{operation_name} retrying after OSError (attempt {retry_count}/{max_retries}) in {delay:.1f}s"
+                )
+                time.sleep(delay)
+
+            except ftplib.error_perm as e:
+                # Permanent FTP errors (550 = File not found) should not be retried
+                error_str = str(e)
+                if error_str.startswith("550"):
+                    logger.warning(
+                        f"{operation_name} permanent FTP error: File not found (550). "
+                        "Skipping retries, triggering fallback mechanism."
+                    )
+                    return "SOFT_FILE_MISSING"  # Sentinel value to signal fallback
+                # Other FTP error codes may be transient, fall through to generic handler
+                logger.warning(f"{operation_name} FTP error: {error_str}")
+                retry_count += 1
+                if retry_count >= max_retries:
+                    logger.error(
+                        f"{operation_name} failed after {max_retries} attempts: {e}"
+                    )
+                    return None
+                # Continue with exponential backoff
+                delay = base_delay * (2 ** (retry_count - 1)) * (0.5 + random.random())
+                total_delay += delay
+                logger.warning(
+                    f"{operation_name} retrying after FTP error (attempt {retry_count}/{max_retries}) in {delay:.1f}s"
+                )
+                time.sleep(delay)
+
+            except Exception as e:
+                retry_count += 1
+
+                if retry_count >= max_retries:
+                    logger.error(
+                        f"{operation_name} failed after {max_retries} attempts: {e}"
+                    )
+                    return None
+
+                # Exponential backoff with jitter
+                # Jitter range: 0.5-1.5x multiplier (standard practice)
+                delay = base_delay * (2 ** (retry_count - 1)) * (0.5 + random.random())
+                total_delay += delay
+
+                # Progress reporting (if console available)
+                if hasattr(self, "console") and self.console:
+                    self.console.print(
+                        f"[yellow]⚠ {operation_name} failed (attempt {retry_count}/{max_retries})[/yellow]"
+                    )
+                    self.console.print(f"[yellow]  Error: {str(e)[:100]}[/yellow]")
+                    self.console.print(
+                        f"[yellow]  Retrying in {delay:.1f}s...[/yellow]"
+                    )
+                else:
+                    logger.warning(
+                        f"{operation_name} failed (attempt {retry_count}/{max_retries}). "
+                        f"Retrying in {delay:.1f}s... Error: {e}"
+                    )
+
+                time.sleep(delay)
+
+        return None
+
+    # ████████████████████████████████████████████████████████████████████████████████
+    # ██                                                                            ██
     # ██                  MAIN ENTRY POINTS (USED BY DATA_EXPERT)                  ██
     # ██                                                                            ██
     # ████████████████████████████████████████████████████████████████████████████████
 
-    def fetch_metadata_only(self, geo_id: str) -> str:
+    def fetch_metadata_only(self, geo_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
         Fetch and validate GEO metadata with fallback mechanisms (Scenario 1).
 
@@ -193,18 +508,27 @@ class GEOService:
                 logger.info(f"Detected GDS identifier: {clean_geo_id}")
                 return self._fetch_gds_metadata_and_convert(clean_geo_id)
             elif not clean_geo_id.startswith("GSE"):
-                return f"Invalid GEO ID format: {geo_id}. Must be a GSE or GDS accession (e.g., GSE194247 or GDS5826)."
+                logger.error(
+                    f"Invalid GEO ID format: {geo_id}. Must be a GSE or GDS accession (e.g., GSE194247 or GDS5826)."
+                )
+                return (None, None)
 
             # Handle GSE identifiers (existing logic)
             return self._fetch_gse_metadata(clean_geo_id)
 
+        except UnsupportedPlatformError:
+            # Re-raise platform errors - they should be handled by caller
+            raise
+        except FeatureNotImplementedError:
+            # Re-raise modality errors - they should be handled by caller
+            raise
         except Exception as e:
             logger.exception(f"Error fetching metadata for {geo_id}: {e}")
-            return f"Error fetching metadata for {geo_id}: {str(e)}"
+            return (None, None)
 
     def _fetch_gse_metadata(self, gse_id: str) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """
-        Fetch GSE metadata using GEOparse.
+        Fetch GSE metadata using GEOparse with retry logic.
 
         Args:
             gse_id: GSE accession ID
@@ -214,21 +538,82 @@ class GEOService:
         """
         try:
             logger.debug(f"Downloading SOFT metadata for {gse_id} using GEOparse...")
-            gse = GEOparse.get_GEO(geo=gse_id, destdir=str(self.cache_dir))
+
+            # Wrap GEOparse call with retry logic for transient network failures
+            gse = self._retry_with_backoff(
+                operation=lambda: GEOparse.get_GEO(
+                    geo=gse_id, destdir=str(self.cache_dir)
+                ),
+                operation_name=f"Fetch metadata for {gse_id}",
+                max_retries=5,
+                is_ftp=False,
+            )
+
+            # Check if SOFT file was missing (sentinel value from retry logic)
+            if gse == "SOFT_FILE_MISSING":
+                logger.info(
+                    f"SOFT file unavailable for {gse_id}, attempting Entrez fallback..."
+                )
+                try:
+                    return self._fetch_gse_metadata_via_entrez(gse_id)
+                except Exception as e:
+                    logger.error(f"Entrez fallback also failed for {gse_id}: {e}")
+                    logger.error(
+                        f"Failed to fetch metadata for {gse_id}: "
+                        f"SOFT file missing and Entrez fallback failed ({str(e)}). "
+                        f"Please check GEO database status or try again later."
+                    )
+                    return (None, None)
+
+            if gse is None:
+                logger.error(
+                    f"Failed to fetch metadata for {gse_id} after multiple retry attempts."
+                )
+                return (None, None)
+
             metadata = self._extract_metadata(gse)
             logger.debug(f"Successfully extracted metadata using GEOparse for {gse_id}")
 
             if not metadata:
-                return f"No metadata could be extracted for {gse_id}"
+                logger.error(f"No metadata could be extracted for {gse_id}")
+                return (None, None)
 
             # Validate metadata against transcriptomics schema
             validation_result = self._validate_geo_metadata(metadata)
 
+            # Check platform compatibility BEFORE downloading files (Phase 2: Early Validation)
+            try:
+                is_compatible, compat_message = self._check_platform_compatibility(
+                    gse_id, metadata
+                )
+                logger.info(f"Platform validation for {gse_id}: {compat_message}")
+            except UnsupportedPlatformError as e:
+                # Store metadata and error for supervisor access, then re-raise
+                self.data_manager.metadata_store[gse_id] = {
+                    "metadata": metadata,
+                    "validation_result": validation_result,
+                    "platform_error": str(e),
+                    "platform_details": e.details,
+                }
+                logger.error(
+                    f"Platform validation failed for {gse_id}: {e.details['detected_platforms']}"
+                )
+                raise
+
             return metadata, validation_result
 
+        except UnsupportedPlatformError:
+            # Re-raise platform errors without catching them
+            raise
+        except FeatureNotImplementedError:
+            # Re-raise modality errors without catching them
+            raise
         except Exception as geoparse_error:
             logger.error(f"GEOparse metadata fetch failed: {geoparse_error}")
-            return f"Failed to fetch metadata for {gse_id}. GEOparse ({geoparse_error}) failed."
+            logger.error(
+                f"Failed to fetch metadata for {gse_id}. GEOparse ({geoparse_error}) failed."
+            )
+            return (None, None)
 
     def _fetch_gds_metadata_and_convert(
         self, gds_id: str
@@ -270,8 +655,8 @@ class GEOService:
                 if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
                     handle_ssl_error(e, url, logger)
                     raise Exception(
-                        f"SSL certificate verification failed when fetching GDS metadata. "
-                        f"See error message above for solutions."
+                        "SSL certificate verification failed when fetching GDS metadata. "
+                        "See error message above for solutions."
                     )
                 raise
 
@@ -280,7 +665,8 @@ class GEOService:
 
             # Extract the GDS record
             if "result" not in gds_data or gds_number not in gds_data["result"]:
-                return f"No GDS record found for {gds_id}"
+                logger.error(f"No GDS record found for {gds_id}")
+                return (None, None)
 
             gds_record = gds_data["result"][gds_number]
             logger.debug(f"Successfully retrieved GDS metadata for {gds_id}")
@@ -288,7 +674,8 @@ class GEOService:
             # Extract GSE ID from GDS record
             gse_id = gds_record.get("gse", "")
             if not gse_id:
-                return f"No associated GSE found for GDS {gds_id}"
+                logger.error(f"No associated GSE found for GDS {gds_id}")
+                return (None, None)
 
             # Ensure GSE has proper format
             if not gse_id.startswith("GSE"):
@@ -297,10 +684,16 @@ class GEOService:
             logger.info(f"Found associated GSE: {gse_id} for GDS {gds_id}")
 
             # Fetch the GSE metadata using existing method
-            gse_metadata, validation_result = self._fetch_gse_metadata(gse_id)
+            result = self._fetch_gse_metadata(gse_id)
 
-            if isinstance(gse_metadata, str):  # Error occurred
-                return gse_metadata
+            # Check if metadata fetch failed (returns (None, None) on error)
+            if result[0] is None:
+                logger.error(
+                    f"Failed to fetch GSE metadata for {gse_id} (from GDS {gds_id})"
+                )
+                return (None, None)
+
+            gse_metadata, validation_result = result
 
             # Enhance metadata with GDS information
             enhanced_metadata = self._combine_gds_gse_metadata(
@@ -309,15 +702,21 @@ class GEOService:
 
             return enhanced_metadata, validation_result
 
+        except UnsupportedPlatformError:
+            # Re-raise platform errors - they should be handled by caller
+            raise
         except urllib.error.URLError as e:
             logger.error(f"Network error fetching GDS metadata: {e}")
-            return f"Network error fetching GDS metadata for {gds_id}: {str(e)}"
+            logger.error(f"Network error fetching GDS metadata for {gds_id}: {str(e)}")
+            return (None, None)
         except json.JSONDecodeError as e:
             logger.error(f"Error parsing GDS JSON response: {e}")
-            return f"Error parsing GDS metadata response for {gds_id}: {str(e)}"
+            logger.error(f"Error parsing GDS metadata response for {gds_id}: {str(e)}")
+            return (None, None)
         except Exception as e:
             logger.error(f"Error fetching GDS metadata for {gds_id}: {e}")
-            return f"Error fetching GDS metadata for {gds_id}: {str(e)}"
+            logger.error(f"Error fetching GDS metadata for {gds_id}: {str(e)}")
+            return (None, None)
 
     def _combine_gds_gse_metadata(
         self,
@@ -388,6 +787,282 @@ class GEOService:
             # Return GSE metadata if combination fails
             return gse_metadata
 
+    def _fetch_gse_metadata_via_entrez(
+        self, gse_id: str
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        Fetch GSE metadata using NCBI Entrez E-utilities (fallback for missing SOFT files).
+
+        This method provides basic metadata (title, summary, organism, platform, sample count)
+        when SOFT files are unavailable on the FTP server. Sample-level characteristics
+        are NOT available via this fallback method.
+
+        Uses the same Entrez esummary API as GDS fetching, but directly for GSE accessions.
+
+        Args:
+            gse_id: GSE accession ID (e.g., GSE233321)
+
+        Returns:
+            Tuple[Dict, Dict]: metadata and validation_result
+
+        Raises:
+            urllib.error.URLError: Network connection errors
+            json.JSONDecodeError: Invalid JSON response
+            Exception: Other unexpected errors
+
+        Note:
+            Entrez metadata is less complete than SOFT files. Missing:
+            - Detailed sample-level characteristics (e.g., treatment groups)
+            - Protocol details
+            - Some contact information
+        """
+        try:
+            logger.info(
+                f"Fetching GSE metadata via Entrez fallback for {gse_id} "
+                "(SOFT file unavailable)"
+            )
+
+            # Extract GSE number from ID
+            gse_number = gse_id.replace("GSE", "")
+
+            # Build NCBI E-utilities URL (same pattern as GDS fetching)
+            base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+            params = {"db": "gds", "id": gse_number, "retmode": "json"}
+
+            # Construct URL with parameters
+            url_params = urllib.parse.urlencode(params)
+            url = f"{base_url}?{url_params}"
+
+            logger.debug(f"Fetching GSE metadata from Entrez: {url}")
+
+            # Create SSL context for secure connection
+            ssl_context = create_ssl_context()
+
+            # Make the request with SSL support (timeout: 30s)
+            try:
+                response = urllib.request.urlopen(url, context=ssl_context, timeout=30)
+                response_data = response.read().decode("utf-8")
+            except Exception as e:
+                error_str = str(e)
+                if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                    handle_ssl_error(e, url, logger)
+                    raise Exception(
+                        "SSL certificate verification failed when fetching GSE metadata via Entrez. "
+                        "See error message above for solutions."
+                    )
+                raise
+
+            # Parse JSON response
+            entrez_data = json.loads(response_data)
+
+            # Extract the GSE record
+            if "result" not in entrez_data or gse_number not in entrez_data["result"]:
+                logger.error(f"No Entrez record found for {gse_id}")
+                raise ValueError(f"No Entrez record found for {gse_id}")
+
+            gse_record = entrez_data["result"][gse_number]
+            logger.debug(f"Successfully retrieved Entrez metadata for {gse_id}")
+
+            # Convert Entrez format to Lobster metadata format
+            metadata = self._convert_entrez_to_lobster_metadata(gse_record, gse_id)
+
+            # Validate metadata against transcriptomics schema
+            validation_result = self._validate_geo_metadata(metadata)
+
+            # Add fallback markers and warnings
+            metadata["_entrez_fallback"] = True
+            metadata["_metadata_source"] = "NCBI Entrez E-utilities (esummary)"
+            metadata["_metadata_completeness"] = "partial"
+            metadata["_warning"] = (
+                "Metadata fetched via Entrez fallback due to missing SOFT file. "
+                "Sample-level characteristics and protocol details not available. "
+                "Basic information (title, summary, organism, platform, sample count) provided."
+            )
+
+            # Check platform compatibility BEFORE downloading files (Phase 2: Early Validation)
+            try:
+                is_compatible, compat_message = self._check_platform_compatibility(
+                    gse_id, metadata
+                )
+                logger.info(
+                    f"Platform validation for {gse_id} (Entrez): {compat_message}"
+                )
+            except UnsupportedPlatformError as e:
+                # Store metadata and error for supervisor access, then re-raise
+                self.data_manager.metadata_store[gse_id] = {
+                    "metadata": metadata,
+                    "validation_result": validation_result,
+                    "platform_error": str(e),
+                    "platform_details": e.details,
+                }
+                logger.error(
+                    f"Platform validation failed for {gse_id}: {e.details['detected_platforms']}"
+                )
+                raise
+
+            logger.info(
+                f"Successfully fetched {gse_id} metadata via Entrez fallback "
+                f"(~70% complete, missing sample characteristics)"
+            )
+
+            return metadata, validation_result
+
+        except UnsupportedPlatformError:
+            # Re-raise platform errors without catching them
+            raise
+        except urllib.error.URLError as e:
+            logger.error(f"Network error in Entrez fallback for {gse_id}: {e}")
+            raise Exception(
+                f"Network error fetching Entrez metadata for {gse_id}: {str(e)}"
+            )
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing Entrez JSON response for {gse_id}: {e}")
+            raise Exception(
+                f"Error parsing Entrez metadata response for {gse_id}: {str(e)}"
+            )
+        except Exception as e:
+            logger.error(f"Error in Entrez fallback for {gse_id}: {e}")
+            raise
+
+    def _convert_entrez_to_lobster_metadata(
+        self, entrez_record: Dict[str, Any], gse_id: str
+    ) -> Dict[str, Any]:
+        """
+        Convert Entrez esummary record to Lobster metadata format.
+
+        Maps Entrez JSON fields to GEOparse-compatible structure for downstream processing.
+        Entrez provides basic dataset information but lacks detailed sample characteristics.
+
+        Args:
+            entrez_record: Entrez esummary record (JSON parsed)
+            gse_id: GSE accession ID
+
+        Returns:
+            Dict: Metadata in Lobster format (compatible with _extract_metadata structure)
+
+        Note:
+            Entrez field mapping:
+            - title: Dataset title
+            - summary: Dataset description
+            - taxon: Organism name
+            - gpl: Platform ID(s)
+            - n_samples: Sample count
+            - pubmedids: Associated publications
+            - pdat: Publication/submission date
+        """
+        try:
+            # Extract platform IDs (can be list or single value)
+            platform_ids = entrez_record.get("gpl", [])
+            if isinstance(platform_ids, str):
+                platform_ids = [platform_ids]
+            elif not isinstance(platform_ids, list):
+                platform_ids = []
+
+            # Extract PubMed IDs
+            pubmed_ids = entrez_record.get("pubmedids", [])
+            if isinstance(pubmed_ids, str):
+                pubmed_ids = [pubmed_ids]
+            elif not isinstance(pubmed_ids, list):
+                pubmed_ids = []
+
+            # Build metadata dict compatible with GEOparse structure
+            metadata = {
+                # Core identifiers
+                "geo_accession": gse_id,
+                "accession": gse_id,
+                # Basic information
+                "title": entrez_record.get("title", ""),
+                "summary": entrez_record.get("summary", ""),
+                "type": entrez_record.get(
+                    "gdstype", "Expression profiling by high throughput sequencing"
+                ),
+                # Organism information
+                "taxon": entrez_record.get("taxon", ""),
+                "organism": entrez_record.get("taxon", ""),
+                # Platform information (as list for consistency with GEOparse)
+                "platform_id": platform_ids,
+                # Sample information
+                "n_samples": entrez_record.get("n_samples", 0),
+                "sample_count": entrez_record.get("n_samples", 0),
+                # Publication information
+                "pubmed_id": pubmed_ids if pubmed_ids else "",
+                # Dates
+                "submission_date": entrez_record.get("pdat", ""),
+                "last_update_date": entrez_record.get("pdat", ""),
+                # Platform details (limited from Entrez)
+                "platforms": self._extract_platform_info_from_entrez(
+                    entrez_record, platform_ids
+                ),
+                # Sample metadata (empty - not available via Entrez)
+                "samples": {},
+                "sample_id": [],
+                # Supplementary files (not available via Entrez)
+                "supplementary_file": [],
+                # Status
+                "status": "Public",  # Assume public if in GEO
+                # FTP link (if available)
+                "ftp_link": entrez_record.get("ftplink", ""),
+            }
+
+            logger.debug(f"Converted Entrez record to Lobster metadata for {gse_id}")
+            return metadata
+
+        except Exception as e:
+            logger.error(f"Error converting Entrez metadata to Lobster format: {e}")
+            # Return minimal metadata to avoid complete failure
+            return {
+                "geo_accession": gse_id,
+                "title": entrez_record.get("title", "Unknown"),
+                "summary": entrez_record.get("summary", ""),
+                "organism": entrez_record.get("taxon", "Unknown"),
+                "platform_id": [],
+                "n_samples": 0,
+                "_conversion_error": str(e),
+            }
+
+    def _extract_platform_info_from_entrez(
+        self, entrez_record: Dict[str, Any], platform_ids: List[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Extract platform information from Entrez record.
+
+        Entrez provides limited platform information compared to SOFT files.
+        This method creates a minimal platform dict compatible with downstream processing.
+
+        Args:
+            entrez_record: Entrez esummary record
+            platform_ids: List of platform GPL IDs
+
+        Returns:
+            Dict: Platform information in GEOparse-compatible format
+        """
+        platforms = {}
+
+        try:
+            # Entrez doesn't provide detailed platform metadata in esummary
+            # Create minimal platform entries for compatibility
+            platform_organism = entrez_record.get("taxon", "")
+            platform_tech = entrez_record.get("ptechtype", "")
+
+            for gpl_id in platform_ids:
+                platforms[gpl_id] = {
+                    "title": f"Platform {gpl_id}",
+                    "organism": platform_organism,
+                    "technology": (
+                        platform_tech if platform_tech else "high throughput sequencing"
+                    ),
+                    "_note": "Platform details from Entrez are limited. Full details available on GEO website.",
+                }
+
+            logger.debug(
+                f"Extracted platform info for {len(platform_ids)} platform(s) from Entrez"
+            )
+
+        except Exception as e:
+            logger.warning(f"Error extracting platform info from Entrez: {e}")
+
+        return platforms
+
     def download_dataset(self, geo_id: str, adapter: str = None, **kwargs) -> str:
         """
         Download and process a dataset using modular strategy with fallbacks (Scenarios 2 & 3).
@@ -409,9 +1084,38 @@ class GEOService:
             # Check if metadata already exists (should be fetched first)
             if clean_geo_id not in self.data_manager.metadata_store:
                 logger.debug(f"Metadata not found, fetching first for {clean_geo_id}")
-                metadata_result = self.fetch_metadata_only(clean_geo_id)
-                if "Error" in metadata_result:
-                    return f"Failed to fetch metadata: {metadata_result}"
+                metadata, validation_result = self.fetch_metadata_only(clean_geo_id)
+                if metadata is None:
+                    return f"Failed to fetch metadata for {clean_geo_id}"
+
+            # Safety check: Verify platform compatibility (Phase 2: Early Validation)
+            stored_metadata = self.data_manager.metadata_store.get(clean_geo_id)
+            if stored_metadata:
+                # Check if platform error was previously detected
+                if "platform_error" in stored_metadata:
+                    logger.error(
+                        f"Cannot download {clean_geo_id} - platform validation failed previously"
+                    )
+                    raise UnsupportedPlatformError(
+                        message=stored_metadata["platform_error"],
+                        details=stored_metadata["platform_details"],
+                    )
+
+                # Validate platform compatibility if not done yet
+                metadata_dict = stored_metadata.get("metadata", {})
+                if metadata_dict:
+                    try:
+                        is_compatible, compat_message = (
+                            self._check_platform_compatibility(
+                                clean_geo_id, metadata_dict
+                            )
+                        )
+                        logger.info(
+                            f"Platform re-validation for {clean_geo_id}: {compat_message}"
+                        )
+                    except UnsupportedPlatformError:
+                        # Already logged and stored by _check_platform_compatibility
+                        raise
 
             # Check if modality already exists in DataManagerV2
             modality_name = f"geo_{clean_geo_id.lower()}_{adapter}"
@@ -443,7 +1147,7 @@ class GEOService:
                 cached_metadata = self.data_manager.metadata_store[clean_geo_id][
                     "metadata"
                 ]
-                predicted_type = self._determine_data_type_from_metadata(
+                self._determine_data_type_from_metadata(
                     cached_metadata
                 )
 
@@ -478,31 +1182,84 @@ class GEOService:
             save_path = f"{modality_name}_raw.h5ad"
             saved_file = self.data_manager.save_modality(modality_name, save_path)
 
-            # Log successful download and save
+            # Check if this was a multi-modal dataset and log exclusions
+            multimodal_info = None
+            if clean_geo_id in self.data_manager.metadata_store:
+                stored_entry = self.data_manager._get_geo_metadata(clean_geo_id)
+                if stored_entry:
+                    multimodal_info = stored_entry.get("multimodal_info")
+
+            # Log successful download and save (with multi-modal info if applicable)
+            log_params = {
+                "geo_id": clean_geo_id,
+                "download_source": geo_result.source.value,
+                "processing_method": geo_result.processing_info.get(
+                    "method", "unknown"
+                ),
+            }
+
+            log_description = f"Downloaded GEO dataset {clean_geo_id} using strategic approach ({geo_result.source.value}), saved to {saved_file}"
+
+            if multimodal_info and multimodal_info.get("is_multimodal"):
+                # Add multi-modal info to parameters
+                log_params["is_multimodal"] = True
+                log_params["loaded_modalities"] = multimodal_info.get(
+                    "supported_types", []
+                )
+                log_params["excluded_modalities"] = multimodal_info.get(
+                    "unsupported_types", []
+                )
+
+                # Calculate excluded sample count
+                sample_types = multimodal_info.get("sample_types", {})
+                excluded_count = sum(
+                    len(samples)
+                    for modality, samples in sample_types.items()
+                    if modality != "rna"
+                )
+
+                # Enhance description with exclusion info
+                log_description += f" | Multi-modal dataset: loaded {len(sample_types.get('rna', []))} RNA samples, excluded {excluded_count} unsupported samples"
+
             self.data_manager.log_tool_usage(
                 tool_name="download_geo_dataset_strategic",
-                parameters={
-                    "geo_id": clean_geo_id,
-                    "download_source": geo_result.source.value,
-                    "processing_method": geo_result.processing_info.get(
-                        "method", "unknown"
-                    ),
-                },
-                description=f"Downloaded GEO dataset {clean_geo_id} using strategic approach ({geo_result.source.value}), saved to {saved_file}",
+                parameters=log_params,
+                description=log_description,
             )
 
             # Auto-save current state
             self.data_manager.auto_save_state()
 
-            return f"""Successfully downloaded and loaded GEO dataset {clean_geo_id}!
+            # Generate success message (enhanced for multi-modal)
+            success_msg = f"""Successfully downloaded and loaded GEO dataset {clean_geo_id}!
 
 📊 Modality: '{modality_name}' ({adata.n_obs} obs × {adata.n_vars} vars)
 🔬 Adapter: {adapter_name} (predicted: {enhanced_metadata.get('data_type', None)})
 💾 Saved to: {save_path}
 🎯 Source: {geo_result.source.value} ({geo_result.processing_info.get('method', 'unknown')})
-⚡ Ready for quality control and downstream analysis!
+⚡ Ready for quality control and downstream analysis!"""
 
-The dataset is now available as modality '{modality_name}' for other agents to use."""
+            if multimodal_info and multimodal_info.get("is_multimodal"):
+                sample_types = multimodal_info.get("sample_types", {})
+                excluded_summary = ", ".join(
+                    [
+                        f"{modality.upper()}: {len(samples)}"
+                        for modality, samples in sample_types.items()
+                        if modality != "rna"
+                    ]
+                )
+                success_msg += f"""
+
+🧬 Multi-Modal Dataset Detected:
+   ✓ Loaded: RNA ({len(sample_types.get('rna', []))} samples)
+   ⏭️  Skipped: {excluded_summary} (support coming in v2.6+)
+
+   Note: Only RNA samples were downloaded. Unsupported modalities were excluded to save bandwidth.
+   When protein/VDJ support is added, you can re-download to get all modalities."""
+
+            success_msg += f"\n\nThe dataset is now available as modality '{modality_name}' for other agents to use."
+
+            return success_msg
 
         except Exception as e:
             logger.exception(f"Error downloading dataset: {e}")
@@ -515,17 +1272,24 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     # ████████████████████████████████████████████████████████████████████████████████
 
     def download_with_strategy(
-        self, geo_id: str, manual_strategy_override: PipelineType = None
+        self,
+        geo_id: str,
+        manual_strategy_override: PipelineType = None,
+        use_intersecting_genes_only: bool = None,
     ) -> GEOResult:
         """
         Master function implementing layered download approach using dynamic pipeline strategy.
 
         Args:
             geo_id: GEO accession ID
+            manual_strategy_override: Optional manual pipeline override
+            use_intersecting_genes_only: Concatenation strategy (None=auto, True=inner, False=outer)
 
         Returns:
             GEOResult: Comprehensive result with data and metadata
         """
+        # Store concatenation strategy for use in pipeline functions
+        self._use_intersecting_genes_only = use_intersecting_genes_only
         clean_geo_id = geo_id.strip().upper()
 
         logger.debug(f"Starting strategic download for {clean_geo_id}")
@@ -533,16 +1297,21 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         try:
             # Step 1: Ensure metadata exists
             if clean_geo_id not in self.data_manager.metadata_store:
-                metadata_summary = self.fetch_metadata_only(clean_geo_id)
-                if "Error" in str(metadata_summary):
+                metadata, validation_result = self.fetch_metadata_only(clean_geo_id)
+                if metadata is None:
                     return GEOResult(
                         success=False,
-                        error_message=f"Failed to fetch metadata: {metadata_summary}",
+                        error_message=f"Failed to fetch metadata for {clean_geo_id}",
                         source=GEODataSource.GEOPARSE,
                     )
 
-            # Step 2: Get metadata and strategy config
-            stored_metadata_info = self.data_manager.metadata_store[clean_geo_id]
+            # Step 2: Get metadata and strategy config using validated retrieval
+            stored_metadata_info = self.data_manager._get_geo_metadata(clean_geo_id)
+            if not stored_metadata_info:
+                raise ValueError(
+                    f"Metadata for {clean_geo_id} not found or malformed in metadata_store. "
+                    f"This indicates a storage/retrieval bug."
+                )
             cached_metadata = stored_metadata_info["metadata"]
             strategy_config = stored_metadata_info.get("strategy_config", {})
 
@@ -594,7 +1363,7 @@ The dataset is now available as modality '{modality_name}' for other agents to u
 
             return GEOResult(
                 success=False,
-                error_message=f"All pipeline steps failed after enough attempts",
+                error_message="All pipeline steps failed after enough attempts",
                 metadata=cached_metadata,
                 source=GEODataSource.GEOPARSE,
             )
@@ -847,12 +1616,25 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     def _try_supplementary_first(
         self, geo_id: str, metadata: Dict[str, Any]
     ) -> GEOResult:
-        """Try supplementary files as primary approach when no direct matrices available."""
+        """Try supplementary files as primary approach when no direct matrices available (with retry)."""
         try:
             logger.debug(f"Attempting supplementary files first for {geo_id}")
 
-            # Get GEO object for supplementary file processing
-            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+            # Get GEO object for supplementary file processing with retry logic
+            gse = self._retry_with_backoff(
+                operation=lambda: GEOparse.get_GEO(
+                    geo=geo_id, destdir=str(self.cache_dir)
+                ),
+                operation_name=f"Download {geo_id} for supplementary files",
+                max_retries=5,
+                is_ftp=True,  # Supplementary files often use FTP
+            )
+
+            if gse is None:
+                return GEOResult(
+                    success=False,
+                    error_message=f"Failed to download {geo_id} for supplementary files after multiple retry attempts",
+                )
 
             # Use existing supplementary file processing
             data = self._process_supplementary_files(gse, geo_id)
@@ -903,20 +1685,29 @@ The dataset is now available as modality '{modality_name}' for other agents to u
             for archive_url in archive_files:
                 if archive_url.lower().endswith(".tar"):
                     matrix = self._process_tar_file(archive_url, geo_id)
-                    if matrix is not None and not matrix.empty:
-                        return GEOResult(
-                            data=matrix,
-                            metadata=metadata,
-                            source=GEODataSource.TAR_ARCHIVE,
-                            processing_info={
-                                "method": "archive_extraction_first",
-                                "file": archive_url.split("/")[-1],
-                                "data_type": self._determine_data_type_from_metadata(
-                                    metadata
-                                ),
-                            },
-                            success=True,
-                        )
+
+                    # Handle both DataFrame and AnnData return types
+                    if matrix is not None:
+                        is_valid = False
+                        if isinstance(matrix, pd.DataFrame):
+                            is_valid = not matrix.empty
+                        elif isinstance(matrix, anndata.AnnData):
+                            is_valid = matrix.n_obs > 0 and matrix.n_vars > 0
+
+                        if is_valid:
+                            return GEOResult(
+                                data=matrix,
+                                metadata=metadata,
+                                source=GEODataSource.TAR_ARCHIVE,
+                                processing_info={
+                                    "method": "archive_extraction_first",
+                                    "file": archive_url.split("/")[-1],
+                                    "data_type": self._determine_data_type_from_metadata(
+                                        metadata
+                                    ),
+                                },
+                                success=True,
+                            )
 
             return GEOResult(
                 success=False,
@@ -1020,16 +1811,35 @@ The dataset is now available as modality '{modality_name}' for other agents to u
         self,
         geo_id: str,
         metadata: Dict[str, Any],
-        use_intersecting_genes_only: bool = True,
+        use_intersecting_genes_only: bool = None,
     ) -> GEOResult:
-        """Pipeline step: Try standard GEOparse download with proper single-cell/bulk handling."""
+        """Pipeline step: Try standard GEOparse download with proper single-cell/bulk handling (with retry)."""
         try:
             logger.debug(f"Trying GEOparse download for {geo_id}")
-            gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
+
+            # Wrap GEOparse download with retry logic
+            gse = self._retry_with_backoff(
+                operation=lambda: GEOparse.get_GEO(
+                    geo=geo_id, destdir=str(self.cache_dir)
+                ),
+                operation_name=f"Download {geo_id} data",
+                max_retries=5,
+                is_ftp=False,
+            )
+
+            if gse is None:
+                return GEOResult(
+                    success=False,
+                    error_message=f"Failed to download {geo_id} after multiple retry attempts",
+                )
 
             # Determine data type from metadata
             data_type = self._determine_data_type_from_metadata(metadata)
-            is_single_cell = data_type == "single_cell_rna_seq"
+
+            # Use instance variable if set, otherwise use parameter default
+            concat_strategy = getattr(
+                self, "_use_intersecting_genes_only", use_intersecting_genes_only
+            )
 
             # Try sample matrices
             sample_info = self._get_sample_info(gse)
@@ -1038,23 +1848,23 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                 validated_matrices = self._validate_matrices(sample_matrices)
 
                 if validated_matrices:
-                    if is_single_cell and len(validated_matrices) > 1:
-                        # For single-cell with multiple samples: store individually first
+                    # UNIFIED PATH: Use ConcatenationService for both single-cell and bulk
+                    # This provides robust duplicate handling via anndata.concat(merge="unique")
+                    if len(validated_matrices) > 1:
+                        # Multiple samples: store individually first, then concatenate
                         stored_samples = self._store_samples_as_anndata(
                             validated_matrices, geo_id, metadata
                         )
 
                         if stored_samples:
-                            # Immediately concatenate for a complete dataset
-                            concatinated_dataset_annDataObject = (
-                                self._concatenate_stored_samples(
-                                    geo_id, stored_samples, use_intersecting_genes_only
-                                )
+                            # Concatenate using ConcatenationService (handles duplicates)
+                            concatenated_dataset = self._concatenate_stored_samples(
+                                geo_id, stored_samples, concat_strategy
                             )
 
-                            if concatinated_dataset_annDataObject is not None:
+                            if concatenated_dataset is not None:
                                 return GEOResult(
-                                    data=concatinated_dataset_annDataObject,
+                                    data=concatenated_dataset,
                                     metadata=metadata,
                                     source=GEODataSource.GEOPARSE,
                                     processing_info={
@@ -1062,53 +1872,37 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                                         "data_type": data_type,
                                         "n_samples": len(validated_matrices),
                                         "stored_sample_ids": stored_samples,
-                                        "use_intersecting_genes_only": use_intersecting_genes_only,
+                                        "use_intersecting_genes_only": concat_strategy,
                                         "batch_info": {
                                             gsm_id: gsm_id
                                             for gsm_id in validated_matrices.keys()
                                         },
-                                        "note": "Single-cell samples concatenated with batch tracking",
+                                        "note": f"Samples concatenated with unified ConcatenationService ({data_type})",
                                     },
                                     success=True,
                                 )
                     else:
-                        # For bulk RNA-seq or single sample: concatenate directly
-                        combined_matrix = self._concatenate_matrices(
-                            validated_matrices, geo_id, use_intersecting_genes_only
+                        # Single sample: store and return directly as AnnData
+                        stored_samples = self._store_samples_as_anndata(
+                            validated_matrices, geo_id, metadata
                         )
 
-                        if combined_matrix is not None:
-                            # Add batch information to the matrix
-                            if "batch" not in combined_matrix.columns:
-                                batch_info = []
-                                for gsm_id in validated_matrices.keys():
-                                    n_cells = len(
-                                        [
-                                            idx
-                                            for idx in combined_matrix.index
-                                            if idx.startswith(gsm_id)
-                                        ]
-                                    )
-                                    batch_info.extend([gsm_id] * n_cells)
-                                combined_matrix["batch"] = batch_info
+                        if stored_samples:
+                            # Get the single stored sample
+                            modality_name = stored_samples[0]
+                            single_sample = self.data_manager.get_modality(
+                                modality_name
+                            )
 
                             return GEOResult(
-                                data=combined_matrix,
+                                data=single_sample,
                                 metadata=metadata,
                                 source=GEODataSource.SAMPLE_MATRICES,
                                 processing_info={
-                                    "method": "geoparse_samples_direct",
-                                    "n_samples": len(validated_matrices),
-                                    "use_intersecting_genes_only": use_intersecting_genes_only,
-                                    "data_type": (
-                                        "bulk"
-                                        if not is_single_cell
-                                        else "single_cell_single_sample"
-                                    ),
-                                    "batch_info": {
-                                        gsm_id: gsm_id
-                                        for gsm_id in validated_matrices.keys()
-                                    },
+                                    "method": "geoparse_single_sample",
+                                    "n_samples": 1,
+                                    "data_type": data_type,
+                                    "stored_sample_id": modality_name,
                                 },
                                 success=True,
                             )
@@ -1140,6 +1934,457 @@ The dataset is now available as modality '{modality_name}' for other agents to u
     # ██                   METADATA AND VALIDATION UTILITIES                       ██
     # ██                                                                            ██
     # ████████████████████████████████████████████████████████████████████████████████
+
+    def _check_platform_compatibility(
+        self, geo_id: str, metadata: Dict[str, Any]
+    ) -> Tuple[bool, str]:
+        """
+        Check if dataset platform is supported before downloading files.
+
+        Performs multi-level platform detection:
+        1. Series-level platforms (most common)
+        2. Sample-level platforms (for mixed-platform datasets)
+        3. Keyword matching for unknown platforms
+
+        Args:
+            geo_id: GEO series identifier
+            metadata: Parsed SOFT file metadata from _extract_metadata()
+
+        Returns:
+            Tuple of (is_compatible, message):
+                - is_compatible: True if platform is supported or unknown
+                - message: Human-readable explanation
+
+        Raises:
+            UnsupportedPlatformError: If platform is explicitly unsupported (microarray)
+        """
+        # Extract platform information at series level
+        series_platforms = metadata.get("platforms", {})
+
+        # Extract platform information at sample level
+        # metadata["samples"] is a dict: {gsm_id: {metadata...}}
+        sample_platforms = {}
+        samples_dict = metadata.get("samples", {})
+        if isinstance(samples_dict, dict):
+            for gsm_id, sample_meta in samples_dict.items():
+                platform_id = sample_meta.get("platform_id")
+                if platform_id:
+                    sample_platforms.setdefault(platform_id, []).append(gsm_id)
+
+        # Combine both levels
+        all_platforms = {}
+        for platform_id, platform_data in series_platforms.items():
+            all_platforms[platform_id] = {
+                "title": platform_data.get("title", ""),
+                "level": "series",
+                "samples": sample_platforms.get(platform_id, []),
+            }
+
+        # Add sample-only platforms
+        for platform_id, samples in sample_platforms.items():
+            if platform_id not in all_platforms:
+                all_platforms[platform_id] = {
+                    "title": f"Platform {platform_id}",
+                    "level": "sample",
+                    "samples": samples,
+                }
+
+        if not all_platforms:
+            logger.warning(f"No platform information found for {geo_id}")
+            return True, "No platform information available - proceeding with caution"
+
+        # Classify platforms
+        unsupported_platforms = []
+        supported_platforms = []
+        experimental_platforms = []
+        unknown_platforms = []
+
+        for platform_id, platform_info in all_platforms.items():
+            platform_title = platform_info.get("title", "").lower()
+
+            # Check registry
+            if platform_id in PLATFORM_REGISTRY:
+                status = PLATFORM_REGISTRY[platform_id]
+
+                if status == PlatformCompatibility.UNSUPPORTED:
+                    unsupported_platforms.append((platform_id, platform_info))
+                elif status == PlatformCompatibility.SUPPORTED:
+                    supported_platforms.append((platform_id, platform_info))
+                elif status == PlatformCompatibility.EXPERIMENTAL:
+                    experimental_platforms.append((platform_id, platform_info))
+            else:
+                # Unknown platform - use keyword matching
+                if any(kw in platform_title for kw in UNSUPPORTED_KEYWORDS):
+                    unsupported_platforms.append((platform_id, platform_info))
+                elif any(kw in platform_title for kw in SUPPORTED_KEYWORDS):
+                    supported_platforms.append((platform_id, platform_info))
+                else:
+                    unknown_platforms.append((platform_id, platform_info))
+
+        # Decision logic: Reject if ANY samples use unsupported platforms
+        # (unless they also have supported platform data)
+        if unsupported_platforms:
+            # Check if this is a mixed dataset
+            if supported_platforms:
+                logger.warning(
+                    f"{geo_id} has BOTH supported and unsupported platforms. "
+                    f"Will attempt to load supported samples only."
+                )
+                return (
+                    True,
+                    "Mixed platform dataset - will filter to supported samples",
+                )
+
+            # Pure unsupported dataset - reject
+            platform_list = "\n".join(
+                [
+                    f"  - {pid}: {info['title']} (level: {info['level']}, samples: {len(info.get('samples', []))})"
+                    for pid, info in unsupported_platforms
+                ]
+            )
+
+            raise UnsupportedPlatformError(
+                message=f"Dataset {geo_id} uses unsupported platform(s)",
+                details={
+                    "geo_id": geo_id,
+                    "unsupported_platforms": [
+                        (pid, info["title"]) for pid, info in unsupported_platforms
+                    ],
+                    "platform_type": "microarray",
+                    "explanation": (
+                        "This dataset appears to use microarray platform(s), which are not "
+                        "currently supported by Lobster. Lobster is designed for RNA-seq data "
+                        "(bulk or single-cell) and proteomics data."
+                    ),
+                    "detected_platforms": platform_list,
+                    "suggestions": [
+                        "Search for RNA-seq version of this experiment",
+                        "Use RNA-seq platforms: Illumina HiSeq, NextSeq, NovaSeq",
+                        "Use single-cell platforms: 10X Chromium, Smart-seq",
+                        f"Check if {geo_id} has supplementary RNA-seq files",
+                    ],
+                },
+            )
+
+        # Handle experimental platforms
+        if experimental_platforms:
+            platform_list = ", ".join([pid for pid, _ in experimental_platforms])
+            logger.warning(
+                f"{geo_id} uses experimental platform(s): {platform_list}. "
+                f"Analysis may require manual validation."
+            )
+            return True, "Experimental platform detected - proceed with validation"
+
+        # Handle unknown platforms conservatively
+        if unknown_platforms and not supported_platforms:
+            platform_list = ", ".join([pid for pid, _ in unknown_platforms])
+            logger.warning(
+                f"{geo_id} has unknown platform(s): {platform_list}. "
+                f"Will attempt loading but recommend validation."
+            )
+            return True, "Unknown platform - will attempt loading"
+
+        # All platforms supported (GPL registry check passed)
+        platform_list = ", ".join([pid for pid, _ in supported_platforms])
+        logger.info(f"GPL registry check passed for {geo_id}: {platform_list}")
+
+        # === TIER 2: LLM MODALITY DETECTION (Phase 2.1) ===
+        logger.info(f"Running LLM modality detection for {geo_id}...")
+
+        # Initialize DataExpertAssistant (lazy initialization pattern)
+        if not hasattr(self, "_data_expert_assistant"):
+            self._data_expert_assistant = DataExpertAssistant()
+
+        # Call LLM to detect modality
+        modality_result = self._data_expert_assistant.detect_modality(metadata, geo_id)
+
+        if modality_result is None:
+            # LLM analysis failed - fall back to permissive mode with warning
+            logger.warning(
+                f"LLM modality detection failed for {geo_id}. "
+                f"Proceeding with permissive mode (may cause issues with multi-omics data)."
+            )
+            return True, "LLM modality detection unavailable - proceeding with caution"
+
+        # Log detection results
+        logger.info(
+            f"Modality detected: {modality_result.modality} "
+            f"(confidence: {modality_result.confidence:.2f}, "
+            f"supported: {modality_result.is_supported})"
+        )
+
+        # Store modality in metadata for downstream use
+        if hasattr(self, "data_manager") and hasattr(
+            self.data_manager, "metadata_store"
+        ):
+            # Store modality detection results with enforced nested structure
+            modality_detection_info = {
+                "modality": modality_result.modality,
+                "confidence": modality_result.confidence,
+                "detected_signals": modality_result.detected_signals,
+                "timestamp": pd.Timestamp.now().isoformat(),
+            }
+
+            # Use helper method to store with consistent structure
+            if geo_id not in self.data_manager.metadata_store:
+                # Store new entry with metadata and modality detection
+                self.data_manager._store_geo_metadata(
+                    geo_id=geo_id,
+                    metadata=metadata,
+                    stored_by="_check_platform_compatibility",
+                    modality_detection=modality_detection_info,
+                )
+            else:
+                # Update existing entry's modality detection
+                existing_entry = self.data_manager._get_geo_metadata(geo_id)
+                if existing_entry:
+                    existing_entry["modality_detection"] = modality_detection_info
+                    self.data_manager.metadata_store[geo_id] = existing_entry
+
+        # Decision: Handle multi-modal datasets intelligently
+        if not modality_result.is_supported:
+            # Check if this is a multi-modal dataset by examining sample types
+            logger.info(
+                f"Detected unsupported modality '{modality_result.modality}', checking for multi-modal composition..."
+            )
+            sample_types = self._detect_sample_types(metadata)
+
+            # Check if we have any supported modalities
+            has_rna = "rna" in sample_types and len(sample_types["rna"]) > 0
+            has_unsupported = any(
+                modality in sample_types and len(sample_types[modality]) > 0
+                for modality in ["protein", "vdj", "atac"]
+            )
+
+            if has_rna and has_unsupported:
+                # Multi-modal dataset with RNA + unsupported modalities
+                logger.info(
+                    f"Multi-modal dataset detected: RNA ({len(sample_types.get('rna', []))}) samples + "
+                    f"unsupported modalities. Will load RNA samples only."
+                )
+
+                # Store multi-modal info in metadata for downstream use
+                multimodal_info = {
+                    "is_multimodal": True,
+                    "sample_types": sample_types,
+                    "supported_types": ["rna"],
+                    "unsupported_types": [t for t in sample_types.keys() if t != "rna"],
+                    "detection_timestamp": pd.Timestamp.now().isoformat(),
+                }
+
+                # Update metadata store with multi-modal info
+                if geo_id in self.data_manager.metadata_store:
+                    existing_entry = self.data_manager._get_geo_metadata(geo_id)
+                    if existing_entry:
+                        existing_entry["multimodal_info"] = multimodal_info
+                        self.data_manager.metadata_store[geo_id] = existing_entry
+
+                # Log what will be skipped
+                unsupported_summary = ", ".join(
+                    [
+                        f"{modality}: {len(samples)} samples"
+                        for modality, samples in sample_types.items()
+                        if modality != "rna"
+                    ]
+                )
+                logger.warning(
+                    f"Skipping unsupported modalities in {geo_id}: {unsupported_summary}. "
+                    f"Support planned for future releases (v2.6+)."
+                )
+
+                return (
+                    True,
+                    f"Multi-modal dataset - loading RNA samples only ({len(sample_types['rna'])} samples)",
+                )
+
+            elif has_rna and not has_unsupported:
+                # RNA-only dataset that was misclassified by pre-filter
+                logger.info(
+                    "Dataset is RNA-only despite modality detection. Proceeding with load."
+                )
+                return (True, "RNA-only dataset (pre-filter was overly conservative)")
+
+            else:
+                # No RNA samples found - truly unsupported
+                signals_display = "\n".join(
+                    [f"  - {signal}" for signal in modality_result.detected_signals[:5]]
+                )
+                if len(modality_result.detected_signals) > 5:
+                    signals_display += f"\n  ... and {len(modality_result.detected_signals) - 5} more signals"
+
+                raise FeatureNotImplementedError(
+                    message=f"Dataset {geo_id} uses unsupported sequencing modality: {modality_result.modality}",
+                    details={
+                        "geo_id": geo_id,
+                        "modality": modality_result.modality,
+                        "confidence": modality_result.confidence,
+                        "detected_signals": modality_result.detected_signals,
+                        "explanation": modality_result.compatibility_reason,
+                        "current_workaround": (
+                            f"Lobster v2.3 currently supports bulk RNA-seq, 10X single-cell, and Smart-seq2. "
+                            f"Support for {modality_result.modality} is planned for future releases."
+                        ),
+                        "suggestions": modality_result.suggestions,
+                        "estimated_implementation": "Planned for Lobster v2.6-v2.8 depending on modality",
+                        "detected_signals_formatted": signals_display,
+                        "sample_types_detected": (
+                            sample_types if sample_types else "No samples classified"
+                        ),
+                    },
+                )
+
+        # Supported modality - return success with modality info
+        return (
+            True,
+            f"Modality compatible: {modality_result.modality} (confidence: {modality_result.confidence:.0%})",
+        )
+
+    def _detect_sample_types(self, metadata: Dict[str, Any]) -> Dict[str, List[str]]:
+        """
+        Detect data types for each sample in a GEO dataset.
+
+        This method examines sample-level metadata to classify samples by modality
+        (RNA, protein, VDJ, ATAC, etc.). It uses GEO's standardized fields when
+        available (library_strategy) and falls back to characteristics_ch1 patterns.
+
+        Args:
+            metadata: GEO metadata dict with 'samples' key containing per-sample metadata
+
+        Returns:
+            Dict mapping modality names to lists of sample IDs:
+                {"rna": ["GSM1", "GSM2"], "protein": ["GSM3"], "vdj": ["GSM4"]}
+
+        Note:
+            This uses simple heuristics on reliable GEO fields, not complex pattern matching.
+            The library_strategy field is standardized by NCBI and highly reliable.
+        """
+        sample_types: Dict[str, List[str]] = {}
+        samples_dict = metadata.get("samples", {})
+
+        if not samples_dict:
+            logger.warning("No samples found in metadata for sample type detection")
+            return sample_types
+
+        logger.info(f"Detecting sample types for {len(samples_dict)} samples...")
+
+        for gsm_id, sample_meta in samples_dict.items():
+            detected_type = None
+
+            # Strategy 1: Use library_strategy field (most reliable - NCBI controlled vocabulary)
+            lib_strategy = sample_meta.get("library_strategy", "")
+            if lib_strategy:
+                lib_strategy_lower = lib_strategy.lower()
+                if "rna-seq" in lib_strategy_lower or "rna seq" in lib_strategy_lower:
+                    detected_type = "rna"
+                elif "atac" in lib_strategy_lower:
+                    detected_type = "atac"
+                # Add other strategies as needed
+
+            # Strategy 2: Check characteristics_ch1 field (flexible but less standardized)
+            if not detected_type:
+                chars = sample_meta.get("characteristics_ch1", [])
+                if isinstance(chars, list):
+                    chars_text = " ".join([str(c).lower() for c in chars])
+                else:
+                    chars_text = str(chars).lower()
+
+                # RNA detection
+                if any(
+                    pattern in chars_text
+                    for pattern in [
+                        "assay: rna",
+                        "assay:rna",
+                        "library type: gene expression",
+                        "library_type: gene expression",
+                        "data type: rna-seq",
+                        "datatype: rna-seq",
+                        "library type: gex",
+                        "library_type: gex",
+                    ]
+                ):
+                    detected_type = "rna"
+
+                # Protein detection (CITE-seq, antibody capture)
+                elif any(
+                    pattern in chars_text
+                    for pattern in [
+                        "assay: protein",
+                        "assay:protein",
+                        "library type: antibody capture",
+                        "library_type: antibody capture",
+                        "antibody-derived tag",
+                        "adt",
+                        "cite-seq protein",
+                        "citeseq protein",
+                    ]
+                ):
+                    detected_type = "protein"
+
+                # VDJ detection (TCR/BCR sequencing)
+                elif any(
+                    pattern in chars_text
+                    for pattern in [
+                        "assay: vdj",
+                        "assay:vdj",
+                        "library type: vdj",
+                        "library_type: vdj",
+                        "tcr-seq",
+                        "tcr seq",
+                        "bcr-seq",
+                        "bcr seq",
+                        "immune repertoire",
+                    ]
+                ):
+                    detected_type = "vdj"
+
+                # ATAC detection
+                elif any(
+                    pattern in chars_text
+                    for pattern in [
+                        "assay: atac",
+                        "assay:atac",
+                        "library type: atac",
+                        "library_type: atac",
+                        "chromatin accessibility",
+                    ]
+                ):
+                    detected_type = "atac"
+
+            # Strategy 3: Check sample title for common patterns
+            if not detected_type:
+                title = sample_meta.get("title", "").lower()
+                if any(
+                    pattern in title for pattern in ["_rna", "_gex", "_gene_expression"]
+                ):
+                    detected_type = "rna"
+                elif any(
+                    pattern in title for pattern in ["_protein", "_adt", "_antibody"]
+                ):
+                    detected_type = "protein"
+                elif any(pattern in title for pattern in ["_vdj", "_tcr", "_bcr"]):
+                    detected_type = "vdj"
+                elif "_atac" in title:
+                    detected_type = "atac"
+
+            # Store result
+            if detected_type:
+                sample_types.setdefault(detected_type, []).append(gsm_id)
+                logger.debug(f"Sample {gsm_id}: detected as '{detected_type}'")
+            else:
+                # Unknown - default to RNA for backward compatibility
+                sample_types.setdefault("rna", []).append(gsm_id)
+                logger.debug(f"Sample {gsm_id}: type unclear, defaulting to 'rna'")
+
+        # Log summary
+        summary = ", ".join(
+            [
+                f"{modality}: {len(samples)}"
+                for modality, samples in sample_types.items()
+            ]
+        )
+        logger.info(f"Sample type detection complete: {summary}")
+
+        return sample_types
 
     def _extract_metadata(self, gse) -> Dict[str, Any]:
         """
@@ -1497,7 +2742,6 @@ The dataset is now available as modality '{modality_name}' for other agents to u
 
             # Robust validation status handling with type checking
             validation_status = "UNKNOWN"
-            alignment_pct_raw = "UNKNOWN"
             alignment_pct_formatted = "UNKNOWN"
             predicted_type = "UNKNOWN"
             aligned_fields = "UNKNOWN"
@@ -1515,11 +2759,10 @@ The dataset is now available as modality '{modality_name}' for other agents to u
                     try:
                         # Try to convert to float
                         alignment_float = float(alignment_raw)
-                        alignment_pct_raw = alignment_float
                         alignment_pct_formatted = f"{alignment_float:.1f}"
                     except (ValueError, TypeError):
                         # If conversion fails, use string representation
-                        alignment_pct_raw = str(alignment_raw)
+                        str(alignment_raw)
                         alignment_pct_formatted = str(alignment_raw)
 
                 # Predicted type
@@ -1593,9 +2836,168 @@ The actual expression data download will be much faster now that metadata is pre
     # ██                                                                            ██
     # ████████████████████████████████████████████████████████████████████████████████
 
+    def _detect_kallisto_salmon_files(
+        self,
+        supplementary_files: List[str],
+    ) -> Tuple[bool, str, List[str], int]:
+        """
+        Detect if dataset contains Kallisto/Salmon per-sample quantification files.
+
+        Args:
+            supplementary_files: List of supplementary file URLs/paths
+
+        Returns:
+            Tuple of (has_quant_files, tool_type, matched_filenames, estimated_samples):
+            - has_quant_files: True if quantification files detected
+            - tool_type: "kallisto", "salmon", or "mixed"
+            - matched_filenames: List of matching file names
+            - estimated_samples: Estimated number of samples
+        """
+        kallisto_patterns = [
+            "abundance.tsv",
+            "abundance.h5",
+            "abundance.txt",
+        ]
+
+        salmon_patterns = [
+            "quant.sf",
+            "quant.genes.sf",
+        ]
+
+        kallisto_files = []
+        salmon_files = []
+        abundance_files = []  # Track unique files for sample count
+
+        for file_path in supplementary_files:
+            # Extract just the filename from URL
+            filename = os.path.basename(file_path).lower()
+
+            # Check Kallisto patterns
+            if any(pattern in filename for pattern in kallisto_patterns):
+                kallisto_files.append(file_path)
+                if "abundance.tsv" in filename or "abundance.h5" in filename:
+                    abundance_files.append(filename)
+
+            # Check Salmon patterns
+            if any(pattern in filename for pattern in salmon_patterns):
+                salmon_files.append(file_path)
+                if "quant.sf" in filename:
+                    abundance_files.append(filename)
+
+        # Determine tool type
+        has_quant = len(kallisto_files) > 0 or len(salmon_files) > 0
+
+        if not has_quant:
+            return False, "", [], 0
+
+        if len(kallisto_files) > 0 and len(salmon_files) > 0:
+            tool_type = "mixed"
+            matched = kallisto_files + salmon_files
+        elif len(kallisto_files) > 0:
+            tool_type = "kallisto"
+            matched = kallisto_files
+        else:
+            tool_type = "salmon"
+            matched = salmon_files
+
+        # Estimate sample count (one abundance file per sample)
+        estimated_samples = len(abundance_files)
+
+        return has_quant, tool_type, matched, estimated_samples
+
+    def _load_quantification_files(
+        self,
+        quantification_dir: Path,
+        tool_type: str,
+        gse_id: str,
+        data_type: str = "bulk",
+    ) -> Optional[anndata.AnnData]:
+        """
+        Load Kallisto/Salmon quantification files into AnnData.
+
+        This method follows the same pattern as other GEO loading methods:
+        1. Merges per-sample quantification files using BulkRNASeqService
+        2. Creates AnnData using TranscriptomicsAdapter
+        3. Returns AnnData (NOT DataFrame) so download_dataset() can handle storage with correct naming
+
+        Args:
+            quantification_dir: Directory containing per-sample subdirectories
+            tool_type: "kallisto" or "salmon"
+            gse_id: GEO series ID
+            data_type: Data type for TranscriptomicsAdapter ("bulk" or "single_cell", default: "bulk")
+
+        Returns:
+            AnnData: Processed AnnData object or None if loading fails
+        """
+        try:
+            logger.info(
+                f"Loading {tool_type} quantification files from {quantification_dir}"
+            )
+
+            # Step 1: Use bulk_rnaseq_service to merge quantification files
+            bulk_service = BulkRNASeqService()
+
+            try:
+                df, metadata = bulk_service.load_from_quantification_files(
+                    quantification_dir=quantification_dir,
+                    tool=tool_type,
+                )
+                logger.info(
+                    f"Successfully merged {metadata['n_samples']} {tool_type} samples "
+                    f"× {metadata['n_genes']} genes"
+                )
+            except Exception as e:
+                logger.error(f"Failed to merge {tool_type} files: {e}")
+                raise
+
+            # Step 2: Use TranscriptomicsAdapter to create AnnData
+            # Note: Constructor needs "bulk" but from_quantification_dataframe() needs "bulk_rnaseq"
+            adapter = TranscriptomicsAdapter(data_type=data_type)
+
+            try:
+                adata = adapter.from_quantification_dataframe(
+                    df=df,
+                    data_type="bulk_rnaseq",  # Quantification-specific data_type
+                    metadata=metadata,
+                )
+                logger.info(
+                    f"Created AnnData from quantification: "
+                    f"{adata.n_obs} samples × {adata.n_vars} genes"
+                )
+            except Exception as e:
+                logger.error(f"Failed to create AnnData from quantification: {e}")
+                raise
+
+            # Step 3: Add GEO metadata to AnnData.uns for provenance
+            adata.uns["geo_metadata"] = {
+                "geo_id": gse_id,
+                "data_source": "quantification_files",
+                "quantification_tool": tool_type,
+                "n_files_merged": metadata["n_samples"],
+            }
+
+            logger.info(
+                f"Successfully loaded {gse_id} from {tool_type} files: "
+                f"{adata.n_obs} samples × {adata.n_vars} genes"
+            )
+
+            # Step 4: Return AnnData directly (not DataFrame)
+            # Let download_dataset() handle storage with correct naming convention
+            return adata
+
+        except Exception as e:
+            logger.error(f"Error loading quantification files: {e}")
+            logger.exception("Full traceback for quantification loading error:")
+            return None
+
     def _process_supplementary_files(self, gse, gse_id: str) -> Optional[pd.DataFrame]:
         """
         Process supplementary files (TAR archives, etc.) to extract expression data.
+
+        This method now supports:
+        - Kallisto/Salmon quantification files (new in Phase 3)
+        - TAR archives
+        - Direct expression files
 
         Args:
             gse: GEOparse GSE object
@@ -1614,6 +3016,56 @@ The actual expression data download will be much faster now that metadata is pre
                 suppl_files = [suppl_files]
 
             logger.debug(f"Found {len(suppl_files)} supplementary files for {gse_id}")
+
+            # STEP 1: Check for Kallisto/Salmon quantification files FIRST
+            has_quant, tool_type, quant_filenames, estimated_samples = (
+                self._detect_kallisto_salmon_files(suppl_files)
+            )
+
+            if has_quant:
+                logger.info(
+                    f"{gse_id}: Detected {tool_type} quantification files "
+                    f"({estimated_samples} estimated samples)"
+                )
+
+                # STEP 2: Check for pre-merged matrix files as alternative
+                matrix_files = [
+                    f
+                    for f in suppl_files
+                    if any(
+                        ext in f.lower()
+                        for ext in [
+                            "_matrix.txt",
+                            "_counts.txt",
+                            "_expression.txt",
+                            ".h5ad",
+                            "_tpm.txt",
+                            "_fpkm.txt",
+                        ]
+                    )
+                ]
+
+                if matrix_files:
+                    logger.info(
+                        f"{gse_id}: Found {len(matrix_files)} pre-merged matrix files "
+                        f"alongside quantification. Using matrix files (faster loading)."
+                    )
+                    # Process matrix files normally - fall through to existing logic below
+                else:
+                    # STEP 3: Route to quantification file handler
+                    logger.info(
+                        f"{gse_id}: No pre-merged matrix found. "
+                        f"Loading {tool_type} quantification files..."
+                    )
+
+                    # This will be handled by the new _load_quantification_files method
+                    # For now, we need to return a signal that quantification files were found
+                    # The actual loading will happen in the download_dataset method
+                    logger.info(
+                        f"{gse_id}: Quantification file loading requires TAR extraction. "
+                        f"Proceeding with TAR file processing."
+                    )
+                    # Fall through to TAR processing
 
             # Look for TAR files first (most common for expression data)
             tar_files = [f for f in suppl_files if f.lower().endswith(".tar")]
@@ -1645,16 +3097,22 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error processing supplementary files: {e}")
             return None
 
-    def _process_tar_file(self, tar_url: str, gse_id: str) -> Optional[pd.DataFrame]:
+    def _process_tar_file(
+        self, tar_url: str, gse_id: str
+    ) -> Optional[Union[pd.DataFrame, anndata.AnnData]]:
         """
         Download and process a TAR file containing expression data.
+
+        This method can return either DataFrame or AnnData depending on the data source:
+        - Quantification files (Kallisto/Salmon): Returns AnnData directly
+        - Other expression files: Returns DataFrame for adapter processing
 
         Args:
             tar_url: URL to TAR file
             gse_id: GEO series ID
 
         Returns:
-            DataFrame: Combined expression matrix or None
+            Union[DataFrame, AnnData]: Expression data or None if processing fails
         """
         try:
             # Download TAR file
@@ -1691,7 +3149,54 @@ The actual expression data download will be much faster now that metadata is pre
 
                 logger.debug(f"Extracted {len(safe_members)} files from TAR")
 
-            # Process nested archives and find expression data
+            # STEP 1: Check for Kallisto/Salmon quantification files in extracted directory
+            try:
+                logger.debug(f"Checking for quantification files in {extract_dir}")
+
+                # Use BulkRNASeqService to detect quantification tool
+                bulk_service = BulkRNASeqService()
+                tool_type = bulk_service._detect_quantification_tool(extract_dir)
+
+                logger.info(
+                    f"{gse_id}: Detected {tool_type} quantification files in TAR archive"
+                )
+
+                # Load quantification files using the new loader
+                # Returns AnnData (not DataFrame) for consistent handling
+                adata_result = self._load_quantification_files(
+                    quantification_dir=extract_dir,
+                    tool_type=tool_type,
+                    gse_id=gse_id,
+                    data_type="bulk",
+                )
+
+                if adata_result is not None:
+                    logger.info(
+                        f"{gse_id}: Successfully loaded quantification files: "
+                        f"{adata_result.n_obs} samples × {adata_result.n_vars} genes"
+                    )
+                    # Return the AnnData directly (GEOResult will handle it)
+                    return adata_result
+                else:
+                    logger.warning(
+                        f"{gse_id}: Quantification file loading returned None, "
+                        f"falling back to standard processing"
+                    )
+
+            except ValueError as e:
+                # No quantification files detected - this is expected for most datasets
+                logger.debug(
+                    f"{gse_id}: No quantification files detected in TAR: {e}. "
+                    f"Continuing with standard TAR processing."
+                )
+            except Exception as e:
+                # Unexpected error during quantification loading
+                logger.warning(
+                    f"{gse_id}: Error during quantification file detection/loading: {e}. "
+                    f"Falling back to standard TAR processing."
+                )
+
+            # STEP 2: Process nested archives and find expression data (existing logic)
             nested_extract_dir = self.cache_dir / f"{gse_id}_nested_extracted"
             nested_extract_dir.mkdir(exist_ok=True)
 
@@ -1817,63 +3322,6 @@ The actual expression data download will be much faster now that metadata is pre
     # Parsing functions have been moved to geo_parser.py for better separation of concerns
     # and reusability across different modalities
 
-    def _concatenate_matrices(
-        self,
-        validated_matrices: Dict[str, pd.DataFrame],
-        geo_id: str,
-        use_intersecting_genes_only: bool = True,
-    ) -> Optional[pd.DataFrame]:
-        """
-        Concatenate multiple sample matrices into a single DataFrame.
-
-        Args:
-            validated_matrices: Dictionary of sample matrices
-            geo_id: GEO series ID
-            use_intersecting_genes_only: Whether to use only common genes
-
-        Returns:
-            Combined DataFrame or None
-        """
-        try:
-            if not validated_matrices:
-                logger.warning("No matrices to concatenate")
-                return None
-
-            logger.info(
-                f"Concatenating {len(validated_matrices)} matrices for {geo_id}"
-            )
-
-            matrices_list = list(validated_matrices.values())
-
-            if use_intersecting_genes_only:
-                # Find common genes across all matrices
-                common_genes = set(matrices_list[0].columns)
-                for matrix in matrices_list[1:]:
-                    common_genes = common_genes.intersection(set(matrix.columns))
-
-                if not common_genes:
-                    logger.error("No common genes found across matrices")
-                    return None
-
-                # Filter matrices to common genes
-                filtered_matrices = [
-                    matrix[list(common_genes)] for matrix in matrices_list
-                ]
-                combined_matrix = pd.concat(filtered_matrices, axis=0, sort=False)
-                logger.debug(f"Concatenated with {len(common_genes)} common genes")
-
-            else:
-                # Use all genes, filling missing with zeros
-                combined_matrix = pd.concat(matrices_list, axis=0, sort=False).fillna(0)
-                logger.debug(f"Concatenated with all genes, filled missing with zeros")
-
-            logger.info(f"Final combined matrix shape: {combined_matrix.shape}")
-            return combined_matrix
-
-        except Exception as e:
-            logger.error(f"Error concatenating matrices: {e}")
-            return None
-
     # ████████████████████████████████████████████████████████████████████████████████
     # ██                                                                            ██
     # ██                   SAMPLE PROCESSING AND VALIDATION                        ██
@@ -1884,17 +3332,44 @@ The actual expression data download will be much faster now that metadata is pre
         """
         Get sample information for downloading individual matrices.
 
+        For multi-modal datasets, filters samples to only include supported modalities (RNA).
+
         Args:
             gse: GEOparse GSE object
 
         Returns:
-            dict: Sample information dictionary
+            dict: Sample information dictionary (filtered for multi-modal datasets)
         """
         sample_info = {}
 
         try:
+            # Check if this is a multi-modal dataset
+            geo_id = (
+                gse.metadata.get("geo_accession", [""])[0]
+                if hasattr(gse, "metadata")
+                else ""
+            )
+            multimodal_info = None
+            if geo_id and geo_id in self.data_manager.metadata_store:
+                stored_entry = self.data_manager._get_geo_metadata(geo_id)
+                if stored_entry:
+                    multimodal_info = stored_entry.get("multimodal_info")
+
+            # Collect sample info
             if hasattr(gse, "gsms"):
                 for gsm_id, gsm in gse.gsms.items():
+                    # Check if we should include this sample (multi-modal filtering)
+                    if multimodal_info and multimodal_info.get("is_multimodal"):
+                        # Get RNA sample IDs from multi-modal info
+                        rna_sample_ids = multimodal_info.get("sample_types", {}).get(
+                            "rna", []
+                        )
+                        if gsm_id not in rna_sample_ids:
+                            logger.debug(
+                                f"Skipping non-RNA sample {gsm_id} (multi-modal dataset)"
+                            )
+                            continue
+
                     sample_info[gsm_id] = {
                         "title": (
                             getattr(gsm, "metadata", {}).get("title", [""])[0]
@@ -1910,7 +3385,14 @@ The actual expression data download will be much faster now that metadata is pre
                         "download_url": f"https://ftp.ncbi.nlm.nih.gov/geo/samples/{gsm_id[:6]}nnn/{gsm_id}/suppl/",
                     }
 
-            logger.debug(f"Collected information for {len(sample_info)} samples")
+            if multimodal_info and multimodal_info.get("is_multimodal"):
+                logger.info(
+                    f"Multi-modal filtering: collected {len(sample_info)} RNA samples "
+                    f"(excluded {len(gse.gsms) - len(sample_info)} unsupported samples)"
+                )
+            else:
+                logger.debug(f"Collected information for {len(sample_info)} samples")
+
             return sample_info
 
         except Exception as e:
@@ -1988,7 +3470,7 @@ The actual expression data download will be much faster now that metadata is pre
                 )
                 return df
 
-        except Exception as e:
+        except Exception:
             # Fallback to expression table
             if hasattr(gsm, "table") and gsm.table is not None:
                 matrix = gsm.table
@@ -2418,14 +3900,27 @@ The actual expression data download will be much faster now that metadata is pre
             matrix_file = local_files["matrix"]
             logger.info(f"Parsing matrix file: {matrix_file}")
 
-            # Read the sparse matrix
-            if matrix_file.name.endswith(".gz"):
-                import gzip
+            # Read the sparse matrix with enhanced error handling
+            try:
+                if matrix_file.name.endswith(".gz"):
+                    import gzip
 
-                with gzip.open(matrix_file, "rt") as f:
-                    matrix = sio.mmread(f)
-            else:
-                matrix = sio.mmread(matrix_file)
+                    with gzip.open(matrix_file, "rt") as f:
+                        matrix = sio.mmread(f)
+                else:
+                    matrix = sio.mmread(matrix_file)
+
+            except (gzip.BadGzipFile, EOFError) as e:
+                logger.error(f"Gzip corruption detected for {gsm_id}: {e}")
+                logger.error(f"Removing corrupted cache: {matrix_file}")
+                if matrix_file.exists():
+                    matrix_file.unlink()
+                return None
+
+            except OSError as e:
+                logger.error(f"File I/O error processing {gsm_id}: {e}")
+                logger.error(f"Matrix file path: {matrix_file}")
+                return None
 
             # Convert to dense format and transpose (10X format is genes x cells, we want cells x genes)
             if hasattr(matrix, "todense"):
@@ -2493,6 +3988,22 @@ The actual expression data download will be much faster now that metadata is pre
 
             # Create the final DataFrame
             df = pd.DataFrame(matrix_dense, index=cell_ids, columns=gene_names)
+
+            # Deduplicate gene columns if necessary
+            if df.columns.duplicated().any():
+                duplicates = df.columns[df.columns.duplicated()].unique()
+                logger.warning(
+                    f"{gsm_id}: Found {len(duplicates)} duplicate gene IDs. "
+                    f"Aggregating by sum. Examples: {list(duplicates[:5])}"
+                )
+                original_shape = df.shape
+                # Aggregate duplicates by summing (biologically sound for counts)
+                df = df.T.groupby(level=0).sum().T
+                logger.info(
+                    f"{gsm_id}: Aggregated duplicate genes. "
+                    f"Shape: {original_shape} → {df.shape}"
+                )
+
             logger.info(f"Successfully created 10X DataFrame for {gsm_id}: {df.shape}")
             return df
 
@@ -2521,7 +4032,7 @@ The actual expression data download will be much faster now that metadata is pre
             if not local_path.exists():
                 logger.info(f"Downloading H5 file: {url}")
                 if not self.geo_downloader.download_file(url, local_path):
-                    logger.error(f"Failed to download H5 file")
+                    logger.error("Failed to download H5 file")
                     return None
             else:
                 logger.info(f"Using cached H5 file: {local_path}")
@@ -2540,8 +4051,121 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error processing H5 file for {gsm_id}: {e}")
             return None
 
+    def _determine_transpose_biologically(
+        self,
+        matrix: pd.DataFrame,
+        gsm_id: str,
+        geo_id: Optional[str] = None,
+        data_type_hint: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """
+        Determine transpose using biological knowledge instead of naive shape comparison.
+
+        Biological Rules:
+        1. Genes: Always 10,000-60,000 in human/mouse datasets
+        2. Samples: Bulk RNA-seq typically 2-200
+        3. Cells: Single-cell typically 100-200,000
+
+        Args:
+            matrix: Input DataFrame
+            gsm_id: Sample ID for logging
+            geo_id: GEO ID for data type context
+            data_type_hint: Optional explicit data type override
+
+        Returns:
+            Tuple of (should_transpose, reason)
+        """
+        n_rows, n_cols = matrix.shape
+
+        logger.debug(f"Transpose decision for {gsm_id}: shape={n_rows}×{n_cols}")
+
+        # Rule 1: If one dimension clearly genes (>50K), transpose so genes become columns
+        if n_rows > 50000 and n_cols < 50000:
+            reason = f"Large row count ({n_rows}) indicates genes as rows, transposing to samples/cells×genes"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return True, reason
+
+        if n_cols > 50000 and n_rows < 50000:
+            reason = f"Large column count ({n_cols}) indicates genes as columns, keeping as samples/cells×genes"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return False, reason
+
+        # Rule 2: Both dimensions large (>10K) → likely cells × genes (single-cell)
+        if n_rows > 10000 and n_cols > 10000:
+            reason = f"Both dimensions large ({n_rows}×{n_cols}) → likely cells×genes format (single-cell)"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return False, reason
+
+        # Rule 2b: Many observations (>10K) with few variables → likely gene panel (cells×genes)
+        # This catches targeted sequencing panels before Rule 3 misidentifies them
+        if n_rows > 10000 and n_cols >= 100 and n_cols < 10000:
+            reason = f"Many observations, moderate variables ({n_rows}×{n_cols}) → likely cells×genes (gene panel or filtered data)"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return False, reason
+
+        # Rule 3: One dimension very small (<1K), other large (>10K) → likely samples × genes or bulk RNA-seq
+        if n_rows < 1000 and n_cols > 10000:
+            reason = f"Few rows, many columns ({n_rows}×{n_cols}) → likely samples×genes format (bulk RNA-seq)"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return False, reason
+
+        # Note: We removed the automatic transpose for n_cols < 1000 and n_rows > 10000
+        # because it conflicts with gene panels (many cells, few genes).
+        # This case will fall through to data type detection or conservative fallback.
+
+        # Rule 4: Use data type detection for edge cases
+        data_type = data_type_hint
+        if not data_type and geo_id:
+            try:
+                # Get cached metadata if available using validated retrieval
+                stored_metadata = self.data_manager._get_geo_metadata(geo_id)
+                if stored_metadata:
+                    data_type = self._determine_data_type_from_metadata(
+                        stored_metadata["metadata"]
+                    )
+                    logger.debug(f"Detected data type from metadata: {data_type}")
+            except Exception as e:
+                logger.warning(
+                    f"Could not get data type for biological transpose guidance: {e}"
+                )
+
+        if data_type:
+            if data_type == "bulk_rna_seq":
+                # Bulk: prefer samples×genes (fewer samples)
+                if n_rows < n_cols:
+                    reason = f"Bulk RNA-seq: {n_rows} samples × {n_cols} genes (likely correct orientation)"
+                    logger.info(f"Transpose decision for {gsm_id}: {reason}")
+                    return False, reason
+                else:
+                    reason = f"Bulk RNA-seq: {n_rows}×{n_cols} likely genes×samples, transposing to samples×genes"
+                    logger.info(f"Transpose decision for {gsm_id}: {reason}")
+                    return True, reason
+
+            elif data_type == "single_cell_rna_seq":
+                # Single-cell: prefer cells×genes (more cells than genes in small datasets)
+                if n_rows >= n_cols:
+                    reason = f"Single-cell: {n_rows} cells × {n_cols} genes (likely correct orientation)"
+                    logger.info(f"Transpose decision for {gsm_id}: {reason}")
+                    return False, reason
+                else:
+                    reason = f"Single-cell: {n_rows}×{n_cols} likely genes×cells, transposing to cells×genes"
+                    logger.info(f"Transpose decision for {gsm_id}: {reason}")
+                    return True, reason
+
+        # Rule 5: Conservative fallback - only transpose if very confident
+        # This replaces the old naive heuristic with a much more conservative approach
+        # Use higher threshold (>100x) to avoid misidentifying large bulk studies as needing transpose
+        if n_cols > n_rows * 100:  # >100x more columns than rows (extreme imbalance)
+            reason = f"Extreme imbalance ({n_rows}×{n_cols}, {n_cols/n_rows:.1f}x) suggests genes as rows, transposing"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return True, reason
+        else:
+            reason = f"Ambiguous shape ({n_rows}×{n_cols}), defaulting to no transpose (safer - assume samples/cells × genes)"
+            logger.info(f"Transpose decision for {gsm_id}: {reason}")
+            return False, reason
+
     def _download_single_expression_file(
-        self, url: str, gsm_id: str
+        self, url: str, gsm_id: str, geo_id: Optional[str] = None
     ) -> Optional[pd.DataFrame]:
         """
         Download and parse a single expression file with enhanced support.
@@ -2563,7 +4187,7 @@ The actual expression data download will be much faster now that metadata is pre
             if not local_path.exists():
                 logger.info(f"Downloading expression file: {url}")
                 if not self.geo_downloader.download_file(url, local_path):
-                    logger.error(f"Failed to download expression file")
+                    logger.error("Failed to download expression file")
                     return None
             else:
                 logger.info(f"Using cached expression file: {local_path}")
@@ -2571,14 +4195,19 @@ The actual expression data download will be much faster now that metadata is pre
             # Parse using geo_parser for better format support
             matrix = self.geo_parser.parse_supplementary_file(local_path)
             if matrix is not None and not matrix.empty:
-                # Add sample prefix to row names if they look like cells
-                if (
-                    matrix.shape[0] > matrix.shape[1]
-                ):  # More rows than columns suggests cells x genes
-                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
-                else:  # More columns than rows suggests genes x cells, transpose
+                # Use biology-aware transpose logic instead of naive shape comparison
+                should_transpose, reason = self._determine_transpose_biologically(
+                    matrix=matrix, gsm_id=gsm_id, geo_id=geo_id
+                )
+
+                logger.info(f"Transpose decision for {gsm_id}: {reason}")
+
+                if should_transpose:
                     matrix = matrix.T
-                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                    logger.debug(f"Matrix transposed: {matrix.shape}")
+
+                # Add sample prefix to row names
+                matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
 
                 logger.info(
                     f"Successfully parsed expression file for {gsm_id}: {matrix.shape}"
@@ -2623,7 +4252,12 @@ The actual expression data download will be much faster now that metadata is pre
         # Use multithreading for validation - this is the main performance improvement
         with ThreadPoolExecutor(max_workers=min(8, len(valid_matrices))) as executor:
             future_to_sample = {
-                executor.submit(self._validate_single_matrix, gsm_id, matrix): gsm_id
+                executor.submit(
+                    self._validate_single_matrix,
+                    gsm_id,
+                    matrix,
+                    # sample_type defaults to "rna" in _validate_single_matrix
+                ): gsm_id
                 for gsm_id, matrix in valid_matrices.items()
             }
 
@@ -2643,28 +4277,128 @@ The actual expression data download will be much faster now that metadata is pre
         return validated
 
     def _validate_single_matrix(
-        self, gsm_id: str, matrix: pd.DataFrame
+        self, gsm_id: str, matrix: pd.DataFrame, sample_type: str = "rna"
     ) -> Tuple[bool, str]:
         """
-        Validate a single matrix with optimized checks.
+        Validate a single matrix with biology-aware thresholds and type-aware duplicate checking.
 
         Args:
             gsm_id: Sample ID for logging
             matrix: DataFrame to validate
+            sample_type: Data type ("rna", "protein", "vdj", "atac").
+                        VDJ data (TCR/BCR) allows duplicate row indices (multi-chain per cell).
 
         Returns:
             Tuple[bool, str]: (is_valid, info_message)
         """
         try:
-            # Check matrix dimensions first (fastest check)
-            if matrix.shape[0] < 10 or matrix.shape[1] < 10:
-                return False, f"Matrix too small ({matrix.shape})"
+            n_obs, n_vars = matrix.shape
 
-            # Use optimized validation
-            if not self._is_valid_expression_matrix(matrix):
-                return False, "Invalid matrix format"
+            # Rule 1: Must have some observations and variables
+            if n_obs == 0 or n_vars == 0:
+                return False, f"Empty matrix ({n_obs}×{n_vars})"
 
-            return True, f"Valid matrix {matrix.shape}"
+            # Rule 1.5: Check for duplicate indices (added for bug fix)
+            # Duplicate gene IDs (columns) - WARNING only, since we auto-deduplicate
+            if matrix.columns.duplicated().any():
+                n_dup = matrix.columns.duplicated().sum()
+                logger.warning(
+                    f"{gsm_id}: Found {n_dup} duplicate gene IDs. "
+                    f"These will be aggregated during loading."
+                )
+                # Don't fail validation - deduplication happens at loading stage
+
+            # Duplicate cell/sample IDs (rows) - Type-aware validation
+            if matrix.index.duplicated().any():
+                n_dup = matrix.index.duplicated().sum()
+                duplicate_rate = n_dup / len(matrix)
+
+                # VDJ data (TCR/BCR sequencing): Duplicates are EXPECTED
+                # One row per receptor chain = multiple rows per cell
+                if sample_type == "vdj":
+                    logger.info(
+                        f"{gsm_id}: VDJ data has {n_dup} repeated cell barcodes "
+                        f"({duplicate_rate:.1%} of total) - expected for multi-chain data"
+                    )
+                    # Continue validation - duplicates are scientifically correct
+                else:
+                    # Gene expression/protein data: Duplicates indicate corruption
+                    return (
+                        False,
+                        f"Duplicate cell/sample IDs ({n_dup} duplicates, {duplicate_rate:.1%}) "
+                        f"- invalid for {sample_type} data",
+                    )
+
+            # Rule 2: Biology-aware validation
+            # For bulk RNA-seq: few samples (2-500), many genes (10K-60K)
+            # For single-cell: many cells (100-200K), many genes (5K-30K)
+
+            if n_vars >= 10000:  # Likely genes dimension is correct
+                if n_obs >= 2:  # At least 2 observations (samples or cells)
+                    # Use optimized validation for matrix format
+                    if not self._is_valid_expression_matrix(matrix):
+                        return (
+                            False,
+                            "Invalid matrix format (non-numeric or all-zero data)",
+                        )
+
+                    return True, f"Valid matrix: {n_obs} obs × {n_vars} genes"
+                else:
+                    return (
+                        False,
+                        f"Only {n_obs} observation(s) - insufficient for analysis (need at least 2)",
+                    )
+
+            elif (
+                n_obs >= 10000
+            ):  # Many observations, check if genes dimension reasonable
+                if n_vars >= 100:  # Reasonable number of variables
+                    # Use optimized validation for matrix format
+                    if not self._is_valid_expression_matrix(matrix):
+                        return (
+                            False,
+                            "Invalid matrix format (non-numeric or all-zero data)",
+                        )
+
+                    return True, f"Valid matrix: {n_obs} obs × {n_vars} vars"
+                elif n_vars >= 4 and n_obs > 50000:
+                    # Special case: Very high obs count (>50K) with few vars suggests genes×samples
+                    # This will be caught and transposed by biology-aware transpose logic
+                    # Accept with warning for GSE130036-type cases
+                    if not self._is_valid_expression_matrix(matrix):
+                        return (
+                            False,
+                            "Invalid matrix format (non-numeric or all-zero data)",
+                        )
+
+                    return (
+                        True,
+                        f"Valid but unusual matrix: {n_obs} obs × {n_vars} vars (likely needs transpose - genes as obs)",
+                    )
+                else:
+                    return (
+                        False,
+                        f"Only {n_vars} variables - likely transpose error or corrupted data (need at least 100 vars for >10K obs)",
+                    )
+
+            else:  # Both dimensions small - use conservative thresholds
+                if n_obs >= 10 and n_vars >= 10:
+                    # Use optimized validation for matrix format
+                    if not self._is_valid_expression_matrix(matrix):
+                        return (
+                            False,
+                            "Invalid matrix format (non-numeric or all-zero data)",
+                        )
+
+                    return (
+                        True,
+                        f"Small matrix: {n_obs} obs × {n_vars} vars (may be test/subset data)",
+                    )
+                else:
+                    return (
+                        False,
+                        f"Matrix too small for analysis ({n_obs}×{n_vars}) - need at least 10×10",
+                    )
 
         except Exception as e:
             return False, f"Validation error: {str(e)}"
@@ -2834,27 +4568,162 @@ The actual expression data download will be much faster now that metadata is pre
             logger.error(f"Error storing samples as AnnData: {e}")
             return stored_samples
 
+    def _analyze_gene_coverage_and_decide_join(
+        self, sample_modalities: List[str]
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Analyze gene coverage variance across samples and decide optimal join strategy.
+
+        This method examines the coefficient of variation (CV) in gene counts across
+        samples to intelligently select between inner join (intersection) and outer
+        join (union) concatenation strategies.
+
+        Args:
+            sample_modalities: List of modality names to analyze
+
+        Returns:
+            Tuple of (use_intersecting_genes_only, analysis_metadata)
+                - use_intersecting_genes_only: True for inner join, False for outer join
+                - analysis_metadata: Dict with statistics and reasoning
+        """
+        from datetime import datetime
+
+        try:
+            # Collect gene counts from all samples
+            gene_counts = []
+            for modality in sample_modalities:
+                try:
+                    adata = self.data_manager.get_modality(modality)
+                    gene_counts.append(adata.n_vars)
+                except Exception as e:
+                    logger.warning(f"Could not get gene count for {modality}: {e}")
+                    continue
+
+            if not gene_counts:
+                logger.warning("No valid gene counts found, defaulting to inner join")
+                return True, {
+                    "decision": "inner",
+                    "reasoning": "No valid samples found",
+                }
+
+            # Calculate statistics
+            min_genes = int(np.min(gene_counts))
+            max_genes = int(np.max(gene_counts))
+            mean_genes = float(np.mean(gene_counts))
+            std_genes = float(np.std(gene_counts))
+            cv = std_genes / mean_genes if mean_genes > 0 else 0.0
+
+            # Decision logic: Use outer join if high variability
+            # Check both CV and absolute range ratio for robustness
+            VARIANCE_THRESHOLD = 0.20  # Lowered from 0.30 to be more conservative
+            RANGE_RATIO_THRESHOLD = (
+                1.5  # Max/min ratio - if > 1.5x difference, use outer join
+            )
+
+            range_ratio = max_genes / min_genes if min_genes > 0 else float("inf")
+            use_inner_join = (
+                cv <= VARIANCE_THRESHOLD and range_ratio <= RANGE_RATIO_THRESHOLD
+            )
+
+            # Build decision metadata
+            metadata = {
+                "timestamp": datetime.now().isoformat(),
+                "n_samples_analyzed": len(gene_counts),
+                "min_genes": min_genes,
+                "max_genes": max_genes,
+                "mean_genes": mean_genes,
+                "std_genes": std_genes,
+                "coefficient_variation": cv,
+                "range_ratio": range_ratio,
+                "variance_threshold": VARIANCE_THRESHOLD,
+                "range_ratio_threshold": RANGE_RATIO_THRESHOLD,
+                "decision": "inner" if use_inner_join else "outer",
+                "reasoning": (
+                    f"Gene coverage CV={cv:.1%} <= {VARIANCE_THRESHOLD:.1%} AND range ratio={range_ratio:.2f}x <= {RANGE_RATIO_THRESHOLD:.2f}x: Consistent coverage"
+                    if use_inner_join
+                    else (
+                        f"Gene coverage variability detected: CV={cv:.1%} (threshold: {VARIANCE_THRESHOLD:.1%}) OR range ratio={range_ratio:.2f}x (threshold: {RANGE_RATIO_THRESHOLD:.2f}x) - using union to preserve all genes"
+                    )
+                ),
+            }
+
+            # LOG DECISION TO USER (INFO level)
+            logger.info("=" * 70)
+            logger.info("🔍 CONCATENATION STRATEGY DECISION")
+            logger.info("=" * 70)
+            logger.info(
+                f"📊 Analyzing {len(sample_modalities)} samples for gene coverage..."
+            )
+            logger.info(
+                f"   Gene count range: {min_genes:,} - {max_genes:,} ({range_ratio:.2f}x difference)"
+            )
+            logger.info(f"   Mean: {mean_genes:,.0f} ± {std_genes:,.0f}")
+            logger.info(f"   Coefficient of Variation: {cv:.1%}")
+            logger.info("")
+            logger.info("📐 Decision Criteria:")
+            logger.info(
+                f"   CV threshold: {VARIANCE_THRESHOLD:.1%}, Range ratio threshold: {RANGE_RATIO_THRESHOLD:.2f}x"
+            )
+            logger.info("")
+
+            if use_inner_join:
+                logger.info("✓ Selected: INNER JOIN (intersection of genes)")
+                logger.info(f"  📌 Reason: {metadata['reasoning']}")
+                logger.info(
+                    "  📍 Effect: Only genes present in ALL samples will be retained"
+                )
+                logger.info(
+                    "  ⚠️  Warning: Genes unique to some samples will be excluded"
+                )
+            else:
+                logger.info("⚠️  VARIABILITY DETECTED")
+                logger.info("✓ Selected: OUTER JOIN (union of all genes)")
+                logger.info(f"  📌 Reason: {metadata['reasoning']}")
+                logger.info(
+                    "  📍 Effect: ALL genes included, missing values filled with zeros"
+                )
+                logger.info("  ℹ️  Note: This preserves maximum biological information")
+
+            logger.info("=" * 70)
+
+            return use_inner_join, metadata
+
+        except Exception as e:
+            logger.error(f"Error analyzing gene coverage: {e}")
+            logger.warning("Defaulting to outer join for safety")
+            return False, {
+                "decision": "outer",
+                "reasoning": f"Error during analysis: {str(e)}",
+                "error": str(e),
+            }
+
     def _concatenate_stored_samples(
         self,
         geo_id: str,
         stored_samples: List[str],
-        use_intersecting_genes_only: bool = True,
+        use_intersecting_genes_only: bool = None,
     ) -> Optional[pd.DataFrame]:
         """
-        Concatenate stored AnnData samples using ConcatenationService.
+        Concatenate stored AnnData samples using ConcatenationService with intelligent strategy selection.
 
         This function delegates to ConcatenationService to eliminate code duplication
-        while maintaining the same interface for backward compatibility.
+        while adding intelligent auto-detection of the optimal join strategy based on
+        gene coverage variance. When use_intersecting_genes_only is None (default),
+        automatically analyzes gene coverage and selects the appropriate join type.
 
         Args:
             geo_id: GEO series ID
             stored_samples: List of modality names that were stored
-            use_intersecting_genes_only: If True, use only common genes across all samples.
-                                       If False, use all genes (filling missing with zeros).
+            use_intersecting_genes_only: Join strategy selection:
+                - None (default): Auto-detect based on gene coverage variance
+                - True: Use inner join (intersection - only common genes)
+                - False: Use outer join (union - all genes with zero-filling)
 
         Returns:
-            DataFrame: Concatenated expression matrix or None if concatenation fails
+            AnnData: Concatenated AnnData object or None if concatenation fails
         """
+        from datetime import datetime
+
         try:
             # Import and initialize ConcatenationService
             from lobster.tools.concatenation_service import ConcatenationService
@@ -2865,9 +4734,34 @@ The actual expression data download will be much faster now that metadata is pre
                 f"Using ConcatenationService to concatenate {len(stored_samples)} stored samples for {geo_id}"
             )
 
-            # Use ConcatenationService for concatenation
-            output_name = f"geo_{geo_id.lower()}_concatenated_temp"
+            # AUTO-DETECT join strategy if not explicitly specified
+            analysis_metadata = {}
+            auto_detected = False
 
+            if use_intersecting_genes_only is None:
+                logger.info(
+                    "No explicit join strategy specified - performing intelligent auto-detection..."
+                )
+                use_intersecting_genes_only, analysis_metadata = (
+                    self._analyze_gene_coverage_and_decide_join(stored_samples)
+                )
+                auto_detected = True
+                logger.info(
+                    f"Auto-detection complete: using {'INNER' if use_intersecting_genes_only else 'OUTER'} join"
+                )
+            else:
+                # Manual specification
+                join_type = "inner" if use_intersecting_genes_only else "outer"
+                logger.info(
+                    f"Using explicitly specified join strategy: {join_type.upper()} join"
+                )
+                analysis_metadata = {
+                    "decision": join_type,
+                    "reasoning": f"Explicitly specified by user: use_intersecting_genes_only={use_intersecting_genes_only}",
+                    "timestamp": datetime.now().isoformat(),
+                }
+
+            # Perform concatenation
             concatenated_adata, statistics = concat_service.concatenate_from_modalities(
                 modality_names=stored_samples,
                 output_name=None,  # Don't store, just return
@@ -2875,7 +4769,68 @@ The actual expression data download will be much faster now that metadata is pre
                 batch_key="batch",
             )
 
+            # PROVENANCE TRACKING: Log to DataManager tool usage history
+            provenance_info = {
+                **analysis_metadata,
+                **statistics,
+                "samples_concatenated": len(stored_samples),
+                "resulting_shape": (
+                    concatenated_adata.n_obs,
+                    concatenated_adata.n_vars,
+                ),
+                "auto_detected": auto_detected,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            self.data_manager.log_tool_usage(
+                tool_name="concatenate_geo_samples",
+                parameters={
+                    "geo_id": geo_id,
+                    "n_samples": len(stored_samples),
+                    "join_strategy": (
+                        "inner" if use_intersecting_genes_only else "outer"
+                    ),
+                    "auto_detected": auto_detected,
+                },
+                result=provenance_info,
+            )
+
+            # METADATA STORAGE: Store concatenation decision for supervisor access
+            modality_name = f"geo_{geo_id.lower()}"
+            concatenation_info = {
+                "join_strategy": "inner" if use_intersecting_genes_only else "outer",
+                "auto_detected": auto_detected,
+                "analysis": analysis_metadata,
+                "statistics": statistics,
+                "quality_impact": (
+                    "Only genes present in all samples retained"
+                    if use_intersecting_genes_only
+                    else "All genes included, missing values filled with zeros"
+                ),
+                "provenance_tracked": True,
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # Update existing entry or create new one with concatenation decision
+            existing_entry = self.data_manager._get_geo_metadata(modality_name)
+            if existing_entry:
+                existing_entry["concatenation_decision"] = concatenation_info
+                self.data_manager.metadata_store[modality_name] = existing_entry
+            else:
+                # No existing entry - store concatenation decision in proper structure
+                # Note: This shouldn't happen if metadata was stored earlier, but handle it defensively
+                self.data_manager.metadata_store[modality_name] = {
+                    "concatenation_decision": concatenation_info,
+                    "stored_by": "_handle_multi_sample_concatenation",
+                    "fetch_timestamp": datetime.now().isoformat(),
+                }
+
+            logger.info(
+                "✓ Concatenation decision stored in metadata_store for supervisor access"
+            )
+            logger.info("✓ Provenance tracked in tool_usage_history")
             logger.info(f"ConcatenationService completed: {statistics}")
+
             return concatenated_adata
 
         except Exception as e:
@@ -2931,7 +4886,7 @@ The actual expression data download will be much faster now that metadata is pre
 
             # Save to workspace
             save_path = f"{gsm_id.lower()}_sample.h5ad"
-            saved_file = self.data_manager.save_modality(modality_name, save_path)
+            self.data_manager.save_modality(modality_name, save_path)
 
             return f"""Successfully downloaded single-cell sample {gsm_id}!
 
@@ -2945,7 +4900,7 @@ The actual expression data download will be much faster now that metadata is pre
             return f"Error storing sample {gsm_id}: {str(e)}"
 
     def _download_supplementary_file(  # FIXME
-        self, url: str, gsm_id: str
+        self, url: str, gsm_id: str, geo_id: Optional[str] = None
     ) -> Optional[pd.DataFrame]:
         """
         Professional download and parse of supplementary files with FTP support.
@@ -2953,6 +4908,7 @@ The actual expression data download will be much faster now that metadata is pre
         Args:
             url: URL to supplementary file (supports HTTP/HTTPS/FTP)
             gsm_id: GEO sample ID
+            geo_id: Optional GEO dataset ID for transpose logic context
 
         Returns:
             DataFrame: Parsed matrix or None
@@ -2978,14 +4934,19 @@ The actual expression data download will be much faster now that metadata is pre
             matrix = self.geo_parser.parse_supplementary_file(local_file)
 
             if matrix is not None and not matrix.empty:
-                # Add sample prefix to row names for proper identification
-                if (
-                    matrix.shape[0] > matrix.shape[1]
-                ):  # More rows than columns suggests cells x genes
-                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
-                else:  # More columns than rows suggests genes x cells, transpose
+                # Use biology-aware transpose logic instead of naive shape comparison
+                should_transpose, reason = self._determine_transpose_biologically(
+                    matrix=matrix, gsm_id=gsm_id, geo_id=geo_id
+                )
+
+                logger.info(f"Transpose decision for {gsm_id}: {reason}")
+
+                if should_transpose:
                     matrix = matrix.T
-                    matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
+                    logger.debug(f"Matrix transposed: {matrix.shape}")
+
+                # Add sample prefix to row names for proper identification
+                matrix.index = [f"{gsm_id}_{idx}" for idx in matrix.index]
 
                 logger.info(
                     f"Successfully parsed supplementary file for {gsm_id}: {matrix.shape}"

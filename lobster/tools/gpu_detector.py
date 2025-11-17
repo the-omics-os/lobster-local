@@ -5,7 +5,6 @@ Provides GPU availability detection without requiring PyTorch installation.
 Used by scVI integration to determine hardware capabilities.
 """
 
-import os
 import re
 import subprocess
 from typing import Dict, Optional, Tuple

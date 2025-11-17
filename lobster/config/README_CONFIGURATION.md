@@ -30,7 +30,7 @@ The system now uses a centralized agent registry (`lobster/config/agent_registry
 | `data_expert_agent` | Data Expert | `lobster.agents.data_expert.data_expert` | `handoff_to_data_expert` |
 | `singlecell_expert_agent` | Single-Cell Expert | `lobster.agents.singlecell_expert.singlecell_expert` | `handoff_to_singlecell_expert` |
 | `bulk_rnaseq_expert_agent` | Bulk RNA-seq Expert | `lobster.agents.bulk_rnaseq_expert.bulk_rnaseq_expert` | `handoff_to_bulk_rnaseq_expert` |
-| `method_expert_agent` | Method Expert | `lobster.agents.method_expert.method_expert` | `handoff_to_method_expert` |
+| ~~`method_expert_agent`~~ | ~~Method Expert~~ | ~~`lobster.agents.method_expert.method_expert`~~ | **DEPRECATED v2.2+** - merged into `research_agent` |
 
 ### System Agents
 These agents are tracked by the callback system but don't require factory functions:
@@ -151,7 +151,7 @@ LOBSTER_METHOD_AGENT_TEMPERATURE=0.3
 
 ### Required API Keys (unchanged)
 ```bash
-OPENAI_API_KEY="your-openai-api-key"
+OPENAI_API_KEY="your-openai-api-key" #TODO
 AWS_BEDROCK_ACCESS_KEY="your-aws-access-key"
 AWS_BEDROCK_SECRET_ACCESS_KEY="your-aws-secret-key"
 NCBI_API_KEY="your-ncbi-api-key"

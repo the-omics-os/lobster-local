@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional, Type
 
 from .enhanced_handoff_tool import (
     DATA_LOADING_SCHEMA,
-    METHOD_CONTEXT_SCHEMA,
     PSEUDOBULK_CONTEXT_SCHEMA,
     SCVI_CONTEXT_SCHEMA,
 )
@@ -98,19 +97,20 @@ EXPERT_HANDOFF_PATTERNS = {
         description="Data Expert to Research Agent for dataset discovery",
         priority=7,
     ),
-    "research_to_method": HandoffPattern(
-        from_expert="research_agent",
-        to_expert="method_expert",
-        task_types=[
-            "parameter_extraction",
-            "method_recommendation",
-            "protocol_analysis",
-        ],
-        context_schema=METHOD_CONTEXT_SCHEMA,
-        return_flow="sender",
-        description="Research Agent to Method Expert for parameter extraction from publications",
-        priority=6,
-    ),
+    # DEPRECATED v2.2+: method_expert merged into research_agent (Phase 1)
+    # "research_to_method": HandoffPattern(
+    #     from_expert="research_agent",
+    #     to_expert="method_expert",
+    #     task_types=[
+    #         "parameter_extraction",
+    #         "method_recommendation",
+    #         "protocol_analysis",
+    #     ],
+    #     context_schema=METHOD_CONTEXT_SCHEMA,
+    #     return_flow="sender",
+    #     description="Research Agent to Method Expert for parameter extraction from publications",
+    #     priority=6,
+    # ),
     "research_to_data": HandoffPattern(
         from_expert="research_agent",
         to_expert="data_expert",
@@ -125,34 +125,36 @@ EXPERT_HANDOFF_PATTERNS = {
         description="Research Agent to Data Expert for dataset loading after discovery",
         priority=8,
     ),
-    "method_to_singlecell": HandoffPattern(
-        from_expert="method_expert",
-        to_expert="singlecell_expert",
-        task_types=["apply_method", "parameter_optimization", "protocol_execution"],
-        context_schema={
-            "method_name": str,
-            "parameters": Dict[str, Any],
-            "modality_name": str,
-            "reference_paper": Optional[str],
-        },
-        return_flow="sender",
-        description="Method Expert to Single Cell Expert for applying extracted methods",
-        priority=7,
-    ),
-    "method_to_bulk": HandoffPattern(
-        from_expert="method_expert",
-        to_expert="bulk_rnaseq_expert",
-        task_types=["apply_method", "parameter_optimization", "statistical_analysis"],
-        context_schema={
-            "method_name": str,
-            "parameters": Dict[str, Any],
-            "modality_name": str,
-            "design_matrix": Optional[Dict[str, Any]],
-        },
-        return_flow="sender",
-        description="Method Expert to Bulk RNA-seq Expert for applying statistical methods",
-        priority=7,
-    ),
+    # DEPRECATED v2.2+: method_expert merged into research_agent (Phase 1)
+    # "method_to_singlecell": HandoffPattern(
+    #     from_expert="method_expert",
+    #     to_expert="singlecell_expert",
+    #     task_types=["apply_method", "parameter_optimization", "protocol_execution"],
+    #     context_schema={
+    #         "method_name": str,
+    #         "parameters": Dict[str, Any],
+    #         "modality_name": str,
+    #         "reference_paper": Optional[str],
+    #     },
+    #     return_flow="sender",
+    #     description="Method Expert to Single Cell Expert for applying extracted methods",
+    #     priority=7,
+    # ),
+    # DEPRECATED v2.2+: method_expert merged into research_agent (Phase 1)
+    # "method_to_bulk": HandoffPattern(
+    #     from_expert="method_expert",
+    #     to_expert="bulk_rnaseq_expert",
+    #     task_types=["apply_method", "parameter_optimization", "statistical_analysis"],
+    #     context_schema={
+    #         "method_name": str,
+    #         "parameters": Dict[str, Any],
+    #         "modality_name": str,
+    #         "design_matrix": Optional[Dict[str, Any]],
+    #     },
+    #     return_flow="sender",
+    #     description="Method Expert to Bulk RNA-seq Expert for applying statistical methods",
+    #     priority=7,
+    # ),
     "bulk_to_singlecell": HandoffPattern(
         from_expert="bulk_rnaseq_expert",
         to_expert="singlecell_expert",

@@ -10,9 +10,7 @@ import os
 from typing import Any, Dict, Optional
 
 from rich import box
-from rich.color import Color
 from rich.panel import Panel
-from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
 

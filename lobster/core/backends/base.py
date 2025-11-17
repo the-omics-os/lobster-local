@@ -11,7 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-import anndata
 
 from lobster.core.interfaces.backend import IDataBackend
 

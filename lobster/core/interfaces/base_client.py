@@ -7,7 +7,7 @@ ensuring consistency between local and cloud implementations.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class BaseClient(ABC):
@@ -156,5 +156,24 @@ class BaseClient(ABC):
         """
         return {
             "error": "Model listing not available for this client type",
+            "success": False,
+        }
+
+    def get_token_usage(self) -> Dict[str, Any]:
+        """
+        Get token usage and cost information for the current session.
+
+        Returns:
+            Dictionary with token usage information including:
+                - session_id: str
+                - total_input_tokens: int
+                - total_output_tokens: int
+                - total_tokens: int
+                - total_cost_usd: float
+                - by_agent: Dict[str, Dict] (per-agent breakdown)
+                - invocations: List[Dict] (detailed invocation log)
+        """
+        return {
+            "error": "Token tracking not available for this client type",
             "success": False,
         }

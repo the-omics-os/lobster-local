@@ -12,24 +12,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import psutil
 from rich import box
 from rich.align import Align
-from rich.columns import Columns
-from rich.console import Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TaskProgressColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
 from rich.table import Table
 from rich.text import Text
 
@@ -309,7 +299,7 @@ class LiveDashboard:
             if len(self.system_metrics) > 60:
                 self.system_metrics.pop(0)
 
-        except Exception as e:
+        except Exception:
             # Fallback to dummy metrics if psutil fails
             self.system_metrics.append(SystemMetrics())
 
@@ -331,7 +321,7 @@ class LiveDashboard:
                 # Sleep until next update
                 self.stop_event.wait(self.refresh_rate)
 
-            except Exception as e:
+            except Exception:
                 # Continue monitoring even if there are errors
                 time.sleep(self.refresh_rate)
 

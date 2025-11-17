@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Union
 import anndata
 import numpy as np
 import pandas as pd
-import scanpy as sc
 
 from lobster.core.interfaces.adapter import IModalityAdapter
 from lobster.core.interfaces.validator import ValidationResult
@@ -30,7 +29,9 @@ class BaseAdapter(IModalityAdapter):
     Subclasses need only implement the modality-specific methods.
     """
 
-    def __init__(self, name: Optional[str] = None, config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self, name: Optional[str] = None, config: Optional[Dict[str, Any]] = None
+    ):
         """
         Initialize the base adapter.
 
@@ -52,7 +53,10 @@ class BaseAdapter(IModalityAdapter):
     @property
     def supported_formats(self) -> List[str]:
         """Legacy property for backward compatibility with old test API."""
-        if hasattr(self, "_supported_formats_override") and self._supported_formats_override:
+        if (
+            hasattr(self, "_supported_formats_override")
+            and self._supported_formats_override
+        ):
             return self._supported_formats_override
         return self.get_supported_formats()
 
@@ -192,8 +196,11 @@ class BaseAdapter(IModalityAdapter):
                 sparsity = (X == 0).sum() / X.size
                 if sparsity > 0.8:
                     from scipy.sparse import csr_matrix
+
                     X = csr_matrix(X)
-                    self.logger.info(f"Converted to sparse matrix (sparsity: {sparsity:.2%})")
+                    self.logger.info(
+                        f"Converted to sparse matrix (sparsity: {sparsity:.2%})"
+                    )
 
             # Create basic AnnData object
             adata = anndata.AnnData(
@@ -392,9 +399,13 @@ class BaseAdapter(IModalityAdapter):
                     "zero_obs": int((obs_sums == 0).sum()),
                     "zero_vars": int((var_sums == 0).sum()),
                     "density": (
-                        float(1.0 - (adata.X == 0).sum() / adata.X.size)
-                        if hasattr(adata.X, "size")
-                        else 0.0
+                        float(adata.X.nnz / (adata.X.shape[0] * adata.X.shape[1]))
+                        if hasattr(adata.X, "nnz")  # Sparse matrix - O(1) operation
+                        else (
+                            float(1.0 - (adata.X == 0).sum() / adata.X.size)
+                            if hasattr(adata.X, "size")
+                            else 0.0
+                        )
                     ),
                 }
             )
@@ -434,13 +445,17 @@ class BaseAdapter(IModalityAdapter):
         self.logger.debug(f"{self.name} {operation}: {details}")
 
     # Backward compatibility aliases for old method names
-    def _load_csv_file(self, path: Union[str, Path], index_col: int = 0, **kwargs) -> pd.DataFrame:
+    def _load_csv_file(
+        self, path: Union[str, Path], index_col: int = 0, **kwargs
+    ) -> pd.DataFrame:
         """Legacy alias for _load_csv_data (for backward compatibility)."""
         # For tests expecting exact pandas signature, call directly
         # This is a legacy method that bypasses our enhancements
         return pd.read_csv(path, index_col=index_col, **kwargs)
 
-    def _load_excel_file(self, path: Union[str, Path], index_col: int = 0, **kwargs) -> pd.DataFrame:
+    def _load_excel_file(
+        self, path: Union[str, Path], index_col: int = 0, **kwargs
+    ) -> pd.DataFrame:
         """Legacy alias for _load_excel_data (for backward compatibility)."""
         # For tests expecting exact pandas signature, call directly
         # This is a legacy method that bypasses our enhancements
@@ -450,7 +465,9 @@ class BaseAdapter(IModalityAdapter):
         """Legacy alias for _load_h5ad_data (for backward compatibility)."""
         return self._load_h5ad_data(path)
 
-    def _load_file(self, path: Union[str, Path], **kwargs) -> Union[pd.DataFrame, anndata.AnnData]:
+    def _load_file(
+        self, path: Union[str, Path], **kwargs
+    ) -> Union[pd.DataFrame, anndata.AnnData]:
         """
         Load file with automatic format detection (legacy method).
 

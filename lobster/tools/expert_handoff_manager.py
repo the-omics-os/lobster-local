@@ -5,18 +5,14 @@ This module provides the ExpertHandoffManager class for managing expert-to-exper
 handoffs with context preservation and automatic return flow management.
 """
 
-import json
 import logging
-import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from langchain_core.tools import BaseTool, InjectedToolCallId, tool
-from langgraph.prebuilt import InjectedState
+from langchain_core.tools import BaseTool
 from langgraph.types import Command
-from typing_extensions import Annotated
 
 logger = logging.getLogger(__name__)
 
@@ -290,13 +286,13 @@ class ExpertHandoffManager:
         """
         description = f"Task: {context.task_type}\n"
         description += f"From: {context.from_expert}\n"
-        description += f"Parameters:\n"
+        description += "Parameters:\n"
 
         for key, value in context.parameters.items():
             description += f"  - {key}: {value}\n"
 
         if context.return_expectations:
-            description += f"Expected Results:\n"
+            description += "Expected Results:\n"
             for key, value in context.return_expectations.items():
                 description += f"  - {key}: {value}\n"
 

@@ -6,14 +6,14 @@ and generating visualizations of the results.
 """
 
 import time
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple
 
 import anndata
-import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
 
+from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
 from lobster.utils.logger import get_logger
 from lobster.utils.progress_wrapper import with_periodic_progress
 
@@ -34,13 +34,18 @@ class ClusteringService:
     reduction on single-cell RNA-seq data and generate visualizations.
     """
 
-    def __init__(self):
+    def __init__(self, config=None, **kwargs):
         """
         Initialize the clustering service.
+
+        Args:
+            config: Optional configuration dict (ignored, for backward compatibility)
+            **kwargs: Additional arguments (ignored, for backward compatibility)
 
         This service is stateless and doesn't require a data manager instance.
         """
         logger.debug("Initializing stateless ClusteringService")
+        self.config = config or {}
         self.default_cluster_resolution = 0.7
         self.progress_callback = None
         self.current_progress = 0
@@ -88,6 +93,140 @@ class ClusteringService:
 
         return progress_callback_wrapper
 
+    def _create_clustering_ir(
+        self,
+        resolution: float,
+        n_neighbors: int = 15,
+        n_pcs: int = 20,
+        min_mean: float = 0.0125,
+        max_mean: float = 3.0,
+        min_disp: float = 0.5,
+    ) -> AnalysisStep:
+        """
+        Create Intermediate Representation for full clustering pipeline.
+
+        Args:
+            resolution: Leiden clustering resolution parameter
+            n_neighbors: Number of neighbors for graph construction
+            n_pcs: Number of principal components to use
+            min_mean: Minimum mean for HVG selection
+            max_mean: Maximum mean for HVG selection
+            min_disp: Minimum dispersion for HVG selection
+
+        Returns:
+            AnalysisStep with full clustering pipeline code template
+        """
+        # Parameter schema
+        parameter_schema = {
+            "resolution": ParameterSpec(
+                param_type="float",
+                papermill_injectable=True,
+                default_value=resolution,
+                required=False,
+                validation_rule="resolution > 0",
+                description="Resolution parameter for Leiden clustering",
+            ),
+            "n_neighbors": ParameterSpec(
+                param_type="int",
+                papermill_injectable=True,
+                default_value=n_neighbors,
+                required=False,
+                validation_rule="n_neighbors > 0",
+                description="Number of neighbors for graph construction",
+            ),
+            "n_pcs": ParameterSpec(
+                param_type="int",
+                papermill_injectable=True,
+                default_value=n_pcs,
+                required=False,
+                validation_rule="n_pcs > 0",
+                description="Number of principal components to use",
+            ),
+        }
+
+        # Jinja2 template with full clustering pipeline
+        code_template = """# Full single-cell clustering pipeline
+# Following best practices from scanpy workflows
+
+# 1. Normalize and log-transform
+sc.pp.normalize_total(adata, target_sum=1e4)
+sc.pp.log1p(adata)
+print("Normalization complete")
+
+# 2. Find highly variable genes
+sc.pp.highly_variable_genes(
+    adata,
+    min_mean={{ min_mean }},
+    max_mean={{ max_mean }},
+    min_disp={{ min_disp }},
+    flavor='seurat'
+)
+n_hvg = sum(adata.var.highly_variable)
+print(f"Identified {n_hvg} highly variable genes")
+
+# 3. Store raw data and subset to HVG
+adata.raw = adata.copy()
+adata = adata[:, adata.var.highly_variable]
+
+# 4. Scale data
+sc.pp.scale(adata, max_value=10)
+print("Scaling complete")
+
+# 5. PCA dimensionality reduction
+sc.tl.pca(adata, svd_solver='arpack')
+print(f"PCA complete (using {{ n_pcs }} components)")
+
+# 6. Compute neighborhood graph
+sc.pp.neighbors(adata, n_neighbors={{ n_neighbors }}, n_pcs={{ n_pcs }})
+print("Neighborhood graph computed")
+
+# 7. Leiden clustering
+sc.tl.leiden(adata, resolution={{ resolution }}, key_added='leiden')
+n_clusters = len(adata.obs['leiden'].unique())
+print(f"Leiden clustering complete: {n_clusters} clusters (resolution={{ resolution }})")
+
+# 8. UMAP visualization
+sc.tl.umap(adata)
+print("UMAP coordinates computed")
+
+print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} clusters")
+"""
+
+        return AnalysisStep(
+            operation="scanpy.tl.cluster_pipeline",
+            tool_name="cluster_and_visualize",
+            description=f"Full clustering pipeline: HVG + PCA + neighbors + Leiden (res={resolution}) + UMAP",
+            library="scanpy",
+            code_template=code_template,
+            imports=["import scanpy as sc", "import numpy as np"],
+            parameters={
+                "resolution": resolution,
+                "n_neighbors": n_neighbors,
+                "n_pcs": n_pcs,
+                "min_mean": min_mean,
+                "max_mean": max_mean,
+                "min_disp": min_disp,
+            },
+            parameter_schema=parameter_schema,
+            input_entities=["adata"],
+            output_entities=["adata"],
+            execution_context={
+                "operation_type": "clustering",
+                "pipeline_steps": [
+                    "normalize",
+                    "hvg",
+                    "scale",
+                    "pca",
+                    "neighbors",
+                    "leiden",
+                    "umap",
+                ],
+                "resolution": resolution,
+            },
+            validates_on_export=True,
+            requires_validation=False,
+        )
+
     def cluster_and_visualize(
         self,
         adata: anndata.AnnData,
@@ -98,7 +237,7 @@ class ClusteringService:
         demo_mode: bool = False,
         subsample_size: Optional[int] = None,
         skip_steps: Optional[list] = None,
-    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
         """
         Perform clustering and UMAP visualization on single-cell RNA-seq data.
 
@@ -115,7 +254,7 @@ class ClusteringService:
             skip_steps: List of steps to skip in demo mode (e.g. ['marker_genes'])
 
         Returns:
-            Tuple[anndata.AnnData, Dict[str, Any]]: Clustered AnnData and clustering stats
+            Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]: Clustered AnnData, clustering stats, and IR
 
         Raises:
             ClusteringError: If clustering fails
@@ -254,7 +393,14 @@ class ClusteringService:
 
             logger.info(f"Clustering completed: {n_clusters} clusters identified")
 
-            return adata_clustered, clustering_stats
+            # Create IR for notebook export
+            ir = self._create_clustering_ir(
+                resolution=resolution,
+                n_neighbors=15,  # Default from _perform_clustering
+                n_pcs=20,  # Default from _perform_clustering
+            )
+
+            return adata_clustered, clustering_stats, ir
 
         except Exception as e:
             logger.exception(f"Error during clustering: {e}")
@@ -417,6 +563,23 @@ class ClusteringService:
             n_hvg = sum(adata.var.highly_variable)
             logger.info(f"Using {n_hvg} highly variable genes")
 
+            # ISSUE #7 FIX: Handle case when no HVG detected
+            if n_hvg == 0:
+                logger.warning(
+                    "No highly variable genes detected with current parameters. "
+                    "Using all genes for clustering instead."
+                )
+                raise ClusteringError(
+                    "No highly variable genes detected. This typically indicates:\n"
+                    "1. Data has very low variance (all genes have similar expression)\n"
+                    "2. Dataset is too small or uniform for HVG detection\n"
+                    "3. Data may need quality filtering before clustering\n\n"
+                    "Suggestions:\n"
+                    "- Check data quality (use quality_service for QC metrics)\n"
+                    "- Ensure data is raw counts (not already normalized/log-transformed)\n"
+                    "- Try filtering out low-quality cells/genes first"
+                )
+
             # In demo mode, further restrict the number of HVG for faster processing
             if demo_mode and n_hvg > 1000:
                 logger.info("Demo mode: Restricting to top 1000 variable genes")
@@ -435,15 +598,32 @@ class ClusteringService:
             sc.pp.scale(adata_hvg, max_value=10)
             self._update_progress("Data scaling completed")
 
-            # PCA (using 'arpack' SVD solver for better performance with sparse matrices)
-            logger.info("Running PCA")
-            sc.tl.pca(adata_hvg, svd_solver="arpack")
-            self._update_progress("PCA completed")
-
             # Determine optimal number of PCs (following publication's approach using 20 PCs)
             # In demo mode, use fewer PCs for faster processing
             n_pcs = 10 if demo_mode else 20
+
+            # ISSUE #7 FIX: Validate n_pcs against available features
+            n_features = adata_hvg.n_vars
+            if n_features < n_pcs:
+                old_n_pcs = n_pcs
+                n_pcs = min(
+                    n_features - 1, n_features // 2
+                )  # Use at most half of features
+                if n_pcs < 1:
+                    raise ClusteringError(
+                        f"Insufficient features for PCA: only {n_features} highly variable genes detected, "
+                        f"but need at least 2 for PCA. Try using all genes or check data quality."
+                    )
+                logger.warning(
+                    f"Reduced n_pcs from {old_n_pcs} to {n_pcs} due to limited features ({n_features} HVG)"
+                )
+
             logger.info(f"Using {n_pcs} principal components for neighborhood graph")
+
+            # PCA (using 'arpack' SVD solver for better performance with sparse matrices)
+            logger.info("Running PCA")
+            sc.tl.pca(adata_hvg, svd_solver="arpack", n_comps=n_pcs)
+            self._update_progress("PCA completed")
 
             # Compute neighborhood graph
             logger.info("Computing neighborhood graph")
@@ -891,7 +1071,7 @@ class ClusteringService:
             marker_summary = "\n\n**Top Marker Genes by Cluster:**\n"
             for cluster in sorted(adata.obs["leiden"].unique(), key=lambda x: int(x)):
                 genes = adata.uns["rank_genes_groups"]["names"][cluster][:5]
-                scores = adata.uns["rank_genes_groups"]["scores"][cluster][:5]
+                adata.uns["rank_genes_groups"]["scores"][cluster][:5]
                 marker_summary += f"- Cluster {cluster}: {', '.join(genes)}\n"
 
         # Batch correction information

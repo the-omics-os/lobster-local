@@ -6,13 +6,11 @@ R-style formulas and constructing design matrices for differential expression
 analysis, supporting complex experimental designs with covariates.
 """
 
-import logging
 import re
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import LabelEncoder
 
 from lobster.core import DesignMatrixError, FormulaError
 from lobster.utils.logger import get_logger
@@ -299,7 +297,7 @@ class DifferentialFormulaService:
                     ref_level = reference_levels[var]
                     if ref_level in levels:
                         levels = [ref_level] + [
-                            l for l in sorted(levels) if l != ref_level
+                            level for level in sorted(levels) if level != ref_level
                         ]
                     else:
                         self.logger.warning(
@@ -352,7 +350,7 @@ class DifferentialFormulaService:
         elif var_info["type"] == "categorical":
             # Categorical variable - create dummy variables
             levels = var_info["levels"]
-            reference_level = levels[0]
+            levels[0]
 
             # Create dummy variables for all levels except reference
             for level in levels[1:]:
@@ -837,7 +835,7 @@ class DifferentialFormulaService:
             rank = np.linalg.matrix_rank(design_result["design_matrix"])
             n_cols = design_result["design_matrix"].shape[1]
 
-            preview += f"\nDesign Properties:\n"
+            preview += "\nDesign Properties:\n"
             preview += f"• Matrix rank: {rank}/{n_cols} ({'full rank' if rank == n_cols else 'rank deficient'})\n"
             preview += f"• Degrees of freedom: {len(metadata) - n_cols}\n"
 

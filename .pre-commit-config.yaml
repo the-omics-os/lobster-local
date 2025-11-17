@@ -1,0 +1,70 @@
+# Pre-commit hooks for Lobster AI project
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Wiki documentation quality checks
+  - repo: local
+    hooks:
+      - id: wiki-links
+        name: Check wiki links
+        entry: python scripts/check_wiki_links.py
+        language: python
+        files: ^wiki/.*\.md$
+        pass_filenames: false
+
+      - id: wiki-code
+        name: Test wiki code examples
+        entry: python scripts/test_wiki_code_examples.py
+        language: python
+        files: ^wiki/.*\.md$
+        pass_filenames: false
+        additional_dependencies:
+          - anndata
+          - scanpy
+          - numpy
+          - pandas
+
+      - id: wiki-lint
+        name: Lint wiki markdown
+        entry: python scripts/lint_wiki_markdown.py
+        language: python
+        files: ^wiki/.*\.md$
+        pass_filenames: false
+
+  # Python code quality (existing)
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^wiki/
+      - id: end-of-file-fixer
+        exclude: ^wiki/
+      - id: check-yaml
+      - id: check-added-large-files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+      - id: check-toml
+
+  # Python formatting (existing)
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        exclude: ^wiki/
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        exclude: ^wiki/
+
+# Configuration
+default_language_version:
+  python: python3.12
+
+# Stages
+default_stages: [commit, push]
+
+# Fail fast on first error
+fail_fast: false

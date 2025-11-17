@@ -8,15 +8,13 @@ quality control, quantification, and differential expression analysis.
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 import anndata
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
 
-from lobster.core import DesignMatrixError, FormulaError, PseudobulkError
+from lobster.core import FormulaError
 from lobster.tools.differential_formula_service import DifferentialFormulaService
 from lobster.utils.logger import get_logger
 
@@ -533,29 +531,155 @@ Next suggested step: Import quantification data with tximport for differential e
         organism: Optional[str] = None,
     ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
         """
-        Run pathway enrichment analysis on a gene list.
+        Run pathway enrichment analysis on a gene list using GSEApy.
 
-        NOTE: This is a placeholder implementation. For production use, integrate with
-        libraries like GSEApy, gprofiler-python, or enrichr-python for real enrichment analysis.
+        Supports multiple enrichment databases:
+        - GO: Gene Ontology (Biological Process, Molecular Function, Cellular Component)
+        - KEGG: KEGG pathway database
+        - Reactome: Reactome pathway database
+        - WikiPathways: WikiPathways database
 
         Args:
-            gene_list: List of genes for enrichment analysis
-            analysis_type: Type of analysis ("GO" or "KEGG")
-            background_genes: Background gene set (None for default)
+            gene_list: List of genes for enrichment analysis (gene symbols)
+            analysis_type: Type of analysis ("GO", "KEGG", "Reactome", "WikiPathways")
+            background_genes: Background gene set (None for default - all detected genes)
+            organism: Organism name (default: "human", supports "mouse", "rat", etc.)
 
         Returns:
             Tuple[pd.DataFrame, Dict[str, Any]]: Enrichment results and stats
+                - DataFrame contains: Term, Overlap, P-value, Adjusted P-value, Genes
+                - Dict contains summary statistics
 
         Raises:
             BulkRNASeqError: If enrichment analysis fails
         """
-        logger.warning(
-            "Pathway enrichment analysis not yet implemented. This is a placeholder."
-        )
-        raise BulkRNASeqError(
-            "Pathway enrichment analysis not yet implemented. "
-            "Please integrate with GSEApy, gprofiler-python, or enrichr-python for real functionality."
-        )
+        try:
+            # Validate inputs
+            if not gene_list or len(gene_list) == 0:
+                raise BulkRNASeqError(
+                    "Empty gene list provided for enrichment analysis"
+                )
+
+            # Set default organism
+            if organism is None:
+                organism = "human"
+
+            logger.info(
+                f"Running {analysis_type} pathway enrichment on {len(gene_list)} genes for {organism}"
+            )
+
+            # Try to import GSEApy
+            try:
+                import gseapy as gp
+            except ImportError:
+                logger.error("GSEApy not installed")
+                raise BulkRNASeqError(
+                    "GSEApy not installed. Install with: pip install gseapy"
+                )
+
+            # Map analysis type to Enrichr gene set libraries
+            library_map = {
+                "GO": [
+                    "GO_Biological_Process_2023",
+                    "GO_Molecular_Function_2023",
+                    "GO_Cellular_Component_2023",
+                ],
+                "KEGG": ["KEGG_2021_Human"],
+                "Reactome": ["Reactome_2022"],
+                "WikiPathways": ["WikiPathway_2023_Human"],
+            }
+
+            # Get organism-specific libraries
+            if organism.lower() == "mouse":
+                library_map["KEGG"] = ["KEGG_2021_Mouse"]
+            elif organism.lower() == "rat":
+                library_map["KEGG"] = ["KEGG_2021_Rat"]
+
+            if analysis_type not in library_map:
+                raise BulkRNASeqError(
+                    f"Unknown analysis type '{analysis_type}'. "
+                    f"Supported types: {list(library_map.keys())}"
+                )
+
+            gene_sets = library_map[analysis_type]
+            logger.info(f"Using gene set libraries: {gene_sets}")
+
+            # Run enrichment analysis
+            all_results = []
+            for gene_set in gene_sets:
+                try:
+                    logger.info(f"Running enrichment for {gene_set}")
+                    enr_result = gp.enrichr(
+                        gene_list=gene_list,
+                        gene_sets=[gene_set],
+                        organism=organism.capitalize(),
+                        background=background_genes,
+                        cutoff=0.05,  # Adjusted p-value cutoff
+                    )
+
+                    if enr_result.results is not None and not enr_result.results.empty:
+                        results_df = enr_result.results.copy()
+                        results_df["gene_set_library"] = gene_set
+                        all_results.append(results_df)
+                        logger.info(
+                            f"Found {len(results_df)} enriched terms in {gene_set}"
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to run enrichment for {gene_set}: {e}")
+                    continue
+
+            if not all_results:
+                logger.warning(
+                    f"No significant enrichment found for {analysis_type} analysis"
+                )
+                # Return empty results
+                enrichment_df = pd.DataFrame(
+                    columns=[
+                        "Term",
+                        "Overlap",
+                        "P-value",
+                        "Adjusted P-value",
+                        "Genes",
+                        "gene_set_library",
+                    ]
+                )
+            else:
+                # Combine results from all gene sets
+                enrichment_df = pd.concat(all_results, ignore_index=True)
+
+                # Sort by adjusted p-value
+                enrichment_df = enrichment_df.sort_values("Adjusted P-value")
+
+            # Generate analysis statistics
+            significant_terms = enrichment_df[enrichment_df["Adjusted P-value"] < 0.05]
+
+            enrichment_stats = {
+                "analysis_type": "pathway_enrichment",
+                "enrichment_database": analysis_type,
+                "n_genes_input": len(gene_list),
+                "n_terms_total": len(enrichment_df),
+                "n_significant_terms": len(significant_terms),
+                "organism": organism,
+                "gene_set_libraries": gene_sets,
+                "top_terms": (
+                    significant_terms["Term"].head(10).tolist()
+                    if len(significant_terms) > 0
+                    else []
+                ),
+            }
+
+            logger.info(
+                f"Pathway enrichment completed: {len(significant_terms)} significant terms found"
+            )
+
+            return enrichment_df, enrichment_stats
+
+        except Exception as e:
+            if isinstance(e, BulkRNASeqError):
+                raise
+            else:
+                logger.exception(f"Error in pathway enrichment analysis: {e}")
+                raise BulkRNASeqError(f"Pathway enrichment analysis failed: {e}")
 
     def _run_deseq2_like_analysis(
         self,
@@ -758,7 +882,12 @@ Next suggested step: Import quantification data with tximport for differential e
     def _combine_salmon_results(
         self, salmon_dir: Path, sample_names: List[str]
     ) -> pd.DataFrame:
-        """Combine Salmon quantification results into a single matrix."""
+        """
+        Combine Salmon quantification results into a single matrix.
+
+        DEPRECATED: Use merge_salmon_results() for enhanced functionality.
+        This method is kept for backward compatibility.
+        """
         dfs = []
         for sample in sample_names:
             quant_file = salmon_dir / sample / "quant.sf"
@@ -773,6 +902,351 @@ Next suggested step: Import quantification data with tximport for differential e
             return combined.fillna(0)
         else:
             raise ValueError("No valid Salmon results found")
+
+    def merge_salmon_results(
+        self,
+        salmon_dir: Path,
+        sample_names: Optional[List[str]] = None,
+        value_column: str = "TPM",
+        gene_id_column: str = "Name",
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Merge per-sample Salmon quantification files into unified expression matrix.
+
+        Args:
+            salmon_dir: Directory containing per-sample subdirectories with quant.sf files
+            sample_names: Optional list of sample names; auto-detected if None
+            value_column: Column to extract (TPM, NumReads, etc.)
+            gene_id_column: Column containing gene/transcript IDs
+
+        Returns:
+            Tuple of (merged_dataframe, metadata_dict)
+            - merged_dataframe: Samples as columns, genes as rows
+            - metadata_dict: Detection statistics and file info
+
+        Raises:
+            FileNotFoundError: If no valid quant.sf files found
+            ValueError: If data format is invalid
+        """
+        # Auto-detect sample names if not provided
+        if sample_names is None:
+            sample_names = [
+                d.name
+                for d in salmon_dir.iterdir()
+                if d.is_dir() and (d / "quant.sf").exists()
+            ]
+            logger.info(f"Auto-detected {len(sample_names)} Salmon samples")
+
+        if not sample_names:
+            raise FileNotFoundError(
+                f"No Salmon quantification directories found in {salmon_dir}"
+            )
+
+        # Merge per-sample files
+        dfs = []
+        successful_samples = []
+        failed_samples = []
+
+        for sample in sample_names:
+            quant_file = salmon_dir / sample / "quant.sf"
+
+            if not quant_file.exists():
+                logger.warning(f"Missing quant.sf for sample {sample}")
+                failed_samples.append(sample)
+                continue
+
+            try:
+                df = pd.read_csv(quant_file, sep="\t")
+
+                # Validate required columns
+                if gene_id_column not in df.columns:
+                    raise ValueError(f"Missing gene ID column '{gene_id_column}'")
+                if value_column not in df.columns:
+                    raise ValueError(f"Missing value column '{value_column}'")
+
+                # Extract values
+                df = df.set_index(gene_id_column)[value_column]
+                df.name = sample
+                dfs.append(df)
+                successful_samples.append(sample)
+
+            except Exception as e:
+                logger.error(f"Failed to read {sample}: {e}")
+                failed_samples.append(sample)
+
+        if not dfs:
+            raise ValueError("No valid Salmon quantification files could be loaded")
+
+        # Combine into matrix
+        combined = pd.concat(dfs, axis=1)
+        combined = combined.fillna(0)  # Missing genes set to 0
+
+        # Generate metadata
+        metadata = {
+            "quantification_tool": "Salmon",
+            "n_samples": len(successful_samples),
+            "n_genes": len(combined),
+            "value_type": value_column,
+            "successful_samples": successful_samples,
+            "failed_samples": failed_samples,
+            "source_directory": str(salmon_dir),
+        }
+
+        logger.info(
+            f"Merged Salmon results: {len(successful_samples)} samples × {len(combined)} genes"
+        )
+
+        return combined, metadata
+
+    def merge_kallisto_results(
+        self,
+        kallisto_dir: Path,
+        sample_names: Optional[List[str]] = None,
+        value_column: str = "tpm",
+        gene_id_column: str = "target_id",
+        use_h5: bool = False,
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Merge per-sample Kallisto quantification files into unified expression matrix.
+
+        Kallisto produces three output formats:
+        - abundance.tsv: Text format (default)
+        - abundance.h5: HDF5 format (faster, requires h5py)
+        - abundance.txt: Alternative text format
+
+        Args:
+            kallisto_dir: Directory containing per-sample subdirectories
+            sample_names: Optional list of sample names; auto-detected if None
+            value_column: Column to extract (tpm, est_counts, etc.)
+            gene_id_column: Column containing gene/transcript IDs
+            use_h5: If True, prefer HDF5 format over TSV
+
+        Returns:
+            Tuple of (merged_dataframe, metadata_dict)
+
+        Raises:
+            FileNotFoundError: If no valid abundance files found
+            ImportError: If use_h5=True but h5py not available
+        """
+        # Check H5 support
+        if use_h5:
+            try:
+                import h5py  # noqa: F401
+            except ImportError:
+                logger.warning("h5py not available, falling back to TSV format")
+                use_h5 = False
+
+        # Auto-detect sample names
+        if sample_names is None:
+            sample_names = []
+            for d in kallisto_dir.iterdir():
+                if not d.is_dir():
+                    continue
+
+                # Check for any Kallisto output format
+                if (
+                    (d / "abundance.tsv").exists()
+                    or (d / "abundance.h5").exists()
+                    or (d / "abundance.txt").exists()
+                ):
+                    sample_names.append(d.name)
+
+            logger.info(f"Auto-detected {len(sample_names)} Kallisto samples")
+
+        if not sample_names:
+            raise FileNotFoundError(
+                f"No Kallisto quantification directories found in {kallisto_dir}"
+            )
+
+        # Merge per-sample files
+        dfs = []
+        successful_samples = []
+        failed_samples = []
+        formats_used = {"h5": 0, "tsv": 0, "txt": 0}
+
+        for sample in sample_names:
+            sample_dir = kallisto_dir / sample
+
+            # Try formats in priority order
+            df = None
+            format_used = None
+
+            if use_h5 and (sample_dir / "abundance.h5").exists():
+                try:
+                    df = self._read_kallisto_h5(
+                        sample_dir / "abundance.h5", value_column, gene_id_column
+                    )
+                    format_used = "h5"
+                except Exception as e:
+                    logger.warning(f"Failed to read H5 for {sample}: {e}, trying TSV")
+
+            if df is None and (sample_dir / "abundance.tsv").exists():
+                try:
+                    df = self._read_kallisto_tsv(
+                        sample_dir / "abundance.tsv", value_column, gene_id_column
+                    )
+                    format_used = "tsv"
+                except Exception as e:
+                    logger.warning(f"Failed to read TSV for {sample}: {e}")
+
+            if df is None and (sample_dir / "abundance.txt").exists():
+                try:
+                    df = self._read_kallisto_tsv(
+                        sample_dir / "abundance.txt", value_column, gene_id_column
+                    )
+                    format_used = "txt"
+                except Exception as e:
+                    logger.error(f"Failed to read TXT for {sample}: {e}")
+
+            if df is not None:
+                df.name = sample
+                dfs.append(df)
+                successful_samples.append(sample)
+                formats_used[format_used] += 1
+            else:
+                failed_samples.append(sample)
+
+        if not dfs:
+            raise ValueError("No valid Kallisto quantification files could be loaded")
+
+        # Combine into matrix
+        combined = pd.concat(dfs, axis=1)
+        combined = combined.fillna(0)
+
+        # Generate metadata
+        metadata = {
+            "quantification_tool": "Kallisto",
+            "n_samples": len(successful_samples),
+            "n_genes": len(combined),
+            "value_type": value_column,
+            "successful_samples": successful_samples,
+            "failed_samples": failed_samples,
+            "formats_used": formats_used,
+            "source_directory": str(kallisto_dir),
+        }
+
+        logger.info(
+            f"Merged Kallisto results: {len(successful_samples)} samples × {len(combined)} genes"
+        )
+
+        return combined, metadata
+
+    def _read_kallisto_h5(
+        self,
+        h5_file: Path,
+        value_column: str,
+        gene_id_column: str,
+    ) -> pd.Series:
+        """Read Kallisto HDF5 abundance file."""
+        import h5py
+
+        with h5py.File(h5_file, "r") as f:
+            # Kallisto H5 structure: /aux/ids, /est_counts, /tpm, etc.
+            gene_ids = f["aux"]["ids"][:]
+            if isinstance(gene_ids[0], bytes):
+                gene_ids = [gid.decode("utf-8") for gid in gene_ids]
+
+            # Map column name to H5 dataset
+            h5_column_map = {
+                "tpm": "tpm",
+                "est_counts": "est_counts",
+                "eff_length": "eff_length",
+            }
+
+            if value_column not in h5_column_map:
+                raise ValueError(f"Invalid value column '{value_column}' for H5 format")
+
+            values = f[h5_column_map[value_column]][:]
+
+        return pd.Series(values, index=gene_ids, name=h5_file.parent.name)
+
+    def _read_kallisto_tsv(
+        self,
+        tsv_file: Path,
+        value_column: str,
+        gene_id_column: str,
+    ) -> pd.Series:
+        """Read Kallisto TSV abundance file."""
+        df = pd.read_csv(tsv_file, sep="\t")
+
+        # Validate columns
+        if gene_id_column not in df.columns:
+            raise ValueError(f"Missing gene ID column '{gene_id_column}'")
+        if value_column not in df.columns:
+            raise ValueError(f"Missing value column '{value_column}'")
+
+        return df.set_index(gene_id_column)[value_column]
+
+    def load_from_quantification_files(
+        self,
+        quantification_dir: Path,
+        tool: str = "auto",
+        sample_names: Optional[List[str]] = None,
+        **kwargs,
+    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+        """
+        Load bulk RNA-seq quantification files (Kallisto or Salmon) into expression matrix.
+
+        Args:
+            quantification_dir: Directory containing per-sample quantification files
+            tool: Quantification tool ("kallisto", "salmon", or "auto" for detection)
+            sample_names: Optional list of sample names
+            **kwargs: Additional arguments passed to tool-specific loaders
+
+        Returns:
+            Tuple of (expression_dataframe, metadata_dict)
+
+        Example:
+            >>> df, metadata = service.load_from_quantification_files(
+            ...     Path("GSE130036_RAW/"),
+            ...     tool="auto"
+            ... )
+            >>> print(df.shape)  # (60000 genes, 4 samples)
+        """
+        # Auto-detect tool if needed
+        if tool == "auto":
+            tool = self._detect_quantification_tool(quantification_dir)
+            logger.info(f"Auto-detected quantification tool: {tool}")
+
+        # Route to appropriate loader
+        if tool == "kallisto":
+            return self.merge_kallisto_results(
+                quantification_dir, sample_names, **kwargs
+            )
+        elif tool == "salmon":
+            return self.merge_salmon_results(quantification_dir, sample_names, **kwargs)
+        else:
+            raise ValueError(f"Unsupported quantification tool: {tool}")
+
+    def _detect_quantification_tool(self, directory: Path) -> str:
+        """Auto-detect whether directory contains Kallisto or Salmon files."""
+        kallisto_count = 0
+        salmon_count = 0
+
+        for subdir in directory.iterdir():
+            if not subdir.is_dir():
+                continue
+
+            # Check for Kallisto signatures
+            if (
+                (subdir / "abundance.tsv").exists()
+                or (subdir / "abundance.h5").exists()
+                or (subdir / "abundance.txt").exists()
+            ):
+                kallisto_count += 1
+
+            # Check for Salmon signatures
+            if (subdir / "quant.sf").exists() or (subdir / "quant.genes.sf").exists():
+                salmon_count += 1
+
+        if kallisto_count > salmon_count:
+            return "kallisto"
+        elif salmon_count > 0:
+            return "salmon"
+        else:
+            raise ValueError(
+                f"No Kallisto or Salmon quantification files detected in {directory}"
+            )
 
     def run_pydeseq2_analysis(
         self,
@@ -821,7 +1295,7 @@ Next suggested step: Import quantification data with tximport for differential e
 
             # Parse formula and validate design
             design_info = self.formula_service.parse_formula(formula, metadata)
-            design_result = self.formula_service.construct_design_matrix(
+            self.formula_service.construct_design_matrix(
                 design_info, metadata, contrast
             )
 
@@ -976,8 +1450,8 @@ Next suggested step: Import quantification data with tximport for differential e
         status = {}
 
         try:
-            from pydeseq2.dds import DeseqDataSet
-            from pydeseq2.ds import DeseqStats
+            from pydeseq2.dds import DeseqDataSet  # noqa: F401
+            from pydeseq2.ds import DeseqStats  # noqa: F401
 
             status["pydeseq2"] = True
             status["pydeseq2_available"] = True  # Add expected key for tests
@@ -988,7 +1462,7 @@ Next suggested step: Import quantification data with tximport for differential e
             status["pydeseq2_available"] = False
 
         try:
-            from pydeseq2.default_inference import DefaultInference
+            from pydeseq2.default_inference import DefaultInference  # noqa: F401
 
             status["pydeseq2_inference"] = True
             logger.debug("pyDESeq2 inference components available")

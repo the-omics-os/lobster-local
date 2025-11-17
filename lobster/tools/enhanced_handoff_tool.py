@@ -504,7 +504,7 @@ SCVI_CONTEXT_SCHEMA: Dict[str, Type] = {
     "n_latent": int,
     "batch_key": Optional[str],
     "max_epochs": int,
-    "use_gpu": bool
+    "use_gpu": bool,
 }
 
 PSEUDOBULK_CONTEXT_SCHEMA: Dict[str, Type] = {
@@ -512,25 +512,27 @@ PSEUDOBULK_CONTEXT_SCHEMA: Dict[str, Type] = {
     "groupby": str,
     "layer": Optional[str],
     "method": str,
-    "min_cells": int
+    "min_cells": int,
 }
 
 DATA_LOADING_SCHEMA: Dict[str, Type] = {
     "file_path": str,
     "file_type": str,
     "delimiter": Optional[str],
-    "header": Optional[Union[int, bool]]
+    "header": Optional[Union[int, bool]],
 }
 
 METHOD_CONTEXT_SCHEMA: Dict[str, Type] = {
     "publication_id": str,
     "method_name": str,
     "parameters_needed": List[str],
-    "context": str
+    "context": str,
 }
 
 
-def validate_context_schema(context: Dict[str, Any], schema: Dict[str, Type]) -> Dict[str, Any]:
+def validate_context_schema(
+    context: Dict[str, Any], schema: Dict[str, Type]
+) -> Dict[str, Any]:
     """
     STUB: Validate context data against a schema (disabled for supervisor-mediated flow).
 
