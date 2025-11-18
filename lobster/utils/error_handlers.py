@@ -11,6 +11,7 @@ Architecture:
 """
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import List, Optional, Union
@@ -78,10 +79,11 @@ class ErrorHandler(ABC):
 
 class RateLimitErrorHandler(ErrorHandler):
     """
-    Handles Anthropic rate limit errors (429).
+    Handles LLM provider rate limit errors (429, ThrottlingException).
 
     Provides guidance for users who have exceeded their API rate limits,
-    with recommendations to request increases or switch to AWS Bedrock.
+    with provider-specific recommendations based on whether they're using
+    Anthropic Claude API or AWS Bedrock.
     """
 
     def can_handle(self, error: Exception, error_str: str) -> bool:
@@ -93,31 +95,104 @@ class RateLimitErrorHandler(ErrorHandler):
             "too many requests",
             "exceeded your organization",
             "usage increase rate",
+            "throttlingexception",  # AWS Bedrock
+            "throttling",
         ]
         error_lower = error_str.lower()
         return any(pattern in error_lower for pattern in patterns)
 
+    def _detect_provider(self, error_str: str) -> str:
+        """
+        Detect which LLM provider is being used based on error message and environment.
+
+        Returns:
+            "bedrock", "anthropic", or "unknown"
+        """
+        error_lower = error_str.lower()
+
+        # Check error message for provider-specific patterns
+        if "throttlingexception" in error_lower or "bedrock" in error_lower or "converse" in error_lower:
+            return "bedrock"
+
+        # Check environment variables
+        if os.environ.get("LOBSTER_LLM_PROVIDER"):
+            return os.environ.get("LOBSTER_LLM_PROVIDER", "unknown")
+        elif os.environ.get("ANTHROPIC_API_KEY"):
+            return "anthropic"
+        elif os.environ.get("AWS_BEDROCK_ACCESS_KEY") or os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY"):
+            return "bedrock"
+
+        return "unknown"
+
     def handle(self, error: Exception, error_str: str) -> ErrorGuidance:
-        """Generate comprehensive rate limit guidance."""
-        return ErrorGuidance(
-            error_type="rate_limit",
-            title="⚠️  Rate Limit Exceeded",
-            description=(
-                "You've hit Anthropic's API rate limit. This is common for new accounts "
-                "which have conservative usage limits to prevent abuse."
-            ),
-            solutions=[
-                "Wait a few minutes and try again (limits reset periodically)",
-                "Request an Anthropic rate increase at: https://docs.anthropic.com/en/api/rate-limits",
-                "Switch to AWS Bedrock (recommended for production): See installation docs",
-                "Contact us for assistance: info@omics-os.com",
-            ],
-            severity="warning",
-            documentation_url="https://docs.anthropic.com/en/api/rate-limits",
-            can_retry=True,
-            retry_delay=60,
-            metadata={"original_error": error_str[:200], "provider": "anthropic"},
-        )
+        """Generate comprehensive rate limit guidance based on provider."""
+        provider = self._detect_provider(error_str)
+
+        if provider == "bedrock":
+            return ErrorGuidance(
+                error_type="rate_limit",
+                title="⚠️  AWS Bedrock Rate Limit Exceeded",
+                description=(
+                    "You've hit AWS Bedrock's API rate limit (ThrottlingException). "
+                    "This occurs when you exceed the requests per minute or tokens per minute "
+                    "limits for your AWS account."
+                ),
+                solutions=[
+                    "Wait 60-120 seconds and try again (AWS rate limits reset every minute)",
+                    "Request a service quota increase in AWS Service Quotas console",
+                    "Visit: https://console.aws.amazon.com/servicequotas/home/services/bedrock/quotas",
+                    "Consider implementing exponential backoff in your application",
+                    "Reduce concurrent requests or batch operations",
+                    "Contact us for assistance: info@omics-os.com",
+                ],
+                severity="warning",
+                documentation_url="https://docs.aws.amazon.com/bedrock/latest/userguide/quotas.html",
+                can_retry=True,
+                retry_delay=60,
+                metadata={"original_error": error_str[:200], "provider": "bedrock"},
+            )
+        elif provider == "anthropic":
+            return ErrorGuidance(
+                error_type="rate_limit",
+                title="⚠️  Anthropic API Rate Limit Exceeded",
+                description=(
+                    "You've hit Anthropic's API rate limit. This is common for new accounts "
+                    "which have conservative usage limits to prevent abuse."
+                ),
+                solutions=[
+                    "Wait a few minutes and try again (limits reset periodically)",
+                    "Request an Anthropic rate increase at: https://docs.anthropic.com/en/api/rate-limits",
+                    "Check your tier limits at: https://console.anthropic.com/settings/limits",
+                    "Consider switching to AWS Bedrock for higher rate limits",
+                    "Contact us for assistance: info@omics-os.com",
+                ],
+                severity="warning",
+                documentation_url="https://docs.anthropic.com/en/api/rate-limits",
+                can_retry=True,
+                retry_delay=60,
+                metadata={"original_error": error_str[:200], "provider": "anthropic"},
+            )
+        else:
+            # Generic rate limit guidance when provider can't be determined
+            return ErrorGuidance(
+                error_type="rate_limit",
+                title="⚠️  API Rate Limit Exceeded",
+                description=(
+                    "You've hit your LLM provider's API rate limit. "
+                    "This occurs when you exceed the allowed requests per minute."
+                ),
+                solutions=[
+                    "Wait a few minutes and try again (limits reset periodically)",
+                    "Check your API provider's console for rate limit details",
+                    "If using Anthropic: https://docs.anthropic.com/en/api/rate-limits",
+                    "If using AWS Bedrock: https://docs.aws.amazon.com/bedrock/latest/userguide/quotas.html",
+                    "Contact us for assistance: info@omics-os.com",
+                ],
+                severity="warning",
+                can_retry=True,
+                retry_delay=60,
+                metadata={"original_error": error_str[:200], "provider": "unknown"},
+            )
 
 
 class AuthenticationErrorHandler(ErrorHandler):

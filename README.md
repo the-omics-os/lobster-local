@@ -2,7 +2,7 @@
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Documentation: CC BY 4.0](https://img.shields.io/badge/Documentation-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
 **Transform your bioinformatics research with AI agents that understand your data and provide expert analysis insights.**
 
@@ -36,9 +36,9 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 # 1. Install
 pip install lobster-ai
 
-# 2. Configure API key (add NCBI for higher requests)
-open .env
+# 2. Configure API key (create .env file)
 ANTHROPIC_API_KEY=<your key>
+# or AWS_BEDROCK_ACCESS_KEY + AWS_BEDROCK_SECRET_ACCESS_KEY
 
 # 3. Run
 lobster chat
@@ -169,36 +169,13 @@ NCBI_EMAIL=your.email@example.com
 
 ---
 
-### Alternative: Docker (Cross-Platform)
-
-**Best for:** Windows users, production deployments, isolated environments
-
-```bash
-# 1. Configure API keys
-cp .env.example .env
-# Edit .env with your ANTHROPIC_API_KEY
-
-# 2. Run with Docker
-docker run -it --rm \
-  --env-file .env \
-  -v $(pwd)/data:/app/data \
-  ghcr.io/the-omics-os/lobster-local:latest chat
-```
-
-**Why Docker?**
-- ✅ No Python installation required
-- ✅ Consistent environment across all platforms
-- ✅ Isolated from system dependencies
-
----
-
 ### Platform-Specific Installation
 
 For native installation (development, advanced users):
 
 - **macOS**: [Native Installation Guide](https://github.com/the-omics-os/lobster-local/wiki/02-installation#macos)
 - **Linux**: [Ubuntu/Debian Guide](https://github.com/the-omics-os/lobster-local/wiki/02-installation#linux-ubuntudebian)
-- **Windows**: [Docker Recommended](https://github.com/the-omics-os/lobster-local/wiki/02-installation#windows) or [WSL Guide](https://github.com/the-omics-os/lobster-local/wiki/02-installation#windows)
+- **Windows**: [WSL Guide (Recommended)](https://github.com/the-omics-os/lobster-local/wiki/02-installation#windows)
 
 **Complete installation guide:** [wiki/02-installation.md](https://github.com/the-omics-os/lobster-local/wiki/02-installation)
 
