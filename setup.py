@@ -95,6 +95,7 @@ setup(
     description="Multi-Agent Bioinformatics Analysis System powered by LangGraph",
     long_description=long_description,
     long_description_content_type="text/markdown",
+    license="AGPL-3.0-or-later",
     url="https://github.com/the-omics-os/lobster-ai",
     project_urls={
         "Bug Tracker": "https://github.com/the-omics-os/lobster-ai/issues",
@@ -119,7 +120,6 @@ setup(
         "Development Status :: 4 - Beta",
         "Intended Audience :: Science/Research",
         "Intended Audience :: Healthcare Industry",
-        "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.9",
