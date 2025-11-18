@@ -33,14 +33,18 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 ## ⚡ Quick Start (60 seconds)
 
 ```bash
-# 1. Install
-pip install lobster-ai
+# 1. Install uv (if not already installed)
+# See: https://docs.astral.sh/uv/getting-started/installation/
 
-# 2. Configure API key (create .env file)
+# 2. Install Lobster AI
+uv pip install lobster-ai
+# Alternative: pip install lobster-ai
+
+# 3. Configure API key (create .env file)
 ANTHROPIC_API_KEY=<your key>
 # or AWS_BEDROCK_ACCESS_KEY + AWS_BEDROCK_SECRET_ACCESS_KEY
 
-# 3. Run
+# 4. Run
 lobster chat
 ```
 
@@ -138,7 +142,11 @@ lobster query --reasoning "differential expression between conditions"
 Install Lobster AI with a single command:
 
 ```bash
-pip install lobster-ai
+# Recommended: Use uv for faster installation
+# Install uv: https://docs.astral.sh/uv/getting-started/installation/
+uv pip install lobster-ai
+
+# Alternative: pip install lobster-ai
 ```
 
 **Configure API Keys:**
