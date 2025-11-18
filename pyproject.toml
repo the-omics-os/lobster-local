@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=65.0", "wheel", "setuptools-scm[toml]>=6.2"]
+requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -11,12 +11,12 @@ authors = [
 description = "Multi-Agent Bioinformatics Analysis System powered by LangGraph"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Healthcare Industry",
-    "License :: OSI Approved :: Apache Software License 2.0",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -192,18 +192,15 @@ all = [
 lobster = "lobster.cli:app"
 
 [tool.setuptools]
-packages = ["lobster"]
+# Automatically discover all packages under lobster/
+# This ensures all lobster.* subpackages are included in the distribution
+packages.find = {where = ["."], include = ["lobster*"]}
 
 [tool.setuptools.dynamic]
 version = {attr = "lobster.version.__version__"}
 
 [tool.setuptools.package-data]
 lobster = ["**/*.json", "**/*.yaml", "**/*.yml"]
-
-[tool.setuptools-scm]
-write_to = "lobster/_version.py"
-version_scheme = "release-branch-semver"
-local_scheme = "node-and-date"
 
 # Development tools configurations
 [tool.black]
