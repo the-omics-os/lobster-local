@@ -711,11 +711,43 @@ class GEOProvider(BasePublicationProvider):
         logger.info(f"Extracting download URLs for {geo_id}")
 
         try:
-            # Construct FTP base URL
-            ftp_base = self._construct_ftp_base_url(geo_id)
+            # Construct HTTPS base URL (not FTP - see https fix below)
+            ftp_base = self._construct_ftp_base_url(geo_id)  # Note: returns HTTPS despite name
+
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = self.cache_dir / f"{geo_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components
+                gse_num_str = geo_id[3:]  # Remove 'GSE' prefix
+                if len(gse_num_str) >= 3:
+                    series_folder = f"GSE{gse_num_str[:-3]}nnn"
+                else:
+                    series_folder = "GSEnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/soft/{geo_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
 
             # Fetch GEO metadata using GEOparse
-            # Note: This downloads metadata but not actual data files
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             logger.debug(f"Fetching GEO metadata for {geo_id} using GEOparse")
             gse = GEOparse.get_GEO(
                 geo=geo_id,
@@ -877,8 +909,9 @@ class GEOProvider(BasePublicationProvider):
             # For short IDs like GSE1, GSE12
             series_folder = "GSEnnn"
 
-        # Construct base URL
-        base_url = f"ftp://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/"
+        # Construct base URL using HTTPS for reliable downloads with TLS error detection
+        # (FTP lacks error detection and causes silent corruption during NCBI throttling)
+        base_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/"
 
         return base_url
 

@@ -196,19 +196,19 @@ class LobsterAgentConfigurator:
             # Supervisor uses Claude 4.5 Sonnet
             "supervisor": "claude-4-5-sonnet",
             # Assistant uses Claude 3.7 Sonnet
-            "assistant": "claude-4-sonnet",
+            "assistant": "claude-4-5-haiku",
             # All expert agents use Claude 4 Sonnet
-            "singlecell_expert_agent": "claude-4-sonnet",
-            "bulk_rnaseq_expert_agent": "claude-4-sonnet",
-            # "method_expert_agent": "claude-4-sonnet",  # DEPRECATED v2.2+
-            "data_expert_agent": "claude-4-sonnet",
-            "machine_learning_expert_agent": "claude-4-sonnet",
-            "research_agent": "claude-4-sonnet",
-            "metadata_assistant": "claude-4-sonnet",
-            "ms_proteomics_expert_agent": "claude-4-sonnet",
-            "affinity_proteomics_expert_agent": "claude-4-sonnet",
-            "visualization_expert_agent": "claude-4-sonnet",
-            "protein_structure_visualization_expert_agent": "claude-4-sonnet",
+            "singlecell_expert_agent": "claude-4-5-haiku",
+            "bulk_rnaseq_expert_agent": "claude-4-5-haiku",
+            # "method_expert_agent": "claude-4-5-haiku",  # DEPRECATED v2.2+
+            "data_expert_agent": "claude-4-5-haiku",
+            "machine_learning_expert_agent": "claude-4-5-haiku",
+            "research_agent": "claude-4-5-haiku",
+            "metadata_assistant": "claude-4-5-haiku",
+            "ms_proteomics_expert_agent": "claude-4-5-haiku",
+            "affinity_proteomics_expert_agent": "claude-4-5-haiku",
+            "visualization_expert_agent": "claude-4-5-haiku",
+            "protein_structure_visualization_expert_agent": "claude-4-5-haiku",
             "custom_feature_agent": "claude-4-5-sonnet",  # Use Sonnet 4.5 for code generation
             "thinking": {},  # No thinking configured for production
         },

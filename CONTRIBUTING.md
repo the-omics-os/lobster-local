@@ -326,7 +326,7 @@ We follow a simple principle: **Be kind, be constructive, be scientific.**
 
 ## 📄 License
 
-By contributing to Lobster AI, you agree that your contributions will be licensed under the Apache 2.0 License.
+By contributing to Lobster AI, you agree that your contributions will be licensed under the AGPL-3.0-or-later License.
 
 ## 🙏 Recognition
 

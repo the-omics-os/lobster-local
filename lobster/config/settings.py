@@ -99,6 +99,14 @@ class Settings:
         self.SSL_VERIFY = os.environ.get("LOBSTER_SSL_VERIFY", "true").lower() == "true"
         self.SSL_CERT_PATH = os.environ.get("LOBSTER_SSL_CERT_PATH", None)
 
+        # Validate configuration and store error for later check in CLI
+        is_valid, error_msg = self.validate_configuration()
+        if not is_valid:
+            # Don't raise here - let CLI handle it gracefully
+            self._config_error = error_msg
+        else:
+            self._config_error = None
+
     @property
     def llm_provider(self) -> str:
         """Detect which LLM provider to use based on available credentials."""
@@ -136,6 +144,43 @@ class Settings:
             Value of the setting or default
         """
         return getattr(self, name, default)
+
+    def validate_configuration(self) -> tuple:
+        """
+        Validate that required configuration is present.
+
+        Returns:
+            tuple: (is_valid: bool, error_message: str)
+        """
+        if not self.ANTHROPIC_API_KEY and not (
+            self.AWS_BEDROCK_ACCESS_KEY and self.AWS_BEDROCK_SECRET_ACCESS_KEY
+        ):
+            error_msg = """
+❌ No LLM provider configured
+
+Lobster AI requires API credentials to function.
+
+Quick Setup:
+1. Create a .env file in your current directory
+2. Add ONE of the following:
+
+   Option A - Claude API (Recommended for testing):
+   ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+
+   Option B - AWS Bedrock (Recommended for production):
+   AWS_BEDROCK_ACCESS_KEY=your-access-key
+   AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
+
+Get API Keys:
+  • Claude API: https://console.anthropic.com/
+  • AWS Bedrock: https://aws.amazon.com/bedrock/
+
+For detailed setup instructions, see:
+  https://github.com/the-omics-os/lobster-local/wiki/03-configuration
+"""
+            return False, error_msg
+
+        return True, ""
 
     def get_agent_llm_params(self, agent_name: str) -> Dict[str, Any]:
         """

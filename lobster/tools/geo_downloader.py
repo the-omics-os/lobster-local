@@ -8,6 +8,7 @@ database, providing structured access to gene expression datasets.
 import ftplib
 import hashlib
 import os
+import random
 import re
 import tarfile
 import time
@@ -725,11 +726,15 @@ class GEODownloadManager:
 
         for attempt in range(1, max_retries + 1):
             try:
-                # Exponential backoff: 2^attempt seconds (2s, 4s, 8s)
+                # Exponential backoff with jitter: 2^attempt ± 20% seconds
+                # Jitter prevents synchronized retry storms (thundering herd problem)
                 if attempt > 1:
-                    wait_time = 2**attempt
+                    base_delay = 2**attempt
+                    jitter = base_delay * 0.2 * (2 * random.random() - 1)  # ±20%
+                    wait_time = base_delay + jitter
                     logger.info(
-                        f"Retry attempt {attempt}/{max_retries} after {wait_time}s delay..."
+                        f"Retry attempt {attempt}/{max_retries} after {wait_time:.1f}s delay "
+                        f"(base: {base_delay}s, jitter: {jitter:+.1f}s)"
                     )
                     time.sleep(wait_time)
 
@@ -761,6 +766,19 @@ class GEODownloadManager:
                         if local_path.exists():
                             local_path.unlink()
                         continue
+
+                    # Verify file size matches expected size
+                    # CRITICAL: Detects truncated files from FTP throttling
+                    if file_size > 0 and local_path.exists():
+                        actual_size = local_path.stat().st_size
+                        if actual_size != file_size:
+                            logger.warning(
+                                f"File size mismatch on attempt {attempt}/{max_retries}: "
+                                f"expected {file_size} bytes, got {actual_size} bytes. "
+                                f"File likely truncated by FTP throttling."
+                            )
+                            local_path.unlink()
+                            continue
 
                     # Verify MD5 checksum if provided
                     if md5_checksum:

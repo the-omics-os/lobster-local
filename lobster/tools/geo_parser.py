@@ -915,6 +915,212 @@ class GEOParser:
             logger.error(f"Error parsing 10X data for {sample_id}: {e}")
             return None
 
+    def _parse_h5ad_with_fallback(self, file_path: Path) -> Optional[pd.DataFrame]:
+        """
+        Parse H5AD files with multi-strategy fallback for legacy formats and corruption.
+
+        Strategy:
+        1. Modern anndata (0.8+): Try anndata.read_h5ad()
+        2. Legacy anndata (0.7.x): Fallback to direct h5py reading (old 'matrix' parameter)
+        3. HDF5 corruption: Detect and report unrecoverable corruption
+
+        Args:
+            file_path: Path to H5AD file (may be .gz compressed)
+
+        Returns:
+            DataFrame with expression data, or None if all strategies fail
+
+        Raises:
+            None - all exceptions are caught and logged
+        """
+        # Strategy 1: Try modern anndata format
+        try:
+            import anndata
+
+            adata = anndata.read_h5ad(file_path)
+            logger.debug(f"Parsed h5ad file (modern format): {file_path}")
+
+            # Convert to DataFrame
+            return pd.DataFrame(adata.X, index=adata.obs_names, columns=adata.var_names)
+
+        except ImportError:
+            logger.warning("anndata package not available, cannot parse h5ad")
+            return None
+
+        except TypeError as e:
+            error_msg = str(e)
+
+            # Strategy 2: Detect legacy format (anndata 0.7.x with 'matrix' parameter)
+            if "'matrix'" in error_msg or "unexpected keyword argument" in error_msg:
+                logger.info(
+                    f"Detected legacy H5AD format in {file_path.name}. "
+                    f"Attempting fallback parser..."
+                )
+                return self._parse_legacy_h5ad(file_path)
+            else:
+                logger.warning(f"TypeError parsing h5ad (not legacy format): {e}")
+                return None
+
+        except OSError as e:
+            error_msg = str(e)
+
+            # Strategy 3: Detect HDF5 corruption
+            if (
+                "bad object header" in error_msg
+                or "Unable to synchronously open" in error_msg
+            ):
+                logger.error(
+                    f"HDF5 file corruption detected in {file_path.name}: {error_msg}. "
+                    f"File is unrecoverable without re-download."
+                )
+                return None
+            elif "File signature not found" in error_msg or "Truncated" in error_msg:
+                logger.error(
+                    f"Incomplete/truncated HDF5 file: {file_path.name}. "
+                    f"Download likely interrupted."
+                )
+                return None
+            else:
+                logger.warning(f"OS error parsing h5ad: {e}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"Failed to parse h5ad file: {e}")
+            return None
+
+    def _parse_legacy_h5ad(self, file_path: Path) -> Optional[pd.DataFrame]:
+        """
+        Parse legacy anndata 0.7.x H5AD format using direct h5py access.
+
+        Legacy format (pre-0.8) used 'matrix' parameter in AnnData.__init__(),
+        which was renamed to 'X' in modern versions. This parser reads the raw
+        HDF5 structure directly to bypass format incompatibilities.
+
+        Args:
+            file_path: Path to legacy H5AD file
+
+        Returns:
+            DataFrame with expression data, or None if parsing fails
+
+        Technical Note:
+            Legacy H5AD structure:
+            - /X or /matrix: Expression matrix (cells × genes)
+            - /obs_names or /obs/_index: Cell barcodes
+            - /var_names or /var/_index: Gene names
+        """
+        try:
+            import h5py
+            import scipy.sparse as sp
+
+            logger.debug(f"Opening legacy H5AD file with h5py: {file_path}")
+
+            with h5py.File(file_path, "r") as f:
+                # Explore available keys for diagnostics
+                available_keys = list(f.keys())
+                logger.debug(f"Legacy H5AD keys: {available_keys}")
+
+                # Try to read expression matrix (multiple naming conventions)
+                X = None
+                if "X" in f:
+                    X = f["X"][:]
+                elif "matrix" in f:
+                    X = f["matrix"][:]
+                else:
+                    logger.error(
+                        f"No expression matrix found in {file_path.name}. "
+                        f"Available keys: {available_keys}"
+                    )
+                    return None
+
+                # Handle sparse matrices
+                if isinstance(X, h5py.Group):
+                    # Sparse CSR matrix format
+                    if all(k in X for k in ["data", "indices", "indptr"]):
+                        X = sp.csr_matrix(
+                            (X["data"][:], X["indices"][:], X["indptr"][:])
+                        ).toarray()
+                    else:
+                        logger.error(
+                            f"Unsupported sparse matrix format in {file_path.name}"
+                        )
+                        return None
+
+                # Read observation names (cells)
+                obs_names = None
+                for possible_key in ["obs_names", "obs/_index", "obs/index"]:
+                    try:
+                        if (
+                            possible_key in f
+                            or "/" in possible_key
+                            and possible_key.split("/")[0] in f
+                        ):
+                            obs_data = f[possible_key][:]
+                            obs_names = [
+                                s.decode() if isinstance(s, bytes) else str(s)
+                                for s in obs_data
+                            ]
+                            break
+                    except:
+                        continue
+
+                if obs_names is None:
+                    # Fallback: use indices
+                    obs_names = [f"Cell_{i}" for i in range(X.shape[0])]
+                    logger.warning(f"No cell names found, using generic indices")
+
+                # Read variable names (genes)
+                var_names = None
+                for possible_key in ["var_names", "var/_index", "var/index"]:
+                    try:
+                        if (
+                            possible_key in f
+                            or "/" in possible_key
+                            and possible_key.split("/")[0] in f
+                        ):
+                            var_data = f[possible_key][:]
+                            var_names = [
+                                s.decode() if isinstance(s, bytes) else str(s)
+                                for s in var_data
+                            ]
+                            break
+                    except:
+                        continue
+
+                if var_names is None:
+                    # Fallback: use indices
+                    var_names = [f"Gene_{i}" for i in range(X.shape[1])]
+                    logger.warning(f"No gene names found, using generic indices")
+
+                # Validate dimensions
+                if len(obs_names) != X.shape[0]:
+                    logger.error(
+                        f"Dimension mismatch: {len(obs_names)} cells vs {X.shape[0]} rows"
+                    )
+                    return None
+
+                if len(var_names) != X.shape[1]:
+                    logger.error(
+                        f"Dimension mismatch: {len(var_names)} genes vs {X.shape[1]} columns"
+                    )
+                    return None
+
+                # Create DataFrame
+                df = pd.DataFrame(X, index=obs_names, columns=var_names)
+                logger.info(
+                    f"Successfully parsed legacy H5AD: {df.shape[0]} cells × {df.shape[1]} genes"
+                )
+                return df
+
+        except ImportError:
+            logger.error("h5py package not available for legacy H5AD parsing")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to parse legacy H5AD format: {e}")
+            import traceback
+
+            logger.debug(traceback.format_exc())
+            return None
+
     def parse_supplementary_file(self, file_path: Path) -> Optional[pd.DataFrame]:
         """
         Parse supplementary expression data file with enhanced format support.
@@ -938,21 +1144,7 @@ class GEOParser:
 
             # Handle specific file formats
             if inner_suffix in [".h5", ".h5ad"]:
-                try:
-                    import anndata
-
-                    adata = anndata.read_h5ad(file_path)
-                    logger.debug(f"Parsed h5ad file: {file_path}")
-                    # Convert AnnData to DataFrame (X contains expression matrix)
-                    return pd.DataFrame(
-                        adata.X, index=adata.obs_names, columns=adata.var_names
-                    )
-                except ImportError:
-                    logger.warning("anndata package not available, cannot parse h5ad")
-                    return None
-                except Exception as e:
-                    logger.warning(f"Failed to parse h5ad file: {e}")
-                    return None
+                return self._parse_h5ad_with_fallback(file_path)
 
             elif inner_suffix == ".rds":
                 try:
@@ -1348,29 +1540,30 @@ class GEOParser:
 
             local_file = temp_path / filename
 
-            # Download file (handle both HTTP and FTP)
-            logger.info(f"Downloading file from: {target_url}")
-
+            # Convert FTP to HTTPS for reliable downloads with TLS error detection
+            # (FTP lacks error detection and causes silent corruption during throttling)
             if target_url.startswith("ftp://"):
-                urllib.request.urlretrieve(target_url, local_file)
-            else:
-                # For HTTPS, use proper SSL context with certificate verification
-                ssl_context = create_ssl_context()
-                try:
-                    with urllib.request.urlopen(
-                        target_url, context=ssl_context
-                    ) as response:
-                        with open(local_file, "wb") as out_file:
-                            out_file.write(response.read())
-                except Exception as e:
-                    error_str = str(e)
-                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
-                        handle_ssl_error(e, target_url, logger)
-                        raise Exception(
-                            "SSL certificate verification failed when downloading file. "
-                            "See error message above for solutions."
-                        )
-                    raise
+                target_url = target_url.replace("ftp://", "https://", 1)
+                logger.debug(f"Converted FTP to HTTPS: {target_url}")
+
+            # Download file with proper SSL context and certificate verification
+            logger.info(f"Downloading file from: {target_url}")
+            ssl_context = create_ssl_context()
+            try:
+                with urllib.request.urlopen(
+                    target_url, context=ssl_context
+                ) as response:
+                    with open(local_file, "wb") as out_file:
+                        out_file.write(response.read())
+            except Exception as e:
+                error_str = str(e)
+                if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                    handle_ssl_error(e, target_url, logger)
+                    raise Exception(
+                        "SSL certificate verification failed when downloading file. "
+                        "See error message above for solutions."
+                    )
+                raise
 
             logger.debug(f"Downloaded to: {local_file}")
 

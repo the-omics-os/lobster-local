@@ -35,6 +35,7 @@ from lobster.config.agent_config import (
     initialize_configurator,
 )
 from lobster.core.client import AgentClient
+from lobster.version import __version__
 
 # Import new UI system
 from lobster.ui import LobsterTheme, setup_logging
@@ -701,6 +702,15 @@ def init_client(
 ) -> AgentClient:
     """Initialize either local or cloud client based on environment."""
     global client
+
+    # Check for configuration errors
+    from lobster.config.settings import settings
+
+    if hasattr(settings, '_config_error') and settings._config_error:
+        console.print(settings._config_error)
+        console.print("\n[yellow]Tip:[/yellow] If you installed via pip, make sure to create a .env file in your current directory.")
+        console.print("[yellow]Tip:[/yellow] See README for installation instructions: https://github.com/the-omics-os/lobster-local")
+        raise typer.Exit(code=1)
 
     # Check for cloud API key
     cloud_key = os.environ.get("LOBSTER_CLOUD_KEY")
@@ -1424,7 +1434,7 @@ def display_welcome():
     else:
         input_status = "[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
 
-    welcome_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
+    welcome_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v{__version__}[/bold white]
 
 {input_status}
 
@@ -1465,7 +1475,7 @@ def show_default_help():
     # Create branded header
     header_text = LobsterTheme.create_title_text("LOBSTER by Omics-OS", "🦞")
 
-    help_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v2.0[/bold white]
+    help_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v{__version__}[/bold white]
 
 [bold {LobsterTheme.PRIMARY_ORANGE}]AVAILABLE COMMANDS:[/bold {LobsterTheme.PRIMARY_ORANGE}]
 

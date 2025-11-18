@@ -10,6 +10,7 @@ data from the Gene Expression Omnibus (GEO) database using a layered approach:
 
 import ftplib
 import json
+import logging
 import os
 import re
 import tarfile
@@ -18,6 +19,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -54,6 +56,12 @@ from lobster.utils.logger import get_logger
 from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 
 logger = get_logger(__name__)
+
+# Suppress GEOparse DEBUG logging to avoid noise in non-debug mode
+# GEOparse library emits debug messages about directory creation that should
+# only appear when explicitly debugging
+geoparse_logger = logging.getLogger("GEOparse")
+geoparse_logger.setLevel(logging.WARNING)
 
 
 # ████████████████████████████████████████████████████████████████████████████████
@@ -539,7 +547,40 @@ class GEOService:
         try:
             logger.debug(f"Downloading SOFT metadata for {gse_id} using GEOparse...")
 
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = Path(self.cache_dir) / f"{gse_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components
+                gse_num_str = gse_id[3:]  # Remove 'GSE' prefix
+                if len(gse_num_str) >= 3:
+                    series_folder = f"GSE{gse_num_str[:-3]}nnn"
+                else:
+                    series_folder = "GSEnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{gse_id}/soft/{gse_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+
             # Wrap GEOparse call with retry logic for transient network failures
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             gse = self._retry_with_backoff(
                 operation=lambda: GEOparse.get_GEO(
                     geo=gse_id, destdir=str(self.cache_dir)
@@ -588,13 +629,22 @@ class GEOService:
                 )
                 logger.info(f"Platform validation for {gse_id}: {compat_message}")
             except UnsupportedPlatformError as e:
-                # Store metadata and error for supervisor access, then re-raise
-                self.data_manager.metadata_store[gse_id] = {
-                    "metadata": metadata,
-                    "validation_result": validation_result,
-                    "platform_error": str(e),
-                    "platform_details": e.details,
-                }
+                # CHANGE 3: Use helper method for consistent structure
+                self.data_manager._store_geo_metadata(
+                    geo_id=gse_id,
+                    metadata=metadata,
+                    stored_by="_fetch_gse_metadata (exception)",
+                )
+                # Enrich with error details
+                if gse_id in self.data_manager.metadata_store:
+                    existing_entry = self.data_manager.metadata_store[gse_id]
+                    existing_entry.update({
+                        "validation_result": validation_result,
+                        "platform_error": str(e),
+                        "platform_details": e.details,
+                        "status": "unsupported_platform",
+                        "error_timestamp": datetime.now().isoformat(),
+                    })
                 logger.error(
                     f"Platform validation failed for {gse_id}: {e.details['detected_platforms']}"
                 )
@@ -888,13 +938,22 @@ class GEOService:
                     f"Platform validation for {gse_id} (Entrez): {compat_message}"
                 )
             except UnsupportedPlatformError as e:
-                # Store metadata and error for supervisor access, then re-raise
-                self.data_manager.metadata_store[gse_id] = {
-                    "metadata": metadata,
-                    "validation_result": validation_result,
-                    "platform_error": str(e),
-                    "platform_details": e.details,
-                }
+                # CHANGE 3: Use helper method for consistent structure
+                self.data_manager._store_geo_metadata(
+                    geo_id=gse_id,
+                    metadata=metadata,
+                    stored_by="_fetch_gse_metadata_via_entrez (exception)",
+                )
+                # Enrich with error details
+                if gse_id in self.data_manager.metadata_store:
+                    existing_entry = self.data_manager.metadata_store[gse_id]
+                    existing_entry.update({
+                        "validation_result": validation_result,
+                        "platform_error": str(e),
+                        "platform_details": e.details,
+                        "status": "unsupported_platform",
+                        "error_timestamp": datetime.now().isoformat(),
+                    })
                 logger.error(
                     f"Platform validation failed for {gse_id}: {e.details['detected_platforms']}"
                 )
@@ -1147,9 +1206,7 @@ class GEOService:
                 cached_metadata = self.data_manager.metadata_store[clean_geo_id][
                     "metadata"
                 ]
-                self._determine_data_type_from_metadata(
-                    cached_metadata
-                )
+                self._determine_data_type_from_metadata(cached_metadata)
 
             n_obs, n_vars = geo_result.data.shape
 
@@ -1620,7 +1677,40 @@ class GEOService:
         try:
             logger.debug(f"Attempting supplementary files first for {geo_id}")
 
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = Path(self.cache_dir) / f"{geo_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components
+                gse_num_str = geo_id[3:]  # Remove 'GSE' prefix
+                if len(gse_num_str) >= 3:
+                    series_folder = f"GSE{gse_num_str[:-3]}nnn"
+                else:
+                    series_folder = "GSEnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/soft/{geo_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+
             # Get GEO object for supplementary file processing with retry logic
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             gse = self._retry_with_backoff(
                 operation=lambda: GEOparse.get_GEO(
                     geo=geo_id, destdir=str(self.cache_dir)
@@ -1725,7 +1815,40 @@ class GEOService:
         try:
             logger.debug(f"Trying supplementary fallback for {geo_id}")
 
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = Path(self.cache_dir) / f"{geo_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components
+                gse_num_str = geo_id[3:]  # Remove 'GSE' prefix
+                if len(gse_num_str) >= 3:
+                    series_folder = f"GSE{gse_num_str[:-3]}nnn"
+                else:
+                    series_folder = "GSEnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/soft/{geo_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+
             # This is essentially the same as _try_supplementary_first but with different logging
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
 
             data = self._process_supplementary_files(gse, geo_id)
@@ -1760,7 +1883,40 @@ class GEOService:
                 f"Using emergency fallback for {geo_id} - all other methods failed"
             )
 
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = Path(self.cache_dir) / f"{geo_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components
+                gse_num_str = geo_id[3:]  # Remove 'GSE' prefix
+                if len(gse_num_str) >= 3:
+                    series_folder = f"GSE{gse_num_str[:-3]}nnn"
+                else:
+                    series_folder = "GSEnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/soft/{geo_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+
             # Try to get any available data using basic GEOparse approach
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             gse = GEOparse.get_GEO(geo=geo_id, destdir=str(self.cache_dir))
 
             # Try to get expression data from any available sample
@@ -1817,7 +1973,40 @@ class GEOService:
         try:
             logger.debug(f"Trying GEOparse download for {geo_id}")
 
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = Path(self.cache_dir) / f"{geo_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components
+                gse_num_str = geo_id[3:]  # Remove 'GSE' prefix
+                if len(gse_num_str) >= 3:
+                    series_folder = f"GSE{gse_num_str[:-3]}nnn"
+                else:
+                    series_folder = "GSEnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/series/{series_folder}/{geo_id}/soft/{geo_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+
             # Wrap GEOparse download with retry logic
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             gse = self._retry_with_backoff(
                 operation=lambda: GEOparse.get_GEO(
                     geo=geo_id, destdir=str(self.cache_dir)
@@ -1845,7 +2034,21 @@ class GEOService:
             sample_info = self._get_sample_info(gse)
             if sample_info:
                 sample_matrices = self._download_sample_matrices(sample_info, geo_id)
-                validated_matrices = self._validate_matrices(sample_matrices)
+
+                # Detect sample types for type-aware validation (critical for VDJ data)
+                sample_types = self._detect_sample_types(metadata)
+                logger.info(
+                    f"Sample type detection for {geo_id}: found {len(sample_types)} modalities "
+                    f"across {sum(len(gsm_list) for gsm_list in sample_types.values())} samples"
+                )
+                if sample_types:
+                    for modality, gsm_list in sample_types.items():
+                        logger.info(f"  • {modality}: {len(gsm_list)} samples")
+
+                # Validate matrices with type information
+                validated_matrices = self._validate_matrices(
+                    sample_matrices, sample_types
+                )
 
                 if validated_matrices:
                     # UNIFIED PATH: Use ConcatenationService for both single-cell and bulk
@@ -1958,6 +2161,26 @@ class GEOService:
         Raises:
             UnsupportedPlatformError: If platform is explicitly unsupported (microarray)
         """
+        # CHANGE 1: Store minimal metadata BEFORE any early returns
+        # This guarantees metadata availability for all code paths (including early returns)
+        if geo_id not in self.data_manager.metadata_store:
+            logger.debug(f"Storing minimal metadata for {geo_id} before validation")
+            minimal_metadata = {
+                "geo_id": geo_id,
+                "title": metadata.get("title", ""),
+                "summary": metadata.get("summary", ""),
+                "status": "validating",  # Indicate validation in progress
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # Use helper method for consistent structure
+            self.data_manager._store_geo_metadata(
+                geo_id=geo_id,
+                metadata=metadata,
+                stored_by="_check_platform_compatibility (entry)",
+            )
+            logger.debug(f"Stored minimal metadata for {geo_id} before validation")
+
         # Extract platform information at series level
         series_platforms = metadata.get("platforms", {})
 
@@ -2113,7 +2336,8 @@ class GEOService:
             f"supported: {modality_result.is_supported})"
         )
 
-        # Store modality in metadata for downstream use
+        # CHANGE 2: Enrich existing metadata entry instead of "store if missing"
+        # This ensures progressive enrichment as validation proceeds
         if hasattr(self, "data_manager") and hasattr(
             self.data_manager, "metadata_store"
         ):
@@ -2125,21 +2349,26 @@ class GEOService:
                 "timestamp": pd.Timestamp.now().isoformat(),
             }
 
-            # Use helper method to store with consistent structure
-            if geo_id not in self.data_manager.metadata_store:
-                # Store new entry with metadata and modality detection
-                self.data_manager._store_geo_metadata(
-                    geo_id=geo_id,
-                    metadata=metadata,
-                    stored_by="_check_platform_compatibility",
-                    modality_detection=modality_detection_info,
-                )
-            else:
-                # Update existing entry's modality detection
+            if geo_id in self.data_manager.metadata_store:
+                # Update existing entry with validation results (progressive enrichment)
                 existing_entry = self.data_manager._get_geo_metadata(geo_id)
                 if existing_entry:
                     existing_entry["modality_detection"] = modality_detection_info
+                    existing_entry["status"] = "validated"  # Mark as fully validated
+                    existing_entry["validation_timestamp"] = datetime.now().isoformat()
                     self.data_manager.metadata_store[geo_id] = existing_entry
+                    logger.debug(f"Enriched metadata for {geo_id} with validation results")
+            else:
+                # Fallback: Create new entry if somehow missing (shouldn't happen with Change 1)
+                logger.warning(
+                    f"Metadata for {geo_id} missing during enrichment - creating new entry"
+                )
+                self.data_manager._store_geo_metadata(
+                    geo_id=geo_id,
+                    metadata=metadata,
+                    stored_by="_check_platform_compatibility (fallback)",
+                    modality_detection=modality_detection_info,
+                )
 
         # Decision: Handle multi-modal datasets intelligently
         if not modality_result.is_supported:
@@ -3015,6 +3244,13 @@ The actual expression data download will be much faster now that metadata is pre
             if not isinstance(suppl_files, list):
                 suppl_files = [suppl_files]
 
+            # Convert NCBI's FTP URLs to HTTPS for reliable downloads
+            # (FTP lacks error detection and causes silent corruption during throttling)
+            suppl_files = [
+                url.replace("ftp://", "https://", 1) if url.startswith("ftp://") else url
+                for url in suppl_files
+            ]
+
             logger.debug(f"Found {len(suppl_files)} supplementary files for {gse_id}")
 
             # STEP 1: Check for Kallisto/Salmon quantification files FIRST
@@ -3120,7 +3356,16 @@ The actual expression data download will be much faster now that metadata is pre
 
             if not tar_file_path.exists():
                 logger.debug(f"Downloading TAR file from: {tar_url}")
-                urllib.request.urlretrieve(tar_url, tar_file_path)
+
+                # Convert FTP to HTTPS for reliability (FTP has no error detection)
+                if tar_url.startswith("ftp://"):
+                    tar_url = tar_url.replace("ftp://", "https://", 1)
+                    logger.debug(f"Converted FTP to HTTPS: {tar_url}")
+
+                # Use geo_downloader for retry + validation logic
+                if not self.geo_downloader.download_file(tar_url, tar_file_path):
+                    raise GEODownloadError(f"Failed to download TAR file: {tar_url}")
+
                 logger.debug(f"Downloaded TAR file: {tar_file_path}")
             else:
                 logger.debug(f"Using cached TAR file: {tar_file_path}")
@@ -3416,14 +3661,17 @@ The actual expression data download will be much faster now that metadata is pre
 
         logger.info(f"Downloading matrices for {len(sample_info)} samples...")
 
-        # Use threading for parallel downloads
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_sample = {
-                executor.submit(
+        # Use threading for parallel downloads with rate limiting
+        # CRITICAL: Reduced from 5 to 2 concurrent downloads + 0.5s delays
+        # to prevent NCBI FTP server throttling that causes HDF5 corruption
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_to_sample = {}
+            for gsm_id, info in sample_info.items():
+                future = executor.submit(
                     self._download_single_sample, gsm_id, info, gse_id
-                ): gsm_id
-                for gsm_id, info in sample_info.items()
-            }
+                )
+                future_to_sample[future] = gsm_id
+                time.sleep(0.5)  # Delay between spawning downloads
 
             for future in as_completed(future_to_sample):
                 gsm_id = future_to_sample[future]
@@ -3457,7 +3705,40 @@ The actual expression data download will be much faster now that metadata is pre
             DataFrame: Sample expression matrix or None
         """
         try:
+            # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
+            # GEOparse internally uses FTP which lacks error detection and causes corruption.
+            # By pre-downloading with HTTPS, GEOparse finds existing file and skips its FTP download.
+            soft_file_path = Path(self.cache_dir) / f"{gsm_id}_family.soft.gz"
+            if not soft_file_path.exists():
+                # Construct SOFT file URL components (GSM samples follow similar pattern)
+                gsm_num_str = gsm_id[3:]  # Remove 'GSM' prefix
+                if len(gsm_num_str) >= 3:
+                    sample_folder = f"GSM{gsm_num_str[:-3]}nnn"
+                else:
+                    sample_folder = "GSMnnn"
+
+                soft_url = f"https://ftp.ncbi.nlm.nih.gov/geo/samples/{sample_folder}/{gsm_id}/soft/{gsm_id}_family.soft.gz"
+
+                logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
+                try:
+                    ssl_context = create_ssl_context()
+                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with open(soft_file_path, "wb") as f:
+                            f.write(response.read())
+                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                except Exception as e:
+                    error_str = str(e)
+                    if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        handle_ssl_error(e, soft_url, logger)
+                        raise Exception(
+                            f"SSL certificate verification failed when downloading SOFT file. "
+                            f"See error message above for solutions."
+                        )
+                    # If pre-download fails, let GEOparse try (will use FTP as fallback)
+                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+
             # Try to get sample using GEOparse
+            # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             gsm = GEOparse.get_GEO(geo=gsm_id, destdir=str(self.cache_dir))
 
             # Check for 10X format supplementary files
@@ -4221,16 +4502,32 @@ The actual expression data download will be much faster now that metadata is pre
             return None
 
     def _validate_matrices(
-        self, sample_matrices: Dict[str, Optional[pd.DataFrame]]
+        self,
+        sample_matrices: Dict[str, Optional[pd.DataFrame]],
+        sample_types: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, pd.DataFrame]:
         """
         Validate downloaded matrices and filter out invalid ones using multithreading.
 
+        This method performs type-aware validation, crucial for handling diverse omics
+        data types with different validity criteria. For example, VDJ sequencing data
+        (TCR/BCR) legitimately contains duplicate cell barcodes (one per receptor chain),
+        while gene expression data with duplicates indicates data corruption.
+
         Args:
-            sample_matrices: Dictionary of sample matrices
+            sample_matrices: Dictionary mapping sample IDs (e.g., "GSM123") to DataFrames
+            sample_types: Optional dict mapping modality names to sample ID lists
+                         (e.g., {"rna": ["GSM1", "GSM2"], "vdj": ["GSM3"]}).
+                         If provided, enables type-aware validation. If None, all samples
+                         default to "rna" type for backward compatibility.
 
         Returns:
-            dict: Dictionary of validated matrices
+            dict: Dictionary of validated matrices (invalid ones removed)
+
+        Example:
+            >>> matrices = {"GSM1": df1, "GSM2": df2}
+            >>> types = {"rna": ["GSM1"], "vdj": ["GSM2"]}
+            >>> validated = service._validate_matrices(matrices, types)
         """
         validated = {}
 
@@ -4245,18 +4542,33 @@ The actual expression data download will be much faster now that metadata is pre
             logger.warning("No matrices to validate")
             return validated
 
+        # Build GSM-to-type lookup for efficient concurrent validation
+        gsm_to_type: Dict[str, str] = {}
+        if sample_types:
+            for modality, gsm_list in sample_types.items():
+                for gsm_id in gsm_list:
+                    gsm_to_type[gsm_id] = modality
+            logger.info(
+                f"Type-aware validation enabled: {len(gsm_to_type)} samples classified "
+                f"across {len(sample_types)} modalities"
+            )
+        else:
+            logger.debug(
+                "No sample type information provided - defaulting all samples to 'rna' type"
+            )
+
         logger.info(
             f"Validating {len(valid_matrices)} matrices using multithreading..."
         )
 
-        # Use multithreading for validation - this is the main performance improvement
+        # Use multithreading for validation - main performance optimization
         with ThreadPoolExecutor(max_workers=min(8, len(valid_matrices))) as executor:
             future_to_sample = {
                 executor.submit(
                     self._validate_single_matrix,
                     gsm_id,
                     matrix,
-                    # sample_type defaults to "rna" in _validate_single_matrix
+                    gsm_to_type.get(gsm_id, "rna"),  # Type-aware or default to "rna"
                 ): gsm_id
                 for gsm_id, matrix in valid_matrices.items()
             }
@@ -4267,9 +4579,15 @@ The actual expression data download will be much faster now that metadata is pre
                     is_valid, validation_info = future.result()
                     if is_valid:
                         validated[gsm_id] = valid_matrices[gsm_id]
-                        logger.info(f"Validated {gsm_id}: {validation_info}")
+                        sample_type = gsm_to_type.get(gsm_id, "rna")
+                        logger.info(
+                            f"Validated {gsm_id} (type: {sample_type}): {validation_info}"
+                        )
                     else:
-                        logger.warning(f"Skipping {gsm_id}: {validation_info}")
+                        sample_type = gsm_to_type.get(gsm_id, "rna")
+                        logger.warning(
+                            f"Skipping {gsm_id} (type: {sample_type}): {validation_info}"
+                        )
                 except Exception as e:
                     logger.error(f"Error validating {gsm_id}: {e}")
 
