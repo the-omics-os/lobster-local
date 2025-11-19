@@ -40,13 +40,16 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 uv pip install lobster-ai
 # Alternative: pip install lobster-ai
 
-# 3. Run Lobster (first-run wizard will configure API keys automatically)
+# 3. Configure API keys
+lobster init
+
+# 4. Start using Lobster
 lobster chat
 ```
 
 **Get API keys:** [Claude API](https://console.anthropic.com/) | [AWS Bedrock](https://aws.amazon.com/bedrock/)
 
-**On first run**, Lobster will guide you through API key setup with an interactive wizard. Your configuration is saved to a `.env` file in your working directory.
+**Setup wizard:** Run `lobster init` to launch the interactive configuration wizard. It will guide you through API key setup and save configuration to a `.env` file in your working directory.
 
 **First analysis:**
 ```bash
@@ -149,11 +152,11 @@ uv pip install lobster-ai
 
 **Configure API Keys:**
 
-On first run, Lobster will launch an **interactive setup wizard** that guides you through API key configuration. No manual file editing required!
+Run the configuration wizard to set up your API keys:
 
 ```bash
-# Simply run Lobster - the wizard handles the rest
-lobster chat
+# Launch interactive configuration wizard
+lobster init
 ```
 
 The wizard will:
@@ -161,6 +164,12 @@ The wizard will:
 - Securely collect your API keys (input is masked)
 - Optionally configure NCBI API key for enhanced literature search
 - Create a `.env` file in your working directory
+
+**Additional configuration commands:**
+```bash
+lobster config test   # Test API connectivity
+lobster config show   # Display current configuration (secrets masked)
+```
 
 **Get API Keys:**
 - **Claude API**: https://console.anthropic.com/
@@ -245,7 +254,20 @@ Lobster AI automatically searches scientific literature and extracts key informa
 
 Lobster AI is configured via the `.env` file in your working directory.
 
-**Minimal configuration** (choose one):
+**Quick Setup:**
+
+```bash
+# Interactive configuration wizard
+lobster init
+
+# Test configuration
+lobster config test
+
+# View current configuration
+lobster config show
+```
+
+**Manual configuration** (advanced users - edit `.env` file):
 
 ```bash
 # Option A: Claude API
@@ -254,17 +276,21 @@ ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
 # Option B: AWS Bedrock
 AWS_BEDROCK_ACCESS_KEY=your-access-key
 AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
-```
 
-**Optional settings:**
-```bash
-# Enhanced literature search
+# Optional: Enhanced literature search
 NCBI_API_KEY=your-ncbi-api-key
 NCBI_EMAIL=your.email@example.com
 
-# Performance tuning
+# Optional: Performance tuning
 LOBSTER_PROFILE=production
 LOBSTER_MAX_FILE_SIZE_MB=500
+```
+
+**CI/CD and automation:**
+```bash
+# Non-interactive mode for scripts and CI/CD
+lobster init --non-interactive --anthropic-key=sk-ant-xxx
+lobster init --non-interactive --bedrock-access-key=xxx --bedrock-secret-key=yyy
 ```
 
 **Complete configuration guide:** [wiki/03-configuration.md](https://github.com/the-omics-os/lobster-local/wiki/03-configuration)

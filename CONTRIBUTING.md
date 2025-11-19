@@ -45,22 +45,28 @@ cd lobster-local
 make dev-install
 
 # 4. Configure your API keys
-# The .env file is automatically created during installation
-# Edit it with your API keys:
-nano .env
+# Activate virtual environment first
+source .venv/bin/activate
 
-# Required: Add one of these API configurations:
-# Option 1: Claude API (Recommended)
-ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+# Run configuration wizard
+lobster init
 
-# Option 2: AWS Bedrock
-AWS_BEDROCK_ACCESS_KEY=AKIA...
-AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
+# The wizard will guide you through:
+# - Choosing LLM provider (Claude API or AWS Bedrock)
+# - Entering API keys securely (input is masked)
+# - Optionally configuring NCBI API key
 
-# Optional: Enhanced literature search
-NCBI_API_KEY=your-ncbi-api-key
+# Alternatively, manually edit .env file (advanced users):
+# nano .env
+# ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
+# AWS_BEDROCK_ACCESS_KEY=AKIA...
+# AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
+# NCBI_API_KEY=your-ncbi-api-key
 
-# 5. Test your setup
+# 5. Test your configuration
+lobster config test  # Verify API connectivity
+
+# 6. Test your setup
 lobster --help  # Verify installation
 lobster chat    # Start interactive mode
 
