@@ -40,15 +40,13 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 uv pip install lobster-ai
 # Alternative: pip install lobster-ai
 
-# 3. Configure API key (create .env file)
-ANTHROPIC_API_KEY=<your key>
-# or AWS_BEDROCK_ACCESS_KEY + AWS_BEDROCK_SECRET_ACCESS_KEY
-
-# 4. Run
+# 3. Run Lobster (first-run wizard will configure API keys automatically)
 lobster chat
 ```
 
 **Get API keys:** [Claude API](https://console.anthropic.com/) | [AWS Bedrock](https://aws.amazon.com/bedrock/)
+
+**On first run**, Lobster will guide you through API key setup with an interactive wizard. Your configuration is saved to a `.env` file in your working directory.
 
 **First analysis:**
 ```bash
@@ -151,7 +149,27 @@ uv pip install lobster-ai
 
 **Configure API Keys:**
 
-Create a `.env` file in your working directory:
+On first run, Lobster will launch an **interactive setup wizard** that guides you through API key configuration. No manual file editing required!
+
+```bash
+# Simply run Lobster - the wizard handles the rest
+lobster chat
+```
+
+The wizard will:
+- Prompt you to choose between Claude API or AWS Bedrock
+- Securely collect your API keys (input is masked)
+- Optionally configure NCBI API key for enhanced literature search
+- Create a `.env` file in your working directory
+
+**Get API Keys:**
+- **Claude API**: https://console.anthropic.com/
+- **AWS Bedrock**: https://aws.amazon.com/bedrock/
+- **NCBI API** (optional): https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/
+
+**Advanced: Manual Configuration**
+
+If you prefer, you can manually create a `.env` file in your working directory:
 
 ```bash
 # Required: Choose ONE LLM provider
@@ -167,13 +185,6 @@ AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
 NCBI_API_KEY=your-ncbi-key
 NCBI_EMAIL=your.email@example.com
 ```
-
-**Get API Keys:**
-- **Claude API**: https://console.anthropic.com/
-- **AWS Bedrock**: https://aws.amazon.com/bedrock/
-- **NCBI API**: https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/
-
-**Note:** The `.env` file must be in your current working directory when running Lobster.
 
 ---
 
