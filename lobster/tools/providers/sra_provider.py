@@ -96,8 +96,7 @@ class SRAProvider(BasePublicationProvider):
 
         # Phase 1.2: Biopython Bio.Entrez wrapper for NCBI API
         self.entrez_wrapper = BioPythonEntrezWrapper(
-            email=self.config.email,
-            api_key=self.config.api_key
+            email=self.config.email, api_key=self.config.api_key
         )
         self.query_builder = NCBIQueryBuilder(NCBIDatabase.SRA)
 
@@ -172,7 +171,9 @@ class SRAProvider(BasePublicationProvider):
         logger.debug(f"Applied SRA filters: {query} → {filtered_query}")
         return filtered_query
 
-    def _apply_quality_filters(self, query: str, modality_hint: Optional[str] = None) -> str:
+    def _apply_quality_filters(
+        self, query: str, modality_hint: Optional[str] = None
+    ) -> str:
         """
         Apply quality filters to improve result relevance.
 
@@ -209,7 +210,11 @@ class SRAProvider(BasePublicationProvider):
         if modality_hint:
             hint_lower = modality_hint.lower()
 
-            if "scrna" in hint_lower or "single-cell" in hint_lower or "singlecell" in hint_lower:
+            if (
+                "scrna" in hint_lower
+                or "single-cell" in hint_lower
+                or "singlecell" in hint_lower
+            ):
                 # scRNA-seq: prefer paired-end Illumina for quality
                 quality_query += ' AND "library layout paired"[Filter]'
                 quality_query += ' AND "platform illumina"[Filter]'
@@ -256,7 +261,7 @@ class SRAProvider(BasePublicationProvider):
                 db="sra",
                 term=query,
                 retmax=min(max_results, self.config.batch_size),
-                retstart=0
+                retstart=0,
             )
 
             # Extract total count and initial IDs
@@ -271,7 +276,9 @@ class SRAProvider(BasePublicationProvider):
                 remaining = min(max_results - len(all_ids), total_count - len(all_ids))
 
                 # Calculate number of additional batches needed
-                num_batches = (remaining + self.config.batch_size - 1) // self.config.batch_size
+                num_batches = (
+                    remaining + self.config.batch_size - 1
+                ) // self.config.batch_size
 
                 logger.info(
                     f"Fetching {remaining:,} more results in {num_batches} batch(es) "
@@ -281,7 +288,10 @@ class SRAProvider(BasePublicationProvider):
                 # Fetch remaining batches
                 for batch_num in range(num_batches):
                     offset = len(all_ids)
-                    batch_size = min(self.config.batch_size, remaining - (batch_num * self.config.batch_size))
+                    batch_size = min(
+                        self.config.batch_size,
+                        remaining - (batch_num * self.config.batch_size),
+                    )
 
                     logger.debug(
                         f"Fetching batch {batch_num + 1}/{num_batches}: "
@@ -289,10 +299,7 @@ class SRAProvider(BasePublicationProvider):
                     )
 
                     batch_result = self.entrez_wrapper.esearch(
-                        db="sra",
-                        term=query,
-                        retmax=batch_size,
-                        retstart=offset
+                        db="sra", term=query, retmax=batch_size, retstart=offset
                     )
 
                     batch_ids = batch_result.get("IdList", [])
@@ -304,7 +311,9 @@ class SRAProvider(BasePublicationProvider):
                     if len(batch_ids) < batch_size:
                         break
 
-            logger.info(f"Retrieved {len(all_ids):,} SRA IDs (requested: {max_results:,}, available: {total_count:,})")
+            logger.info(
+                f"Retrieved {len(all_ids):,} SRA IDs (requested: {max_results:,}, available: {total_count:,})"
+            )
             return all_ids
 
         except Exception as e:
@@ -336,10 +345,7 @@ class SRAProvider(BasePublicationProvider):
             # Note: Bio.Entrez.read() doesn't parse SRA's complex XML-in-XML structure,
             # so we need to parse it manually with xmltodict
             xml_content = self.entrez_wrapper.efetch(
-                db="sra",
-                id=",".join(sra_ids),
-                rettype="docsum",
-                retmode="xml"
+                db="sra", id=",".join(sra_ids), rettype="docsum", retmode="xml"
             )
 
             # Parse XML response
@@ -746,7 +752,9 @@ class SRAProvider(BasePublicationProvider):
 
                     # Phase 1.4: Apply quality filters (public, has data, etc.)
                     modality_hint = kwargs.get("modality_hint", None)
-                    ncbi_query = self._apply_quality_filters(ncbi_query, modality_hint=modality_hint)
+                    ncbi_query = self._apply_quality_filters(
+                        ncbi_query, modality_hint=modality_hint
+                    )
 
                     # Execute esearch to get SRA IDs
                     sra_ids = self._ncbi_esearch(ncbi_query, filters or {}, max_results)
@@ -1061,7 +1069,10 @@ class SRAProvider(BasePublicationProvider):
         # Pass modality_hint for quality filters
         modality_hint = "amplicon" if amplicon_region else None
         result = self.search_publications(
-            enhanced_query, max_results=max_results, filters=filters, modality_hint=modality_hint
+            enhanced_query,
+            max_results=max_results,
+            filters=filters,
+            modality_hint=modality_hint,
         )
 
         # Add microbiome-specific tips
@@ -1113,7 +1124,9 @@ class SRAProvider(BasePublicationProvider):
         ]
         return any(re.match(pattern, query.strip()) for pattern in patterns)
 
-    def _enrich_accession_metadata(self, df: pd.DataFrame, accession: str) -> pd.DataFrame:
+    def _enrich_accession_metadata(
+        self, df: pd.DataFrame, accession: str
+    ) -> pd.DataFrame:
         """
         Enrich pysradb metadata with organism and platform from direct NCBI API.
 
@@ -1133,10 +1146,17 @@ class SRAProvider(BasePublicationProvider):
         needs_enrichment = False
         if "organism" not in df.columns or df["organism"].isna().all():
             needs_enrichment = True
-            logger.debug(f"Missing organism field for {accession}, enriching via NCBI API")
-        if "instrument_platform" not in df.columns or df["instrument_platform"].isna().all():
+            logger.debug(
+                f"Missing organism field for {accession}, enriching via NCBI API"
+            )
+        if (
+            "instrument_platform" not in df.columns
+            or df["instrument_platform"].isna().all()
+        ):
             needs_enrichment = True
-            logger.debug(f"Missing platform field for {accession}, enriching via NCBI API")
+            logger.debug(
+                f"Missing platform field for {accession}, enriching via NCBI API"
+            )
 
         if not needs_enrichment:
             return df
@@ -1152,7 +1172,9 @@ class SRAProvider(BasePublicationProvider):
                         break
 
             if not study_acc:
-                logger.warning(f"Cannot enrich {accession}: no study/experiment accession found")
+                logger.warning(
+                    f"Cannot enrich {accession}: no study/experiment accession found"
+                )
                 return df
 
             # Search via NCBI esearch to get SRA IDs
@@ -1166,7 +1188,9 @@ class SRAProvider(BasePublicationProvider):
             ncbi_df = self._ncbi_esummary(sra_ids)
 
             if ncbi_df.empty:
-                logger.warning(f"Cannot enrich {accession}: NCBI esummary returned empty")
+                logger.warning(
+                    f"Cannot enrich {accession}: NCBI esummary returned empty"
+                )
                 return df
 
             # Take first record from NCBI data (usually most relevant)
@@ -1178,10 +1202,15 @@ class SRAProvider(BasePublicationProvider):
                     df["organism"] = ncbi_record["organism"]
                     logger.debug(f"Enriched organism: {ncbi_record['organism']}")
 
-            if "instrument_platform" not in df.columns or df["instrument_platform"].isna().all():
+            if (
+                "instrument_platform" not in df.columns
+                or df["instrument_platform"].isna().all()
+            ):
                 if pd.notna(ncbi_record.get("instrument_platform")):
                     df["instrument_platform"] = ncbi_record["instrument_platform"]
-                    logger.debug(f"Enriched platform: {ncbi_record['instrument_platform']}")
+                    logger.debug(
+                        f"Enriched platform: {ncbi_record['instrument_platform']}"
+                    )
 
             return df
 

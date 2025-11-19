@@ -226,7 +226,4 @@ def list_organisms_with_scientific() -> dict[str, str]:
         >>> mapping["human"]
         'Homo sapiens'
     """
-    return {
-        e.name.lower().replace("_", " "): e.value
-        for e in OrganismEnum
-    }
+    return {e.name.lower().replace("_", " "): e.value for e in OrganismEnum}

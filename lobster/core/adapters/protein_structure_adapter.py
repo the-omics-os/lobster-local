@@ -116,12 +116,10 @@ class ProteinStructureAdapter(BaseAdapter):
             self.logger.error(f"Failed to load protein structure from {source}: {e}")
             raise
 
-    def _load_from_file(
-        self, path: Union[str, Path], **kwargs
-    ) -> anndata.AnnData:
+    def _load_from_file(self, path: Union[str, Path], **kwargs) -> anndata.AnnData:
         """Load protein structure from file with format detection."""
         try:
-            from Bio.PDB import PDBParser, MMCIFParser
+            from Bio.PDB import MMCIFParser, PDBParser
         except ImportError as e:
             raise ImportError(
                 "BioPython is required for protein structure loading. "
@@ -230,18 +228,20 @@ class ProteinStructureAdapter(BaseAdapter):
                 residue_number = residue.id[1]
 
                 for atom in residue:
-                    atom_data.append({
-                        "atom_name": atom.name,
-                        "residue_name": residue_name,
-                        "chain_id": chain_id,
-                        "residue_number": residue_number,
-                        "element": atom.element,
-                        "b_factor": atom.bfactor,
-                        "occupancy": atom.occupancy,
-                        "alt_loc": atom.altloc,
-                        "is_hetero": hetero_flag != " ",
-                        "model_number": model.id,
-                    })
+                    atom_data.append(
+                        {
+                            "atom_name": atom.name,
+                            "residue_name": residue_name,
+                            "chain_id": chain_id,
+                            "residue_number": residue_number,
+                            "element": atom.element,
+                            "b_factor": atom.bfactor,
+                            "occupancy": atom.occupancy,
+                            "alt_loc": atom.altloc,
+                            "is_hetero": hetero_flag != " ",
+                            "model_number": model.id,
+                        }
+                    )
                     coordinates.append(atom.coord)
 
         if len(atom_data) == 0:
@@ -258,10 +258,7 @@ class ProteinStructureAdapter(BaseAdapter):
         X = np.array(coordinates, dtype=np.float32)
 
         # Variable names (coordinate axes)
-        var = pd.DataFrame(
-            {"coordinate_axis": ["x", "y", "z"]},
-            index=["x", "y", "z"]
-        )
+        var = pd.DataFrame({"coordinate_axis": ["x", "y", "z"]}, index=["x", "y", "z"])
 
         # Create AnnData
         adata = anndata.AnnData(X=X, obs=obs, var=var)
@@ -281,9 +278,7 @@ class ProteinStructureAdapter(BaseAdapter):
 
         return adata
 
-    def _extract_structure_metadata(
-        self, structure, file_path: Path
-    ) -> Dict[str, Any]:
+    def _extract_structure_metadata(self, structure, file_path: Path) -> Dict[str, Any]:
         """
         Extract metadata from Bio.PDB.Structure object.
 
@@ -303,13 +298,15 @@ class ProteinStructureAdapter(BaseAdapter):
         # Try to extract header information (available for PDB parser)
         if hasattr(structure, "header") and structure.header:
             header = structure.header
-            metadata.update({
-                "experiment_method": header.get("structure_method", "UNKNOWN"),
-                "resolution": header.get("resolution"),
-                "deposition_date": header.get("deposition_date"),
-                "release_date": header.get("release_date"),
-                "organism": header.get("source", {}).get("organism_scientific"),
-            })
+            metadata.update(
+                {
+                    "experiment_method": header.get("structure_method", "UNKNOWN"),
+                    "resolution": header.get("resolution"),
+                    "deposition_date": header.get("deposition_date"),
+                    "release_date": header.get("release_date"),
+                    "organism": header.get("source", {}).get("organism_scientific"),
+                }
+            )
 
             # Add crystallographic information if available
             if "resolution" in header:
@@ -394,9 +391,7 @@ class ProteinStructureAdapter(BaseAdapter):
 
         return format_map.get(suffix, suffix.lstrip("."))
 
-    def preprocess_data(
-        self, adata: anndata.AnnData, **kwargs
-    ) -> anndata.AnnData:
+    def preprocess_data(self, adata: anndata.AnnData, **kwargs) -> anndata.AnnData:
         """
         Apply basic preprocessing to structure data.
 

@@ -85,13 +85,9 @@ class BioPythonEntrezWrapper:
         # - Without API key: 3 requests/second (0.34s delay)
         # - With API key: 10 requests/second (0.1s delay)
         if self._entrez.api_key:
-            logger.info(
-                "Bio.Entrez configured with API key (10 req/s rate limit)"
-            )
+            logger.info("Bio.Entrez configured with API key (10 req/s rate limit)")
         else:
-            logger.info(
-                "Bio.Entrez configured without API key (3 req/s rate limit)"
-            )
+            logger.info("Bio.Entrez configured without API key (3 req/s rate limit)")
 
         logger.debug(f"Bio.Entrez email: {self._entrez.email}")
 
@@ -242,9 +238,7 @@ class BioPythonEntrezWrapper:
             logger.error(f"Bio.Entrez.efetch error: {e}")
             raise
 
-    def elink(
-        self, dbfrom: str, db: str, id: str, **kwargs
-    ) -> List[Dict[str, Any]]:
+    def elink(self, dbfrom: str, db: str, id: str, **kwargs) -> List[Dict[str, Any]]:
         """
         Execute NCBI elink (find linked records across databases).
 

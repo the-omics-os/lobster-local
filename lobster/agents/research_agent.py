@@ -625,14 +625,17 @@ def research_agent(
 
                 # Check if already in download queue
                 queue_entries = [
-                    entry for entry in data_manager.download_queue.list_entries()
+                    entry
+                    for entry in data_manager.download_queue.list_entries()
                     if entry.dataset_id == accession
                 ]
 
                 # Add to queue if requested and not already present
                 if add_to_queue and not queue_entries:
                     try:
-                        logger.info(f"Adding cached dataset {accession} to download queue")
+                        logger.info(
+                            f"Adding cached dataset {accession} to download queue"
+                        )
 
                         # Import GEOProvider
                         from lobster.tools.providers.geo_provider import GEOProvider
@@ -643,7 +646,9 @@ def research_agent(
                         url_data = geo_provider.get_download_urls(accession)
 
                         if url_data.get("error"):
-                            logger.warning(f"URL extraction warning for {accession}: {url_data['error']}")
+                            logger.warning(
+                                f"URL extraction warning for {accession}: {url_data['error']}"
+                            )
 
                         # Create DownloadQueueEntry
                         entry_id = f"queue_{accession}_{uuid.uuid4().hex[:8]}"
@@ -655,11 +660,13 @@ def research_agent(
                             missing_fields=[],
                             available_fields={},
                             sample_count_by_field={},
-                            total_samples=metadata.get('n_samples', len(metadata.get('samples', {}))),
+                            total_samples=metadata.get(
+                                "n_samples", len(metadata.get("samples", {}))
+                            ),
                             field_coverage={},
                             recommendation="proceed",
                             confidence_score=1.0,
-                            warnings=[]
+                            warnings=[],
                         )
 
                         queue_entry = DownloadQueueEntry(
@@ -685,17 +692,21 @@ def research_agent(
                         # Add to download queue
                         data_manager.download_queue.add_entry(queue_entry)
 
-                        logger.info(f"Successfully added cached dataset {accession} to download queue with entry_id: {entry_id}")
+                        logger.info(
+                            f"Successfully added cached dataset {accession} to download queue with entry_id: {entry_id}"
+                        )
 
                         # Update queue_entries list for response building
                         queue_entries = [queue_entry]
 
                     except Exception as e:
-                        logger.error(f"Failed to add cached dataset {accession} to download queue: {e}")
+                        logger.error(
+                            f"Failed to add cached dataset {accession} to download queue: {e}"
+                        )
                         # Continue with response - queue addition is optional
 
                 # Build concise response for cached datasets
-                title = metadata.get('title', 'N/A')
+                title = metadata.get("title", "N/A")
                 if len(title) > 100:
                     title = title[:100] + "..."
 
@@ -706,44 +717,54 @@ def research_agent(
                     f"**Title**: {title}",
                     f"**Sample Count**: {metadata.get('n_samples', len(metadata.get('samples', {})))}",
                     f"**Database**: {metadata.get('database', 'GEO')}",
-                    ""
+                    "",
                 ]
 
                 # Add queue status if exists
                 if queue_entries:
                     entry = queue_entries[0]
-                    response_parts.extend([
-                        f"**Download Queue**: {entry.status.upper()}",
-                        f"**Entry ID**: `{entry.entry_id}`",
-                        f"**Priority**: {entry.priority}",
-                        "",
-                        "**Next steps**:",
-                        f"- Status is {entry.status}: " + (
-                            "Ready for data_expert download" if entry.status == DownloadStatus.PENDING
-                            else f"Already {entry.status}"
-                        )
-                    ])
+                    response_parts.extend(
+                        [
+                            f"**Download Queue**: {entry.status.upper()}",
+                            f"**Entry ID**: `{entry.entry_id}`",
+                            f"**Priority**: {entry.priority}",
+                            "",
+                            "**Next steps**:",
+                            f"- Status is {entry.status}: "
+                            + (
+                                "Ready for data_expert download"
+                                if entry.status == DownloadStatus.PENDING
+                                else f"Already {entry.status}"
+                            ),
+                        ]
+                    )
                     if entry.status == DownloadStatus.COMPLETED:
-                        response_parts.append(f"- Load from workspace: `/workspace load {entry.modality_name}`")
+                        response_parts.append(
+                            f"- Load from workspace: `/workspace load {entry.modality_name}`"
+                        )
                 else:
                     # No queue entry exists - explain why
                     if not add_to_queue:
-                        response_parts.extend([
-                            "**Download Queue**: Not added (add_to_queue=False)",
-                            "",
-                            "**Next steps**:",
-                            f"1. Call `validate_dataset_metadata(accession='{accession}', add_to_queue=True)` to add to download queue",
-                            "2. Then hand off to data_expert with the entry_id from the response"
-                        ])
+                        response_parts.extend(
+                            [
+                                "**Download Queue**: Not added (add_to_queue=False)",
+                                "",
+                                "**Next steps**:",
+                                f"1. Call `validate_dataset_metadata(accession='{accession}', add_to_queue=True)` to add to download queue",
+                                "2. Then hand off to data_expert with the entry_id from the response",
+                            ]
+                        )
                     else:
                         # Should not happen after fix, but handle gracefully
-                        response_parts.extend([
-                            "**Download Queue**: Failed to add (check logs for details)",
-                            "",
-                            "**Next steps**:",
-                            "1. Check logs for queue addition error",
-                            f"2. Retry: `validate_dataset_metadata(accession='{accession}', add_to_queue=True)`"
-                        ])
+                        response_parts.extend(
+                            [
+                                "**Download Queue**: Failed to add (check logs for details)",
+                                "",
+                                "**Next steps**:",
+                                "1. Check logs for queue addition error",
+                                f"2. Retry: `validate_dataset_metadata(accession='{accession}', add_to_queue=True)`",
+                            ]
+                        )
 
                 return "\n".join(response_parts)
 
@@ -1541,7 +1562,7 @@ Could not extract content for: {identifier}
 <Identity_And_Expertise>
 Research Agent: Literature discovery and dataset metadata specialist.
 
-**Core Capabilities**: Search PubMed/bioRxiv/medRxiv, extract publication content (abstracts, methods, parameters), find related datasets/papers, search omics databases (GEO/SRA/PRIDE/ArrayExpress/dbGaP), read dataset metadata, workspace caching, handoff to metadata_assistant.
+**Core Capabilities**: Search PubMed/bioRxiv/medRxiv, extract publication content (abstracts, methods, parameters), find related datasets/papers, search omics databases (GEO/SRA/PRIDE/ArrayExpress/dbGaP), read dataset metadata, workspace caching, validating datasets (which adds them to the download queue) & handoff to metadata_assistant.
 
 **Not Responsible For**: Dataset downloads (data_expert), omics analysis (QC/DE/clustering - specialist agents), raw data processing (FastQ/alignment), visualizations.
 

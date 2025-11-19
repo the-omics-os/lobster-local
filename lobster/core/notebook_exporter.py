@@ -176,9 +176,7 @@ class NotebookExporter:
             return self.provenance.activities.copy()
         else:
             # Manual filtering not implemented yet
-            logger.warning(
-                "Manual filter strategy not implemented, using 'successful'"
-            )
+            logger.warning("Manual filter strategy not implemented, using 'successful'")
             return self._filter_activities("successful")
 
     def _extract_irs(self, activities: List[Dict[str, Any]]) -> List[AnalysisStep]:

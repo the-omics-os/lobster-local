@@ -161,13 +161,17 @@ class PyMOLVisualizationService:
                                 script_file, pymol_installed["path"]
                             )
                             executed = True
-                            execution_message = "Successfully executed with PyMOL (batch mode)"
+                            execution_message = (
+                                "Successfully executed with PyMOL (batch mode)"
+                            )
                             logger.info(f"PyMOL visualization created: {output_image}")
                     except Exception as e:
                         logger.error(f"PyMOL execution failed: {e}")
                         execution_message = f"Execution failed: {e}"
                 else:
-                    execution_message = f"PyMOL not installed: {pymol_installed['message']}"
+                    execution_message = (
+                        f"PyMOL not installed: {pymol_installed['message']}"
+                    )
                     logger.warning(execution_message)
 
             # Prepare visualization data
@@ -226,9 +230,7 @@ class PyMOLVisualizationService:
 
         except Exception as e:
             logger.exception(f"Error creating PyMOL visualization: {e}")
-            raise PyMOLVisualizationError(
-                f"Failed to create visualization: {str(e)}"
-            )
+            raise PyMOLVisualizationError(f"Failed to create visualization: {str(e)}")
 
     def check_pymol_installation(self) -> Dict[str, Any]:
         """
@@ -355,24 +357,28 @@ class PyMOLVisualizationService:
                 residues, color, style = parts
                 pymol_selection = self._convert_to_pymol_selection(residues)
 
-                groups.append({
-                    "residues": residues,
-                    "pymol_selection": pymol_selection,
-                    "color": color,
-                    "style": style,
-                    "label": f"highlight_group_{i+1}",
-                })
+                groups.append(
+                    {
+                        "residues": residues,
+                        "pymol_selection": pymol_selection,
+                        "color": color,
+                        "style": style,
+                        "label": f"highlight_group_{i+1}",
+                    }
+                )
 
         elif highlight_residues:
             # Single group with specified color and style
             pymol_selection = self._convert_to_pymol_selection(highlight_residues)
-            groups.append({
-                "residues": highlight_residues,
-                "pymol_selection": pymol_selection,
-                "color": highlight_color,
-                "style": highlight_style,
-                "label": "highlight_residues",
-            })
+            groups.append(
+                {
+                    "residues": highlight_residues,
+                    "pymol_selection": pymol_selection,
+                    "color": highlight_color,
+                    "style": highlight_style,
+                    "label": "highlight_residues",
+                }
+            )
 
         return groups
 
@@ -409,7 +415,10 @@ class PyMOLVisualizationService:
                 residues = residues.strip()
 
                 # Handle ranges and single residues
-                if "-" in residues and not residues.replace("-", "").replace(" ", "").isdigit():
+                if (
+                    "-" in residues
+                    and not residues.replace("-", "").replace(" ", "").isdigit()
+                ):
                     # Range format: 15-20
                     selections.append(f"(chain {chain} and resi {residues})")
                 else:
@@ -495,18 +504,22 @@ class PyMOLVisualizationService:
 
         # Add residue highlighting if specified
         if highlight_groups_parsed:
-            commands.append("# Highlight specific residues (disease mutations, binding sites, etc.)")
+            commands.append(
+                "# Highlight specific residues (disease mutations, binding sites, etc.)"
+            )
             for group in highlight_groups_parsed:
-                label = group['label']
-                pymol_selection = group['pymol_selection']
-                color = group['color']
-                style_cmd = group['style']
+                label = group["label"]
+                pymol_selection = group["pymol_selection"]
+                color = group["color"]
+                style_cmd = group["style"]
 
-                commands.extend([
-                    f"select {label}, {pymol_selection}",
-                    f"show {style_cmd}, {label}",
-                    f"color {color}, {label}",
-                ])
+                commands.extend(
+                    [
+                        f"select {label}, {pymol_selection}",
+                        f"show {style_cmd}, {label}",
+                        f"color {color}, {label}",
+                    ]
+                )
             commands.append("")
 
         # Mode-specific final commands
@@ -608,9 +621,7 @@ class PyMOLVisualizationService:
 
         except Exception as e:
             logger.error(f"Failed to launch PyMOL interactive mode: {e}")
-            raise PyMOLVisualizationError(
-                f"Failed to launch PyMOL GUI: {e}"
-            )
+            raise PyMOLVisualizationError(f"Failed to launch PyMOL GUI: {e}")
 
     def _create_visualization_ir(
         self,
@@ -820,7 +831,9 @@ except FileNotFoundError:
 """
 
         # Build description with highlight info if applicable
-        description_parts = [f"Create {style} visualization of protein structure colored by {color_by}"]
+        description_parts = [
+            f"Create {style} visualization of protein structure colored by {color_by}"
+        ]
         if highlight_groups or highlight_residues:
             description_parts.append("with residue highlights")
         description = " ".join(description_parts)
@@ -839,7 +852,9 @@ except FileNotFoundError:
                 "width": width,
                 "height": height,
                 "background": background,
-                "highlight_residues": highlight_residues if highlight_residues else None,
+                "highlight_residues": (
+                    highlight_residues if highlight_residues else None
+                ),
                 "highlight_color": highlight_color,
                 "highlight_style": highlight_style,
                 "highlight_groups": highlight_groups if highlight_groups else None,

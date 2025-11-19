@@ -104,10 +104,14 @@ class GEOFallbackService:
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -117,7 +121,9 @@ class GEOFallbackService:
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
             # Use GEOparse to get series matrix
@@ -281,20 +287,29 @@ class GEOFallbackService:
                     logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                     try:
                         ssl_context = create_ssl_context()
-                        with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                        with urllib.request.urlopen(
+                            soft_url, context=ssl_context
+                        ) as response:
                             with open(soft_file_path, "wb") as f:
                                 f.write(response.read())
-                        logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                        logger.debug(
+                            f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                        )
                     except Exception as e:
                         error_str = str(e)
-                        if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
+                        if (
+                            "CERTIFICATE_VERIFY_FAILED" in error_str
+                            or "SSL" in error_str
+                        ):
                             handle_ssl_error(e, soft_url, logger)
                             raise Exception(
                                 f"SSL certificate verification failed when downloading SOFT file. "
                                 f"See error message above for solutions."
                             )
                         # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                        logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                        logger.warning(
+                            f"Pre-download failed: {e}. GEOparse will attempt download."
+                        )
 
                 # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
                 gsm = GEOparse.get_GEO(geo=clean_gsm_id, destdir=str(self.cache_dir))

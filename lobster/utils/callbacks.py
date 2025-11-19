@@ -603,7 +603,11 @@ class TokenTrackingCallback(BaseCallbackHandler):
     Works with both AWS Bedrock and Anthropic Direct API providers.
     """
 
-    def __init__(self, session_id: str, pricing_config: Optional[Dict[str, Dict[str, float]]] = None):
+    def __init__(
+        self,
+        session_id: str,
+        pricing_config: Optional[Dict[str, Dict[str, float]]] = None,
+    ):
         """
         Initialize token tracking callback.
 
@@ -668,7 +672,9 @@ class TokenTrackingCallback(BaseCallbackHandler):
         model = self._extract_model_name(response)
 
         # Calculate cost
-        cost = self._calculate_cost(model, usage["input_tokens"], usage["output_tokens"])
+        cost = self._calculate_cost(
+            model, usage["input_tokens"], usage["output_tokens"]
+        )
 
         # Create invocation record
         invocation = TokenInvocation(
@@ -679,7 +685,7 @@ class TokenTrackingCallback(BaseCallbackHandler):
             input_tokens=usage["input_tokens"],
             output_tokens=usage["output_tokens"],
             total_tokens=usage["total_tokens"],
-            cost_usd=cost
+            cost_usd=cost,
         )
         self.invocations.append(invocation)
 
@@ -697,7 +703,7 @@ class TokenTrackingCallback(BaseCallbackHandler):
                 "output_tokens": 0,
                 "total_tokens": 0,
                 "cost_usd": 0.0,
-                "invocation_count": 0
+                "invocation_count": 0,
             }
 
         self.by_agent[agent_name]["input_tokens"] += usage["input_tokens"]
@@ -724,15 +730,23 @@ class TokenTrackingCallback(BaseCallbackHandler):
                 generation = first_generation_list[0]
 
                 # Check for usage_metadata on the generation's message
-                if hasattr(generation, "message") and hasattr(generation.message, "usage_metadata"):
+                if hasattr(generation, "message") and hasattr(
+                    generation.message, "usage_metadata"
+                ):
                     usage_metadata = generation.message.usage_metadata
                     if isinstance(usage_metadata, dict):
-                        if "input_tokens" in usage_metadata and "output_tokens" in usage_metadata:
+                        if (
+                            "input_tokens" in usage_metadata
+                            and "output_tokens" in usage_metadata
+                        ):
                             return {
                                 "input_tokens": usage_metadata.get("input_tokens", 0),
                                 "output_tokens": usage_metadata.get("output_tokens", 0),
-                                "total_tokens": usage_metadata.get("total_tokens",
-                                    usage_metadata.get("input_tokens", 0) + usage_metadata.get("output_tokens", 0))
+                                "total_tokens": usage_metadata.get(
+                                    "total_tokens",
+                                    usage_metadata.get("input_tokens", 0)
+                                    + usage_metadata.get("output_tokens", 0),
+                                ),
                             }
 
         llm_output = response.llm_output or {}
@@ -744,7 +758,8 @@ class TokenTrackingCallback(BaseCallbackHandler):
                 return {
                     "input_tokens": usage.get("input_tokens", 0),
                     "output_tokens": usage.get("output_tokens", 0),
-                    "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                    "total_tokens": usage.get("input_tokens", 0)
+                    + usage.get("output_tokens", 0),
                 }
 
         # Try standard LangChain format (prompt_tokens, completion_tokens)
@@ -753,7 +768,7 @@ class TokenTrackingCallback(BaseCallbackHandler):
             return {
                 "input_tokens": usage.get("prompt_tokens", 0),
                 "output_tokens": usage.get("completion_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0)
+                "total_tokens": usage.get("total_tokens", 0),
             }
 
         # Try response metadata (Bedrock alternative)
@@ -765,7 +780,8 @@ class TokenTrackingCallback(BaseCallbackHandler):
                     return {
                         "input_tokens": usage.get("input_tokens", 0),
                         "output_tokens": usage.get("output_tokens", 0),
-                        "total_tokens": usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                        "total_tokens": usage.get("input_tokens", 0)
+                        + usage.get("output_tokens", 0),
                     }
 
         # No token data found
@@ -780,7 +796,9 @@ class TokenTrackingCallback(BaseCallbackHandler):
                 generation = first_generation_list[0]
 
                 # Check for model in message's response_metadata (LangChain 0.3+)
-                if hasattr(generation, "message") and hasattr(generation.message, "response_metadata"):
+                if hasattr(generation, "message") and hasattr(
+                    generation.message, "response_metadata"
+                ):
                     metadata = generation.message.response_metadata
                     if isinstance(metadata, dict):
                         if "model_name" in metadata:
@@ -808,7 +826,9 @@ class TokenTrackingCallback(BaseCallbackHandler):
 
         return "unknown"
 
-    def _calculate_cost(self, model: str, input_tokens: int, output_tokens: int) -> float:
+    def _calculate_cost(
+        self, model: str, input_tokens: int, output_tokens: int
+    ) -> float:
         """
         Calculate cost based on model pricing.
 
@@ -825,7 +845,9 @@ class TokenTrackingCallback(BaseCallbackHandler):
 
         pricing = self.pricing_config[model]
         input_cost = (input_tokens / 1_000_000) * pricing.get("input_per_million", 0.0)
-        output_cost = (output_tokens / 1_000_000) * pricing.get("output_per_million", 0.0)
+        output_cost = (output_tokens / 1_000_000) * pricing.get(
+            "output_per_million", 0.0
+        )
         return input_cost + output_cost
 
     def get_usage_summary(self) -> Dict[str, Any]:
@@ -847,7 +869,7 @@ class TokenTrackingCallback(BaseCallbackHandler):
                     "output_tokens": stats["output_tokens"],
                     "total_tokens": stats["total_tokens"],
                     "cost_usd": round(stats["cost_usd"], 4),
-                    "invocation_count": stats["invocation_count"]
+                    "invocation_count": stats["invocation_count"],
                 }
                 for agent, stats in self.by_agent.items()
             },
@@ -860,10 +882,10 @@ class TokenTrackingCallback(BaseCallbackHandler):
                     "input_tokens": inv.input_tokens,
                     "output_tokens": inv.output_tokens,
                     "total_tokens": inv.total_tokens,
-                    "cost_usd": round(inv.cost_usd, 4)
+                    "cost_usd": round(inv.cost_usd, 4),
                 }
                 for inv in self.invocations
-            ]
+            ],
         }
 
     def get_latest_cost(self) -> Dict[str, Any]:
@@ -880,7 +902,7 @@ class TokenTrackingCallback(BaseCallbackHandler):
         return {
             "latest_cost_usd": round(latest_cost, 4),
             "session_total_usd": round(self.total_cost_usd, 4),
-            "total_tokens": self.total_tokens
+            "total_tokens": self.total_tokens,
         }
 
     def save_to_workspace(self, workspace_path: Path):

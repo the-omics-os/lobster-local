@@ -18,7 +18,6 @@ from langgraph.store.memory import InMemoryStore
 
 from lobster.agents.graph import create_bioinformatics_graph
 from lobster.config.settings import MODEL_PRICING
-from lobster.utils.callbacks import TokenTrackingCallback
 
 # Import shared archive handling utilities
 from lobster.core.archive_utils import (
@@ -32,6 +31,7 @@ from lobster.core.data_manager_v2 import DataManagerV2
 # Import extraction cache manager
 from lobster.core.extraction_cache import ExtractionCacheManager
 from lobster.core.interfaces.base_client import BaseClient
+from lobster.utils.callbacks import TokenTrackingCallback
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -87,8 +87,7 @@ class AgentClient(BaseClient):
 
         # Initialize token tracking (always enabled)
         self.token_tracker = TokenTrackingCallback(
-            session_id=self.session_id,
-            pricing_config=MODEL_PRICING
+            session_id=self.session_id, pricing_config=MODEL_PRICING
         )
         self.callbacks.append(self.token_tracker)
 

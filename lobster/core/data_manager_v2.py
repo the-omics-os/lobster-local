@@ -488,8 +488,8 @@ class DataManagerV2:
                 logger.warning(
                     f"Pre-save validation found {len(validation_issues)} potential "
                     f"serialization issues in modality '{name}'. These will be "
-                    f"sanitized automatically during save:\n" +
-                    "\n".join(f"  - {issue}" for issue in validation_issues[:5])
+                    f"sanitized automatically during save:\n"
+                    + "\n".join(f"  - {issue}" for issue in validation_issues[:5])
                 )
                 if len(validation_issues) > 5:
                     logger.debug(
@@ -3667,7 +3667,6 @@ https://github.com/OmicsOS/lobster
             through DataManager (architectural requirement).
         """
         import hashlib
-
 
         publications_dir = self.literature_cache_dir / "publications"
         publications_dir.mkdir(parents=True, exist_ok=True)

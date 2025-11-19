@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import anndata
 
+from lobster.core.utils.h5ad_utils import sanitize_value
+
 if TYPE_CHECKING:
     from lobster.core.analysis_ir import AnalysisStep
 
@@ -83,7 +85,7 @@ class ProvenanceTracker:
             "timestamp": timestamp,
             "inputs": inputs or [],
             "outputs": outputs or [],
-            "parameters": parameters or {},
+            "parameters": sanitize_value(parameters or {}),
             "description": description,
             "software_versions": self._get_software_versions(),
         }

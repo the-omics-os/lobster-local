@@ -712,7 +712,9 @@ class GEOProvider(BasePublicationProvider):
 
         try:
             # Construct HTTPS base URL (not FTP - see https fix below)
-            ftp_base = self._construct_ftp_base_url(geo_id)  # Note: returns HTTPS despite name
+            ftp_base = self._construct_ftp_base_url(
+                geo_id
+            )  # Note: returns HTTPS despite name
 
             # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
             # GEOparse internally uses FTP which lacks error detection and causes corruption.
@@ -731,10 +733,14 @@ class GEOProvider(BasePublicationProvider):
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -744,7 +750,9 @@ class GEOProvider(BasePublicationProvider):
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Fetch GEO metadata using GEOparse
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download

@@ -53,6 +53,7 @@ class QualityService:
         self,
         adata: anndata.AnnData,
         min_genes: int = 500,
+        max_genes: int = 5000,
         max_mt_pct: float = 20.0,
         max_ribo_pct: float = 50.0,
         min_housekeeping_score: float = 1.0,
@@ -63,6 +64,7 @@ class QualityService:
         Args:
             adata: AnnData object to assess
             min_genes: Minimum number of genes per cell
+            max_genes: Maximum number of genes per cell (filters potential doublets)
             max_mt_pct: Maximum percentage of mitochondrial genes
             max_ribo_pct: Maximum percentage of ribosomal genes
             min_housekeeping_score: Minimum housekeeping gene score
@@ -95,9 +97,10 @@ class QualityService:
             adata_qc.obs["ribo_pct"] = qc_metrics["ribo_pct"]
             adata_qc.obs["housekeeping_score"] = qc_metrics["housekeeping_score"]
 
-            # Filter cells based on QC metrics
+            # Filter cells based on QC metrics (with upper bound for doublets)
             passing_cells = (
                 (qc_metrics["n_genes"] >= min_genes)
+                & (qc_metrics["n_genes"] <= max_genes)
                 & (qc_metrics["mt_pct"] <= max_mt_pct)
                 & (qc_metrics["ribo_pct"] <= max_ribo_pct)
                 & (qc_metrics["housekeeping_score"] >= min_housekeeping_score)
@@ -116,6 +119,7 @@ class QualityService:
             assessment_stats = {
                 "analysis_type": "quality_assessment",
                 "min_genes": min_genes,
+                "max_genes": max_genes,
                 "max_mt_pct": max_mt_pct,
                 "max_ribo_pct": max_ribo_pct,
                 "min_housekeeping_score": min_housekeeping_score,
@@ -161,6 +165,7 @@ class QualityService:
             # Create IR for notebook export
             ir = self._create_quality_ir(
                 min_genes=min_genes,
+                max_genes=max_genes,
                 max_mt_pct=max_mt_pct,
                 max_ribo_pct=max_ribo_pct,
                 min_housekeeping_score=min_housekeeping_score,
@@ -171,6 +176,98 @@ class QualityService:
         except Exception as e:
             logger.exception(f"Error in quality assessment: {e}")
             raise QualityError(f"Quality assessment failed: {str(e)}")
+
+    def suggest_adaptive_thresholds(
+        self,
+        adata: anndata.AnnData,
+        n_mads: float = 3.0,
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Suggest adaptive quality control thresholds using MAD-based outlier detection.
+
+        Uses Median Absolute Deviation (MAD) to identify outliers:
+        threshold = median ± (n_mads * MAD)
+
+        This approach is more robust than fixed thresholds for heterogeneous datasets
+        with varying cell types, sequencing depths, or tissue types.
+
+        Args:
+            adata: AnnData object to analyze
+            n_mads: Number of MADs from median for outlier detection (default: 3.0)
+                   Higher values = more permissive, lower values = more stringent
+
+        Returns:
+            Dict with suggested thresholds:
+            {
+                "n_genes": {"lower": float, "upper": float, "median": float, "mad": float},
+                "total_counts": {"lower": float, "upper": float, "median": float, "mad": float},
+                "mt_pct": {"upper": float, "median": float, "mad": float}
+            }
+
+        Raises:
+            QualityError: If threshold calculation fails
+        """
+        try:
+            logger.info(f"Calculating adaptive thresholds with {n_mads} MADs")
+
+            # Calculate QC metrics first if not already present
+            if "n_genes" not in adata.obs.columns:
+                qc_metrics = self._calculate_qc_metrics_from_adata(adata)
+            else:
+                qc_metrics = adata.obs[["n_genes", "total_counts", "mt_pct"]].copy()
+                # If columns don't exist, calculate them
+                if "n_genes" not in qc_metrics.columns:
+                    qc_metrics = self._calculate_qc_metrics_from_adata(adata)
+
+            def calculate_mad_bounds(values: pd.Series) -> Dict[str, float]:
+                """Calculate median, MAD, and bounds for a metric."""
+                median = values.median()
+                mad = np.median(np.abs(values - median))
+                return {
+                    "median": float(median),
+                    "mad": float(mad),
+                    "lower": float(median - n_mads * mad),
+                    "upper": float(median + n_mads * mad),
+                }
+
+            # Calculate adaptive thresholds
+            suggestions = {
+                "n_genes": calculate_mad_bounds(qc_metrics["n_genes"]),
+                "total_counts": calculate_mad_bounds(qc_metrics["total_counts"]),
+                "mt_pct": {
+                    "median": float(qc_metrics["mt_pct"].median()),
+                    "mad": float(
+                        np.median(
+                            np.abs(qc_metrics["mt_pct"] - qc_metrics["mt_pct"].median())
+                        )
+                    ),
+                    "upper": float(
+                        qc_metrics["mt_pct"].median()
+                        + n_mads
+                        * np.median(
+                            np.abs(qc_metrics["mt_pct"] - qc_metrics["mt_pct"].median())
+                        )
+                    ),
+                },
+            }
+
+            # Ensure sensible bounds (no negative values)
+            for metric in ["n_genes", "total_counts"]:
+                suggestions[metric]["lower"] = max(0, suggestions[metric]["lower"])
+
+            suggestions["mt_pct"]["upper"] = min(100, suggestions["mt_pct"]["upper"])
+
+            logger.info(
+                f"Adaptive thresholds calculated: "
+                f"n_genes={suggestions['n_genes']['lower']:.0f}-{suggestions['n_genes']['upper']:.0f}, "
+                f"mt_pct<={suggestions['mt_pct']['upper']:.1f}%"
+            )
+
+            return suggestions
+
+        except Exception as e:
+            logger.exception(f"Error calculating adaptive thresholds: {e}")
+            raise QualityError(f"Adaptive threshold calculation failed: {str(e)}")
 
     def _calculate_qc_metrics_from_adata(self, adata: anndata.AnnData) -> pd.DataFrame:
         """
@@ -774,6 +871,7 @@ class QualityService:
     def _create_quality_ir(
         self,
         min_genes: int,
+        max_genes: int,
         max_mt_pct: float,
         max_ribo_pct: float,
         min_housekeeping_score: float,
@@ -785,6 +883,7 @@ class QualityService:
 
         Args:
             min_genes: Minimum genes per cell threshold
+            max_genes: Maximum genes per cell threshold (doublet filtering)
             max_mt_pct: Maximum mitochondrial percentage
             max_ribo_pct: Maximum ribosomal percentage
             min_housekeeping_score: Minimum housekeeping gene score
@@ -801,6 +900,14 @@ class QualityService:
                 required=False,
                 validation_rule="min_genes > 0",
                 description="Minimum genes per cell for QC pass",
+            ),
+            "max_genes": ParameterSpec(
+                param_type="int",
+                papermill_injectable=True,
+                default_value=5000,
+                required=False,
+                validation_rule="max_genes > 0 and max_genes > min_genes",
+                description="Maximum genes per cell (filters potential doublets)",
             ),
             "max_mt_pct": ParameterSpec(
                 param_type="float",
@@ -838,9 +945,10 @@ sc.pp.calculate_qc_metrics(
     inplace=True
 )
 
-# Add QC pass/fail flags
+# Add QC pass/fail flags (with upper bound for doublet filtering)
 adata.obs['qc_pass'] = (
     (adata.obs['n_genes_by_counts'] >= {{ min_genes }}) &
+    (adata.obs['n_genes_by_counts'] <= {{ max_genes }}) &
     (adata.obs['pct_counts_mt'] <= {{ max_mt_pct }}) &
     (adata.obs['pct_counts_ribo'] <= {{ max_ribo_pct }})
 )
@@ -857,12 +965,13 @@ print(f"Mean mitochondrial %: {adata.obs['pct_counts_mt'].mean():.2f}")
         ir = AnalysisStep(
             operation="scanpy.pp.calculate_qc_metrics",
             tool_name="assess_quality",
-            description="Calculate quality control metrics and filter cells",
+            description="Calculate quality control metrics and filter cells with doublet detection",
             library="scanpy",
             code_template=code_template,
             imports=["import scanpy as sc", "import numpy as np"],
             parameters={
                 "min_genes": min_genes,
+                "max_genes": max_genes,
                 "max_mt_pct": max_mt_pct,
                 "max_ribo_pct": max_ribo_pct,
                 "min_housekeeping_score": min_housekeeping_score,

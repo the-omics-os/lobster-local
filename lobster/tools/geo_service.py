@@ -564,10 +564,14 @@ class GEOService:
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -577,7 +581,9 @@ class GEOService:
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Wrap GEOparse call with retry logic for transient network failures
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
@@ -638,13 +644,15 @@ class GEOService:
                 # Enrich with error details
                 if gse_id in self.data_manager.metadata_store:
                     existing_entry = self.data_manager.metadata_store[gse_id]
-                    existing_entry.update({
-                        "validation_result": validation_result,
-                        "platform_error": str(e),
-                        "platform_details": e.details,
-                        "status": "unsupported_platform",
-                        "error_timestamp": datetime.now().isoformat(),
-                    })
+                    existing_entry.update(
+                        {
+                            "validation_result": validation_result,
+                            "platform_error": str(e),
+                            "platform_details": e.details,
+                            "status": "unsupported_platform",
+                            "error_timestamp": datetime.now().isoformat(),
+                        }
+                    )
                 logger.error(
                     f"Platform validation failed for {gse_id}: {e.details['detected_platforms']}"
                 )
@@ -947,13 +955,15 @@ class GEOService:
                 # Enrich with error details
                 if gse_id in self.data_manager.metadata_store:
                     existing_entry = self.data_manager.metadata_store[gse_id]
-                    existing_entry.update({
-                        "validation_result": validation_result,
-                        "platform_error": str(e),
-                        "platform_details": e.details,
-                        "status": "unsupported_platform",
-                        "error_timestamp": datetime.now().isoformat(),
-                    })
+                    existing_entry.update(
+                        {
+                            "validation_result": validation_result,
+                            "platform_error": str(e),
+                            "platform_details": e.details,
+                            "status": "unsupported_platform",
+                            "error_timestamp": datetime.now().isoformat(),
+                        }
+                    )
                 logger.error(
                     f"Platform validation failed for {gse_id}: {e.details['detected_platforms']}"
                 )
@@ -1176,12 +1186,6 @@ class GEOService:
                         # Already logged and stored by _check_platform_compatibility
                         raise
 
-            # Check if modality already exists in DataManagerV2
-            modality_name = f"geo_{clean_geo_id.lower()}_{adapter}"
-            existing_modalities = self.data_manager.list_modalities()
-            if modality_name in existing_modalities:
-                return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
-
             # Use the strategic download approach
             geo_result = self.download_with_strategy(geo_id=clean_geo_id, **kwargs)
 
@@ -1225,6 +1229,14 @@ class GEOService:
             logger.debug(
                 f"Using adapter '{adapter_name}' based on predicted type '{enhanced_metadata.get('data_type', None)}' and data shape {geo_result.data.shape}"
             )
+
+            # Construct modality name with correct adapter
+            modality_name = f"geo_{clean_geo_id.lower()}_{adapter_name}"
+
+            # Check if modality already exists in DataManagerV2
+            existing_modalities = self.data_manager.list_modalities()
+            if modality_name in existing_modalities:
+                return f"Dataset {clean_geo_id} already loaded as modality '{modality_name}'. Use data_manager.get_modality('{modality_name}') to access it."
 
             # Load as modality in DataManagerV2
             adata = self.data_manager.load_modality(
@@ -1694,10 +1706,14 @@ class GEOService:
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -1707,7 +1723,9 @@ class GEOService:
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Get GEO object for supplementary file processing with retry logic
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
@@ -1832,10 +1850,14 @@ class GEOService:
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -1845,7 +1867,9 @@ class GEOService:
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # This is essentially the same as _try_supplementary_first but with different logging
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
@@ -1900,10 +1924,14 @@ class GEOService:
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -1913,7 +1941,9 @@ class GEOService:
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Try to get any available data using basic GEOparse approach
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
@@ -1990,10 +2020,14 @@ class GEOService:
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -2003,7 +2037,9 @@ class GEOService:
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Wrap GEOparse download with retry logic
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download
@@ -2357,7 +2393,9 @@ class GEOService:
                     existing_entry["status"] = "validated"  # Mark as fully validated
                     existing_entry["validation_timestamp"] = datetime.now().isoformat()
                     self.data_manager.metadata_store[geo_id] = existing_entry
-                    logger.debug(f"Enriched metadata for {geo_id} with validation results")
+                    logger.debug(
+                        f"Enriched metadata for {geo_id} with validation results"
+                    )
             else:
                 # Fallback: Create new entry if somehow missing (shouldn't happen with Change 1)
                 logger.warning(
@@ -3247,7 +3285,11 @@ The actual expression data download will be much faster now that metadata is pre
             # Convert NCBI's FTP URLs to HTTPS for reliable downloads
             # (FTP lacks error detection and causes silent corruption during throttling)
             suppl_files = [
-                url.replace("ftp://", "https://", 1) if url.startswith("ftp://") else url
+                (
+                    url.replace("ftp://", "https://", 1)
+                    if url.startswith("ftp://")
+                    else url
+                )
                 for url in suppl_files
             ]
 
@@ -3722,10 +3764,14 @@ The actual expression data download will be much faster now that metadata is pre
                 logger.debug(f"Pre-downloading SOFT file using HTTPS: {soft_url}")
                 try:
                     ssl_context = create_ssl_context()
-                    with urllib.request.urlopen(soft_url, context=ssl_context) as response:
+                    with urllib.request.urlopen(
+                        soft_url, context=ssl_context
+                    ) as response:
                         with open(soft_file_path, "wb") as f:
                             f.write(response.read())
-                    logger.debug(f"Successfully pre-downloaded SOFT file to {soft_file_path}")
+                    logger.debug(
+                        f"Successfully pre-downloaded SOFT file to {soft_file_path}"
+                    )
                 except Exception as e:
                     error_str = str(e)
                     if "CERTIFICATE_VERIFY_FAILED" in error_str or "SSL" in error_str:
@@ -3735,7 +3781,9 @@ The actual expression data download will be much faster now that metadata is pre
                             f"See error message above for solutions."
                         )
                     # If pre-download fails, let GEOparse try (will use FTP as fallback)
-                    logger.warning(f"Pre-download failed: {e}. GEOparse will attempt download.")
+                    logger.warning(
+                        f"Pre-download failed: {e}. GEOparse will attempt download."
+                    )
 
             # Try to get sample using GEOparse
             # Note: GEOparse will find our pre-downloaded SOFT file and skip its FTP download

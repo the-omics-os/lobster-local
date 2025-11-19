@@ -34,6 +34,24 @@ class StrategyConfig(BaseModel):
         concatenation_strategy: Sample handling (auto, union, intersection)
         confidence: Confidence score for strategy recommendation (0.0 to 1.0)
         rationale: Human-readable explanation of strategy choice
+        strategy_params: Database-specific strategy parameters
+        execution_params: Execution parameters for download process
+
+    Example:
+        >>> strategy = StrategyConfig(
+        ...     strategy_name="MATRIX_FIRST",
+        ...     concatenation_strategy="union",
+        ...     confidence=0.95,
+        ...     rationale="H5 file available with optimal structure",
+        ...     strategy_params={
+        ...         "use_intersecting_genes_only": False,
+        ...         "min_samples": 10
+        ...     },
+        ...     execution_params={
+        ...         "timeout": 7200,  # 2 hours for large datasets
+        ...         "max_retries": 5
+        ...     }
+        ... )
     """
 
     strategy_name: str = Field(
@@ -47,6 +65,33 @@ class StrategyConfig(BaseModel):
     )
     rationale: Optional[str] = Field(
         None, description="Human-readable explanation of strategy choice"
+    )
+
+    # Backward compatible: existing queue entries without these fields will work
+    strategy_params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="""
+        Database-specific strategy parameters.
+
+        Examples:
+        - GEO: {"use_intersecting_genes_only": bool, "min_samples": int}
+        - SRA: {"quality_threshold": int, "paired_end_only": bool}
+        - PRIDE: {"search_engine_filter": str, "min_peptides": int}
+        """,
+    )
+    execution_params: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="""
+        Execution parameters for download process.
+
+        Common parameters:
+        - timeout: int (seconds, default: 3600)
+        - max_retries: int (default: 3)
+        - retry_backoff: float (seconds, default: 2.0)
+        - max_concurrent_downloads: int (default: 1)
+        - verify_checksum: bool (default: True)
+        - resume_enabled: bool (default: False)
+        """,
     )
 
     @field_validator("strategy_name")
@@ -68,6 +113,54 @@ class StrategyConfig(BaseModel):
                 f"concatenation_strategy must be one of {allowed}, got '{v}'"
             )
         return v_lower
+
+    @field_validator("strategy_params")
+    @classmethod
+    def validate_strategy_params(
+        cls, v: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Validate strategy_params are appropriate for the database type.
+
+        This validator can be extended as more database services are added.
+        For now, ensures it's a dictionary when provided.
+        """
+        if v is None:
+            return v
+
+        # Ensure it's a dictionary
+        if not isinstance(v, dict):
+            raise ValueError("strategy_params must be a dictionary")
+
+        return v
+
+    def get_execution_params_with_defaults(self) -> Dict[str, Any]:
+        """
+        Get execution parameters with default values filled in.
+
+        Returns:
+            Dict[str, Any]: All execution parameters with defaults for unspecified values
+
+        Example:
+            >>> strategy = StrategyConfig(strategy_name="MATRIX_FIRST", ...)
+            >>> params = strategy.get_execution_params_with_defaults()
+            >>> print(params["timeout"])  # 3600
+            >>> print(params["max_retries"])  # 3
+        """
+        defaults = {
+            "timeout": 3600,
+            "max_retries": 3,
+            "retry_backoff": 2.0,
+            "max_concurrent_downloads": 1,
+            "verify_checksum": True,
+            "resume_enabled": False,
+        }
+
+        if self.execution_params is None:
+            return defaults
+
+        # Merge user params with defaults (user params take precedence)
+        return {**defaults, **self.execution_params}
 
 
 class DownloadQueueEntry(BaseModel):

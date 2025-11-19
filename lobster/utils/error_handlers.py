@@ -111,7 +111,11 @@ class RateLimitErrorHandler(ErrorHandler):
         error_lower = error_str.lower()
 
         # Check error message for provider-specific patterns
-        if "throttlingexception" in error_lower or "bedrock" in error_lower or "converse" in error_lower:
+        if (
+            "throttlingexception" in error_lower
+            or "bedrock" in error_lower
+            or "converse" in error_lower
+        ):
             return "bedrock"
 
         # Check environment variables
@@ -119,7 +123,9 @@ class RateLimitErrorHandler(ErrorHandler):
             return os.environ.get("LOBSTER_LLM_PROVIDER", "unknown")
         elif os.environ.get("ANTHROPIC_API_KEY"):
             return "anthropic"
-        elif os.environ.get("AWS_BEDROCK_ACCESS_KEY") or os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY"):
+        elif os.environ.get("AWS_BEDROCK_ACCESS_KEY") or os.environ.get(
+            "AWS_BEDROCK_SECRET_ACCESS_KEY"
+        ):
             return "bedrock"
 
         return "unknown"

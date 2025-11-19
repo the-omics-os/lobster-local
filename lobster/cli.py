@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Modern, user-friendly CLI for the Multi-Agent Bioinformatics System.
-Installable via pip or curl, with rich terminal interface. 
+Installable via pip or curl, with rich terminal interface.
 """
 
 import os
@@ -35,7 +35,6 @@ from lobster.config.agent_config import (
     initialize_configurator,
 )
 from lobster.core.client import AgentClient
-from lobster.version import __version__
 
 # Import new UI system
 from lobster.ui import LobsterTheme, setup_logging
@@ -49,6 +48,7 @@ from lobster.ui.console_manager import get_console_manager
 
 # Import the proper callback handler and system utilities
 from lobster.utils import SimpleTerminalCallback, TerminalCallbackHandler, open_path
+from lobster.version import __version__
 
 # Import prompt_toolkit for autocomplete functionality (optional dependency)
 try:
@@ -706,10 +706,14 @@ def init_client(
     # Check for configuration errors
     from lobster.config.settings import settings
 
-    if hasattr(settings, '_config_error') and settings._config_error:
+    if hasattr(settings, "_config_error") and settings._config_error:
         console.print(settings._config_error)
-        console.print("\n[yellow]Tip:[/yellow] If you installed via pip, make sure to create a .env file in your current directory.")
-        console.print("[yellow]Tip:[/yellow] See README for installation instructions: https://github.com/the-omics-os/lobster-local")
+        console.print(
+            "\n[yellow]Tip:[/yellow] If you installed via pip, make sure to create a .env file in your current directory."
+        )
+        console.print(
+            "[yellow]Tip:[/yellow] See README for installation instructions: https://github.com/the-omics-os/lobster-local"
+        )
         raise typer.Exit(code=1)
 
     # Check for cloud API key
@@ -836,7 +840,6 @@ def init_client(
 
     # Configure logging level based on debug flag
     import logging
-
 
     if debug:
         setup_logging(logging.DEBUG)
@@ -1793,11 +1796,13 @@ def config_test():
     import datetime
 
     console.print()
-    console.print(Panel.fit(
-        f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Configuration Test[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-        border_style=LobsterTheme.PRIMARY_ORANGE,
-        padding=(0, 2)
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Configuration Test[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+            border_style=LobsterTheme.PRIMARY_ORANGE,
+            padding=(0, 2),
+        )
+    )
     console.print()
 
     # Check .env file exists
@@ -1812,6 +1817,7 @@ def config_test():
 
     # Load environment variables
     from dotenv import load_dotenv
+
     load_dotenv()
 
     # Test results
@@ -1834,7 +1840,7 @@ def config_test():
                 test_config = {
                     "model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
                     "temperature": 1.0,
-                    "max_tokens": 100
+                    "max_tokens": 100,
                 }
                 test_llm = LLMFactory.create_llm(test_config, "test")
 
@@ -1868,12 +1874,7 @@ def config_test():
 
             # Test with a simple esearch query
             base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-            params = {
-                "db": "pubmed",
-                "term": "cancer",
-                "retmax": "1",
-                "retmode": "xml"
-            }
+            params = {"db": "pubmed", "term": "cancer", "retmax": "1", "retmode": "xml"}
             if ncbi_email:
                 params["email"] = ncbi_email
             if ncbi_key:
@@ -1900,7 +1901,9 @@ def config_test():
                     if ncbi_key:
                         console.print("[dim]  Rate limit: 10 requests/second[/dim]")
                     else:
-                        console.print("[dim]  Rate limit: 3 requests/second (add NCBI_API_KEY for higher limit)[/dim]")
+                        console.print(
+                            "[dim]  Rate limit: 3 requests/second (add NCBI_API_KEY for higher limit)[/dim]"
+                        )
         except Exception as e:
             error_msg = str(e)
             if len(error_msg) > 60:
@@ -1920,31 +1923,39 @@ def config_test():
     table.add_column("Details", style="dim")
 
     for service, status, details in results:
-        status_style = "green" if status == "✅" else ("red" if status == "❌" else "dim")
+        status_style = (
+            "green" if status == "✅" else ("red" if status == "❌" else "dim")
+        )
         table.add_row(service, f"[{status_style}]{status}[/{status_style}]", details)
 
     console.print(table)
     console.print()
 
     # Final verdict
-    all_required_ok = all(status == "✅" for service, status, _ in results if service == "LLM Provider")
+    all_required_ok = all(
+        status == "✅" for service, status, _ in results if service == "LLM Provider"
+    )
 
     if all_required_ok:
-        console.print(Panel.fit(
-            "[bold green]✅ Configuration Valid[/bold green]\n\n"
-            "All required services are accessible.\n"
-            f"You can now run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-            border_style="green",
-            padding=(1, 2)
-        ))
+        console.print(
+            Panel.fit(
+                "[bold green]✅ Configuration Valid[/bold green]\n\n"
+                "All required services are accessible.\n"
+                f"You can now run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
     else:
-        console.print(Panel.fit(
-            "[bold red]❌ Configuration Issues Detected[/bold red]\n\n"
-            "Please check your API keys in the .env file.\n"
-            f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
-            border_style="red",
-            padding=(1, 2)
-        ))
+        console.print(
+            Panel.fit(
+                "[bold red]❌ Configuration Issues Detected[/bold red]\n\n"
+                "Please check your API keys in the .env file.\n"
+                f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
+                border_style="red",
+                padding=(1, 2),
+            )
+        )
         raise typer.Exit(1)
 
 
@@ -1952,11 +1963,13 @@ def config_test():
 def config_show():
     """Display current configuration with masked secrets."""
     console.print()
-    console.print(Panel.fit(
-        f"[bold {LobsterTheme.PRIMARY_ORANGE}]⚙️  Current Configuration[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-        border_style=LobsterTheme.PRIMARY_ORANGE,
-        padding=(0, 2)
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold {LobsterTheme.PRIMARY_ORANGE}]⚙️  Current Configuration[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+            border_style=LobsterTheme.PRIMARY_ORANGE,
+            padding=(0, 2),
+        )
+    )
     console.print()
 
     # Check .env file
@@ -1971,6 +1984,7 @@ def config_show():
 
     # Load environment variables
     from dotenv import load_dotenv
+
     load_dotenv()
 
     def mask_secret(value: Optional[str], show_chars: int = 4) -> str:
@@ -1982,7 +1996,9 @@ def config_show():
         return f"[yellow]{value[:show_chars]}{'*' * (len(value) - show_chars)}[/yellow]"
 
     # Create configuration table
-    table = Table(title=None, box=box.SIMPLE, show_header=True, header_style="bold cyan")
+    table = Table(
+        title=None, box=box.SIMPLE, show_header=True, header_style="bold cyan"
+    )
     table.add_column("Setting", style="cyan", no_wrap=True)
     table.add_column("Value", style="white")
 
@@ -1997,6 +2013,7 @@ def config_show():
     if anthropic_key:
         table.add_row("  ANTHROPIC_API_KEY", mask_secret(anthropic_key))
         from lobster.config.llm_factory import LLMFactory
+
         provider = LLMFactory.detect_provider()
         if provider:
             table.add_row("  [dim]Provider[/dim]", f"[green]{provider.value}[/green]")
@@ -2008,9 +2025,12 @@ def config_show():
         table.add_row("  AWS_BEDROCK_SECRET_ACCESS_KEY", mask_secret(bedrock_secret))
         if not anthropic_key:
             from lobster.config.llm_factory import LLMFactory
+
             provider = LLMFactory.detect_provider()
             if provider:
-                table.add_row("  [dim]Provider[/dim]", f"[green]{provider.value}[/green]")
+                table.add_row(
+                    "  [dim]Provider[/dim]", f"[green]{provider.value}[/green]"
+                )
     else:
         if not anthropic_key:
             table.add_row("  AWS_BEDROCK_ACCESS_KEY", "[dim]Not set[/dim]")
@@ -2034,24 +2054,29 @@ def config_show():
 
     # Status
     from lobster.config.llm_factory import LLMFactory
+
     provider = LLMFactory.detect_provider()
 
     if provider:
-        console.print(Panel.fit(
-            f"[green]✅ Configuration looks valid[/green]\n\n"
-            f"Primary provider: [bold]{provider.value}[/bold]\n"
-            f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster config test[/bold {LobsterTheme.PRIMARY_ORANGE}] to verify connectivity",
-            border_style="green",
-            padding=(1, 2)
-        ))
+        console.print(
+            Panel.fit(
+                f"[green]✅ Configuration looks valid[/green]\n\n"
+                f"Primary provider: [bold]{provider.value}[/bold]\n"
+                f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster config test[/bold {LobsterTheme.PRIMARY_ORANGE}] to verify connectivity",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
     else:
-        console.print(Panel.fit(
-            "[red]❌ No LLM provider configured[/red]\n\n"
-            "Please set either ANTHROPIC_API_KEY or AWS_BEDROCK credentials.\n"
-            f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-            border_style="red",
-            padding=(1, 2)
-        ))
+        console.print(
+            Panel.fit(
+                "[red]❌ No LLM provider configured[/red]\n\n"
+                "Please set either ANTHROPIC_API_KEY or AWS_BEDROCK credentials.\n"
+                f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                border_style="red",
+                padding=(1, 2),
+            )
+        )
 
 
 @app.command()
@@ -2060,16 +2085,22 @@ def init(
         False, "--force", "-f", help="Overwrite existing .env file"
     ),
     non_interactive: bool = typer.Option(
-        False, "--non-interactive", help="Non-interactive mode for CI/CD (requires API key flags)"
+        False,
+        "--non-interactive",
+        help="Non-interactive mode for CI/CD (requires API key flags)",
     ),
     anthropic_key: Optional[str] = typer.Option(
         None, "--anthropic-key", help="Claude API key (non-interactive mode)"
     ),
     bedrock_access_key: Optional[str] = typer.Option(
-        None, "--bedrock-access-key", help="AWS Bedrock access key (non-interactive mode)"
+        None,
+        "--bedrock-access-key",
+        help="AWS Bedrock access key (non-interactive mode)",
     ),
     bedrock_secret_key: Optional[str] = typer.Option(
-        None, "--bedrock-secret-key", help="AWS Bedrock secret key (non-interactive mode)"
+        None,
+        "--bedrock-secret-key",
+        help="AWS Bedrock secret key (non-interactive mode)",
     ),
     ncbi_key: Optional[str] = typer.Option(
         None, "--ncbi-key", help="NCBI API key (optional, non-interactive mode)"
@@ -2100,15 +2131,17 @@ def init(
     # Check if .env already exists
     if env_path.exists() and not force:
         console.print()
-        console.print(Panel.fit(
-            "[bold yellow]⚠️  Configuration Already Exists[/bold yellow]\n\n"
-            f"A .env file already exists at:\n[cyan]{env_path}[/cyan]\n\n"
-            "To reconfigure, use:\n"
-            f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
-            "Or edit the file manually.",
-            border_style="yellow",
-            padding=(1, 2)
-        ))
+        console.print(
+            Panel.fit(
+                "[bold yellow]⚠️  Configuration Already Exists[/bold yellow]\n\n"
+                f"A .env file already exists at:\n[cyan]{env_path}[/cyan]\n\n"
+                "To reconfigure, use:\n"
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
+                "Or edit the file manually.",
+                border_style="yellow",
+                padding=(1, 2),
+            )
+        )
         console.print()
         console.print(f"[dim]Configuration file: {env_path}[/dim]")
         raise typer.Exit(0)
@@ -2145,22 +2178,32 @@ def init(
         has_bedrock = bedrock_access_key is not None and bedrock_secret_key is not None
 
         if not has_anthropic and not has_bedrock:
-            console.print("[red]❌ Error: No API keys provided for non-interactive mode[/red]")
+            console.print(
+                "[red]❌ Error: No API keys provided for non-interactive mode[/red]"
+            )
             console.print()
             console.print("You must provide either:")
             console.print("  • Claude API: --anthropic-key=xxx")
-            console.print("  • AWS Bedrock: --bedrock-access-key=xxx --bedrock-secret-key=xxx")
+            console.print(
+                "  • AWS Bedrock: --bedrock-access-key=xxx --bedrock-secret-key=xxx"
+            )
             raise typer.Exit(1)
 
         if has_anthropic and has_bedrock:
-            console.print("[yellow]⚠️  Warning: Both Claude API and AWS Bedrock keys provided.[/yellow]")
-            console.print("[yellow]   Using Claude API. Remove --anthropic-key to use Bedrock.[/yellow]")
+            console.print(
+                "[yellow]⚠️  Warning: Both Claude API and AWS Bedrock keys provided.[/yellow]"
+            )
+            console.print(
+                "[yellow]   Using Claude API. Remove --anthropic-key to use Bedrock.[/yellow]"
+            )
 
         if has_anthropic:
             env_lines.append(f"ANTHROPIC_API_KEY={anthropic_key.strip()}")
         elif has_bedrock:
             env_lines.append(f"AWS_BEDROCK_ACCESS_KEY={bedrock_access_key.strip()}")
-            env_lines.append(f"AWS_BEDROCK_SECRET_ACCESS_KEY={bedrock_secret_key.strip()}")
+            env_lines.append(
+                f"AWS_BEDROCK_SECRET_ACCESS_KEY={bedrock_secret_key.strip()}"
+            )
 
         if ncbi_key:
             env_lines.append(f"\n# Optional: Enhanced literature search")
@@ -2183,26 +2226,28 @@ def init(
 
     # Interactive mode: run wizard
     console.print("\n")
-    console.print(Panel.fit(
-        "[bold white]🦞 Welcome to Lobster AI![/bold white]\n\n"
-        "Let's set up your API keys.\n"
-        "This wizard will create a [cyan].env[/cyan] file in your current directory.",
-        border_style="bright_blue",
-        padding=(1, 2)
-    ))
+    console.print(
+        Panel.fit(
+            "[bold white]🦞 Welcome to Lobster AI![/bold white]\n\n"
+            "Let's set up your API keys.\n"
+            "This wizard will create a [cyan].env[/cyan] file in your current directory.",
+            border_style="bright_blue",
+            padding=(1, 2),
+        )
+    )
     console.print()
 
     try:
         # Provider selection
         console.print("[bold white]Select your LLM provider:[/bold white]")
-        console.print("  [cyan]1[/cyan] - Claude API (Anthropic) - Quick testing, development")
+        console.print(
+            "  [cyan]1[/cyan] - Claude API (Anthropic) - Quick testing, development"
+        )
         console.print("  [cyan]2[/cyan] - AWS Bedrock - Production, enterprise use")
         console.print()
 
         provider = Prompt.ask(
-            "[bold white]Choose provider[/bold white]",
-            choices=["1", "2"],
-            default="1"
+            "[bold white]Choose provider[/bold white]", choices=["1", "2"], default="1"
         )
 
         env_lines = []
@@ -2212,11 +2257,12 @@ def init(
         if provider == "1":
             # Claude API setup
             console.print("\n[bold white]🔑 Claude API Configuration[/bold white]")
-            console.print("Get your API key from: [link]https://console.anthropic.com/[/link]\n")
+            console.print(
+                "Get your API key from: [link]https://console.anthropic.com/[/link]\n"
+            )
 
             api_key = Prompt.ask(
-                "[bold white]Enter your Claude API key[/bold white]",
-                password=True
+                "[bold white]Enter your Claude API key[/bold white]", password=True
             )
 
             if not api_key.strip():
@@ -2228,15 +2274,15 @@ def init(
         else:
             # AWS Bedrock setup
             console.print("\n[bold white]🔑 AWS Bedrock Configuration[/bold white]")
-            console.print("You'll need AWS access key and secret key with Bedrock permissions.\n")
+            console.print(
+                "You'll need AWS access key and secret key with Bedrock permissions.\n"
+            )
 
             access_key = Prompt.ask(
-                "[bold white]Enter your AWS access key[/bold white]",
-                password=True
+                "[bold white]Enter your AWS access key[/bold white]", password=True
             )
             secret_key = Prompt.ask(
-                "[bold white]Enter your AWS secret key[/bold white]",
-                password=True
+                "[bold white]Enter your AWS secret key[/bold white]", password=True
             )
 
             if not access_key.strip() or not secret_key.strip():
@@ -2249,14 +2295,15 @@ def init(
         # Optional NCBI key
         console.print("\n[bold white]📚 NCBI API Key (Optional)[/bold white]")
         console.print("Enhances literature search capabilities.")
-        console.print("Get key from: [link]https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/[/link]\n")
+        console.print(
+            "Get key from: [link]https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/[/link]\n"
+        )
 
         add_ncbi = Confirm.ask("Add NCBI API key?", default=False)
 
         if add_ncbi:
             ncbi_key = Prompt.ask(
-                "[bold white]Enter your NCBI API key[/bold white]",
-                password=True
+                "[bold white]Enter your NCBI API key[/bold white]", password=True
             )
             if ncbi_key.strip():
                 env_lines.append(f"\n# Optional: Enhanced literature search")
@@ -2276,10 +2323,7 @@ def init(
             success_message += "\n"
         success_message += f"[bold white]Next step:[/bold white] Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!"
 
-        console.print(Panel.fit(
-            success_message,
-            border_style="green"
-        ))
+        console.print(Panel.fit(success_message, border_style="green"))
         console.print()
 
     except KeyboardInterrupt:
@@ -2296,10 +2340,16 @@ def chat(
         None, "--workspace", "-w", help="Workspace directory"
     ),
     reasoning: Optional[bool] = typer.Option(
-        None, "--reasoning", hidden=True, help="[DEPRECATED] Reasoning is now enabled by default. Use --no-reasoning to disable."
+        None,
+        "--reasoning",
+        hidden=True,
+        help="[DEPRECATED] Reasoning is now enabled by default. Use --no-reasoning to disable.",
     ),
     no_reasoning: bool = typer.Option(
-        False, "--no-reasoning", is_flag=True, help="Disable agent reasoning display (enabled by default)"
+        False,
+        "--no-reasoning",
+        is_flag=True,
+        help="Disable agent reasoning display (enabled by default)",
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show detailed tool usage and agent activity"
@@ -2332,7 +2382,6 @@ def chat(
     # Configure logging level based on debug flag
     import logging
 
-
     if debug:
         setup_logging(logging.DEBUG)
     else:
@@ -2342,17 +2391,21 @@ def chat(
     env_file = Path.cwd() / ".env"
     if not env_file.exists():
         console.print()
-        console.print(Panel.fit(
-            "[bold red]⚠️  No Configuration Found[/bold red]\n\n"
-            "Lobster requires API keys to function. Please run the setup wizard:\n\n"
-            f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
-            "This will guide you through API key configuration.",
-            border_style="red",
-            padding=(1, 2)
-        ))
+        console.print(
+            Panel.fit(
+                "[bold red]⚠️  No Configuration Found[/bold red]\n\n"
+                "Lobster requires API keys to function. Please run the setup wizard:\n\n"
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
+                "This will guide you through API key configuration.",
+                border_style="red",
+                padding=(1, 2),
+            )
+        )
         console.print()
         console.print("[dim]For manual configuration, see:[/dim]")
-        console.print("[link]https://github.com/the-omics-os/lobster-local/wiki/03-configuration[/link]")
+        console.print(
+            "[link]https://github.com/the-omics-os/lobster-local/wiki/03-configuration[/link]"
+        )
         raise typer.Exit(1)
 
     display_welcome()
@@ -2459,9 +2512,7 @@ def chat(
                         cost_display += f" (+${latest_cost:.4f} this response)"
                     cost_display += f" | Total tokens: {total_tokens:,}"
 
-                    console_manager.print(
-                        f"[dim grey50]{cost_display}[/dim grey50]"
-                    )
+                    console_manager.print(f"[dim grey50]{cost_display}[/dim grey50]")
 
                 # Show any generated plots with orange styling
                 if result.get("plots"):
@@ -2712,7 +2763,9 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
                 return
 
             # Create summary table
-            summary_table = Table(title="💰 Session Token Usage & Cost", box=box.ROUNDED)
+            summary_table = Table(
+                title="💰 Session Token Usage & Cost", box=box.ROUNDED
+            )
             summary_table.add_column("Metric", style="cyan", no_wrap=True)
             summary_table.add_column("Value", style="green")
 
@@ -2723,9 +2776,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
             summary_table.add_row(
                 "Total Output Tokens", f"{token_usage['total_output_tokens']:,}"
             )
-            summary_table.add_row(
-                "Total Tokens", f"{token_usage['total_tokens']:,}"
-            )
+            summary_table.add_row("Total Tokens", f"{token_usage['total_tokens']:,}")
             summary_table.add_row(
                 "Total Cost (USD)", f"${token_usage['total_cost_usd']:.4f}"
             )
@@ -2734,9 +2785,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 
             # Create per-agent breakdown table if agents have been used
             if token_usage.get("by_agent"):
-                agent_table = Table(
-                    title="📊 Cost by Agent", box=box.ROUNDED
-                )
+                agent_table = Table(title="📊 Cost by Agent", box=box.ROUNDED)
                 agent_table.add_column("Agent", style="cyan")
                 agent_table.add_column("Input", style="blue", justify="right")
                 agent_table.add_column("Output", style="magenta", justify="right")
@@ -2752,7 +2801,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
                         f"{stats['output_tokens']:,}",
                         f"{stats['total_tokens']:,}",
                         f"${stats['cost_usd']:.4f}",
-                        str(stats['invocation_count'])
+                        str(stats["invocation_count"]),
                     )
 
                 console_manager.print("\n")
@@ -3372,9 +3421,7 @@ when they are started by agents or analysis workflows.
 
                 # Provide next step suggestions
                 console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
-                console.print(
-                    "[white]Use these commands to analyze your data:[/white]"
-                )
+                console.print("[white]Use these commands to analyze your data:[/white]")
                 console.print("  • [yellow]/data[/yellow] - View data summary")
                 console.print(
                     f"  • [yellow]Analyze the {load_result['modality_name']} dataset[/yellow] - Start analysis"
@@ -3471,9 +3518,7 @@ when they are started by agents or analysis workflows.
 
         else:
             # Binary file or unsupported type
-            console.print(
-                "[bold yellow on black] ℹ️  File Info [/bold yellow on black]"
-            )
+            console.print("[bold yellow on black] ℹ️  File Info [/bold yellow on black]")
             console.print(
                 f"[white]File type '[yellow]{file_description}[/yellow]' is not supported for reading or loading.[/white]"
             )
@@ -3526,9 +3571,7 @@ when they are started by agents or analysis workflows.
 
                     # Show condition groups
                     if nested_info.groups:
-                        console.print(
-                            "\n[bold white]📂 Condition Groups:[/bold white]"
-                        )
+                        console.print("\n[bold white]📂 Condition Groups:[/bold white]")
                         groups_table = Table(box=box.ROUNDED, border_style="cyan")
                         groups_table.add_column("Condition", style="bold orange1")
                         groups_table.add_column("Samples", style="white")
@@ -5492,10 +5535,15 @@ def query(
     question: str,
     workspace: Optional[Path] = typer.Option(None, "--workspace", "-w"),
     reasoning: Optional[bool] = typer.Option(
-        None, "--reasoning", hidden=True, help="[DEPRECATED] Reasoning is now enabled by default. Use --no-reasoning to disable."
+        None,
+        "--reasoning",
+        hidden=True,
+        help="[DEPRECATED] Reasoning is now enabled by default. Use --no-reasoning to disable.",
     ),
     no_reasoning: bool = typer.Option(
-        False, "--no-reasoning", help="Disable agent reasoning display (enabled by default)"
+        False,
+        "--no-reasoning",
+        help="Disable agent reasoning display (enabled by default)",
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show detailed tool usage and agent activity"
@@ -5513,7 +5561,9 @@ def query(
     # Check for configuration
     env_file = Path.cwd() / ".env"
     if not env_file.exists():
-        console.print(f"[red]❌ No configuration found. Run 'lobster init' first.[/red]")
+        console.print(
+            f"[red]❌ No configuration found. Run 'lobster init' first.[/red]"
+        )
         raise typer.Exit(1)
 
     # Initialize client

@@ -125,18 +125,30 @@ class H5ADBackend(BaseBackend):
 
         # Sanitize uns (unstructured metadata) using centralized utility
         adata.uns = {
-            util_sanitize_key(k, slash_replacement): util_sanitize_value(v, slash_replacement)
+            util_sanitize_key(k, slash_replacement): util_sanitize_value(
+                v, slash_replacement
+            )
             for k, v in adata.uns.items()
         }
 
         # Sanitize obsm, varm, layers (keys must be safe)
-        adata.obsm = {util_sanitize_key(k, slash_replacement): v for k, v in adata.obsm.items()}
-        adata.varm = {util_sanitize_key(k, slash_replacement): v for k, v in adata.varm.items()}
-        adata.layers = {util_sanitize_key(k, slash_replacement): v for k, v in adata.layers.items()}
+        adata.obsm = {
+            util_sanitize_key(k, slash_replacement): v for k, v in adata.obsm.items()
+        }
+        adata.varm = {
+            util_sanitize_key(k, slash_replacement): v for k, v in adata.varm.items()
+        }
+        adata.layers = {
+            util_sanitize_key(k, slash_replacement): v for k, v in adata.layers.items()
+        }
 
         # Sanitize DataFrame column names in obs and var
-        adata.obs.columns = [util_sanitize_key(col, slash_replacement) for col in adata.obs.columns]
-        adata.var.columns = [util_sanitize_key(col, slash_replacement) for col in adata.var.columns]
+        adata.obs.columns = [
+            util_sanitize_key(col, slash_replacement) for col in adata.obs.columns
+        ]
+        adata.var.columns = [
+            util_sanitize_key(col, slash_replacement) for col in adata.var.columns
+        ]
 
         # Sanitize DataFrame VALUES in obs and var (COMPREHENSIVE)
         # This prevents serialization errors when writing to H5AD
@@ -240,68 +252,92 @@ class H5ADBackend(BaseBackend):
         def is_arrow_dtype(series_or_index):
             """Check if a Series or Index uses ArrowExtensionArray."""
             # Check 1: Direct __arrow_array__ attribute
-            if hasattr(series_or_index, '__arrow_array__'):
+            if hasattr(series_or_index, "__arrow_array__"):
                 return True
 
             # Check 2: Check dtype string (covers both "string[pyarrow]" and "string")
-            if hasattr(series_or_index, 'dtype'):
+            if hasattr(series_or_index, "dtype"):
                 dtype_str = str(series_or_index.dtype)
-                if 'string' in dtype_str or 'pyarrow' in dtype_str:
+                if "string" in dtype_str or "pyarrow" in dtype_str:
                     return True
 
             # Check 3: Check underlying array type directly
-            if hasattr(series_or_index, 'array'):
+            if hasattr(series_or_index, "array"):
                 array_type = type(series_or_index.array).__name__
-                if 'Arrow' in array_type or 'arrow' in array_type:
+                if "Arrow" in array_type or "arrow" in array_type:
                     return True
 
             return False
 
         # Convert obs.index
         if is_arrow_dtype(adata_copy.obs.index):
-            logger.debug("Converting obs.index from ArrowExtensionArray to object dtype")
+            logger.debug(
+                "Converting obs.index from ArrowExtensionArray to object dtype"
+            )
             # Use to_numpy() with explicit dtype to force conversion
             values = adata_copy.obs.index.to_numpy(dtype=str, na_value="")
             adata_copy.obs.index = pd.Index(values, dtype=object)
 
         # Convert var.index
         if is_arrow_dtype(adata_copy.var.index):
-            logger.debug("Converting var.index from ArrowExtensionArray to object dtype")
+            logger.debug(
+                "Converting var.index from ArrowExtensionArray to object dtype"
+            )
             values = adata_copy.var.index.to_numpy(dtype=str, na_value="")
             adata_copy.var.index = pd.Index(values, dtype=object)
 
         # Convert obs columns
         for col in adata_copy.obs.columns:
             if is_arrow_dtype(adata_copy.obs[col]):
-                logger.debug(f"Converting obs['{col}'] from ArrowExtensionArray to object dtype")
+                logger.debug(
+                    f"Converting obs['{col}'] from ArrowExtensionArray to object dtype"
+                )
                 # Use to_numpy() with explicit dtype to force conversion from ArrowStringArray
                 values = adata_copy.obs[col].to_numpy(dtype=str, na_value="")
-                adata_copy.obs[col] = pd.Series(values, index=adata_copy.obs.index, dtype=object)
+                adata_copy.obs[col] = pd.Series(
+                    values, index=adata_copy.obs.index, dtype=object
+                )
 
         # Convert var columns
         for col in adata_copy.var.columns:
             if is_arrow_dtype(adata_copy.var[col]):
-                logger.debug(f"Converting var['{col}'] from ArrowExtensionArray to object dtype")
+                logger.debug(
+                    f"Converting var['{col}'] from ArrowExtensionArray to object dtype"
+                )
                 values = adata_copy.var[col].to_numpy(dtype=str, na_value="")
-                adata_copy.var[col] = pd.Series(values, index=adata_copy.var.index, dtype=object)
+                adata_copy.var[col] = pd.Series(
+                    values, index=adata_copy.var.index, dtype=object
+                )
 
         # Check obsm (embeddings/dimensionality reductions) - usually numeric, but check
         for key in adata_copy.obsm.keys():
             if isinstance(adata_copy.obsm[key], pd.DataFrame):
                 for col in adata_copy.obsm[key].columns:
                     if is_arrow_dtype(adata_copy.obsm[key][col]):
-                        logger.debug(f"Converting obsm['{key}']['{col}'] from ArrowExtensionArray to object dtype")
-                        values = adata_copy.obsm[key][col].to_numpy(dtype=str, na_value="")
-                        adata_copy.obsm[key][col] = pd.Series(values, index=adata_copy.obsm[key].index, dtype=object)
+                        logger.debug(
+                            f"Converting obsm['{key}']['{col}'] from ArrowExtensionArray to object dtype"
+                        )
+                        values = adata_copy.obsm[key][col].to_numpy(
+                            dtype=str, na_value=""
+                        )
+                        adata_copy.obsm[key][col] = pd.Series(
+                            values, index=adata_copy.obsm[key].index, dtype=object
+                        )
 
         # Check varm (feature metadata)
         for key in adata_copy.varm.keys():
             if isinstance(adata_copy.varm[key], pd.DataFrame):
                 for col in adata_copy.varm[key].columns:
                     if is_arrow_dtype(adata_copy.varm[key][col]):
-                        logger.debug(f"Converting varm['{key}']['{col}'] from ArrowExtensionArray to object dtype")
-                        values = adata_copy.varm[key][col].to_numpy(dtype=str, na_value="")
-                        adata_copy.varm[key][col] = pd.Series(values, index=adata_copy.varm[key].index, dtype=object)
+                        logger.debug(
+                            f"Converting varm['{key}']['{col}'] from ArrowExtensionArray to object dtype"
+                        )
+                        values = adata_copy.varm[key][col].to_numpy(
+                            dtype=str, na_value=""
+                        )
+                        adata_copy.varm[key][col] = pd.Series(
+                            values, index=adata_copy.varm[key].index, dtype=object
+                        )
 
         # FIX #5.1: Convert ArrowExtensionArray in adata.uns (where provenance lives!)
         # This was the missing piece - uns can contain GEO metadata with Arrow strings
@@ -313,26 +349,32 @@ class H5ADBackend(BaseBackend):
                 return [convert_uns_arrow(item) for item in obj]
             elif isinstance(obj, pd.Series):
                 if is_arrow_dtype(obj):
-                    logger.debug(f"Converting Series in uns from ArrowExtensionArray to object dtype")
+                    logger.debug(
+                        f"Converting Series in uns from ArrowExtensionArray to object dtype"
+                    )
                     values = obj.to_numpy(dtype=str, na_value="")
                     return pd.Series(values, index=obj.index, dtype=object)
                 return obj
             elif isinstance(obj, pd.Index):
                 if is_arrow_dtype(obj):
-                    logger.debug(f"Converting Index in uns from ArrowExtensionArray to object dtype")
+                    logger.debug(
+                        f"Converting Index in uns from ArrowExtensionArray to object dtype"
+                    )
                     values = obj.to_numpy(dtype=str, na_value="")
                     return pd.Index(values, dtype=object)
                 return obj
             # Handle individual Arrow strings (can occur in nested dicts)
-            elif hasattr(obj, '__arrow_array__'):
+            elif hasattr(obj, "__arrow_array__"):
                 logger.debug(f"Converting individual Arrow value in uns to string")
                 return str(obj)
             else:
                 return obj
 
-        if hasattr(adata_copy, 'uns') and adata_copy.uns:
+        if hasattr(adata_copy, "uns") and adata_copy.uns:
             logger.debug("Checking adata.uns for ArrowExtensionArray...")
-            adata_copy.uns = {k: convert_uns_arrow(v) for k, v in adata_copy.uns.items()}
+            adata_copy.uns = {
+                k: convert_uns_arrow(v) for k, v in adata_copy.uns.items()
+            }
 
         return adata_copy
 
@@ -383,11 +425,14 @@ class H5ADBackend(BaseBackend):
 
             # FIX #5.2: Post-sanitization validation (diagnostic safety check)
             # Verify that sanitization actually worked before attempting write
-            if hasattr(adata_sanitized, 'uns') and adata_sanitized.uns:
+            if hasattr(adata_sanitized, "uns") and adata_sanitized.uns:
                 from lobster.core.utils.h5ad_utils import validate_for_h5ad
+
                 post_issues = validate_for_h5ad(adata_sanitized.uns, "adata.uns")
                 if post_issues and logger.isEnabledFor(logging.DEBUG):
-                    logger.warning(f"Post-sanitization check found {len(post_issues)} remaining issues (may be false positives):")
+                    logger.warning(
+                        f"Post-sanitization check found {len(post_issues)} remaining issues (may be false positives):"
+                    )
                     for issue in post_issues[:5]:
                         logger.warning(f"  - {issue}")
                     # Don't raise error - these might be false positives from validation
@@ -399,8 +444,9 @@ class H5ADBackend(BaseBackend):
             # Prepare AnnData for saving
             # FIX #5.3: Explicit deep copy of uns to ensure sanitization is preserved
             import copy
+
             adata_to_save = adata_sanitized.copy()
-            if hasattr(adata_sanitized, 'uns') and adata_sanitized.uns:
+            if hasattr(adata_sanitized, "uns") and adata_sanitized.uns:
                 # Force deep copy of uns to prevent shallow copy issues
                 adata_to_save.uns = copy.deepcopy(adata_sanitized.uns)
 

@@ -15,6 +15,7 @@ import scipy.sparse as spr
 from plotly.subplots import make_subplots
 
 from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
+from lobster.utils.deviance import calculate_deviance
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -374,6 +375,245 @@ print(f"Normalization complete (target_sum={{ target_sum }}, log1p transformed)"
         except Exception as e:
             logger.exception(f"Error in filtering and normalization: {e}")
             raise PreprocessingError(f"Filtering and normalization failed: {str(e)}")
+
+    def select_features_deviance(
+        self,
+        adata: anndata.AnnData,
+        n_top_genes: int = 4000,
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
+        """
+        Select highly deviant genes using binomial deviance from multinomial null model.
+
+        This method implements deviance-based feature selection following scry best practices.
+        Unlike traditional highly variable genes (HVG) methods that use log1p transformation
+        with arbitrary pseudo-counts, this approach:
+        - Works directly on raw counts (no normalization bias)
+        - Uses mathematically principled binomial deviance from multinomial null model
+        - Requires no arbitrary pseudo-count choices
+        - Provides closed-form computation
+
+        Recommended by:
+        - Townes et al. (2019): Feature selection and dimension reduction for single-cell RNA-Seq based on a multinomial model
+        - scry package documentation (Bioconductor)
+
+        Args:
+            adata: AnnData object (preferably with raw counts in adata.raw or adata.X)
+            n_top_genes: Number of top deviant genes to select (default: 4000)
+
+        Returns:
+            Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
+                - AnnData with 'highly_deviant' column in .var
+                - Statistics dictionary with feature selection metrics
+                - AnalysisStep IR for notebook export
+
+        Raises:
+            PreprocessingError: If feature selection fails
+
+        Example:
+            >>> service = PreprocessingService()
+            >>> adata_selected, stats, ir = service.select_features_deviance(adata, n_top_genes=4000)
+            >>> print(f"Selected {stats['n_features_selected']} highly deviant genes")
+        """
+        try:
+            logger.info(
+                f"Starting deviance-based feature selection (n_top_genes={n_top_genes})"
+            )
+
+            # Create working copy
+            adata_processed = adata.copy()
+            original_n_genes = adata_processed.n_vars
+
+            # Use raw counts if available (preferred), otherwise use current X
+            if adata_processed.raw is not None:
+                logger.info("Using raw counts from adata.raw for deviance calculation")
+                count_data = adata_processed.raw.X
+                gene_names = adata_processed.raw.var_names
+            else:
+                logger.info("Using adata.X for deviance calculation (no adata.raw found)")
+                count_data = adata_processed.X
+                gene_names = adata_processed.var_names
+
+            # Ensure we have count data (not log-transformed)
+            # Check if data looks like log-transformed (all values < 15 is suspicious)
+            if hasattr(count_data, "toarray"):
+                max_val = count_data.max()
+            else:
+                max_val = count_data.max()
+
+            if max_val < 15:
+                logger.warning(
+                    f"Data appears to be log-transformed (max value: {max_val:.2f}). "
+                    "Deviance-based feature selection works best on raw counts. "
+                    "Consider using adata.raw if available."
+                )
+
+            # Calculate deviance using shared utility
+            logger.info("Calculating binomial deviance from multinomial null model")
+            deviance_scores = calculate_deviance(count_data)
+
+            # Select top n_top_genes by deviance
+            n_features_to_select = min(n_top_genes, len(deviance_scores))
+            top_deviance_idx = np.argsort(deviance_scores)[::-1][:n_features_to_select]
+
+            # Mark selected features in adata.var
+            adata_processed.var["highly_deviant"] = False
+            adata_processed.var.loc[
+                gene_names[top_deviance_idx], "highly_deviant"
+            ] = True
+
+            # Store deviance scores
+            adata_processed.var["deviance_score"] = 0.0
+            adata_processed.var.loc[gene_names, "deviance_score"] = deviance_scores
+
+            # Calculate statistics
+            selected_genes = adata_processed.var[
+                adata_processed.var["highly_deviant"]
+            ].index.tolist()
+            n_selected = len(selected_genes)
+
+            # Compute percentile thresholds for context
+            deviance_threshold = (
+                deviance_scores[top_deviance_idx[-1]] if n_selected > 0 else 0.0
+            )
+            deviance_median = float(np.median(deviance_scores))
+            deviance_mean = float(np.mean(deviance_scores))
+
+            processing_stats = {
+                "analysis_type": "deviance_feature_selection",
+                "method": "binomial_deviance_multinomial_null",
+                "n_top_genes_requested": n_top_genes,
+                "n_features_selected": n_selected,
+                "original_n_genes": original_n_genes,
+                "selection_rate": (n_selected / original_n_genes) * 100,
+                "deviance_threshold": float(deviance_threshold),
+                "deviance_median": deviance_median,
+                "deviance_mean": deviance_mean,
+                "used_raw_counts": adata.raw is not None,
+                "top_10_genes": selected_genes[:10],
+            }
+
+            logger.info(
+                f"Deviance-based feature selection completed: {n_selected}/{original_n_genes} genes selected "
+                f"({processing_stats['selection_rate']:.1f}%)"
+            )
+
+            # Create IR for notebook export
+            ir = self._create_deviance_selection_ir(
+                n_top_genes=n_top_genes,
+            )
+
+            return adata_processed, processing_stats, ir
+
+        except Exception as e:
+            logger.exception(f"Error in deviance-based feature selection: {e}")
+            raise PreprocessingError(
+                f"Deviance-based feature selection failed: {str(e)}"
+            )
+
+    def _create_deviance_selection_ir(
+        self,
+        n_top_genes: int,
+    ) -> AnalysisStep:
+        """
+        Create Intermediate Representation for deviance-based feature selection.
+
+        Args:
+            n_top_genes: Number of top deviant genes to select
+
+        Returns:
+            AnalysisStep with complete code generation instructions
+        """
+        # Create parameter schema with Papermill flags
+        parameter_schema = {
+            "n_top_genes": ParameterSpec(
+                param_type="int",
+                papermill_injectable=True,
+                default_value=4000,
+                required=False,
+                validation_rule="n_top_genes > 0",
+                description="Number of top deviant genes to select",
+            ),
+        }
+
+        # Jinja2 template with parameter placeholders
+        code_template = """# Deviance-based feature selection
+# Works on raw counts without normalization bias
+# Implementation based on Townes et al. (2019)
+
+import numpy as np
+import scipy.sparse as spr
+
+# Helper function to calculate deviance
+def calculate_deviance(count_matrix):
+    if spr.issparse(count_matrix):
+        X = count_matrix.toarray()
+    else:
+        X = count_matrix.copy()
+
+    X = np.maximum(X, 1e-10)
+    cell_totals = X.sum(axis=1, keepdims=True)
+    gene_totals = X.sum(axis=0)
+    total_counts = X.sum()
+
+    p_null = gene_totals / total_counts
+    p_null = np.maximum(p_null, 1e-10)
+
+    expected = cell_totals @ p_null.reshape(1, -1)
+    expected = np.maximum(expected, 1e-10)
+
+    mask = X > 0
+    deviance_terms = np.zeros_like(X)
+    deviance_terms[mask] = 2 * X[mask] * np.log(X[mask] / expected[mask])
+
+    return deviance_terms.sum(axis=0)
+
+# Calculate binomial deviance from multinomial null model
+count_data = adata.raw.X if adata.raw is not None else adata.X
+deviance_scores = calculate_deviance(count_data)
+
+# Select top {{ n_top_genes }} genes by deviance
+n_features_to_select = min({{ n_top_genes }}, len(deviance_scores))
+top_deviance_idx = np.argsort(deviance_scores)[::-1][:n_features_to_select]
+
+# Mark selected features
+adata.var['highly_deviant'] = False
+gene_names = adata.raw.var_names if adata.raw is not None else adata.var_names
+adata.var.loc[gene_names[top_deviance_idx], 'highly_deviant'] = True
+
+# Store deviance scores
+adata.var['deviance_score'] = 0.0
+adata.var.loc[gene_names, 'deviance_score'] = deviance_scores
+
+# Display selection summary
+n_selected = adata.var['highly_deviant'].sum()
+print(f"Selected {n_selected} highly deviant genes out of {adata.n_vars} total genes")
+print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10]}")
+"""
+
+        # Create AnalysisStep
+        ir = AnalysisStep(
+            operation="deviance_feature_selection",
+            tool_name="select_features_deviance",
+            description=f"Select top {n_top_genes} highly deviant genes using binomial deviance from multinomial null model",
+            library="numpy",
+            code_template=code_template,
+            imports=["import numpy as np", "import scipy.sparse as spr"],
+            parameters={
+                "n_top_genes": n_top_genes,
+            },
+            parameter_schema=parameter_schema,
+            input_entities=["adata"],
+            output_entities=["adata"],
+            execution_context={
+                "method": "binomial_deviance_multinomial_null",
+                "reference": "Townes et al. (2019)",
+            },
+            validates_on_export=True,
+            requires_validation=False,
+        )
+
+        logger.debug(f"Created IR for deviance feature selection: {ir.operation}")
+        return ir
 
     def integrate_and_batch_correct(self, *args, **kwargs):
         """

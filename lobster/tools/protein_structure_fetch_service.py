@@ -104,9 +104,7 @@ class ProteinStructureFetchService:
                 logger.info(f"Downloading structure {pdb_id} from RCSB PDB...")
                 try:
                     structure_file_str = provider.download_structure(
-                        structure_id=pdb_id,
-                        output_path=str(cached_file),
-                        format=format
+                        structure_id=pdb_id, output_path=str(cached_file), format=format
                     )
                     structure_file = Path(structure_file_str)
                 except ValueError as e:
@@ -258,12 +256,13 @@ class ProteinStructureFetchService:
             stats = {
                 "genes_searched": len(genes),
                 "genes_with_structures": genes_with_structures,
-                "genes_with_structures_pct": (genes_with_structures / len(genes))
-                * 100,
+                "genes_with_structures_pct": (genes_with_structures / len(genes)) * 100,
                 "total_structures_found": total_structures_found,
-                "avg_structures_per_gene": total_structures_found / genes_with_structures
-                if genes_with_structures > 0
-                else 0,
+                "avg_structures_per_gene": (
+                    total_structures_found / genes_with_structures
+                    if genes_with_structures > 0
+                    else 0
+                ),
                 "organism": organism,
                 "analysis_type": "link_genes_to_structures",
             }
@@ -370,9 +369,7 @@ class ProteinStructureFetchService:
             citation=None,
         )
 
-    def _create_fetch_structure_ir(
-        self, pdb_id: str, format: str
-    ) -> AnalysisStep:
+    def _create_fetch_structure_ir(self, pdb_id: str, format: str) -> AnalysisStep:
         """Create Intermediate Representation for structure fetch operation."""
         parameter_schema = {
             "pdb_id": ParameterSpec(

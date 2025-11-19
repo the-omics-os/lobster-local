@@ -18,8 +18,8 @@ from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.tools.providers.structure_provider import (
     BaseStructureProvider,
     StructureMetadata,
-    StructureSource,
     StructureProviderCapability,
+    StructureSource,
 )
 
 logger = logging.getLogger(__name__)
@@ -117,9 +117,9 @@ class PDBProvider(BaseStructureProvider):
 
         # Session for connection pooling
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Lobster-Bioinformatics/1.0 (omics-os.com)"
-        })
+        self.session.headers.update(
+            {"User-Agent": "Lobster-Bioinformatics/1.0 (omics-os.com)"}
+        )
 
     @property
     def source(self) -> StructureSource:
@@ -177,29 +177,27 @@ class PDBProvider(BaseStructureProvider):
             "query": {
                 "type": "terminal",
                 "service": "text",
-                "parameters": {
-                    "value": query
-                }
+                "parameters": {"value": query},
             },
             "return_type": "entry",
             "request_options": {
                 "results_content_type": ["experimental"],
                 "return_all_hits": False,
-                "sort": [{"sort_by": "score", "direction": "desc"}]
-            }
+                "sort": [{"sort_by": "score", "direction": "desc"}],
+            },
         }
 
         try:
             self._rate_limit()
             response = self.session.post(
-                self.config.search_url,
-                json=search_payload,
-                timeout=10
+                self.config.search_url, json=search_payload, timeout=10
             )
             response.raise_for_status()
 
             data = response.json()
-            pdb_ids = [hit["identifier"] for hit in data.get("result_set", [])[:max_results]]
+            pdb_ids = [
+                hit["identifier"] for hit in data.get("result_set", [])[:max_results]
+            ]
 
             # Get metadata for each PDB ID
             results = []
@@ -219,7 +217,9 @@ class PDBProvider(BaseStructureProvider):
             logger.error(f"PDB search failed: {e}")
             return []
 
-    def get_structure_metadata(self, pdb_id: str, **kwargs) -> Optional[StructureMetadata]:
+    def get_structure_metadata(
+        self, pdb_id: str, **kwargs
+    ) -> Optional[StructureMetadata]:
         """
         Get detailed metadata for a PDB structure.
 
@@ -252,7 +252,9 @@ class PDBProvider(BaseStructureProvider):
                 chains=self._extract_chains(data),
                 ligands=self._extract_ligands(data),
                 deposition_date=data.get("rcsb_accession_info", {}).get("deposit_date"),
-                release_date=data.get("rcsb_accession_info", {}).get("initial_release_date"),
+                release_date=data.get("rcsb_accession_info", {}).get(
+                    "initial_release_date"
+                ),
                 authors=self._extract_authors(data),
                 publication_doi=self._extract_doi(data),
                 citation=self._extract_citation(data),
@@ -316,14 +318,12 @@ class PDBProvider(BaseStructureProvider):
         try:
             self._rate_limit()
             response = self.session.get(
-                url,
-                timeout=self.config.download_timeout,
-                stream=True
+                url, timeout=self.config.download_timeout, stream=True
             )
             response.raise_for_status()
 
             # Write file
-            with open(output_path_obj, 'wb') as f:
+            with open(output_path_obj, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
@@ -472,15 +472,17 @@ class PDBProvider(BaseStructureProvider):
                 title = cit.get("title", "")
                 journal = cit.get("journal_abbrev", "")
                 year = cit.get("year", "")
-                return f"{title} ({journal}, {year})" if all([title, journal, year]) else None
+                return (
+                    f"{title} ({journal}, {year})"
+                    if all([title, journal, year])
+                    else None
+                )
         except (TypeError, KeyError):
             pass
 
         return None
 
-    def search_by_filters(
-        self, filters: PDBSearchFilters
-    ) -> List[StructureMetadata]:
+    def search_by_filters(self, filters: PDBSearchFilters) -> List[StructureMetadata]:
         """
         Search PDB with advanced filters.
 
@@ -494,37 +496,43 @@ class PDBProvider(BaseStructureProvider):
         query_parts = []
 
         if filters.organism:
-            query_parts.append({
-                "type": "terminal",
-                "service": "text",
-                "parameters": {
-                    "attribute": "rcsb_entity_source_organism.scientific_name",
-                    "operator": "exact_match",
-                    "value": filters.organism
+            query_parts.append(
+                {
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "attribute": "rcsb_entity_source_organism.scientific_name",
+                        "operator": "exact_match",
+                        "value": filters.organism,
+                    },
                 }
-            })
+            )
 
         if filters.experiment_method:
-            query_parts.append({
-                "type": "terminal",
-                "service": "text",
-                "parameters": {
-                    "attribute": "exptl.method",
-                    "operator": "exact_match",
-                    "value": filters.experiment_method
+            query_parts.append(
+                {
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "attribute": "exptl.method",
+                        "operator": "exact_match",
+                        "value": filters.experiment_method,
+                    },
                 }
-            })
+            )
 
         if filters.resolution_max:
-            query_parts.append({
-                "type": "terminal",
-                "service": "text",
-                "parameters": {
-                    "attribute": "rcsb_entry_info.resolution_combined",
-                    "operator": "less_or_equal",
-                    "value": filters.resolution_max
+            query_parts.append(
+                {
+                    "type": "terminal",
+                    "service": "text",
+                    "parameters": {
+                        "attribute": "rcsb_entry_info.resolution_combined",
+                        "operator": "less_or_equal",
+                        "value": filters.resolution_max,
+                    },
                 }
-            })
+            )
 
         # Combine query parts
         if len(query_parts) == 0:
@@ -532,32 +540,29 @@ class PDBProvider(BaseStructureProvider):
         elif len(query_parts) == 1:
             query = query_parts[0]
         else:
-            query = {
-                "type": "group",
-                "logical_operator": "and",
-                "nodes": query_parts
-            }
+            query = {"type": "group", "logical_operator": "and", "nodes": query_parts}
 
         search_payload = {
             "query": query,
             "return_type": "entry",
             "request_options": {
                 "results_content_type": ["experimental"],
-                "return_all_hits": False
-            }
+                "return_all_hits": False,
+            },
         }
 
         try:
             self._rate_limit()
             response = self.session.post(
-                self.config.search_url,
-                json=search_payload,
-                timeout=10
+                self.config.search_url, json=search_payload, timeout=10
             )
             response.raise_for_status()
 
             data = response.json()
-            pdb_ids = [hit["identifier"] for hit in data.get("result_set", [])[:filters.max_results]]
+            pdb_ids = [
+                hit["identifier"]
+                for hit in data.get("result_set", [])[: filters.max_results]
+            ]
 
             # Get metadata for each
             results = []

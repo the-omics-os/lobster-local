@@ -279,15 +279,22 @@ class StructureAnalysisService:
                 dssp = DSSP(model, str(structure_file), dssp="mkdssp")
                 has_dssp = True
             except Exception as e:
-                logger.warning(
-                    f"DSSP not available ({e}). Using simplified analysis."
-                )
+                logger.warning(f"DSSP not available ({e}). Using simplified analysis.")
                 has_dssp = False
                 dssp = None
 
             if has_dssp and dssp:
                 # Extract DSSP results
-                ss_counts = {"H": 0, "B": 0, "E": 0, "G": 0, "I": 0, "T": 0, "S": 0, "-": 0}
+                ss_counts = {
+                    "H": 0,
+                    "B": 0,
+                    "E": 0,
+                    "G": 0,
+                    "I": 0,
+                    "T": 0,
+                    "S": 0,
+                    "-": 0,
+                }
                 residue_ss = []
 
                 for key in dssp:
@@ -322,9 +329,15 @@ class StructureAnalysisService:
 
             else:
                 # Simplified analysis without DSSP
-                chains = [self._get_chain(structure, chain_id)] if chain_id else list(model.get_chains())
+                chains = (
+                    [self._get_chain(structure, chain_id)]
+                    if chain_id
+                    else list(model.get_chains())
+                )
 
-                total_residues = sum(len(list(chain.get_residues())) for chain in chains)
+                total_residues = sum(
+                    len(list(chain.get_residues())) for chain in chains
+                )
 
                 results = {
                     "method": "simplified",
@@ -372,7 +385,7 @@ class StructureAnalysisService:
 
                 # Calculate radius of gyration
                 distances = np.linalg.norm(coords - center, axis=1)
-                radius_of_gyration = np.sqrt(np.mean(distances ** 2))
+                radius_of_gyration = np.sqrt(np.mean(distances**2))
 
                 chain_data.append(
                     {
@@ -387,7 +400,9 @@ class StructureAnalysisService:
         # Calculate overall geometric properties
         all_coords = np.array(all_coords)
         overall_center = np.mean(all_coords, axis=0)
-        overall_radius = np.sqrt(np.mean(np.linalg.norm(all_coords - overall_center, axis=1) ** 2))
+        overall_radius = np.sqrt(
+            np.mean(np.linalg.norm(all_coords - overall_center, axis=1) ** 2)
+        )
 
         results = {
             "chain_properties": chain_data,
@@ -443,9 +458,9 @@ class StructureAnalysisService:
             "summary_stats": {
                 "n_residues": len(residues),
                 "n_contacts": len(contacts),
-                "avg_contacts_per_residue": len(contacts) / len(residues)
-                if residues
-                else 0,
+                "avg_contacts_per_residue": (
+                    len(contacts) / len(residues) if residues else 0
+                ),
             },
         }
 

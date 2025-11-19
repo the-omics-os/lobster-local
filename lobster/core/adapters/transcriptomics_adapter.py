@@ -215,14 +215,16 @@ class TranscriptomicsAdapter(BaseAdapter):
             adata.uns["quantification_metadata"] = sanitize_value(metadata)
 
         # Store transpose decision (sanitized for H5AD compatibility)
-        adata.uns["transpose_info"] = sanitize_value({
-            "transpose_applied": True,
-            "transpose_reason": f"{metadata.get('quantification_tool', 'Quantification')} format specification (genes × samples)",
-            "original_shape": (n_rows, n_cols),  # tuple → will be converted to list
-            "final_shape": adata.shape,  # tuple → will be converted to list
-            "data_type": data_type,
-            "format_specific": True,  # Not heuristic
-        })
+        adata.uns["transpose_info"] = sanitize_value(
+            {
+                "transpose_applied": True,
+                "transpose_reason": f"{metadata.get('quantification_tool', 'Quantification')} format specification (genes × samples)",
+                "original_shape": (n_rows, n_cols),  # tuple → will be converted to list
+                "final_shape": adata.shape,  # tuple → will be converted to list
+                "data_type": data_type,
+                "format_specific": True,  # Not heuristic
+            }
+        )
 
         # Validate orientation
         self._validate_bulk_orientation(adata)

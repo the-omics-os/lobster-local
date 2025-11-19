@@ -13,6 +13,9 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import scanpy as sc
+from scipy.stats import pearsonr
+
+from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
 
 try:
     import scrublet as scr
@@ -21,6 +24,10 @@ try:
 except ImportError:
     SCRUBLET_AVAILABLE = False
     scr = None
+
+# Future CellTypist integration (scheduled Q2 2025)
+# import celltypist
+# from celltypist import models
 
 from lobster.utils.logger import get_logger
 
@@ -231,16 +238,16 @@ class EnhancedSingleCellService:
         self,
         adata: anndata.AnnData,
         reference_markers: Optional[Dict[str, List[str]]] = None,
-    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
         """
-        Annotate cell types based on marker genes.
+        Annotate cell types based on marker genes with per-cell confidence scoring.
 
         Args:
             adata: AnnData object with clustering results
             reference_markers: Optional custom marker genes dictionary
 
         Returns:
-            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with cell type annotations and stats
+            Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]: AnnData with cell type annotations, stats, and IR
 
         Raises:
             SingleCellError: If annotation fails
@@ -282,6 +289,30 @@ class EnhancedSingleCellService:
             cell_types = adata_annotated.obs["leiden"].map(cluster_to_celltype)
             adata_annotated.obs["cell_type"] = cell_types
 
+            # Calculate per-cell confidence scores
+            if markers:
+                logger.info("Calculating per-cell confidence scores...")
+                confidence, top3, entropy = self._calculate_per_cell_confidence(
+                    adata_annotated, markers, cell_type_col="cell_type"
+                )
+
+                adata_annotated.obs["cell_type_confidence"] = confidence
+                adata_annotated.obs["cell_type_top3"] = top3
+                adata_annotated.obs["annotation_entropy"] = entropy
+
+                # Quality flag: high confidence if score > 0.5 and entropy < 0.8
+                adata_annotated.obs["annotation_quality"] = [
+                    "high" if (c > 0.5 and e < 0.8) else "medium" if (c > 0.3 and e < 1.0) else "low"
+                    for c, e in zip(confidence, entropy)
+                ]
+
+                logger.info(
+                    f"Confidence scores: mean={float(np.mean(confidence)):.3f}, "
+                    f"median={float(np.median(confidence)):.3f}"
+                )
+            else:
+                logger.warning("No reference markers provided - skipping confidence scoring")
+
             # Calculate annotation statistics
             cell_type_counts = cell_types.value_counts().to_dict()
             n_cell_types = len(set(cell_types))
@@ -301,15 +332,300 @@ class EnhancedSingleCellService:
                 "marker_scores": cluster_annotations,
             }
 
+            # Update stats with confidence distribution if available
+            if markers:
+                annotation_stats["confidence_mean"] = float(np.mean(confidence))
+                annotation_stats["confidence_median"] = float(np.median(confidence))
+                annotation_stats["confidence_std"] = float(np.std(confidence))
+                annotation_stats["quality_distribution"] = {
+                    "high": int(np.sum(adata_annotated.obs["annotation_quality"] == "high")),
+                    "medium": int(np.sum(adata_annotated.obs["annotation_quality"] == "medium")),
+                    "low": int(np.sum(adata_annotated.obs["annotation_quality"] == "low")),
+                }
+
             logger.info(
                 f"Cell type annotation completed: {n_cell_types} cell types identified"
             )
 
-            return adata_annotated, annotation_stats
+            # Create IR for provenance tracking
+            ir = self._create_annotation_ir(reference_markers=markers)
+
+            return adata_annotated, annotation_stats, ir
 
         except Exception as e:
             logger.exception(f"Error in cell type annotation: {e}")
             raise SingleCellError(f"Cell type annotation failed: {str(e)}")
+
+    def _calculate_per_cell_confidence(
+        self,
+        adata: anndata.AnnData,
+        reference_markers: Dict[str, List[str]],
+        cell_type_col: str = "cell_type",
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Calculate per-cell confidence scores for cell type annotations.
+
+        Uses Pearson correlation between cell expression profiles and marker gene
+        signatures, plus Shannon entropy for top-3 predictions.
+
+        Args:
+            adata: AnnData with cell type annotations
+            reference_markers: Marker genes per cell type
+            cell_type_col: Column in .obs with cell type assignments
+
+        Returns:
+            Tuple of:
+            - confidence_scores: Array of max correlation scores (0-1)
+            - top3_predictions: Array of top-3 cell type predictions (str)
+            - entropy_scores: Array of Shannon entropy values (lower = more confident)
+        """
+        from scipy.stats import pearsonr, entropy as shannon_entropy
+
+        n_cells = adata.n_obs
+        confidence_scores = np.zeros(n_cells)
+        top3_predictions = np.empty(n_cells, dtype=object)
+        entropy_scores = np.zeros(n_cells)
+
+        # Build mean expression signatures for each cell type
+        cell_types = list(reference_markers.keys())
+        signatures = {}
+
+        for ct, markers in reference_markers.items():
+            # Filter markers present in dataset
+            valid_markers = [m for m in markers if m in adata.var_names]
+            if len(valid_markers) > 0:
+                # Mean expression of marker genes
+                marker_expr = adata[:, valid_markers].X
+                if hasattr(marker_expr, "toarray"):
+                    marker_expr = marker_expr.toarray()
+                signatures[ct] = np.mean(marker_expr, axis=1)
+            else:
+                signatures[ct] = np.zeros(n_cells)
+
+        # Calculate correlation for each cell against all signatures
+        for i in range(n_cells):
+            correlations = {}
+            for ct, sig in signatures.items():
+                if np.std(sig) > 0:  # Avoid division by zero
+                    # Pearson correlation between cell i and signature
+                    cell_expr = adata[i, :].X
+                    if hasattr(cell_expr, "toarray"):
+                        cell_expr = cell_expr.toarray().flatten()
+                    else:
+                        cell_expr = np.array(cell_expr).flatten()
+
+                    # Use only marker genes for correlation
+                    markers = [m for m in reference_markers[ct] if m in adata.var_names]
+                    if len(markers) > 0:
+                        marker_indices = [list(adata.var_names).index(m) for m in markers]
+                        cell_marker_expr = cell_expr[marker_indices]
+                        sig_marker_expr = sig[marker_indices] if len(sig.shape) > 0 else sig
+
+                        if np.std(cell_marker_expr) > 0:
+                            corr, _ = pearsonr(cell_marker_expr, sig_marker_expr)
+                            correlations[ct] = max(0, corr)  # Clip negative correlations
+                        else:
+                            correlations[ct] = 0.0
+                    else:
+                        correlations[ct] = 0.0
+                else:
+                    correlations[ct] = 0.0
+
+            # Get top 3 predictions
+            sorted_cts = sorted(correlations.items(), key=lambda x: x[1], reverse=True)
+            top3 = [ct for ct, _ in sorted_cts[:3]]
+            top3_scores = np.array([correlations[ct] for ct in top3])
+
+            # Confidence = max correlation
+            confidence_scores[i] = correlations[sorted_cts[0][0]] if len(sorted_cts) > 0 else 0.0
+
+            # Top 3 as comma-separated string
+            top3_predictions[i] = ",".join(top3)
+
+            # Shannon entropy of top-3 probabilities (normalized)
+            if np.sum(top3_scores) > 0:
+                top3_probs = top3_scores / np.sum(top3_scores)
+                entropy_scores[i] = shannon_entropy(top3_probs)
+            else:
+                entropy_scores[i] = np.log(3)  # Max entropy for uniform distribution
+
+        return confidence_scores, top3_predictions, entropy_scores
+
+    def _create_annotation_ir(
+        self, reference_markers: Optional[Dict[str, List[str]]] = None
+    ) -> AnalysisStep:
+        """Create AnalysisStep IR for cell type annotation."""
+
+        code_template = """
+# Cell type annotation with confidence scoring
+import scanpy as sc
+import numpy as np
+from scipy.stats import pearsonr, entropy
+
+# Define marker genes (user-provided or default)
+reference_markers = {{ reference_markers }}
+
+# Calculate mean expression per cluster
+cluster_col = 'leiden'  # or user-specified
+for cluster in adata.obs[cluster_col].unique():
+    cluster_mask = adata.obs[cluster_col] == cluster
+    cluster_cells = adata[cluster_mask]
+
+    # Score against each cell type
+    scores = {}
+    for cell_type, markers in reference_markers.items():
+        valid_markers = [m for m in markers if m in adata.var_names]
+        if valid_markers:
+            expr = cluster_cells[:, valid_markers].X.mean(axis=0)
+            scores[cell_type] = float(np.mean(expr))
+
+    # Assign cell type with highest score
+    best_type = max(scores, key=scores.get)
+    adata.obs.loc[cluster_mask, 'cell_type'] = best_type
+
+# Calculate per-cell confidence (Pearson correlation with signatures)
+# ... (confidence calculation logic) ...
+
+# Results stored in:
+# - adata.obs['cell_type']: Assigned cell type
+# - adata.obs['cell_type_confidence']: Correlation score (0-1)
+# - adata.obs['cell_type_top3']: Top 3 predictions
+# - adata.obs['annotation_entropy']: Shannon entropy
+# - adata.obs['annotation_quality']: 'high', 'medium', 'low'
+"""
+
+        return AnalysisStep(
+            operation="annotate_cell_types_with_confidence",
+            tool_name="EnhancedSingleCellService.annotate_cell_types",
+            description="Manual cell type annotation using marker genes with per-cell confidence scoring",
+            library="scanpy + scipy",
+            code_template=code_template,
+            imports=[
+                "import scanpy as sc",
+                "import numpy as np",
+                "from scipy.stats import pearsonr, entropy",
+            ],
+            parameters={"reference_markers": reference_markers},
+            parameter_schema={
+                "reference_markers": {
+                    "type": "dict",
+                    "description": "Marker genes per cell type",
+                    "required": False,
+                }
+            },
+            input_entities=["adata"],
+            output_entities=["adata_annotated"],
+        )
+
+
+    # =========================================================================
+    # TODO: CellTypist Integration (Scheduled Q2 2025)
+    # =========================================================================
+    #
+    # CellTypist is an industry-standard automated cell type annotation tool
+    # offering 45+ pretrained models across tissues, species, and disease states.
+    #
+    # INSTALLATION:
+    #   pip install celltypist
+    #
+    # MODEL MANAGEMENT:
+    #   import celltypist
+    #   celltypist.models.download_models()  # Download all models (~2GB)
+    #   celltypist.models.models_description()  # List available models
+    #
+    # CLASSIFICATION WORKFLOW:
+    #   1. Preprocess: Log-normalize counts (scanpy.pp.normalize_total + log1p)
+    #   2. Run: celltypist.annotate(adata, model='Immune_All_Low.pkl')
+    #   3. Post-process: Majority voting and over-clustering refinement
+    #
+    # INTEGRATION POINTS:
+    #   - Add automated annotation as alternative to marker-based approach
+    #   - Support custom model training from user-provided references
+    #   - Merge CellTypist predictions with manual annotations
+    #   - Compare confidence: manual marker scores vs CellTypist probabilities
+    #   - Enable ensemble strategies (marker + classifier consensus)
+    #
+    # PERFORMANCE CONSIDERATIONS:
+    #   - CellTypist requires log-normalized data (not raw counts)
+    #   - Models are tissue/dataset-specific (validate applicability)
+    #   - Majority voting requires over-clustering parameter tuning
+    #   - Large datasets (>100K cells) may need batch processing
+    #
+    # RECOMMENDED MODELS BY TISSUE:
+    #   - PBMC/Immune: Immune_All_Low.pkl, Immune_All_High.pkl
+    #   - Pancreas: Pancreas.pkl
+    #   - Lung: Healthy_COVID19_PBMC.pkl (if immune cells present)
+    #   - Custom: Train with celltypist.train(...)
+    #
+    # REFERENCES:
+    #   - Paper: Domínguez Conde et al., Science 2022
+    #   - Docs: https://www.celltypist.org/
+    #   - GitHub: https://github.com/Teichlab/celltypist
+    #
+    # SCHEDULED TIMELINE: Q2 2025
+    # =========================================================================
+
+    def annotate_with_celltypist(
+        self,
+        adata: anndata.AnnData,
+        model: str = "Immune_All_Low.pkl",
+        majority_voting: bool = False,
+        over_clustering: bool = False,
+        confidence_threshold: float = 0.5,
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], Any]:
+        """
+        Annotate cell types using CellTypist automated classification.
+
+        **Status: Not Yet Implemented - Scheduled for Q2 2025**
+
+        CellTypist uses pretrained logistic regression models to classify cells
+        based on their transcriptomic profiles. This method will provide automated
+        annotation as an alternative or complement to marker-based approaches.
+
+        Args:
+            adata: AnnData object with log-normalized expression data
+            model: Name of pretrained CellTypist model or path to custom model
+            majority_voting: Apply majority voting to refine predictions
+            over_clustering: Perform over-clustering before majority voting
+            confidence_threshold: Minimum confidence score for high-quality predictions
+
+        Returns:
+            Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
+                - AnnData with CellTypist predictions in .obs['celltypist_cell_type']
+                - Statistics dictionary with prediction confidence and quality metrics
+                - AnalysisStep for provenance tracking and notebook export
+
+        Raises:
+            NotImplementedError: This feature is scheduled for Q2 2025
+
+        Future Implementation Notes:
+            - Will add .obs['celltypist_cell_type'] (predicted cell types)
+            - Will add .obs['celltypist_conf_score'] (per-cell confidence)
+            - Will add .obs['celltypist_over_clustering'] (if enabled)
+            - Will support both pretrained and custom models
+            - Will integrate with existing marker-based annotation workflow
+            - Will provide comparison metrics vs manual annotations
+
+        Example Usage (Post-Implementation):
+            >>> service = EnhancedSingleCellService()
+            >>> adata_ann, stats, ir = service.annotate_with_celltypist(
+            ...     adata,
+            ...     model="Immune_All_Low.pkl",
+            ...     majority_voting=True,
+            ...     confidence_threshold=0.7
+            ... )
+            >>> print(stats['n_high_confidence'])  # cells above threshold
+        """
+        raise NotImplementedError(
+            "CellTypist integration is scheduled for Q2 2025. "
+            "This feature will enable automated cell type annotation using "
+            "pretrained classifier models. Use annotate_cell_types() for "
+            "marker-based annotation in the meantime.\n\n"
+            "Required dependencies (not yet installed):\n"
+            "  - celltypist>=1.6.0\n"
+            "  - Compatible pretrained models\n\n"
+            "For more information, see: https://www.celltypist.org/"
+        )
 
     def find_marker_genes(
         self,
@@ -318,9 +634,12 @@ class EnhancedSingleCellService:
         groups: Optional[List[str]] = None,
         method: str = "wilcoxon",
         n_genes: int = 25,
-    ) -> Tuple[anndata.AnnData, Dict[str, Any]]:
+        min_fold_change: float = 1.5,
+        min_pct: float = 0.25,
+        max_out_pct: float = 0.5,
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
         """
-        Find marker genes for clusters or cell types.
+        Find marker genes for clusters or cell types with specificity filtering.
 
         Args:
             adata: AnnData object with clustering/annotation results
@@ -328,9 +647,18 @@ class EnhancedSingleCellService:
             groups: Specific groups to analyze (None for all)
             method: Statistical method ('wilcoxon', 't-test', 'logreg')
             n_genes: Number of top marker genes per group
+            min_fold_change: Minimum fold-change threshold for filtering (default: 1.5).
+                Genes with fold-change < this value will be filtered out.
+            min_pct: Minimum percentage of cells expressing the gene in the group (default: 0.25).
+                Genes expressed in < 25% of in-group cells will be filtered out.
+            max_out_pct: Maximum percentage of cells expressing the gene in other groups (default: 0.5).
+                Genes expressed in > 50% of out-group cells will be filtered out (less specific).
 
         Returns:
-            Tuple[anndata.AnnData, Dict[str, Any]]: AnnData with marker gene results and stats
+            Tuple containing:
+            - AnnData: Object with .uns['rank_genes_groups'] containing filtered marker genes
+            - Dict: Statistics including filtering summary and genes per group
+            - AnalysisStep: Provenance IR for reproducibility
 
         Raises:
             SingleCellError: If marker gene detection fails
@@ -363,6 +691,41 @@ class EnhancedSingleCellService:
 
             sc.tl.rank_genes_groups(adata_markers, **scanpy_kwargs)
 
+            # Apply post-hoc filtering for marker specificity
+            logger.info(
+                f"Applying DEG filtering: min_fold_change={min_fold_change}, "
+                f"min_pct={min_pct}, max_out_pct={max_out_pct}"
+            )
+
+            # Store pre-filter counts
+            pre_filter_counts = {}
+            if 'names' in adata_markers.uns['rank_genes_groups']:
+                for group in adata_markers.uns['rank_genes_groups']['names'].dtype.names:
+                    pre_filter_counts[group] = len(adata_markers.uns['rank_genes_groups']['names'][group])
+
+            # Apply scanpy's built-in filtering
+            sc.tl.filter_rank_genes_groups(
+                adata_markers,
+                min_fold_change=min_fold_change,
+                min_in_group_fraction=min_pct,
+                max_out_group_fraction=max_out_pct,
+            )
+
+            # Store post-filter counts
+            post_filter_counts = {}
+            filtered_counts = {}
+            if 'names' in adata_markers.uns['rank_genes_groups']:
+                for group in adata_markers.uns['rank_genes_groups']['names'].dtype.names:
+                    # Count non-NaN entries (filtered genes are set to NaN)
+                    valid_genes = ~pd.isna(adata_markers.uns['rank_genes_groups']['names'][group])
+                    post_filter_counts[group] = int(np.sum(valid_genes))
+                    filtered_counts[group] = pre_filter_counts[group] - post_filter_counts[group]
+
+            logger.info(
+                f"Filtering complete: "
+                f"{sum(filtered_counts.values())} genes removed across all groups"
+            )
+
             # Extract marker genes into structured format
             marker_genes_df = self._extract_marker_genes(adata_markers, groupby)
 
@@ -375,6 +738,15 @@ class EnhancedSingleCellService:
                 "groupby": groupby,
                 "method": method,
                 "n_genes": n_genes,
+                "filtering_params": {
+                    "min_fold_change": min_fold_change,
+                    "min_pct": min_pct,
+                    "max_out_pct": max_out_pct,
+                },
+                "pre_filter_counts": pre_filter_counts,
+                "post_filter_counts": post_filter_counts,
+                "filtered_counts": filtered_counts,
+                "total_genes_filtered": sum(filtered_counts.values()),
                 "n_groups": n_groups,
                 "groups_analyzed": [str(g) for g in unique_groups],
                 "has_marker_results": "rank_genes_groups" in adata_markers.uns,
@@ -404,11 +776,113 @@ class EnhancedSingleCellService:
                 f"Marker gene analysis completed for {n_groups} groups using {method} method"
             )
 
-            return adata_markers, marker_stats
+            # Create IR for provenance tracking
+            ir = self._create_marker_genes_ir(
+                groupby=groupby,
+                method=method,
+                n_genes=n_genes,
+                min_fold_change=min_fold_change,
+                min_pct=min_pct,
+                max_out_pct=max_out_pct,
+            )
+
+            return adata_markers, marker_stats, ir
 
         except Exception as e:
             logger.exception(f"Error finding marker genes: {e}")
             raise SingleCellError(f"Marker gene analysis failed: {str(e)}")
+
+    def _create_marker_genes_ir(
+        self,
+        groupby: str,
+        method: str,
+        n_genes: int,
+        min_fold_change: float,
+        min_pct: float,
+        max_out_pct: float,
+    ) -> AnalysisStep:
+        """Create AnalysisStep IR for marker gene detection with filtering."""
+
+        code_template = """
+# Marker gene detection with specificity filtering
+import scanpy as sc
+
+# Step 1: Rank genes by differential expression
+sc.tl.rank_genes_groups(
+    adata,
+    groupby='{{ groupby }}',
+    method='{{ method }}',
+    n_genes={{ n_genes }},
+)
+
+# Step 2: Filter for marker specificity
+sc.tl.filter_rank_genes_groups(
+    adata,
+    min_fold_change={{ min_fold_change }},     # Upregulation threshold
+    min_in_group_fraction={{ min_pct }},       # In-group expression
+    max_out_group_fraction={{ max_out_pct }},  # Out-group expression
+)
+
+# Results stored in adata.uns['rank_genes_groups']:
+# - 'names': Filtered gene names per group
+# - 'scores': Test statistics
+# - 'pvals': P-values
+# - 'pvals_adj': Adjusted p-values
+# - 'logfoldchanges': Log2 fold-changes
+# Note: Filtered-out genes are set to NaN
+"""
+
+        return AnalysisStep(
+            operation="find_marker_genes_with_filtering",
+            tool_name="EnhancedSingleCellService.find_marker_genes",
+            description=f"Differential expression analysis with post-hoc filtering (method: {method})",
+            library="scanpy",
+            code_template=code_template,
+            imports=["import scanpy as sc"],
+            parameters={
+                "groupby": groupby,
+                "method": method,
+                "n_genes": n_genes,
+                "min_fold_change": min_fold_change,
+                "min_pct": min_pct,
+                "max_out_pct": max_out_pct,
+            },
+            parameter_schema={
+                "groupby": {
+                    "type": "string",
+                    "description": "Column in .obs for grouping",
+                    "default": "leiden",
+                },
+                "method": {
+                    "type": "string",
+                    "description": "DE test method",
+                    "default": "wilcoxon",
+                    "enum": ["wilcoxon", "t-test", "logreg"],
+                },
+                "n_genes": {
+                    "type": "integer",
+                    "description": "Number of top genes to rank",
+                    "default": 25,
+                },
+                "min_fold_change": {
+                    "type": "number",
+                    "description": "Minimum fold-change threshold",
+                    "default": 1.5,
+                },
+                "min_pct": {
+                    "type": "number",
+                    "description": "Minimum in-group expression fraction",
+                    "default": 0.25,
+                },
+                "max_out_pct": {
+                    "type": "number",
+                    "description": "Maximum out-group expression fraction",
+                    "default": 0.5,
+                },
+            },
+            input_entities=["adata"],
+            output_entities=["adata_with_markers"],
+        )
 
     def _calculate_marker_scores_from_adata(
         self, adata: anndata.AnnData, markers: Dict[str, List[str]]

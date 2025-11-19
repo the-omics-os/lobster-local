@@ -233,7 +233,9 @@ class ProteinStructureVisualizationExpertState(AgentState):
     structure_data: Dict[str, Any]  # Current protein structure data
     pdb_ids: List[str]  # List of PDB IDs being worked with
     visualization_settings: Dict[str, Any]  # ChimeraX visualization parameters
-    analysis_results: Dict[str, Any]  # Structure analysis results (RMSD, secondary structure, geometry)
+    analysis_results: Dict[
+        str, Any
+    ]  # Structure analysis results (RMSD, secondary structure, geometry)
     comparison_results: Dict[str, Any]  # RMSD comparison results between structures
     metadata: Dict[str, Any]  # PDB metadata (organism, resolution, experiment method)
     file_paths: List[str]  # Paths to structure files and visualizations

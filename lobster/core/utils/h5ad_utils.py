@@ -20,6 +20,7 @@ import numpy as np
 # Optional imports for comprehensive type support
 try:
     import pandas as pd
+
     HAS_PANDAS = True
 except ImportError:
     pd = None
@@ -47,9 +48,7 @@ def sanitize_key(key: Any, slash_replacement: str = "__") -> str:
 
 
 def sanitize_value(
-    obj: Any,
-    slash_replacement: str = "__",
-    strict: bool = False
+    obj: Any, slash_replacement: str = "__", strict: bool = False
 ) -> Any:
     """
     Sanitize a value for H5AD/HDF5 serialization.
@@ -104,7 +103,9 @@ def sanitize_value(
     # OrderedDict → dict (with recursive sanitization)
     if isinstance(obj, collections.OrderedDict):
         return {
-            sanitize_key(k, slash_replacement): sanitize_value(v, slash_replacement, strict)
+            sanitize_key(k, slash_replacement): sanitize_value(
+                v, slash_replacement, strict
+            )
             for k, v in obj.items()
         }
 
@@ -140,7 +141,7 @@ def sanitize_value(
         if isinstance(obj, pd.Timedelta):
             return str(obj)
         # pd.Period → string representation
-        if hasattr(pd, 'Period') and isinstance(obj, pd.Period):
+        if hasattr(pd, "Period") and isinstance(obj, pd.Period):
             return str(obj)
 
     # Datetime types → ISO format strings
@@ -162,7 +163,9 @@ def sanitize_value(
     # set/frozenset → numpy string array (via list conversion)
     # HDF5 cannot handle Python sets
     if isinstance(obj, (set, frozenset)):
-        sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in sorted(obj, key=str)]
+        sanitized_items = [
+            sanitize_value(v, slash_replacement, strict) for v in sorted(obj, key=str)
+        ]
         return np.array([str(item) for item in sanitized_items], dtype=str)
 
     # bool → string (HDF5 requirement - bool handling can be tricky)
@@ -179,7 +182,9 @@ def sanitize_value(
     # dict → dict (with recursive sanitization)
     if isinstance(obj, dict):
         return {
-            sanitize_key(k, slash_replacement): sanitize_value(v, slash_replacement, strict)
+            sanitize_key(k, slash_replacement): sanitize_value(
+                v, slash_replacement, strict
+            )
             for k, v in obj.items()
         }
 
@@ -203,10 +208,14 @@ def sanitize_value(
                     sanitized_dict = sanitize_value(item, slash_replacement, strict)
                     sanitized_items.append(str(sanitized_dict))
                 else:
-                    sanitized_items.append(str(sanitize_value(item, slash_replacement, strict)))
+                    sanitized_items.append(
+                        str(sanitize_value(item, slash_replacement, strict))
+                    )
         else:
             # No dicts - recursively sanitize items
-            sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in obj]
+            sanitized_items = [
+                sanitize_value(v, slash_replacement, strict) for v in obj
+            ]
 
         # Convert to numpy string array for H5AD compatibility
         return np.array([str(item) for item in sanitized_items], dtype=str)
@@ -248,9 +257,7 @@ def sanitize_value(
 
 
 def sanitize_dict(
-    data: Dict[str, Any],
-    slash_replacement: str = "__",
-    strict: bool = False
+    data: Dict[str, Any], slash_replacement: str = "__", strict: bool = False
 ) -> Dict[str, Any]:
     """
     Sanitize all keys and values in a dictionary for H5AD serialization.
@@ -312,7 +319,7 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
     # numpy arrays of strings are OK (used for sanitized lists)
     if isinstance(obj, np.ndarray):
         # String arrays are valid for H5AD
-        if obj.dtype.kind in ('U', 'S', 'O'):  # Unicode, bytes, or object string arrays
+        if obj.dtype.kind in ("U", "S", "O"):  # Unicode, bytes, or object string arrays
             return issues
         # Numeric arrays are valid
         if np.issubdtype(obj.dtype, np.number):

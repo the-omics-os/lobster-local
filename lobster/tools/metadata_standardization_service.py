@@ -11,28 +11,54 @@ Phase 3 implementation for research agent refactoring.
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 from pydantic import BaseModel, Field, ValidationError
 
 from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.core.schemas.metabolomics import MetabolomicsMetadataSchema
-from lobster.core.schemas.metagenomics import MetagenomicsMetadataSchema
 from lobster.core.schemas.transcriptomics import TranscriptomicsMetadataSchema
 from lobster.tools.metadata_validation_service import MetadataValidationService
 
 logger = logging.getLogger(__name__)
 
-# Proteomics schema (optional - premium feature)
+# Premium schemas (optional - premium features)
+# These schemas are only available in the full Lobster installation
+# Public lobster-local has transcriptomics only
+
+try:
+    from lobster.core.schemas.metabolomics import MetabolomicsMetadataSchema
+
+    METABOLOMICS_AVAILABLE = True
+except ImportError:
+    MetabolomicsMetadataSchema = None  # type: ignore
+    METABOLOMICS_AVAILABLE = False
+    logger.warning(
+        "Metabolomics schema not available - metabolomics metadata operations disabled"
+    )
+
+try:
+    from lobster.core.schemas.metagenomics import MetagenomicsMetadataSchema
+
+    METAGENOMICS_AVAILABLE = True
+except ImportError:
+    MetagenomicsMetadataSchema = None  # type: ignore
+    METAGENOMICS_AVAILABLE = False
+    logger.warning(
+        "Metagenomics schema not available - metagenomics metadata operations disabled"
+    )
+
 try:
     from lobster.core.schemas.proteomics import ProteomicsMetadataSchema
+
     PROTEOMICS_AVAILABLE = True
 except ImportError:
     ProteomicsMetadataSchema = None  # type: ignore
     PROTEOMICS_AVAILABLE = False
-    logger.warning("Proteomics schema not available - proteomics metadata operations disabled")
+    logger.warning(
+        "Proteomics schema not available - proteomics metadata operations disabled"
+    )
 
 
 # =============================================================================
@@ -48,16 +74,18 @@ class StandardizationResult(BaseModel):
         validation_errors: Dict mapping sample IDs to validation error messages
         field_coverage: Dict showing % of samples with each field
         warnings: List of warnings encountered during standardization
+
+    Note:
+        standardized_metadata can contain any of the available metadata schemas.
+        In the public lobster-local distribution, only TranscriptomicsMetadataSchema
+        is available. Premium features include additional schemas (metabolomics,
+        metagenomics, proteomics).
     """
 
-    standardized_metadata: List[
-        Union[
-            TranscriptomicsMetadataSchema,
-            ProteomicsMetadataSchema,
-            MetabolomicsMetadataSchema,
-            MetagenomicsMetadataSchema,
-        ]
-    ] = Field(default_factory=list, description="Standardized metadata schemas")
+    standardized_metadata: List[BaseModel] = Field(
+        default_factory=list,
+        description="Standardized metadata schemas (any available schema type)",
+    )
     validation_errors: Dict[str, str] = Field(
         default_factory=dict, description="Sample ID -> validation error message"
     )
@@ -128,24 +156,37 @@ class MetadataStandardizationService:
         self.metadata_validator = MetadataValidationService(data_manager)
 
         # Schema registry mapping modality types to Pydantic schemas
+        # Base schemas (always available)
         self.schema_registry = {
             "transcriptomics": TranscriptomicsMetadataSchema,
             "single_cell": TranscriptomicsMetadataSchema,
             "bulk_rna_seq": TranscriptomicsMetadataSchema,
-            "metabolomics": MetabolomicsMetadataSchema,
-            "metagenomics": MetagenomicsMetadataSchema,
-            "microbiome": MetagenomicsMetadataSchema,
         }
 
-        # Add proteomics schemas only if available (premium feature)
-        if PROTEOMICS_AVAILABLE:
-            self.schema_registry.update({
-                "proteomics": ProteomicsMetadataSchema,
-                "mass_spectrometry": ProteomicsMetadataSchema,
-                "affinity": ProteomicsMetadataSchema,
-            })
+        # Add premium schemas only if available (full Lobster installation)
+        if METABOLOMICS_AVAILABLE:
+            self.schema_registry["metabolomics"] = MetabolomicsMetadataSchema
+            logger.debug("Metabolomics schema registered")
 
-        logger.info("MetadataStandardizationService initialized")
+        if METAGENOMICS_AVAILABLE:
+            self.schema_registry["metagenomics"] = MetagenomicsMetadataSchema
+            self.schema_registry["microbiome"] = MetagenomicsMetadataSchema
+            logger.debug("Metagenomics schema registered")
+
+        if PROTEOMICS_AVAILABLE:
+            self.schema_registry.update(
+                {
+                    "proteomics": ProteomicsMetadataSchema,
+                    "mass_spectrometry": ProteomicsMetadataSchema,
+                    "affinity": ProteomicsMetadataSchema,
+                }
+            )
+            logger.debug("Proteomics schemas registered")
+
+        available_modalities = ", ".join(sorted(self.schema_registry.keys()))
+        logger.info(
+            f"MetadataStandardizationService initialized with modalities: {available_modalities}"
+        )
 
     def _create_metadata_ir(
         self,
@@ -243,12 +284,36 @@ class MetadataStandardizationService:
         if identifier not in self.data_manager.list_modalities():
             raise ValueError(f"Dataset '{identifier}' not found")
 
-        # Get schema class
+        # Get schema class - provide helpful error for unavailable premium schemas
         if target_schema not in self.schema_registry:
-            raise ValueError(
-                f"Unknown schema type '{target_schema}'. "
-                f"Available: {list(self.schema_registry.keys())}"
-            )
+            available_schemas = sorted(self.schema_registry.keys())
+            premium_schemas = []
+
+            # Check which premium schemas are unavailable
+            if target_schema in ["metabolomics"] and not METABOLOMICS_AVAILABLE:
+                premium_schemas.append("metabolomics")
+            if (
+                target_schema in ["metagenomics", "microbiome"]
+                and not METAGENOMICS_AVAILABLE
+            ):
+                premium_schemas.append("metagenomics/microbiome")
+            if (
+                target_schema in ["proteomics", "mass_spectrometry", "affinity"]
+                and not PROTEOMICS_AVAILABLE
+            ):
+                premium_schemas.append("proteomics")
+
+            if premium_schemas:
+                raise ValueError(
+                    f"Schema type '{target_schema}' is not available in this Lobster installation. "
+                    f"This is a premium feature requiring the full Lobster distribution. "
+                    f"Available schemas in this installation: {available_schemas}"
+                )
+            else:
+                raise ValueError(
+                    f"Unknown schema type '{target_schema}'. "
+                    f"Available schemas: {available_schemas}"
+                )
 
         schema_class = self.schema_registry[target_schema]
         adata = self.data_manager.get_modality(identifier)

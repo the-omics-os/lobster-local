@@ -16,17 +16,17 @@ from lobster.agents.state import ProteinStructureVisualizationExpertState
 from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.pymol_visualization_service import (
-    PyMOLVisualizationService,
-    PyMOLVisualizationError,
-)
 from lobster.tools.protein_structure_fetch_service import (
-    ProteinStructureFetchService,
     ProteinStructureFetchError,
+    ProteinStructureFetchService,
+)
+from lobster.tools.pymol_visualization_service import (
+    PyMOLVisualizationError,
+    PyMOLVisualizationService,
 )
 from lobster.tools.structure_analysis_service import (
-    StructureAnalysisService,
     StructureAnalysisError,
+    StructureAnalysisService,
 )
 from lobster.utils.logger import get_logger
 
@@ -130,14 +130,18 @@ def protein_structure_visualization_expert(
             metadata = structure_data["metadata"]
             structure_info = structure_data["structure_info"]
 
-            response = f"""✅ Successfully fetched protein structure: {pdb_id}
+            response = (
+                f"""✅ Successfully fetched protein structure: {pdb_id}
 
 📊 **Structure Information:**
 - PDB ID: {pdb_id}
 - Title: {metadata['title']}
 - Organism: {metadata['organism'] or 'Unknown'}
 - Experiment Method: {metadata['experiment_method']}
-- Resolution: {metadata['resolution']} Å""" if metadata['resolution'] else f"""- Experiment Method: {metadata['experiment_method']}"""
+- Resolution: {metadata['resolution']} Å"""
+                if metadata["resolution"]
+                else f"""- Experiment Method: {metadata['experiment_method']}"""
+            )
 
             if structure_info:
                 response += f"""
@@ -320,9 +324,7 @@ You can now fetch and visualize structures for specific genes:
             - visualize_with_pymol("1AKE", highlight_groups="15,42|red|sticks;100-120|blue|surface")  # Multiple highlight groups
         """
         try:
-            logger.info(
-                f"Creating PyMOL visualization for {pdb_id} (style: {style})"
-            )
+            logger.info(f"Creating PyMOL visualization for {pdb_id} (style: {style})")
 
             # Check if structure has been fetched
             modality_name = f"structure_{pdb_id}"
@@ -363,15 +365,19 @@ You can now fetch and visualize structures for specific genes:
 
             # Add highlight parameters if used
             if highlight_residues or highlight_groups:
-                log_params.update({
-                    "highlight_residues": highlight_residues,
-                    "highlight_color": highlight_color,
-                    "highlight_style": highlight_style,
-                    "highlight_groups": highlight_groups,
-                })
+                log_params.update(
+                    {
+                        "highlight_residues": highlight_residues,
+                        "highlight_color": highlight_color,
+                        "highlight_style": highlight_style,
+                        "highlight_groups": highlight_groups,
+                    }
+                )
 
             # Build description
-            desc_parts = [f"Created {mode} {style} visualization of {pdb_id} colored by {color_by}"]
+            desc_parts = [
+                f"Created {mode} {style} visualization of {pdb_id} colored by {color_by}"
+            ]
             if highlight_residues or highlight_groups:
                 desc_parts.append("with residue highlights")
             description = " ".join(desc_parts)
@@ -559,7 +565,9 @@ that can be customized and re-executed as needed.
             )
 
             # Store analysis results in DataManager
-            analysis_modality_name = f"analysis_{pdb_id}_{analysis_type}_{chain_id or 'all'}"
+            analysis_modality_name = (
+                f"analysis_{pdb_id}_{analysis_type}_{chain_id or 'all'}"
+            )
             data_manager.modalities[analysis_modality_name] = analysis_results
 
             # Log tool usage with IR
@@ -675,12 +683,8 @@ Results are stored in memory and can be accessed for further processing.
             if modality_name2 not in data_manager.modalities:
                 return f"❌ Structure {pdb_id2} not found. Please fetch it first."
 
-            structure_file1 = Path(
-                data_manager.modalities[modality_name1]["file_path"]
-            )
-            structure_file2 = Path(
-                data_manager.modalities[modality_name2]["file_path"]
-            )
+            structure_file1 = Path(data_manager.modalities[modality_name1]["file_path"])
+            structure_file2 = Path(data_manager.modalities[modality_name2]["file_path"])
 
             # Calculate RMSD
             rmsd_results, stats, ir = analysis_service.calculate_rmsd(

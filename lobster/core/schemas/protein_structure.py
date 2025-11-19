@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 from lobster.core.interfaces.validator import ValidationResult
+
 from .validation import FlexibleValidator
 
 
@@ -136,10 +137,12 @@ class ProteinStructureSchema:
         ignore_set = set(ignore_warnings) if ignore_warnings else set()
 
         # Add default ignored warnings for protein structures
-        ignore_set.update([
-            "Unexpected obs columns",
-            "Unexpected var columns",
-        ])
+        ignore_set.update(
+            [
+                "Unexpected obs columns",
+                "Unexpected var columns",
+            ]
+        )
 
         validator = FlexibleValidator(
             schema=schema,
@@ -151,7 +154,9 @@ class ProteinStructureSchema:
         validator.add_custom_rule("check_atom_counts", _validate_atom_counts)
         validator.add_custom_rule("check_coordinates", _validate_coordinates)
         validator.add_custom_rule("check_pdb_id", _validate_pdb_id)
-        validator.add_custom_rule("check_chain_consistency", _validate_chain_consistency)
+        validator.add_custom_rule(
+            "check_chain_consistency", _validate_chain_consistency
+        )
 
         return validator
 
@@ -196,6 +201,7 @@ def _validate_atom_counts(adata) -> "ValidationResult":
     # Check for missing coordinates
     if "spatial" in adata.obsm:
         import numpy as np
+
         coords = adata.obsm["spatial"]
         if np.isnan(coords).any():
             nan_count = np.isnan(coords).sum()
@@ -223,13 +229,9 @@ def _validate_coordinates(adata) -> "ValidationResult":
     max_range = np.max(coord_range)
 
     if max_range > 1000:  # > 1000 Å is unusual
-        result.add_warning(
-            f"Unusually large coordinate range: {max_range:.1f} Å"
-        )
+        result.add_warning(f"Unusually large coordinate range: {max_range:.1f} Å")
     elif max_range < 5:  # < 5 Å is very small
-        result.add_warning(
-            f"Unusually small coordinate range: {max_range:.1f} Å"
-        )
+        result.add_warning(f"Unusually small coordinate range: {max_range:.1f} Å")
     else:
         result.add_info(f"Coordinate range: {max_range:.1f} Å")
 
@@ -261,9 +263,7 @@ def _validate_pdb_id(adata) -> "ValidationResult":
                 f"PDB ID should be 4 characters, got '{pdb_id}' ({len(pdb_id)} chars)"
             )
         elif not pdb_id.isalnum():
-            result.add_warning(
-                f"PDB ID should be alphanumeric, got '{pdb_id}'"
-            )
+            result.add_warning(f"PDB ID should be alphanumeric, got '{pdb_id}'")
         else:
             result.add_info(f"Valid PDB ID: {pdb_id}")
     else:
@@ -288,7 +288,9 @@ def _validate_chain_consistency(adata) -> "ValidationResult":
     elif n_chains == 1:
         result.add_info(f"Single chain structure: {chains[0]}")
     else:
-        result.add_info(f"Multi-chain structure: {n_chains} chains ({', '.join(chains[:5])})")
+        result.add_info(
+            f"Multi-chain structure: {n_chains} chains ({', '.join(chains[:5])})"
+        )
 
         # Check chain sizes are reasonable
         chain_sizes = adata.obs["chain_id"].value_counts()
@@ -333,48 +335,35 @@ class ProteinStructureMetadataSchema(BaseModel):
 
     # Required fields
     pdb_id: str = Field(
-        ...,
-        description="PDB identifier (4 characters)",
-        min_length=4,
-        max_length=4
+        ..., description="PDB identifier (4 characters)", min_length=4, max_length=4
     )
 
     # Optional core fields
     experiment_method: Optional[str] = Field(
-        None,
-        description="Experimental method (X-RAY, NMR, CRYO-EM, PREDICTED)"
+        None, description="Experimental method (X-RAY, NMR, CRYO-EM, PREDICTED)"
     )
     resolution: Optional[float] = Field(
-        None,
-        description="Resolution in Angstroms",
-        gt=0.0,
-        lt=100.0
+        None, description="Resolution in Angstroms", gt=0.0, lt=100.0
     )
-    organism: Optional[str] = Field(
-        None,
-        description="Source organism"
-    )
+    organism: Optional[str] = Field(None, description="Source organism")
     chains: Optional[List[str]] = Field(
-        default_factory=list,
-        description="List of chain identifiers"
+        default_factory=list, description="List of chain identifiers"
     )
     ligands: Optional[List[str]] = Field(
-        default_factory=list,
-        description="List of bound ligands"
+        default_factory=list, description="List of bound ligands"
     )
     deposition_date: Optional[str] = Field(
-        None,
-        description="PDB deposition date (YYYY-MM-DD)"
+        None, description="PDB deposition date (YYYY-MM-DD)"
     )
 
     # Flexible additional metadata
     additional_metadata: Optional[Dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Additional custom metadata fields"
+        default_factory=dict, description="Additional custom metadata fields"
     )
 
     class Config:
         """Pydantic configuration."""
+
         json_schema_extra = {
             "example": {
                 "pdb_id": "6FQF",
@@ -387,8 +376,8 @@ class ProteinStructureMetadataSchema(BaseModel):
                 "additional_metadata": {
                     "r_factor": 0.178,
                     "r_free": 0.215,
-                    "space_group": "P 21 21 21"
-                }
+                    "space_group": "P 21 21 21",
+                },
             }
         }
 

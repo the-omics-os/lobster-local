@@ -21,7 +21,7 @@ class ModelProvider(Enum):
     """Supported model providers."""
 
     BEDROCK_ANTHROPIC = "bedrock_anthropic"
-    OPENAI = "openai" #TODO
+    OPENAI = "openai"  # TODO
     BEDROCK_META = "bedrock_meta"
     BEDROCK_AMAZON = "bedrock_amazon"
 
@@ -449,7 +449,7 @@ class LobsterAgentConfigurator:
                     ),
                 }
             )
-        elif model_config.provider == ModelProvider.OPENAI: #TODO
+        elif model_config.provider == ModelProvider.OPENAI:  # TODO
             params.update(
                 {
                     "openai_api_key": os.environ.get("OPENAI_API_KEY"),

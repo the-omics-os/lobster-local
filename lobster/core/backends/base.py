@@ -11,7 +11,6 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-
 from lobster.core.interfaces.backend import IDataBackend
 
 logger = logging.getLogger(__name__)
