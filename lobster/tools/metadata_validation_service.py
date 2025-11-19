@@ -14,6 +14,7 @@ in a future release.
 
 import json
 import re
+from enum import Enum
 from typing import Any, Dict, List, Optional
 
 from langchain_aws import ChatBedrockConverse
@@ -23,6 +24,13 @@ from lobster.config.settings import get_settings
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class ValidationSeverity(str, Enum):
+    """Validation result severity levels."""
+    CRITICAL = "critical"    # Blocks queueing (corrupted/unparseable metadata)
+    WARNING = "warning"      # Allows queueing with warnings (missing optional fields)
+    CLEAN = "clean"          # No issues, proceed normally
 
 
 class MetadataValidationConfig(BaseModel):
@@ -59,6 +67,14 @@ class MetadataValidationConfig(BaseModel):
     warnings: List[str] = Field(
         default_factory=list,
         description="Any warnings or issues found during validation",
+    )
+    severity: ValidationSeverity = Field(
+        default=ValidationSeverity.WARNING,
+        description="Severity level: CRITICAL blocks queueing, WARNING allows with notice, CLEAN means validated"
+    )
+    blocking_issues: List[str] = Field(
+        default_factory=list,
+        description="Critical issues that prevent queueing (e.g., corrupted metadata, unparseable structure)"
     )
 
     @validator("recommendation")
@@ -399,6 +415,8 @@ IMPORTANT:
                     "total_samples": sample_count,
                     "field_coverage": {},
                     "recommendation": "manual_check",
+                    "severity": ValidationSeverity.WARNING,
+                    "blocking_issues": [],
                     "confidence_score": 0.0,
                     "warnings": [
                         "LLM response parsing failed - manual validation recommended"
@@ -418,6 +436,39 @@ IMPORTANT:
 
             # Create MetadataValidationConfig object
             validation_config = MetadataValidationConfig(**validation_dict)
+
+            # Assign severity level based on recommendation and validation results
+            recommendation = validation_config.recommendation
+            total_samples = validation_config.total_samples
+            field_coverage = validation_config.field_coverage
+
+            # Determine severity and blocking issues
+            if total_samples == 0:
+                # No samples found - critical issue
+                validation_config.severity = ValidationSeverity.CRITICAL
+                validation_config.blocking_issues = ["No samples found in dataset"]
+            elif recommendation == "proceed":
+                # All required fields present with good coverage
+                validation_config.severity = ValidationSeverity.CLEAN
+                validation_config.blocking_issues = []
+            elif recommendation == "skip":
+                # Check if it's a critical structural issue or just missing optional fields
+                missing_fields = validation_config.missing_fields
+                has_low_coverage = any(coverage < 50 for coverage in field_coverage.values())
+
+                # If all fields are missing or extremely low coverage, it's likely corrupted
+                if len(missing_fields) == len(required_fields) or has_low_coverage:
+                    # Could be corrupted metadata, but still allow queueing with warning
+                    validation_config.severity = ValidationSeverity.WARNING
+                    validation_config.blocking_issues = []
+                else:
+                    # Missing optional fields - allow with warning
+                    validation_config.severity = ValidationSeverity.WARNING
+                    validation_config.blocking_issues = []
+            else:  # manual_check
+                # Some fields present but needs review - allow with warning
+                validation_config.severity = ValidationSeverity.WARNING
+                validation_config.blocking_issues = []
 
             # Post-process to ensure required values are checked if specified
             if required_values and validation_config.has_required_fields:
@@ -461,6 +512,8 @@ IMPORTANT:
                 total_samples=metadata.get("n_samples", 0),
                 field_coverage={},
                 recommendation="manual_check",
+                severity=ValidationSeverity.WARNING,
+                blocking_issues=[],
                 confidence_score=0.0,
                 warnings=[f"Validation error: {str(e)}"],
             )

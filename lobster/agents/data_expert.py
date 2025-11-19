@@ -19,7 +19,7 @@ from lobster.agents.state import DataExpertState
 from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.core.schemas.download_queue import DownloadStatus
+from lobster.core.schemas.download_queue import DownloadStatus, ValidationStatus
 from lobster.tools.download_orchestrator import DownloadOrchestrator
 from lobster.tools.geo_download_service import GEODownloadService
 from lobster.utils.logger import get_logger
@@ -78,6 +78,7 @@ def data_expert(
     def execute_download_from_queue(
         entry_id: str,
         concatenation_strategy: str = "auto",
+        force_download: bool = False,
     ) -> str:
         """
         Execute download from queue entry prepared by research_agent.
@@ -96,6 +97,7 @@ def data_expert(
                   * BOTH criteria must pass (CV ≤ 20% AND ratio ≤ 1.5x) for INTERSECTION
                 - 'intersection': Keep only genes present in ALL samples (inner join)
                 - 'union': Include all genes from all samples (outer join with zero-filling)
+            force_download: If True, proceed even if validation has warnings (default: False)
 
         Returns:
             Download report with modality name, status, and statistics
@@ -113,6 +115,46 @@ def data_expert(
                 )
 
             entry = data_manager.download_queue.get_entry(entry_id)
+
+            # Check validation status and warn if issues detected
+            if (
+                hasattr(entry, 'validation_status') and
+                entry.validation_status == ValidationStatus.VALIDATED_WITH_WARNINGS and
+                not force_download
+            ):
+                warnings = []
+                if entry.validation_result:
+                    warnings = entry.validation_result.get('warnings', [])
+
+                # Get strategy info
+                strategy_info = ""
+                if entry.recommended_strategy:
+                    strategy_info = f"""
+**Recommended Download Strategy:**
+- Strategy: {entry.recommended_strategy.strategy_name}
+- Confidence: {entry.recommended_strategy.confidence:.2f}
+- Rationale: {entry.recommended_strategy.rationale}
+- Concatenation: {entry.recommended_strategy.concatenation_strategy}
+"""
+
+                warning_msg = f"""
+⚠️ **Dataset has validation warnings but is downloadable**
+
+Entry ID: {entry_id}
+Dataset: {entry.dataset_id}
+
+**Validation Warnings:**
+{chr(10).join(f"  • {w}" for w in warnings[:5])}
+{f"  ... and {len(warnings) - 5} more warnings" if len(warnings) > 5 else ""}
+{strategy_info}
+
+**Options:**
+1. **Proceed with download**: execute_download_from_queue(entry_id="{entry_id}", force_download=True)
+2. **Skip dataset**: Look for alternative datasets with cleaner validation
+
+**Recommendation:** Review warnings above. If warnings are acceptable (e.g., missing optional metadata fields), proceed with force_download=True.
+"""
+                return warning_msg
 
             # Verify entry is downloadable
             if entry.status == DownloadStatus.COMPLETED:
@@ -136,10 +178,10 @@ def data_expert(
             )
 
             # 3. DETERMINE DOWNLOAD STRATEGY
-            # Use recommended_strategy from entry (if set by data_expert_assistant)
+            # Use recommended_strategy from entry (if set by research_agent)
             # Otherwise use default strategy based on available URLs
             if entry.recommended_strategy:
-                download_strategy = entry.recommended_strategy.strategy_type
+                download_strategy = entry.recommended_strategy.strategy_name
                 logger.info(f"Using recommended strategy: {download_strategy}")
             else:
                 # Auto-determine strategy from available URLs
@@ -213,6 +255,7 @@ def data_expert(
                         "dataset_id": entry.dataset_id,
                         "strategy": download_strategy,
                         "concatenation_strategy": concatenation_strategy,
+                        "force_download": force_download,
                         "modality_name": modality_name,
                         "n_obs": result_adata.n_obs,
                         "n_vars": result_adata.n_vars,
@@ -229,15 +272,23 @@ def data_expert(
                 logger.info(f"Download complete: {entry.dataset_id} → {modality_name}")
 
                 # 7. RETURN SUCCESS REPORT
-                response = f"## Download Complete: {entry.dataset_id}\n\n"
-                response += "✅ **Status**: Downloaded successfully\n"
-                response += f"- **Modality name**: `{modality_name}`\n"
-                response += f"- **Samples**: {result_adata.n_obs}\n"
-                response += f"- **Features**: {result_adata.n_vars}\n"
-                response += f"- **Strategy**: {download_strategy}\n"
-                response += f"- **Concatenation**: {concatenation_strategy}\n"
-                response += f"- **Queue entry**: `{entry_id}` (COMPLETED)\n"
-                response += f"\n**Available for analysis**: Use `get_modality_overview('{modality_name}')` to inspect\n"
+                strategy_used = entry.recommended_strategy.strategy_name if entry.recommended_strategy else "auto-detected"
+
+                response = f"""
+✅ **Download completed successfully**
+
+Dataset ID: {entry.dataset_id}
+Entry ID: {entry_id}
+Modality Name: {modality_name}
+Strategy Used: {strategy_used}
+Status: {entry.status.value if hasattr(entry.status, 'value') else entry.status}
+
+Samples: {result_adata.n_obs}
+Features: {result_adata.n_vars}
+Concatenation: {concatenation_strategy}
+
+You can now analyze this dataset using the single-cell or bulk RNA-seq tools.
+"""
 
                 return response
 
@@ -1127,6 +1178,13 @@ Data Expert: Local data operations and modality management specialist.
 
 **Core Capabilities**: Execute downloads from pre-validated queue entries (created by research_agent), load local files, manage modalities (list/inspect/remove/validate), concatenate samples, retry failed downloads, provide data summaries, workspace management.
 
+**Queue-Based Download Workflow:**
+- Execute downloads from queue entries created by research_agent
+- Use `queue_entry.recommended_strategy` for optimal download approach (pre-validated by AI)
+- Check `queue_entry.validation_status` and warn users if validation had issues
+- Allow `force_download=True` parameter to override warnings after user review
+- Never guess or create queue entries (research_agent's responsibility)
+
 **ZERO ONLINE ACCESS**: NO internet, NO GEO/SRA metadata fetching, NO URL extraction, NO external API calls. ALL online operations delegated to research_agent.
 
 **Not Responsible For**: Metadata validation (research_agent), dataset discovery (research_agent), URL extraction (research_agent), omics analysis (specialist agents), visualizations (visualization_expert).
@@ -1213,6 +1271,25 @@ On failure: Update queue to FAILED with full error log, suggest retry with diffe
 Never make up GEO accessions, dataset IDs, file paths, or modality names. Always verify what exists before referencing it.
 </Critical_Rules>
 
+## Validation Awareness
+
+**Before downloading, check validation status:**
+- `VALIDATED_CLEAN`: Proceed normally, no warnings needed
+- `VALIDATED_WITH_WARNINGS`: Display warnings and require user confirmation (force_download=True)
+- `VALIDATION_FAILED`: Critical failure, but queued (rare edge case)
+
+**Warning display format:**
+- Show up to 5 warnings with "..." for additional warnings
+- Display recommended strategy (name, confidence, rationale)
+- Provide clear options: proceed with force_download=True OR skip dataset
+- Log force_download decisions in provenance for audit trail
+
+**Strategy handling:**
+- Recommended strategies come from research_agent's AI analysis (high confidence)
+- Strategies include rationale explaining why they were chosen
+- Fallback to auto-detection only if `recommended_strategy=None` (backward compatibility)
+- Trust the recommended strategy - it's based on comprehensive metadata analysis
+
 <Your_11_Data_Tools>
 
 You have **11 specialized tools** organized into 3 categories:
@@ -1220,9 +1297,16 @@ You have **11 specialized tools** organized into 3 categories:
 ## 🔄 Download & Queue Tools (4 tools)
 
 1. **`execute_download_from_queue`** - Your ONLY download mechanism
-   - WHEN: After research_agent validates and queues a dataset
-   - USE FOR: Executing downloads from PENDING queue entries
-   - CRITICAL: Never attempt direct downloads - always use queue
+   - Entry ID format: `queue_GSEXXXXXX_XXXXXXXX`
+   - Parameters:
+     - `entry_id` (required): Queue entry identifier
+     - `force_download` (optional, default=False): Override validation warnings
+   - Pre-download checks:
+     - Validation status: warn if VALIDATED_WITH_WARNINGS and force_download=False
+     - Entry status: must be PENDING or FAILED (not IN_PROGRESS or COMPLETED)
+   - Uses `queue_entry.recommended_strategy` for download execution
+   - Updates queue status during download (IN_PROGRESS → COMPLETED/FAILED)
+   - Returns modality name for downstream analysis
 
 2. **`retry_failed_download`** - Recovery for failed downloads
    - WHEN: After get_queue_status shows FAILED entries

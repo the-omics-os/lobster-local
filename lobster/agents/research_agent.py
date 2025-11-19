@@ -20,11 +20,15 @@ from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.core.schemas.download_queue import (
     DownloadQueueEntry,
     DownloadStatus,
+    StrategyConfig,
+    ValidationStatus,
 )
 from lobster.tools.content_access_service import ContentAccessService
+from lobster.agents.data_expert_assistant import DataExpertAssistant
 from lobster.tools.metadata_validation_service import (
     MetadataValidationConfig,
     MetadataValidationService,
+    ValidationSeverity,
 )
 
 # Phase 1: New providers for two-tier access
@@ -797,11 +801,18 @@ def research_agent(
                             f"Metadata validation completed for {accession}: {validation_result.recommendation}"
                         )
 
-                        # NEW: Add to download queue if validation passed and add_to_queue=True
-                        if (
-                            validation_result.recommendation == "proceed"
-                            and add_to_queue
-                        ):
+                        # NEW: Relax validation gate - only block CRITICAL severity
+                        severity = getattr(validation_result, 'severity', ValidationSeverity.WARNING)
+
+                        if add_to_queue and severity != ValidationSeverity.CRITICAL:
+                            # Determine validation status for queue entry
+                            if validation_result.recommendation == "proceed":
+                                validation_status = ValidationStatus.VALIDATED_CLEAN
+                            elif validation_result.recommendation == "skip":
+                                validation_status = ValidationStatus.VALIDATION_FAILED
+                            else:  # manual_check
+                                validation_status = ValidationStatus.VALIDATED_WITH_WARNINGS
+
                             try:
                                 # Import GEOProvider
                                 from lobster.tools.providers.geo_provider import (
@@ -819,6 +830,35 @@ def research_agent(
                                         f"URL extraction warning for {accession}: {url_data['error']}"
                                     )
 
+                                # NEW: Extract strategy using data_expert_assistant
+                                logger.info(f"Extracting download strategy for {accession}")
+                                assistant = DataExpertAssistant()
+
+                                # Extract file config using LLM (~2-5s)
+                                try:
+                                    strategy_config = assistant.extract_strategy_config(metadata, accession)
+
+                                    if strategy_config:
+                                        # Analyze and generate recommendations
+                                        analysis = assistant.analyze_download_strategy(strategy_config, metadata)
+
+                                        # Convert to download_queue.StrategyConfig
+                                        recommended_strategy = _create_recommended_strategy(
+                                            strategy_config, analysis, metadata, url_data
+                                        )
+                                        logger.info(
+                                            f"Strategy recommendation for {accession}: {recommended_strategy.strategy_name} "
+                                            f"(confidence: {recommended_strategy.confidence:.2f})"
+                                        )
+                                    else:
+                                        # Fallback: URL-based strategy
+                                        logger.warning(f"LLM strategy extraction failed for {accession}, using URL-based fallback")
+                                        recommended_strategy = _create_fallback_strategy(url_data, metadata)
+                                except Exception as e:
+                                    # Graceful fallback on any error
+                                    logger.warning(f"Strategy extraction error for {accession}: {e}, using URL-based fallback")
+                                    recommended_strategy = _create_fallback_strategy(url_data, metadata)
+
                                 # Create DownloadQueueEntry
                                 entry_id = f"queue_{accession}_{uuid.uuid4().hex[:8]}"
 
@@ -831,6 +871,7 @@ def research_agent(
                                     # Metadata from validation
                                     metadata=metadata,
                                     validation_result=validation_result.__dict__,
+                                    validation_status=validation_status,  # NEW
                                     # URLs from GEOProvider
                                     matrix_url=url_data.get("matrix_url"),
                                     raw_urls=url_data.get("raw_urls", []),
@@ -841,8 +882,8 @@ def research_agent(
                                     # Timestamps
                                     created_at=datetime.now(),
                                     updated_at=datetime.now(),
-                                    # Initially empty (filled by data_expert_assistant later)
-                                    recommended_strategy=None,
+                                    # Strategy recommendation from data_expert_assistant
+                                    recommended_strategy=recommended_strategy,  # NEW (no longer None!)
                                     downloaded_by=None,
                                     modality_name=None,
                                     error_log=[],
@@ -855,16 +896,27 @@ def research_agent(
                                     f"Added {accession} to download queue with entry_id: {entry_id}"
                                 )
 
-                                # Enhanced response
+                                # Enhanced response with strategy information
                                 report += "\n\n## Download Queue\n\n"
-                                report += "✅ Dataset added to download queue:\n"
+                                report += f"✅ Dataset '{accession}' validated and added to queue\n"
                                 report += f"- **Entry ID**: `{entry_id}`\n"
-                                report += "- **Status**: PENDING\n"
+                                report += f"- **Validation status**: {validation_status.value}\n"
+                                report += f"- **Recommended strategy**: {recommended_strategy.strategy_name} (confidence: {recommended_strategy.confidence:.2f})\n"
+                                report += f"- **Rationale**: {recommended_strategy.rationale}\n"
                                 report += f"- **Files found**: {url_data.get('file_count', 0)}\n"
                                 if url_data.get("matrix_url"):
                                     report += "- **Matrix file**: Available\n"
                                 if url_data.get("supplementary_urls"):
                                     report += f"- **Supplementary files**: {len(url_data['supplementary_urls'])} file(s)\n"
+
+                                # Add warnings if validation status has warnings
+                                if validation_status == ValidationStatus.VALIDATED_WITH_WARNINGS:
+                                    warnings = getattr(validation_result, 'warnings', [])
+                                    if warnings:
+                                        report += f"\n⚠️ **Warnings**:\n"
+                                        for warning in warnings[:3]:  # Show max 3 warnings
+                                            report += f"  - {warning}\n"
+
                                 report += "\n**Next steps**:\n"
                                 report += "1. Supervisor can query queue: `get_content_from_workspace(workspace='download_queue')`\n"
                                 report += f"2. Hand off to data_expert with entry_id: `{entry_id}`\n"
@@ -1531,6 +1583,141 @@ Could not extract content for: {identifier}
     # Create workspace content retrieval tool using shared factory (Phase 7+: deduplication)
     get_content_from_workspace = create_get_content_from_workspace_tool(data_manager)
 
+    # ============================================================
+    # Helper Methods: Strategy Mapping
+    # ============================================================
+
+    def _create_recommended_strategy(
+        strategy_config,  # data_expert_assistant.StrategyConfig
+        analysis: dict,
+        metadata: dict,
+        url_data: dict,
+    ) -> StrategyConfig:
+        """
+        Convert data_expert_assistant analysis to download_queue.StrategyConfig.
+
+        Args:
+            strategy_config: File-level strategy from extract_strategy_config()
+            analysis: Analysis dict from analyze_download_strategy()
+            metadata: GEO metadata dictionary
+            url_data: URLs from GEOProvider.get_download_urls()
+
+        Returns:
+            StrategyConfig for DownloadQueueEntry.recommended_strategy
+        """
+        # Determine primary strategy based on file availability
+        if analysis.get("has_h5ad", False):
+            strategy_name = "H5_FIRST"
+            confidence = 0.95
+            rationale = f"H5AD file available with optimal single-file structure ({url_data.get('file_count', 0)} total files)"
+        elif analysis.get("has_processed_matrix", False):
+            strategy_name = "MATRIX_FIRST"
+            confidence = 0.85
+            rationale = f"Processed matrix available ({strategy_config.processed_matrix_name if hasattr(strategy_config, 'processed_matrix_name') else 'unknown'})"
+        elif analysis.get("has_raw_matrix", False) or analysis.get(
+            "raw_data_available", False
+        ):
+            strategy_name = "SAMPLES_FIRST"
+            confidence = 0.75
+            rationale = "Raw data available for full preprocessing control"
+        else:
+            strategy_name = "AUTO"
+            confidence = 0.50
+            rationale = "No clear optimal strategy detected, using auto-detection"
+
+        # Determine concatenation strategy based on sample count
+        n_samples = metadata.get("n_samples", metadata.get("sample_count", 0))
+        platform = metadata.get("platform", "")
+
+        if n_samples < 20 and platform:
+            concatenation_strategy = "union"
+            use_intersecting_genes_only = False
+        elif n_samples >= 20:
+            concatenation_strategy = "intersection"
+            use_intersecting_genes_only = True
+        else:
+            concatenation_strategy = "auto"
+            use_intersecting_genes_only = None
+
+        # Determine execution parameters based on file count
+        file_count = url_data.get("file_count", 0)
+        if file_count > 100:
+            timeout = 7200  # 2 hours
+            max_retries = 5
+        elif file_count > 20:
+            timeout = 3600  # 1 hour
+            max_retries = 3
+        else:
+            timeout = 1800  # 30 minutes
+            max_retries = 3
+
+        return StrategyConfig(
+            strategy_name=strategy_name,
+            concatenation_strategy=concatenation_strategy,
+            confidence=confidence,
+            rationale=rationale,
+            strategy_params={"use_intersecting_genes_only": use_intersecting_genes_only},
+            execution_params={
+                "timeout": timeout,
+                "max_retries": max_retries,
+                "verify_checksum": True,
+                "resume_enabled": False,
+            },
+        )
+
+    def _create_fallback_strategy(
+        url_data: dict, metadata: dict
+    ) -> StrategyConfig:
+        """
+        Create fallback strategy when LLM extraction fails.
+        Uses URL-based heuristics for strategy recommendation.
+
+        Args:
+            url_data: URLs from GEOProvider.get_download_urls()
+            metadata: GEO metadata dictionary
+
+        Returns:
+            StrategyConfig with URL-based strategy
+        """
+        # URL-based strategy detection
+        if url_data.get("h5_url"):
+            strategy_name = "H5_FIRST"
+            confidence = 0.90
+            rationale = "H5AD file URL found (LLM extraction unavailable, using URL-based strategy)"
+        elif url_data.get("matrix_url"):
+            strategy_name = "MATRIX_FIRST"
+            confidence = 0.75
+            rationale = "Matrix file URL found (LLM extraction unavailable, using URL-based strategy)"
+        elif url_data.get("raw_urls") and len(url_data["raw_urls"]) > 0:
+            strategy_name = "SAMPLES_FIRST"
+            confidence = 0.65
+            rationale = f"Raw data URLs found ({len(url_data['raw_urls'])} files, LLM extraction unavailable)"
+        else:
+            strategy_name = "AUTO"
+            confidence = 0.50
+            rationale = "No clear file pattern detected, using auto-detection (LLM extraction unavailable)"
+
+        # Simple concatenation strategy
+        n_samples = metadata.get("n_samples", metadata.get("sample_count", 0))
+        if n_samples >= 20:
+            concatenation_strategy = "intersection"
+        else:
+            concatenation_strategy = "auto"
+
+        return StrategyConfig(
+            strategy_name=strategy_name,
+            concatenation_strategy=concatenation_strategy,
+            confidence=confidence,
+            rationale=rationale,
+            strategy_params={"use_intersecting_genes_only": None},
+            execution_params={
+                "timeout": 3600,
+                "max_retries": 3,
+                "verify_checksum": True,
+                "resume_enabled": False,
+            },
+        )
+
     base_tools = [
         # --------------------------------
         # Literature discovery tools (3 tools)
@@ -1563,6 +1750,13 @@ Could not extract content for: {identifier}
 Research Agent: Literature discovery and dataset metadata specialist.
 
 **Core Capabilities**: Search PubMed/bioRxiv/medRxiv, extract publication content (abstracts, methods, parameters), find related datasets/papers, search omics databases (GEO/SRA/PRIDE/ArrayExpress/dbGaP), read dataset metadata, workspace caching, validating datasets (which adds them to the download queue) & handoff to metadata_assistant.
+
+**Download Strategy Recommendation:**
+- Analyzes GEO dataset metadata using AI to recommend optimal download strategies
+- Evaluates file availability (H5AD, processed matrices, raw data, annotations)
+- Generates confidence-scored recommendations (0.50-0.95) with human-readable rationale
+- Strategies: H5_FIRST (single-file HDF5), MATRIX_FIRST (processed matrices), SAMPLES_FIRST (raw data), AUTO (auto-detection)
+- Graceful fallback to URL-based heuristics if AI analysis fails
 
 **Not Responsible For**: Dataset downloads (data_expert), omics analysis (QC/DE/clustering - specialist agents), raw data processing (FastQ/alignment), visualizations.
 
@@ -1624,11 +1818,26 @@ Always show attempt counter to user:
 - ❌ No datasets with required clinical metadata → Recommend generating new data
 - 🔄 Same results repeating → Expand to related drugs/earlier timepoints
 
-5. **PROVIDE ACTIONABLE SUMMARIES**: 
+5. **PROVIDE ACTIONABLE SUMMARIES**:
    - Each dataset must include: Accession, Year, Sample count, Metadata categories, Data availability
    - Create concise ranked shortlist, not verbose logs
    - Lead with results, append details only if needed
 </Critical_Rules>
+
+## Tiered Validation System
+
+**Three validation severity levels:**
+1. **CRITICAL** (blocks queueing): Corrupted metadata, no samples found, unparseable structure
+2. **WARNING** (allows queueing): Missing optional fields (condition, treatment), low coverage (50-80%)
+3. **CLEAN** (validated): All required fields present, coverage >= 80%
+
+**Validation behavior:**
+- Only CRITICAL severity blocks queue entry creation
+- Datasets with WARNING severity are queued with `validation_status: VALIDATED_WITH_WARNINGS`
+- Users can review warnings and decide whether to proceed with download
+- All validation issues logged in queue entry for transparency
+
+**Philosophy**: Don't block users from accessing data with minor metadata issues. Provide warnings and let them make informed decisions.
 
 <Query_Optimization_Strategy>
 ## Before searching, ALWAYS:
@@ -1709,9 +1918,12 @@ You have **10 specialized tools** organized into 4 categories:
 ## ⚙️ System Tools (1 tool)
 
 10. **`validate_dataset_metadata`** - Quick metadata validation without downloading
-    - Checks required fields, conditions, controls, duplicates, platform consistency
-    - Returns recommendation: "proceed" | "skip" | "manual_check"
-    - Use before committing to dataset downloads
+    - Validates GEO dataset metadata and creates queue entry
+    - Uses AI (DataExpertAssistant) to extract file information and recommend download strategy
+    - Populates `recommended_strategy` field with confidence-scored recommendation
+    - Sets `validation_status` based on severity (CLEAN, VALIDATED_WITH_WARNINGS, VALIDATION_FAILED)
+    - Returns entry_id for supervisor to hand off to data_expert
+    - Never blocks on missing optional fields (only CRITICAL failures prevent queueing)
 
 </Your_10_Research_Tools>
 

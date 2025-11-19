@@ -22,6 +22,13 @@ class DownloadStatus(str, Enum):
     FAILED = "failed"
 
 
+class ValidationStatus(str, Enum):
+    """Queue entry validation status."""
+    VALIDATED_CLEAN = "validated_clean"              # All validation checks passed
+    VALIDATED_WITH_WARNINGS = "validated_warnings"   # Queueable with warnings
+    VALIDATION_FAILED = "validation_failed"          # Critical validation failure
+
+
 class StrategyConfig(BaseModel):
     """
     Download strategy configuration prepared by research_agent.
@@ -214,6 +221,10 @@ class DownloadQueueEntry(BaseModel):
     )
     validation_result: Optional[Dict[str, Any]] = Field(
         None, description="Validation results from metadata_assistant"
+    )
+    validation_status: ValidationStatus = Field(
+        default=ValidationStatus.VALIDATED_CLEAN,
+        description="Validation quality: clean, warnings, or failed"
     )
     recommended_strategy: Optional[StrategyConfig] = Field(
         None, description="Strategy configuration recommended by research_agent"
