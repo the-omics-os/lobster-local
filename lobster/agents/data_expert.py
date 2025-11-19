@@ -355,8 +355,6 @@ def data_expert(
                         "dataset_id": entry.dataset_id,
                         "strategy": download_strategy,
                         "concatenation_strategy": concatenation_strategy,
-                    },
-                    result={
                         "modality_name": modality_name,
                         "n_obs": result_adata.n_obs,
                         "n_vars": result_adata.n_vars,

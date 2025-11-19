@@ -5109,8 +5109,8 @@ The actual expression data download will be much faster now that metadata is pre
                         "inner" if use_intersecting_genes_only else "outer"
                     ),
                     "auto_detected": auto_detected,
+                    **provenance_info,
                 },
-                result=provenance_info,
             )
 
             # METADATA STORAGE: Store concatenation decision for supervisor access

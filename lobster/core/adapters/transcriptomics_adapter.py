@@ -420,8 +420,8 @@ class TranscriptomicsAdapter(BaseAdapter):
                 cache=True,
             )
 
-            # Make variable names unique
-            adata.var_names_unique()
+            # Enforce unique variable names (scanpy.read_10x_mtx bypasses BaseAdapter)
+            adata.var_names_make_unique()
 
             return adata
 

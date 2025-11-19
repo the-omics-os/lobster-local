@@ -82,6 +82,11 @@ class QualityService:
             # Create working copy
             adata_qc = adata.copy()
 
+            # Ensure unique variable names for gene subsetting operations
+            if not adata_qc.var_names.is_unique:
+                logger.warning("Non-unique variable names detected. Making unique.")
+                adata_qc.var_names_make_unique()
+
             # Calculate QC metrics from expression matrix
             qc_metrics = self._calculate_qc_metrics_from_adata(adata_qc)
 

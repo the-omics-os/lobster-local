@@ -217,6 +217,10 @@ class BaseAdapter(IModalityAdapter):
                 ),
             )
 
+            # Enforce unique variable names at data ingestion (industry standard)
+            # Handles duplicate gene names from real-world datasets
+            adata.var_names_make_unique()
+
             self.logger.info(
                 f"Created AnnData: {adata.n_obs} obs × {adata.n_vars} vars"
             )

@@ -4,7 +4,7 @@
 [![Documentation: CC BY 4.0](https://img.shields.io/badge/Documentation-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-**Transform your bioinformatics research with AI agents that understand your data and provide expert analysis insights.**
+**Bioinformatics co-pilot to automate redundant tasks so you can focus on science**
 
 ## 📋 Table of Contents
 
@@ -30,22 +30,48 @@ Lobster AI is a bioinformatics platform that combines specialized AI agents with
 - Life science teams requiring reproducible, publication-ready results
 - Students learning modern bioinformatics approaches
 
-## ⚡ Quick Start (60 seconds)
+## ⚡ Quick Start
+
+### Option 1: Global Installation (Recommended for CLI Use)
 
 ```bash
-# 1. Install uv (if not already installed)
-# See: https://docs.astral.sh/uv/getting-started/installation/
+# Install uv if not already installed
+# macOS/Linux: curl -LsSf https://astral.sh/uv/install.sh | sh
+# Windows: powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
-# 2. Install Lobster AI
-uv pip install lobster-ai
-# Alternative: pip install lobster-ai
+# Install Lobster globally
+uv tool install lobster-ai
 
-# 3. Configure API keys
+# Configure API keys
 lobster init
 
-# 4. Start using Lobster
+# Start using Lobster
 lobster chat
 ```
+
+**Benefits**: Accessible from anywhere, clean uninstall, isolated environment.
+
+### Option 2: Local Installation (For Projects/Development)
+
+```bash
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Install Lobster in virtual environment
+uv pip install lobster-ai
+# or: pip install lobster-ai
+
+# Configure API keys
+lobster init
+
+# Start using Lobster
+lobster chat
+```
+
+**Benefits**: Project-specific installation, doesn't affect system Python.
+
+---
 
 **Get API keys:** [Claude API](https://console.anthropic.com/) | [AWS Bedrock](https://aws.amazon.com/bedrock/)
 
@@ -67,7 +93,7 @@ lobster chat
 
 Welcome to Lobster AI - Your bioinformatics analysis assistant
 
-🦞 You: Download GSE109564 and perform single-cell clustering analysis
+🦞 You: Download GSE109564 do a QC run all preprocessing steps and perform single-cell clustering analysis
 
 🦞 Lobster: I'll download and analyze this single-cell dataset for you...
 
@@ -77,6 +103,8 @@ Welcome to Lobster AI - Your bioinformatics analysis assistant
 ✓ Generated UMAP visualization and marker gene analysis
 
 Analysis complete! Results saved to workspace.
+
+🦞 You: Now fetch the methods from the original publication. 
 ```
 
 ### Single Query Mode
@@ -223,6 +251,60 @@ For native installation (development, advanced users):
 
 If you encounter rate limit errors: [Troubleshooting Guide](https://github.com/the-omics-os/lobster-local/wiki/28-troubleshooting)
 
+---
+
+### Uninstalling Lobster AI
+
+#### Remove Package
+
+**If installed globally with uv tool:**
+```bash
+uv tool uninstall lobster-ai
+```
+
+**If installed locally in virtual environment:**
+```bash
+# Activate the virtual environment first
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+
+# Uninstall
+pip uninstall lobster-ai
+
+# Remove virtual environment (optional)
+deactivate
+rm -rf .venv
+```
+
+**If installed with make (developers):**
+```bash
+cd /path/to/lobster
+make uninstall-global  # Remove global symlink
+make uninstall         # Remove virtual environment
+```
+
+#### Remove User Data (Optional)
+
+⚠️ **Warning**: This deletes all your analysis data, notebooks, and workspaces!
+
+```bash
+# Remove all user data
+rm -rf ~/.lobster
+rm -rf ~/.lobster_workspace
+
+# Remove project configuration
+rm .env  # In your project directory
+```
+
+#### Verify Complete Removal
+
+```bash
+# Check command removed
+which lobster  # Should output nothing
+
+# Check tool not listed (if using uv tool)
+uv tool list | grep lobster  # Should output nothing
+```
+
 ## 🔬 Literature Mining & Metadata
 
 Lobster AI automatically searches scientific literature and extracts key information to inform your analyses:
@@ -254,7 +336,7 @@ Lobster AI automatically searches scientific literature and extracts key informa
 
 Lobster AI is configured via the `.env` file in your working directory.
 
-**Quick Setup:**
+**Works for both global and local installations:**
 
 ```bash
 # Interactive configuration wizard

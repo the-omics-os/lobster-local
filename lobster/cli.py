@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Modern, user-friendly CLI for the Multi-Agent Bioinformatics System.
-Installable via pip or curl, with rich terminal interface.
+Installable via pip or curl, with rich terminal interface. 
 """
 
 import os
