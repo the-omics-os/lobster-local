@@ -114,8 +114,11 @@ def create_bioinformatics_graph(
 
     supervisor_model = create_llm("supervisor", model_params, provider_override=provider_override)
 
+    # Normalize callbacks to a flat list (fix double-nesting bug)
+    # callback_handler may be a single callback, a list of callbacks, or None
     if callback_handler and hasattr(supervisor_model, "with_config"):
-        supervisor_model = supervisor_model.with_config(callbacks=[callback_handler])
+        callbacks = callback_handler if isinstance(callback_handler, list) else [callback_handler]
+        supervisor_model = supervisor_model.with_config(callbacks=callbacks)
 
     # Phase 1: Create all agents (no ordering needed for tool-wrapping)
     agents = []

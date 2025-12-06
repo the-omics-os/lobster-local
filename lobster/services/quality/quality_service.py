@@ -521,7 +521,7 @@ class QualityService:
             index=adata.obs_names,
         )
 
-        logger.info(f"Generated QC metrics for {len(qc_df)} cells")
+        logger.debug(f"Generated QC metrics for {len(qc_df)} cells")
         return qc_df
 
     def _calculate_qc_metrics(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -534,7 +534,7 @@ class QualityService:
         Returns:
             DataFrame: DataFrame with QC metrics
         """
-        logger.info("Calculating quality metrics")
+        logger.debug("Calculating quality metrics")
 
         # Identify mitochondrial genes (MT-)
         mt_genes = [col for col in data.columns if col.startswith("MT-")]
@@ -597,7 +597,7 @@ class QualityService:
             }
         )
 
-        logger.info(f"Generated QC metrics for {len(qc_df)} cells")
+        logger.debug(f"Generated QC metrics for {len(qc_df)} cells")
         return qc_df
 
     def _create_quality_plots(self, qc_metrics: pd.DataFrame) -> List[go.Figure]:
@@ -610,7 +610,7 @@ class QualityService:
         Returns:
             list: List of Plotly figures
         """
-        logger.info("Generating high-quality assessment plots")
+        logger.debug("Generating high-quality assessment plots")
         plots = []
 
         # 1. Enhanced violin plot of mitochondrial percentages
@@ -880,7 +880,7 @@ class QualityService:
         )
         plots.append(fig3)
 
-        logger.info(f"Created {len(plots)} high-quality assessment plots")
+        logger.debug(f"Created {len(plots)} high-quality assessment plots")
         return plots
 
     def _generate_qc_summary(self, qc_metrics: pd.DataFrame) -> str:

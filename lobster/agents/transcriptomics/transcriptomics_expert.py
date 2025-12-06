@@ -367,8 +367,10 @@ def transcriptomics_expert(
     model_params = settings.get_agent_llm_params("transcriptomics_expert")
     llm = create_llm("transcriptomics_expert", model_params)
 
+    # Normalize callbacks to a flat list (fix double-nesting bug)
     if callback_handler and hasattr(llm, "with_config"):
-        llm = llm.with_config(callbacks=[callback_handler])
+        callbacks = callback_handler if isinstance(callback_handler, list) else [callback_handler]
+        llm = llm.with_config(callbacks=callbacks)
 
     # Initialize services
     quality_service = QualityService()

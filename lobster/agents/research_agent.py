@@ -149,8 +149,10 @@ def research_agent(
     model_params = settings.get_agent_llm_params("research_agent")
     llm = create_llm("research_agent", model_params)
 
+    # Normalize callbacks to a flat list (fix double-nesting bug)
     if callback_handler and hasattr(llm, "with_config"):
-        llm = llm.with_config(callbacks=[callback_handler])
+        callbacks = callback_handler if isinstance(callback_handler, list) else [callback_handler]
+        llm = llm.with_config(callbacks=callbacks)
 
     # Initialize services used by tools
     content_access_service = ContentAccessService(data_manager=data_manager)
@@ -202,11 +204,11 @@ def research_agent(
         try:
             # Related paper discovery mode (merged from discover_related_studies)
             if related_to:
-                logger.info(f"Finding papers related to: {related_to}")
+                logger.debug(f"Finding papers related to: {related_to}")
                 results = content_access_service.find_related_publications(
                     identifier=related_to, max_results=max_results
                 )
-                logger.info(f"Related paper discovery completed for: {related_to}")
+                logger.debug(f"Related paper discovery completed for: {related_to}")
                 return results
 
             # Standard literature search mode
@@ -254,7 +256,7 @@ def research_agent(
                 ir=ir,  # Pass IR for provenance tracking
             )
 
-            logger.info(
+            logger.debug(
                 f"Literature search completed for: {query[:50]}... (max_results={max_results})"
             )
             return results
@@ -319,7 +321,7 @@ def research_agent(
                 include_related=include_related,
             )
 
-            logger.info(f"Dataset discovery completed for: {identifier}")
+            logger.debug(f"Dataset discovery completed for: {identifier}")
             return results
 
         except Exception as e:
@@ -746,7 +748,7 @@ def research_agent(
                 if metadata.abstract:
                     formatted += f"\n**Abstract**:\n{metadata.abstract[:1000]}{'...' if len(metadata.abstract) > 1000 else ''}\n"
 
-                logger.info(f"Metadata extraction completed for: {identifier}")
+                logger.debug(f"Metadata extraction completed for: {identifier}")
                 return formatted
 
         except Exception as e:
@@ -1309,7 +1311,7 @@ def research_agent(
 
             if len(identifiers) > 1:
                 # Batch processing mode
-                logger.info(f"Batch processing {len(identifiers)} publications")
+                logger.debug(f"Batch processing {len(identifiers)} publications")
                 batch_results = []
 
                 for idx, identifier in enumerate(identifiers, 1):
@@ -2420,6 +2422,36 @@ Validation and queue tools:
 
 Handoff tool:
 	-	handoff_to_metadata_assistant: send structured instructions to the metadata assistant.
+
+<delegation strategy - metadata_assistant>
+You have DIRECT ACCESS to metadata_assistant via handoff_to_metadata_assistant tool (PREMIUM tier only).
+
+What YOU handle (research_agent):
+	-	Dataset discovery and metadata extraction
+	-	Basic validation for download planning
+	-	Workspace caching
+
+What metadata_assistant handles:
+	-	Sample ID mapping across datasets
+	-	Metadata standardization to schemas
+	-	Complex filtering (16S + host + disease)
+	-	Publication queue processing with disease extraction
+	-	Iterative quality improvement
+
+When to delegate:
+	1.	User asks for "mapping", "standardization", "filtering", "harmonization"
+	2.	Publication queue processing with metadata operations
+	3.	Cross-dataset sample comparison
+	4.	Schema validation beyond download planning
+
+Example: "Process publication queue entry X with disease extraction and 16S filtering"
+	→	handoff_to_metadata_assistant(task_description="Process pub_queue_X: extract disease, filter 16S+human, export CSV")
+
+Tier Restriction (IMPORTANT):
+	-	FREE tier: handoff_to_metadata_assistant is BLOCKED (premium feature)
+	-	If tool missing from your list: inform user "Requires premium subscription"
+	-	PREMIUM+ tier: Full access to metadata_assistant
+</delegation strategy>
 </tool overview>
 
 <workflow>

@@ -153,7 +153,7 @@ class SingleCellVisualizationService:
                 import numpy as np
                 import scanpy as sc
 
-                logger.info(
+                logger.debug(
                     f"Downsampling {adata.n_obs:,} cells to {target_n_points:,} for visualization "
                     f"(improves performance, preserves structure)"
                 )
@@ -968,7 +968,7 @@ class SingleCellVisualizationService:
         """
         try:
             # Calculate all QC metrics upfront
-            logger.info("Computing comprehensive QC metrics for single-cell data")
+            logger.debug("Computing comprehensive QC metrics for single-cell data")
 
             # Basic metrics
             if "n_genes" not in adata.obs.columns:
@@ -1784,7 +1784,7 @@ class SingleCellVisualizationService:
                 font=dict(size=11, color="gray"),
             )
 
-            logger.info(f"Created comprehensive QC plot with {adata.n_obs:,} cells")
+            logger.debug(f"Created comprehensive QC plot with {adata.n_obs:,} cells")
             return fig
 
         except Exception as e:
@@ -1930,13 +1930,13 @@ class SingleCellVisualizationService:
                     html_path = output_path / f"{name}.html"
                     pio.write_html(fig, html_path)
                     saved_files.append(str(html_path))
-                    logger.info(f"Saved HTML: {html_path}")
+                    logger.debug(f"Saved HTML: {html_path}")
 
                 if format in ["png", "both"]:
                     png_path = output_path / f"{name}.png"
                     pio.write_image(fig, png_path, width=3200, height=2400, scale=2)
                     saved_files.append(str(png_path))
-                    logger.info(f"Saved PNG: {png_path}")
+                    logger.debug(f"Saved PNG: {png_path}")
 
             except Exception as e:
                 logger.error(f"Failed to save plot '{name}': {e}")

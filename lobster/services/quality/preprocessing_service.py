@@ -76,12 +76,12 @@ class PreprocessingService:
             PreprocessingError: If correction fails
         """
         try:
-            logger.info(f"Starting ambient RNA correction with method: {method}")
+            logger.debug(f"Starting ambient RNA correction with method: {method}")
 
             # Create working copy
             adata_corrected = adata.copy()
             original_shape = adata_corrected.shape
-            logger.info(
+            logger.debug(
                 f"Input data shape: {original_shape[0]} cells × {original_shape[1]} genes"
             )
 
@@ -298,12 +298,12 @@ print(f"Normalization complete (target_sum={{ target_sum }}, log1p transformed)"
             PreprocessingError: If filtering or normalization fails
         """
         try:
-            logger.info("Starting cell filtering and normalization")
+            logger.debug("Starting cell filtering and normalization")
 
             # Create working copy
             adata_processed = adata.copy()
             original_shape = adata_processed.shape
-            logger.info(
+            logger.debug(
                 f"Input data shape: {original_shape[0]} cells × {original_shape[1]} genes"
             )
 
@@ -415,7 +415,7 @@ print(f"Normalization complete (target_sum={{ target_sum }}, log1p transformed)"
             >>> print(f"Selected {stats['n_features_selected']} highly deviant genes")
         """
         try:
-            logger.info(
+            logger.debug(
                 f"Starting deviance-based feature selection (n_top_genes={n_top_genes})"
             )
 
@@ -425,11 +425,11 @@ print(f"Normalization complete (target_sum={{ target_sum }}, log1p transformed)"
 
             # Use raw counts if available (preferred), otherwise use current X
             if adata_processed.raw is not None:
-                logger.info("Using raw counts from adata.raw for deviance calculation")
+                logger.debug("Using raw counts from adata.raw for deviance calculation")
                 count_data = adata_processed.raw.X
                 gene_names = adata_processed.raw.var_names
             else:
-                logger.info(
+                logger.debug(
                     "Using adata.X for deviance calculation (no adata.raw found)"
                 )
                 count_data = adata_processed.X
@@ -450,7 +450,7 @@ print(f"Normalization complete (target_sum={{ target_sum }}, log1p transformed)"
                 )
 
             # Calculate deviance using shared utility
-            logger.info("Calculating binomial deviance from multinomial null model")
+            logger.debug("Calculating binomial deviance from multinomial null model")
             deviance_scores = calculate_deviance(count_data)
 
             # Select top n_top_genes by deviance
@@ -657,7 +657,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
         empty_threshold: int,
     ) -> Union[np.ndarray, spr.spmatrix]:
         """Apply simple ambient RNA decontamination."""
-        logger.info("Applying simple decontamination method")
+        logger.debug("Applying simple decontamination method")
 
         # Convert to dense if sparse for easier computation
         if spr.issparse(count_matrix):
@@ -700,7 +700,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
         contamination_fraction: float,
     ) -> Union[np.ndarray, spr.spmatrix]:
         """Apply quantile-based ambient RNA correction."""
-        logger.info("Applying quantile-based correction method")
+        logger.debug("Applying quantile-based correction method")
 
         if spr.issparse(count_matrix):
             dense_matrix = count_matrix.toarray()
@@ -779,7 +779,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
     # Helper methods for filtering and normalization
     def _calculate_qc_metrics(self, adata):
         """Calculate quality control metrics."""
-        logger.info("Calculating QC metrics")
+        logger.debug("Calculating QC metrics")
 
         # Basic QC metrics
         sc.pp.calculate_qc_metrics(adata, percent_top=None, log1p=False, inplace=True)
@@ -813,7 +813,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
         max_ribo_percent,
     ) -> Dict[str, Any]:
         """Apply quality control filters."""
-        logger.info("Applying quality control filters")
+        logger.debug("Applying quality control filters")
 
         initial_cells = adata.n_obs
         initial_genes = adata.n_vars
@@ -847,7 +847,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
                 adata.obs[col] = original_obs.loc[adata.obs_names, col]
                 logger.debug(f"Restored obs column: {col}")
 
-        logger.info(f"Preserved {len(adata.obs.columns)} obs columns after filtering")
+        logger.debug(f"Preserved {len(adata.obs.columns)} obs columns after filtering")
 
         final_cells = adata.n_obs
         final_genes = adata.n_vars
@@ -872,7 +872,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
         self, adata, method: str, target_sum: int
     ) -> Dict[str, Any]:
         """Normalize expression data."""
-        logger.info(f"Normalizing expression data using method: {method}")
+        logger.debug(f"Normalizing expression data using method: {method}")
 
         # Store raw data
         adata.raw = adata.copy()
@@ -1027,7 +1027,7 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
     # Helper methods for batch correction and integration
     def _find_integration_features(self, adata, n_features: int) -> Dict[str, Any]:
         """Find highly variable genes for integration."""
-        logger.info(f"Finding {n_features} highly variable genes for integration")
+        logger.debug(f"Finding {n_features} highly variable genes for integration")
 
         # Find highly variable genes
         sc.pp.highly_variable_genes(adata, n_top_genes=n_features, flavor="seurat_v3")
@@ -1045,12 +1045,12 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
             "target_n_features": n_features,
         }
 
-        logger.info(f"Selected {n_hvg_selected} highly variable genes")
+        logger.debug(f"Selected {n_hvg_selected} highly variable genes")
         return integration_stats
 
     def _compute_integration_pca(self, adata, n_components: int) -> Dict[str, Any]:
         """Compute PCA for integration."""
-        logger.info(f"Computing PCA with {n_components} components")
+        logger.debug(f"Computing PCA with {n_components} components")
 
         # Compute PCA
         sc.tl.pca(adata, n_comps=n_components)
@@ -1065,14 +1065,14 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
             "top_10_components_variance": variance_ratio[:10].tolist(),
         }
 
-        logger.info(f"PCA computed: {total_variance_explained:.1f}% variance explained")
+        logger.debug(f"PCA computed: {total_variance_explained:.1f}% variance explained")
         return pca_stats
 
     def _apply_harmony_like_correction(
         self, adata, batch_key: str, theta: float, lambda_param: float
     ) -> Dict[str, Any]:
         """Apply Harmony-like batch correction."""
-        logger.info("Applying Harmony-like batch correction")
+        logger.debug("Applying Harmony-like batch correction")
 
         # Get PCA coordinates
         pca_coords = adata.obsm["X_pca"].copy()
@@ -1107,14 +1107,14 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
             "correction_strength": correction_strength,
         }
 
-        logger.info(
+        logger.debug(
             f"Harmony-like correction applied with strength: {correction_strength}"
         )
         return correction_stats
 
     def _apply_scanorama_like_correction(self, adata, batch_key: str) -> Dict[str, Any]:
         """Apply Scanorama-like batch correction."""
-        logger.info("Applying Scanorama-like batch correction")
+        logger.debug("Applying Scanorama-like batch correction")
 
         # Simple implementation: scale PCA coordinates by batch
         pca_coords = adata.obsm["X_pca"].copy()
@@ -1141,12 +1141,12 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
             "correction_strength": "moderate",
         }
 
-        logger.info("Scanorama-like correction applied")
+        logger.debug("Scanorama-like correction applied")
         return correction_stats
 
     def _apply_simple_batch_scaling(self, adata, batch_key: str) -> Dict[str, Any]:
         """Apply simple batch scaling correction."""
-        logger.info("Applying simple batch scaling correction")
+        logger.debug("Applying simple batch scaling correction")
 
         # Simple z-score normalization per batch
         pca_coords = adata.obsm["X_pca"].copy()
@@ -1173,12 +1173,12 @@ print(f"Top 10 genes: {adata.var_names[adata.var['highly_deviant']].tolist()[:10
             "correction_strength": "strong",
         }
 
-        logger.info("Simple batch scaling correction applied")
+        logger.debug("Simple batch scaling correction applied")
         return correction_stats
 
     def _compute_integrated_umap(self, adata):
         """Compute UMAP on integrated data."""
-        logger.info("Computing UMAP on integrated data")
+        logger.debug("Computing UMAP on integrated data")
 
         # Use corrected PCA coordinates for UMAP
         if "X_pca_corrected" in adata.obsm:

@@ -514,6 +514,7 @@ def extract_available_commands() -> Dict[str, str]:
         "/workspace": "Show workspace status and information",
         "/workspace list": "List available datasets in workspace",
         "/workspace load": "Load dataset or file into workspace",
+        "/workspace remove": "Remove modality from memory",
         "/workspace save": "Save modality to workspace",
         "/workspace info": "Show dataset information",
         "/restore": "Restore previous session datasets",
@@ -724,6 +725,36 @@ if PROMPT_TOOLKIT_AVAILABLE:
                                     display_meta=HTML(f"<dim>{meta}</dim>"),
                                     style="class:completion.dataset",
                                 )
+                except Exception:
+                    pass
+
+            elif text.startswith("/workspace remove "):
+                # Suggest currently loaded modality names for removal
+                prefix = text.replace("/workspace remove ", "")
+                try:
+                    if hasattr(self.client.data_manager, "list_modalities"):
+                        modalities = self.client.data_manager.list_modalities()
+                        for name in modalities:
+                            if name.lower().startswith(prefix.lower()):
+                                # Get modality info for metadata
+                                try:
+                                    adata = self.client.data_manager.get_modality(name)
+                                    meta = f"{adata.n_obs}×{adata.n_vars}"
+                                    yield Completion(
+                                        text=name,
+                                        start_position=-len(prefix),
+                                        display=HTML(f"<ansired>{name}</ansired>"),
+                                        display_meta=HTML(f"<dim>{meta}</dim>"),
+                                        style="class:completion.modality",
+                                    )
+                                except Exception:
+                                    # Fallback without metadata if getting modality fails
+                                    yield Completion(
+                                        text=name,
+                                        start_position=-len(prefix),
+                                        display=HTML(f"<ansired>{name}</ansired>"),
+                                        style="class:completion.modality",
+                                    )
                 except Exception:
                     pass
 
@@ -3845,6 +3876,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Show detailed metadata information
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show workspace status and information
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available datasets in workspace
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace remove[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Remove modality from memory
 [{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Restore previous session datasets
 [{LobsterTheme.PRIMARY_ORANGE}]/restore <pattern>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Restore datasets matching pattern (recent/all/*)
 [{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
@@ -5935,6 +5967,78 @@ when they are started by agents or analysis workflows.
                 else:
                     console.print("[yellow]No datasets loaded[/yellow]")
                     return None
+
+        elif subcommand == "remove":
+            # Remove a modality from memory
+            if len(parts) < 3:
+                console.print("[red]Usage: /workspace remove <modality_name>[/red]")
+                console.print(
+                    "[dim]Examples: /workspace remove geo_gse12345_clustered[/dim]"
+                )
+                console.print("\n[dim]💡 Tip: Use '/modalities' to see loaded modalities[/dim]")
+                return None
+
+            modality_name = parts[2]
+
+            # Check if modality exists
+            if not hasattr(client.data_manager, "list_modalities"):
+                console.print(
+                    "[red]❌ Modality management not available in this client[/red]"
+                )
+                return None
+
+            available_modalities = client.data_manager.list_modalities()
+            if modality_name not in available_modalities:
+                console.print(
+                    f"[red]❌ Modality '{modality_name}' not found[/red]"
+                )
+                console.print(f"\n[yellow]Available modalities ({len(available_modalities)}):[/yellow]")
+                for mod in available_modalities:
+                    console.print(f"  • {mod}")
+                return None
+
+            try:
+                # Import the service
+                from lobster.services.data_management.modality_management_service import (
+                    ModalityManagementService,
+                )
+
+                # Create service instance and remove modality
+                service = ModalityManagementService(client.data_manager)
+                success, stats, ir = service.remove_modality(modality_name)
+
+                if success:
+                    # Log to provenance
+                    client.data_manager.log_tool_usage(
+                        tool_name="remove_modality",
+                        parameters={"modality_name": modality_name},
+                        description=stats,
+                        ir=ir,
+                    )
+
+                    # Display success message
+                    console.print(
+                        f"[green]✓ Successfully removed modality: {stats['removed_modality']}[/green]"
+                    )
+                    console.print(
+                        f"[dim]  Shape: {stats['shape']['n_obs']} obs × {stats['shape']['n_vars']} vars[/dim]"
+                    )
+                    console.print(
+                        f"[dim]  Remaining modalities: {stats['remaining_modalities']}[/dim]"
+                    )
+
+                    return f"Removed modality: {modality_name}"
+                else:
+                    console.print(
+                        f"[red]❌ Failed to remove modality: {modality_name}[/red]"
+                    )
+                    return None
+
+            except Exception as e:
+                console.print(
+                    f"[red]❌ Error removing modality: {str(e)}[/red]"
+                )
+                return None
 
         else:  # Default to info subcommand
             # Show workspace status and information

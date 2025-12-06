@@ -69,8 +69,10 @@ def data_expert(
     model_params = settings.get_agent_llm_params("data_expert_agent")
     llm = create_llm("data_expert_agent", model_params)
 
+    # Normalize callbacks to a flat list (fix double-nesting bug)
     if callback_handler and hasattr(llm, "with_config"):
-        llm = llm.with_config(callbacks=[callback_handler])
+        callbacks = callback_handler if isinstance(callback_handler, list) else [callback_handler]
+        llm = llm.with_config(callbacks=callbacks)
 
     # Initialize the assistant for LLM operations
     assistant = DataExpertAssistant()
@@ -198,7 +200,7 @@ Dataset: {entry.dataset_id}
                 downloaded_by="data_expert",
             )
 
-            logger.info(
+            logger.debug(
                 f"Starting download for {entry.dataset_id} from queue entry {entry_id}"
             )
 
@@ -207,7 +209,7 @@ Dataset: {entry.dataset_id}
             # Otherwise use default strategy based on available URLs
             if entry.recommended_strategy:
                 download_strategy = entry.recommended_strategy.strategy_name
-                logger.info(f"Using recommended strategy: {download_strategy}")
+                logger.debug(f"Using recommended strategy: {download_strategy}")
             else:
                 # Auto-determine strategy from available URLs
                 if entry.h5_url:
@@ -218,7 +220,7 @@ Dataset: {entry.dataset_id}
                     download_strategy = "SUPPLEMENTARY_FIRST"
                 else:
                     download_strategy = "RAW_FIRST"
-                logger.info(f"Auto-selected strategy: {download_strategy}")
+                logger.debug(f"Auto-selected strategy: {download_strategy}")
 
             # 4. EXECUTE DOWNLOAD USING GEO SERVICE
             # Import GEO service
