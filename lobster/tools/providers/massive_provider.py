@@ -369,7 +369,7 @@ class MassIVEProvider(BasePublicationProvider):
             url = f"{self.config.base_url}/datasets/{accession}"
             dataset_data = self._make_api_request(url)
 
-            logger.info(f"Retrieved metadata for MassIVE dataset {accession}")
+            logger.debug(f"Retrieved metadata for MassIVE dataset {accession}")
             return dataset_data
 
         except Exception as e:

@@ -282,7 +282,7 @@ class GEOProvider(BasePublicationProvider):
         Returns:
             str: Formatted search results
         """
-        logger.info(f"GEO database search: {query[:50]}...")
+        logger.debug(f"GEO database search: {query[:50]}...")
 
         try:
             # Convert filters to GEOSearchFilters if provided
@@ -346,7 +346,7 @@ class GEOProvider(BasePublicationProvider):
         Returns:
             str: Formatted dataset information
         """
-        logger.info(f"Finding GEO dataset: {identifier}")
+        logger.debug(f"Finding GEO dataset: {identifier}")
 
         try:
             if not self.validate_identifier(identifier):
@@ -496,7 +496,7 @@ class GEOProvider(BasePublicationProvider):
         if not self.query_builder.validate_query(complete_query):
             raise ValueError(f"Invalid query syntax: {complete_query}")
 
-        logger.info(f"Executing GEO search: {complete_query}")
+        logger.debug(f"Executing GEO search: {complete_query}")
 
         # Build eSearch URL
         url_params = {
@@ -735,7 +735,7 @@ class GEOProvider(BasePublicationProvider):
                 "GEOparse is required for URL extraction. Install with: pip install GEOparse"
             )
 
-        logger.info(f"Extracting download URLs for {geo_id}")
+        logger.debug(f"Extracting download URLs for {geo_id}")
 
         try:
             # Construct HTTPS base URL (not FTP - see https fix below)
@@ -920,7 +920,7 @@ class GEOProvider(BasePublicationProvider):
                 recommended_strategy="matrix" if primary_files else "raw",
             )
 
-            logger.info(
+            logger.debug(
                 f"Extracted {result.file_count} URLs for {geo_id}: "
                 f"matrix={1 if matrix_url else 0}, "
                 f"raw={len(raw_file_objs)}, "
@@ -1184,7 +1184,7 @@ class GEOProvider(BasePublicationProvider):
         Returns:
             str: Formatted search results with accession-specific information
         """
-        logger.info(f"GEO accession search: {accession}")
+        logger.debug(f"GEO accession search: {accession}")
 
         try:
             # Detect accession type
@@ -1280,7 +1280,7 @@ class GEOProvider(BasePublicationProvider):
                     uid_data = summary_data.get("result", {}).get(uid, {})
                     accession = uid_data.get("accession", "")
                     if accession.startswith("GSE"):
-                        logger.info(
+                        logger.debug(
                             f"Found parent series {accession} for sample {gsm_accession}"
                         )
                         return accession

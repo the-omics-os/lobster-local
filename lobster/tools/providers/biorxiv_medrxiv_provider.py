@@ -557,7 +557,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
             jitter = random.uniform(0, base_delay * 0.1)
             delay = base_delay + jitter
 
-            logger.info(
+            logger.debug(
                 f"Rate limited by bioRxiv/medRxiv, waiting {delay:.1f}s before retry..."
             )
             time.sleep(delay)
@@ -569,7 +569,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
         if attempt < self.config.max_retry:
             # Shorter delays for server errors (they often resolve quickly)
             delay = min(2**attempt, 10)
-            logger.info(
+            logger.debug(
                 f"bioRxiv/medRxiv server error {status_code}, waiting {delay}s before retry..."
             )
             time.sleep(delay)
@@ -765,7 +765,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
             ...     filters={"date_range": "2024-01-01/2024-01-31", "category": "bioinformatics"}
             ... )
         """
-        logger.info(f"bioRxiv/medRxiv search: {query[:50]}...")
+        logger.debug(f"bioRxiv/medRxiv search: {query[:50]}...")
 
         try:
             # Apply configuration limits
@@ -786,7 +786,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
                 date_range = (
                     f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
                 )
-                logger.info(f"No date_range specified, using default: {date_range}")
+                logger.debug(f"No date_range specified, using default: {date_range}")
 
             # Fetch preprints with pagination
             all_preprints = []
@@ -1033,7 +1033,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
             BioRxivJATSError: Failed to fetch JATS XML
         """
         try:
-            logger.info(f"Fetching JATS XML: {jatsxml_url[:100]}...")
+            logger.debug(f"Fetching JATS XML: {jatsxml_url[:100]}...")
 
             # Use content_session with browser-like headers for JATS XML URLs
             # (www.biorxiv.org content servers require browser headers to avoid 403)
@@ -1046,13 +1046,13 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
             # Log redirects for debugging (bioRxiv often redirects to versioned URLs)
             if response.history:
                 redirect_chain = " → ".join([r.url for r in response.history])
-                logger.info(f"Followed redirect: {redirect_chain} → {response.url}")
+                logger.debug(f"Followed redirect: {redirect_chain} → {response.url}")
 
             response.raise_for_status()
 
             xml_text = response.text
 
-            logger.info(f"Successfully fetched JATS XML: {len(xml_text)} bytes")
+            logger.debug(f"Successfully fetched JATS XML: {len(xml_text)} bytes")
 
             return xml_text
 
@@ -1101,7 +1101,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
             >>> print(f"Tables: {len(full_text.tables)}")
         """
         try:
-            logger.info(f"Extracting full text for preprint: {doi}")
+            logger.debug(f"Extracting full text for preprint: {doi}")
 
             server = server or self.config.default_server
 
@@ -1157,7 +1157,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
                     ),
                 )
 
-            logger.info(
+            logger.debug(
                 f"Successfully extracted full text: "
                 f"{len(parsed.full_text)} chars, "
                 f"{len(parsed.methods_section)} chars methods, "
@@ -1386,7 +1386,7 @@ class BioRxivMedRxivProvider(BasePublicationProvider):
             >>> datasets = provider.find_datasets_from_publication("10.1101/2024.01.01.123456")
         """
         try:
-            logger.info(f"Finding datasets from preprint: {identifier}")
+            logger.debug(f"Finding datasets from preprint: {identifier}")
 
             # Extract server from kwargs
             server = kwargs.get("server")

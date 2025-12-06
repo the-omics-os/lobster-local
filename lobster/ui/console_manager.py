@@ -177,6 +177,21 @@ class LobsterConsoleManager:
 
     def _setup_logging(self):
         """Setup Rich logging handlers with orange theming."""
+        import os
+
+        # Get log level from environment variable (default: WARNING for cleaner UX)
+        # Users can set LOBSTER_LOG_LEVEL=DEBUG for verbose output
+        # or LOBSTER_LOG_LEVEL=INFO for standard verbosity
+        log_level_name = os.environ.get("LOBSTER_LOG_LEVEL", "WARNING").upper()
+        log_level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL,
+        }
+        log_level = log_level_map.get(log_level_name, logging.WARNING)
+
         # Configure rich handler for main logging
         rich_handler = RichHandler(
             console=self._console,
@@ -192,15 +207,15 @@ class LobsterConsoleManager:
         # Configure logging format
         rich_handler.setFormatter(logging.Formatter(fmt="%(message)s", datefmt="[%X]"))
 
-        # Setup root logger
+        # Setup root logger with user-configurable level
         logging.basicConfig(
-            level=logging.INFO,
+            level=log_level,
             format="%(message)s",
             datefmt="[%X]",
             handlers=[rich_handler],
         )
 
-        # Adjust levels for specific loggers
+        # Adjust levels for specific loggers (always suppress noisy libraries)
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -443,8 +458,27 @@ def get_console_manager() -> LobsterConsoleManager:
     return _console_manager
 
 
-def setup_logging(level: int = logging.INFO):
-    """Setup logging with Rich handlers and update all handler levels."""
+def setup_logging(level: int = None):
+    """
+    Setup logging with Rich handlers and update all handler levels.
+
+    Args:
+        level: Optional explicit log level. If None, uses LOBSTER_LOG_LEVEL env var (default: WARNING)
+    """
+    import os
+
+    # Get level from environment if not explicitly provided
+    if level is None:
+        log_level_name = os.environ.get("LOBSTER_LOG_LEVEL", "WARNING").upper()
+        log_level_map = {
+            "DEBUG": logging.DEBUG,
+            "INFO": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
+            "CRITICAL": logging.CRITICAL,
+        }
+        level = log_level_map.get(log_level_name, logging.WARNING)
+
     get_console_manager()
     root_logger = logging.getLogger()
     root_logger.setLevel(level)

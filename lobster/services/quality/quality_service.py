@@ -79,7 +79,7 @@ class QualityService:
             QualityError: If quality assessment fails
         """
         try:
-            logger.info("Starting quality assessment")
+            logger.debug("Starting quality assessment")
 
             # Create working copy
             adata_qc = adata.copy()
@@ -208,7 +208,7 @@ class QualityService:
             QualityError: If threshold calculation fails
         """
         try:
-            logger.info(f"Calculating adaptive thresholds with {n_mads} MADs")
+            logger.debug(f"Calculating adaptive thresholds with {n_mads} MADs")
 
             # Calculate QC metrics first if not already present
             if "n_genes" not in adata.obs.columns:
@@ -298,7 +298,7 @@ class QualityService:
         mt_mask = var_names.startswith("MT-")
         n_found = mt_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} mitochondrial genes using HGNC pattern (MT-)"
             )
             return mt_mask
@@ -307,7 +307,7 @@ class QualityService:
         mt_mask = var_names.lower().str.startswith("mt-")
         n_found = mt_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} mitochondrial genes using mouse pattern (mt-)"
             )
             return mt_mask
@@ -316,7 +316,7 @@ class QualityService:
         mt_mask = var_names.startswith("MT.")
         n_found = mt_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} mitochondrial genes using alternative pattern (MT.)"
             )
             return mt_mask
@@ -328,7 +328,7 @@ class QualityService:
         mt_mask = var_names.startswith(tuple(ensembl_mt_prefixes))
         n_found = mt_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} mitochondrial genes using Ensembl ID pattern"
             )
             return mt_mask
@@ -382,7 +382,7 @@ class QualityService:
         ribo_mask = var_names.startswith("RPS") | var_names.startswith("RPL")
         n_found = ribo_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} ribosomal genes using HGNC pattern (RPS/RPL)"
             )
             return ribo_mask
@@ -391,7 +391,7 @@ class QualityService:
         ribo_mask = var_names.startswith("Rps") | var_names.startswith("Rpl")
         n_found = ribo_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} ribosomal genes using mouse pattern (Rps/Rpl)"
             )
             return ribo_mask
@@ -402,7 +402,7 @@ class QualityService:
         ) | var_names.lower().str.startswith("rpl")
         n_found = ribo_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} ribosomal genes using lowercase pattern (rps/rpl)"
             )
             return ribo_mask
@@ -411,7 +411,7 @@ class QualityService:
         ribo_mask = var_names.match(r"^RP[SL]\d+", na=False)
         n_found = ribo_mask.sum()
         if n_found > 0:
-            logger.info(
+            logger.debug(
                 f"Detected {n_found} ribosomal genes using compact pattern (RP[SL])"
             )
             return ribo_mask
@@ -443,7 +443,7 @@ class QualityService:
         Returns:
             DataFrame: DataFrame with QC metrics
         """
-        logger.info("Calculating quality metrics from AnnData")
+        logger.debug("Calculating quality metrics from AnnData")
 
         # Identify mitochondrial genes using multi-pattern cascade
         mt_genes = self._detect_mitochondrial_genes(adata)

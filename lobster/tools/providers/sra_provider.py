@@ -100,7 +100,7 @@ class SRAProvider(BasePublicationProvider):
         )
         self.query_builder = NCBIQueryBuilder(NCBIDatabase.SRA)
 
-        logger.info("SRAProvider initialized with Biopython Bio.Entrez support")
+        logger.debug("SRAProvider initialized with Biopython Bio.Entrez support")
 
     def _get_sraweb(self):
         """Lazy initialization of pysradb SRAweb connection."""
@@ -229,7 +229,7 @@ class SRAProvider(BasePublicationProvider):
                 quality_query += ' AND "strategy amplicon"[Filter]'
                 logger.debug("Applied amplicon/16S quality filters")
 
-        logger.info(f"Quality filters applied: {query} → {quality_query}")
+        logger.debug(f"Quality filters applied: {query} → {quality_query}")
         return quality_query
 
     def _ncbi_esearch(
@@ -253,7 +253,7 @@ class SRAProvider(BasePublicationProvider):
             SRAProviderError: If search fails
         """
         try:
-            logger.info(f"NCBI esearch query: {query}")
+            logger.debug(f"NCBI esearch query: {query}")
             logger.debug(f"Max results requested: {max_results}")
 
             # First request to get total count
@@ -268,7 +268,7 @@ class SRAProvider(BasePublicationProvider):
             total_count = int(initial_result.get("Count", 0))
             all_ids = initial_result.get("IdList", [])
 
-            logger.info(f"Found {total_count:,} total results in NCBI SRA")
+            logger.debug(f"Found {total_count:,} total results in NCBI SRA")
 
             # If we need more results and there are more available, paginate
             if len(all_ids) < max_results and len(all_ids) < total_count:
@@ -280,7 +280,7 @@ class SRAProvider(BasePublicationProvider):
                     remaining + self.config.batch_size - 1
                 ) // self.config.batch_size
 
-                logger.info(
+                logger.debug(
                     f"Fetching {remaining:,} more results in {num_batches} batch(es) "
                     f"(batch_size={self.config.batch_size:,})"
                 )
@@ -311,7 +311,7 @@ class SRAProvider(BasePublicationProvider):
                     if len(batch_ids) < batch_size:
                         break
 
-            logger.info(
+            logger.debug(
                 f"Retrieved {len(all_ids):,} SRA IDs (requested: {max_results:,}, available: {total_count:,})"
             )
             return all_ids
@@ -739,7 +739,7 @@ class SRAProvider(BasePublicationProvider):
                 return self._format_search_results(df, query, max_results, filters)
             else:
                 # Path 2: Direct NCBI esearch (PubMedProvider pattern)
-                logger.info(
+                logger.debug(
                     f"[Phase 1] Performing direct NCBI SRA search: {query[:50]}..."
                 )
 
@@ -1061,7 +1061,7 @@ class SRAProvider(BasePublicationProvider):
             filters["strategy"] = "WGS"
 
         # Delegate to search_publications with enhanced query and filters
-        logger.info(
+        logger.debug(
             f"Microbiome search: query='{enhanced_query}', "
             f"amplicon={amplicon_region}, body_site={body_site}"
         )
@@ -1399,7 +1399,7 @@ class SRAProvider(BasePublicationProvider):
                 f"Expected SRR/SRX/SRP/ERS/ERX/ERP/DRS/DRX/DRP format."
             )
 
-        logger.info(f"Fetching download URLs for {accession} from ENA")
+        logger.debug(f"Fetching download URLs for {accession} from ENA")
 
         try:
             # ENA filereport API endpoint
@@ -1630,7 +1630,7 @@ class SRAProvider(BasePublicationProvider):
                 for item in all_urls
             ]
 
-            logger.info(
+            logger.debug(
                 f"Retrieved {len(raw_files)} FASTQ file(s) for {accession} "
                 f"({total_size / 1e6:.1f} MB total, layout={layout})"
             )

@@ -209,7 +209,7 @@ class AbstractProvider:
             'The genetic basis of gene expression variation...'
         """
         try:
-            logger.info(f"Retrieving abstract for: {identifier}")
+            logger.debug(f"Retrieving abstract for: {identifier}")
 
             # Validate identifier format
             if not self._validate_identifier(identifier):
@@ -236,7 +236,7 @@ class AbstractProvider:
                     description=f"Abstract retrieval: {len(metadata.abstract)} chars",
                 )
 
-            logger.info(
+            logger.debug(
                 f"Successfully retrieved abstract: {len(metadata.abstract)} chars, "
                 f"{len(metadata.authors)} authors"
             )

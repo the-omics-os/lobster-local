@@ -99,7 +99,7 @@ class PublicationResolver:
         self.session.headers.update(
             {"User-Agent": "Lobster AI Research Tool/1.0 (mailto:support@omics-os.com)"}
         )
-        logger.info("Initialized PublicationResolver with caching")
+        logger.debug("Initialized PublicationResolver with caching")
 
     def resolve(self, identifier: str) -> PublicationResolutionResult:
         """
@@ -121,7 +121,7 @@ class PublicationResolver:
             >>> else:
             ...     print(f"Suggestions: {result.suggestions}")
         """
-        logger.info(f"Resolving identifier: {identifier}")
+        logger.debug(f"Resolving identifier: {identifier}")
 
         # Normalize identifier
         identifier = identifier.strip()
@@ -147,7 +147,7 @@ class PublicationResolver:
         if pmid:
             result = self._resolve_via_pmc(pmid)
             if result.is_accessible():
-                logger.info(f"Resolved via PMC: {result.pdf_url}")
+                logger.debug(f"Resolved via PMC: {result.pdf_url}")
                 self._cache[identifier] = (result, time.time())
                 return result
 
@@ -155,7 +155,7 @@ class PublicationResolver:
         if pmid:
             result = self._resolve_via_linkout(pmid)
             if result.is_accessible():
-                logger.info(f"Resolved via LinkOut: {result.pdf_url}")
+                logger.debug(f"Resolved via LinkOut: {result.pdf_url}")
                 self._cache[identifier] = (result, time.time())
                 return result
 
@@ -164,13 +164,13 @@ class PublicationResolver:
         if pmid and not doi:
             doi = self._get_doi_from_pmid(pmid)
             if doi:
-                logger.info(f"Fetched DOI from PubMed: {doi}")
+                logger.debug(f"Fetched DOI from PubMed: {doi}")
 
         # Strategy 2: Try bioRxiv/medRxiv preprints
         if doi:
             result = self._resolve_via_preprint_servers(doi)
             if result.is_accessible():
-                logger.info(f"Resolved via preprint server: {result.pdf_url}")
+                logger.debug(f"Resolved via preprint server: {result.pdf_url}")
                 self._cache[identifier] = (result, time.time())
                 return result
 
@@ -178,12 +178,12 @@ class PublicationResolver:
         if doi:
             result = self._resolve_via_publisher(doi)
             if result.is_accessible():
-                logger.info(f"Resolved via publisher: {result.pdf_url}")
+                logger.debug(f"Resolved via publisher: {result.pdf_url}")
                 self._cache[identifier] = (result, time.time())
                 return result
 
         # Strategy 4: Generate helpful suggestions for paywalled papers
-        logger.info(f"Paper appears paywalled: {identifier}")
+        logger.debug(f"Paper appears paywalled: {identifier}")
         result = self._generate_access_suggestions(identifier, pmid, doi)
         self._cache[identifier] = (result, time.time())
         return result
@@ -235,7 +235,7 @@ class PublicationResolver:
         """
         import xml.etree.ElementTree as ET
 
-        logger.info(f"Fetching DOI from PubMed for PMID: {pmid}")
+        logger.debug(f"Fetching DOI from PubMed for PMID: {pmid}")
 
         try:
             # Use NCBI EFetch to get PubMed record in JSON format
@@ -256,7 +256,7 @@ class PublicationResolver:
             for article_id in root.findall(".//ArticleId[@IdType='doi']"):
                 doi = article_id.text
                 if doi:
-                    logger.info(f"Found DOI for PMID {pmid}: {doi}")
+                    logger.debug(f"Found DOI for PMID {pmid}: {doi}")
                     return doi.strip()
 
             logger.debug(f"No DOI found in PubMed record for PMID {pmid}")
@@ -284,7 +284,7 @@ class PublicationResolver:
         Returns:
             PublicationResolutionResult
         """
-        logger.info(f"Checking PMC for PMID: {pmid}")
+        logger.debug(f"Checking PMC for PMID: {pmid}")
 
         try:
             # Step 1: Use elink to find PMC ID
@@ -358,7 +358,7 @@ class PublicationResolver:
             html_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/"
             pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"
 
-            logger.info(f"Found PMC article: PMC{pmc_id}")
+            logger.debug(f"Found PMC article: PMC{pmc_id}")
 
             return PublicationResolutionResult(
                 identifier=f"PMID:{pmid}",
@@ -399,7 +399,7 @@ class PublicationResolver:
             This method returns publisher URLs which may be paywalled.
             The waterfall strategy will continue to other methods if needed.
         """
-        logger.info(f"Checking NCBI LinkOut for PMID: {pmid}")
+        logger.debug(f"Checking NCBI LinkOut for PMID: {pmid}")
 
         try:
             # Use ELink with prlinks (provider links) to get publisher URLs
@@ -425,7 +425,7 @@ class PublicationResolver:
                             provider_url = url_data.get("value")
 
                             if provider_url:
-                                logger.info(
+                                logger.debug(
                                     f"Found LinkOut URL for PMID {pmid}: {provider_url}"
                                 )
                                 provider_url_lower = provider_url.lower()
@@ -477,7 +477,7 @@ class PublicationResolver:
         Returns:
             PublicationResolutionResult
         """
-        logger.info(f"Checking preprint servers for DOI: {doi}")
+        logger.debug(f"Checking preprint servers for DOI: {doi}")
 
         # Check if DOI is from bioRxiv or medRxiv
         if "biorxiv.org" in doi.lower() or doi.startswith("10.1101/"):
@@ -527,7 +527,7 @@ class PublicationResolver:
         Returns:
             PublicationResolutionResult
         """
-        logger.info(f"Checking publisher for DOI: {doi}")
+        logger.debug(f"Checking publisher for DOI: {doi}")
 
         try:
             # Use CrossRef API to get metadata
@@ -727,7 +727,7 @@ class PublicationResolver:
             ...     else:
             ...         print(f"❌ {result.identifier}: Paywalled")
         """
-        logger.info(f"Batch resolving {len(identifiers)} identifiers")
+        logger.debug(f"Batch resolving {len(identifiers)} identifiers")
 
         # Limit batch size
         if len(identifiers) > max_batch:
@@ -738,7 +738,7 @@ class PublicationResolver:
 
         results = []
         for i, identifier in enumerate(identifiers, 1):
-            logger.info(f"Processing {i}/{len(identifiers)}: {identifier}")
+            logger.debug(f"Processing {i}/{len(identifiers)}: {identifier}")
             try:
                 result = self.resolve(identifier)
                 results.append(result)
@@ -753,7 +753,7 @@ class PublicationResolver:
                     )
                 )
 
-        logger.info(
+        logger.debug(
             f"Batch resolution complete: {sum(1 for r in results if r.is_accessible())}/{len(results)} accessible"
         )
         return results

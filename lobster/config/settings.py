@@ -78,6 +78,9 @@ class Settings:
             "OLLAMA_DEFAULT_MODEL", "llama3:8b-instruct"
         )
 
+        # Logging settings
+        self.LOG_LEVEL = os.environ.get("LOBSTER_LOG_LEVEL", "WARNING").upper()
+
         # Git automation settings (for sync scripts and CI/CD)
         self.GIT_USER_NAME = os.environ.get("GIT_USER_NAME", "")
         self.GIT_USER_EMAIL = os.environ.get("GIT_USER_EMAIL", "")

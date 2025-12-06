@@ -170,7 +170,7 @@ class PDBProvider(BaseStructureProvider):
         Returns:
             List[StructureMetadata]: Search results
         """
-        logger.info(f"Searching PDB for: {query} (max_results={max_results})")
+        logger.debug(f"Searching PDB for: {query} (max_results={max_results})")
 
         # Build search query
         search_payload = {
@@ -210,7 +210,7 @@ class PDBProvider(BaseStructureProvider):
                     logger.warning(f"Failed to get metadata for {pdb_id}: {e}")
                     continue
 
-            logger.info(f"Found {len(results)} PDB structures")
+            logger.debug(f"Found {len(results)} PDB structures")
             return results
 
         except Exception as e:
@@ -231,7 +231,7 @@ class PDBProvider(BaseStructureProvider):
             Optional[StructureMetadata]: Structure metadata or None if not found
         """
         pdb_id = pdb_id.upper()
-        logger.info(f"Fetching metadata for PDB ID: {pdb_id}")
+        logger.debug(f"Fetching metadata for PDB ID: {pdb_id}")
 
         url = f"{self.config.base_url}/core/entry/{pdb_id}"
 
@@ -313,7 +313,7 @@ class PDBProvider(BaseStructureProvider):
         output_path_obj = Path(output_path)
         output_path_obj.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Downloading {pdb_id} ({format}) to {output_path}")
+        logger.debug(f"Downloading {pdb_id} ({format}) to {output_path}")
 
         try:
             self._rate_limit()
@@ -327,7 +327,7 @@ class PDBProvider(BaseStructureProvider):
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            logger.info(f"Successfully downloaded {pdb_id} to {output_path}")
+            logger.debug(f"Successfully downloaded {pdb_id} to {output_path}")
             return str(output_path_obj)
 
         except requests.exceptions.HTTPError as e:

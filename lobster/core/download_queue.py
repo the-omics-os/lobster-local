@@ -113,7 +113,7 @@ class DownloadQueue:
             try:
                 existing_entries.append(entry)
                 self._write_entries_atomic(existing_entries)
-                logger.info(f"Added entry {entry.entry_id} to queue")
+                logger.debug(f"Added entry {entry.entry_id} to queue")
                 return entry.entry_id
 
             except Exception as e:
@@ -194,7 +194,7 @@ class DownloadQueue:
             # Write all entries atomically
             self._write_entries_atomic(entries)
 
-            logger.info(f"Updated entry {entry_id} status to {status}")
+            logger.debug(f"Updated entry {entry_id} status to {status}")
             return updated_entry
 
     def list_entries(
@@ -244,7 +244,7 @@ class DownloadQueue:
             # Write remaining entries atomically
             self._write_entries_atomic(entries)
 
-            logger.info(f"Removed entry {entry_id} from queue")
+            logger.debug(f"Removed entry {entry_id} from queue")
 
     def clear_queue(self) -> int:
         """
@@ -267,7 +267,7 @@ class DownloadQueue:
                 # Clear queue file
                 try:
                     self.queue_file.write_text("", encoding="utf-8")
-                    logger.info(f"Cleared {entry_count} entries from queue")
+                    logger.debug(f"Cleared {entry_count} entries from queue")
                 except Exception as e:
                     logger.error(f"Failed to clear queue: {e}")
                     raise DownloadQueueError(f"Failed to clear queue: {e}") from e

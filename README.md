@@ -385,6 +385,10 @@ NCBI_EMAIL=your.email@example.com
 # Optional: Performance tuning
 LOBSTER_PROFILE=production
 LOBSTER_MAX_FILE_SIZE_MB=500
+
+# Optional: Logging level (default: WARNING for clean interface)
+# Set to DEBUG for verbose output, INFO for standard verbosity
+LOBSTER_LOG_LEVEL=WARNING
 ```
 
 **CI/CD and automation:**

@@ -329,7 +329,7 @@ class PubMedProvider(BasePublicationProvider):
         Returns:
             str: Formatted list of discovered datasets
         """
-        logger.info(f"Finding datasets from publication: {identifier}")
+        logger.debug(f"Finding datasets from publication: {identifier}")
         logger.debug(
             f"[DEFENSIVE] dataset_types parameter: type={type(dataset_types)}, value={dataset_types}"
         )
@@ -665,7 +665,7 @@ class PubMedProvider(BasePublicationProvider):
             jitter = random.uniform(0, base_delay * 0.1)
             delay = min(base_delay + jitter, self.config.max_backoff_delay)
 
-            logger.info(f"Rate limited by NCBI, waiting {delay:.1f}s before retry...")
+            logger.debug(f"Rate limited by NCBI, waiting {delay:.1f}s before retry...")
             time.sleep(delay)
 
     def _handle_server_error(
@@ -675,7 +675,7 @@ class PubMedProvider(BasePublicationProvider):
         if attempt < self.config.max_retry:
             # Shorter delays for server errors (they often resolve quickly)
             delay = min(2**attempt, 10)
-            logger.info(
+            logger.debug(
                 f"NCBI server error {status_code}, waiting {delay}s before retry..."
             )
             time.sleep(delay)
@@ -877,14 +877,14 @@ class PubMedProvider(BasePublicationProvider):
         Returns:
             str: Extracted methods with parameters and citations
         """
-        logger.info(f"Extracting computational methods from: {identifier}")
+        logger.debug(f"Extracting computational methods from: {identifier}")
 
         try:
             # PRIORITY: Try PMC full text first (95% accuracy, structured XML)
             pmc_full_text = self._get_pmc_full_text(identifier)
 
             if pmc_full_text:
-                logger.info(f"Using PMC full text for method extraction: {identifier}")
+                logger.debug(f"Using PMC full text for method extraction: {identifier}")
                 # Extract methods from full text (methods section + full text)
                 methods_text = (
                     pmc_full_text.methods_section
@@ -909,7 +909,7 @@ class PubMedProvider(BasePublicationProvider):
                 metadata_source = "PMC full text"
             else:
                 # Fallback: Use abstract (70% accuracy)
-                logger.info(
+                logger.debug(
                     f"PMC full text not available, using abstract for: {identifier}"
                 )
                 metadata = self.extract_publication_metadata(identifier)
@@ -1376,7 +1376,7 @@ class PubMedProvider(BasePublicationProvider):
                                 # Non-lookup: construct accession directly
                                 linked[key].append(f"{config['prefix']}{link_id}")
 
-            logger.info(
+            logger.debug(
                 f"Combined E-Link found: GEO UIDs={len(geo_uids)}, "
                 f"SRA={len(linked['SRA'])}, BioProject UIDs={len(bioproject_uids)}, "
                 f"BioSample UIDs={len(biosample_uids)}"
@@ -1465,7 +1465,7 @@ class PubMedProvider(BasePublicationProvider):
                     else:
                         logger.debug(f"No accession found for GEO UID {uid}")
 
-                logger.info(
+                logger.debug(
                     f"Batch resolved {len(batch_uids)} GEO UIDs → {len(accessions)} accessions"
                 )
 
@@ -1542,7 +1542,7 @@ class PubMedProvider(BasePublicationProvider):
                     else:
                         logger.debug(f"No accession found for BioProject UID {uid}")
 
-                logger.info(
+                logger.debug(
                     f"Batch resolved {len(batch_uids)} BioProject UIDs → {len(accessions)} accessions"
                 )
 
@@ -1598,7 +1598,7 @@ class PubMedProvider(BasePublicationProvider):
                     else:
                         logger.debug(f"No accession found for BioSample UID {uid}")
 
-                logger.info(
+                logger.debug(
                     f"Batch resolved {len(batch_uids)} BioSample UIDs → {len(accessions)} accessions"
                 )
 
@@ -1649,7 +1649,7 @@ class PubMedProvider(BasePublicationProvider):
         # Process in batches of 200
         for i in range(0, len(pmids), batch_size):
             batch_pmids = pmids[i : i + batch_size]
-            logger.info(
+            logger.debug(
                 f"Batch E-Link: processing {len(batch_pmids)} PMIDs "
                 f"(batch {i//batch_size + 1}/{(len(pmids)-1)//batch_size + 1})"
             )
@@ -1750,7 +1750,7 @@ class PubMedProvider(BasePublicationProvider):
                     len(v) for v in biosample_uids_by_pmid.values()
                 )
 
-                logger.info(
+                logger.debug(
                     f"Batch E-Link found: GEO UIDs={total_geo_uids}, "
                     f"SRA={total_sra}, BioProject UIDs={total_bioproject_uids}, "
                     f"BioSample UIDs={total_biosample_uids}"
@@ -1795,7 +1795,7 @@ class PubMedProvider(BasePublicationProvider):
                 for key in all_results[pmid]:
                     all_results[pmid][key] = list(set(all_results[pmid][key]))
 
-        logger.info(
+        logger.debug(
             f"Batch E-Link complete: processed {len(pmids)} PMIDs across "
             f"{(len(pmids)-1)//batch_size + 1} batch(es)"
         )
@@ -2024,7 +2024,7 @@ class PubMedProvider(BasePublicationProvider):
 
             # Try to extract PMC full text
             pmc_result = pmc_provider.extract_full_text(identifier)
-            logger.info(
+            logger.debug(
                 f"PMC full text retrieved: {len(pmc_result.methods_section)} chars methods"
             )
             return pmc_result

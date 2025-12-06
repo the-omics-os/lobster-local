@@ -243,7 +243,7 @@ class NotebookExecutor:
 
             start_time = time.time()
 
-            logger.info(f"Executing notebook: {notebook_path}")
+            logger.debug(f"Executing notebook: {notebook_path}")
             logger.debug(f"Parameters: {params}")
 
             papermill.execute_notebook(

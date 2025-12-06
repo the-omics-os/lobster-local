@@ -493,8 +493,8 @@ class NCBIQueryBuilder:
             logger.warning(
                 f"Detected query syntax errors, auto-fixing: {original_query[:80]}..."
             )
-            logger.info(f"Applied fixes: {', '.join(fixes_applied)}")
-            logger.info(f"Fixed query: {query[:80]}...")
+            logger.debug(f"Applied fixes: {', '.join(fixes_applied)}")
+            logger.debug(f"Fixed query: {query[:80]}...")
 
         return query
 

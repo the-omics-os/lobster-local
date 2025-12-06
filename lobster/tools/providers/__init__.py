@@ -19,8 +19,17 @@ from lobster.tools.providers.massive_provider import (
     MassIVEProvider,
     MassIVEProviderConfig,
 )
-from lobster.tools.providers.pride_provider import PRIDEProvider, PRIDEProviderConfig
 from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
+
+# PRIDE provider is PREMIUM-only (proteomics)
+# Import conditionally to avoid breaking FREE tier
+try:
+    from lobster.tools.providers.pride_provider import PRIDEProvider, PRIDEProviderConfig
+    _PRIDE_AVAILABLE = True
+except ImportError:
+    _PRIDE_AVAILABLE = False
+    PRIDEProvider = None  # type: ignore
+    PRIDEProviderConfig = None  # type: ignore
 
 __all__ = [
     # Base classes
@@ -38,10 +47,11 @@ __all__ = [
     # PubMed provider
     "PubMedProvider",
     "PubMedProviderConfig",
-    # PRIDE provider
-    "PRIDEProvider",
-    "PRIDEProviderConfig",
     # MassIVE provider
     "MassIVEProvider",
     "MassIVEProviderConfig",
 ]
+
+# Add PRIDE to exports if available (PREMIUM tier)
+if _PRIDE_AVAILABLE:
+    __all__.extend(["PRIDEProvider", "PRIDEProviderConfig"])

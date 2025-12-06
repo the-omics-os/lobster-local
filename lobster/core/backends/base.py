@@ -232,7 +232,7 @@ class BaseBackend(IDataBackend):
 
         try:
             resolved_path.unlink()
-            self.logger.info(f"Deleted file: {resolved_path}")
+            self.logger.debug(f"Deleted file: {resolved_path}")
         except PermissionError as e:
             raise PermissionError(f"Permission denied deleting {resolved_path}: {e}")
 
@@ -294,7 +294,7 @@ class BaseBackend(IDataBackend):
 
             shutil.copy2(resolved_path, backup_path)
 
-            self.logger.info(f"Created backup: {backup_path}")
+            self.logger.debug(f"Created backup: {backup_path}")
             return backup_path
         except Exception as e:
             self.logger.warning(f"Failed to create backup for {path}: {e}")

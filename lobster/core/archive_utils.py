@@ -168,7 +168,7 @@ class ArchiveExtractor:
             else:
                 raise ValueError(f"Unsupported archive format: {archive_path.suffix}")
 
-            logger.info(f"Successfully extracted archive to {target_dir}")
+            logger.debug(f"Successfully extracted archive to {target_dir}")
             return target_dir
 
         except Exception as e:
@@ -520,7 +520,7 @@ class ArchiveInspector:
         if len(nested_archives) < 2:
             return None  # Not a nested archive structure worth special handling
 
-        logger.info(
+        logger.debug(
             f"Detected {len(nested_archives)} nested archives in {parent_archive_path}"
         )
 
