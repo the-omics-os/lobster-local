@@ -73,7 +73,7 @@ class ClusteringService:
             callback: Callable function to receive progress updates
         """
         self.progress_callback = callback
-        logger.info("Progress callback set")
+        logger.debug("Progress callback set")
 
     def _update_progress(self, step_name: str) -> None:
         """
@@ -86,7 +86,7 @@ class ClusteringService:
         if self.progress_callback is not None:
             progress_percent = int((self.current_progress / self.total_steps) * 100)
             self.progress_callback(progress_percent, step_name)
-            logger.info(f"Progress updated: {progress_percent}% - {step_name}")
+            logger.debug(f"Progress updated: {progress_percent}% - {step_name}")
 
     def _create_progress_callback(self):
         """
@@ -366,7 +366,7 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             ClusteringError: If clustering fails
         """
         try:
-            logger.info("Starting clustering and visualization pipeline")
+            logger.debug("Starting clustering and visualization pipeline")
 
             # Initialize progress tracking
             self.current_progress = 0
@@ -382,19 +382,19 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             if resolution is None:
                 resolution = self.default_cluster_resolution
 
-            logger.info(f"Performing clustering with resolution {resolution}")
+            logger.debug(f"Performing clustering with resolution {resolution}")
 
             # Create working copy
             adata_clustered = adata.copy()
             original_shape = adata_clustered.shape
 
-            logger.info(
+            logger.debug(
                 f"Input data dimensions: {original_shape[0]} cells × {original_shape[1]} genes"
             )
 
             # Handle demo mode settings
             if demo_mode:
-                logger.info("Running in demo mode (faster processing)")
+                logger.debug("Running in demo mode (faster processing)")
                 if "marker_genes" not in skip_steps:
                     skip_steps.append("marker_genes")
                 if not subsample_size:
@@ -406,11 +406,11 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             if subsample_size and adata_clustered.n_obs > subsample_size:
                 # BUG-005 FIX: Preserve obs columns during subsampling
                 original_obs_cols = set(adata_clustered.obs.columns)
-                logger.info(
+                logger.debug(
                     f"Subsampling data to {subsample_size} cells (from {adata_clustered.n_obs})"
                 )
                 sc.pp.subsample(adata_clustered, n_obs=subsample_size, random_state=42)
-                logger.info(f"Data subsampled: {adata_clustered.n_obs} cells remaining")
+                logger.debug(f"Data subsampled: {adata_clustered.n_obs} cells remaining")
 
                 # Verify metadata preservation
                 new_obs_cols = set(adata_clustered.obs.columns)
