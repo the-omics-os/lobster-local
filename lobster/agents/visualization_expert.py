@@ -204,6 +204,33 @@ def visualization_expert(
 
             adata = data_manager.get_modality(modality_name)
 
+            # SCIENTIFIC VALIDATION: Skip QC plots for DE result subsets
+            # QC metrics (n_genes, n_counts, pct_mito) only make sense for full datasets
+            # DE results contain filtered gene subsets (e.g., 174 genes) - QC plots are meaningless
+            is_de_modality = (
+                "_de_" in modality_name.lower()
+                or modality_name.lower().startswith("de_")
+                or "differential" in modality_name.lower()
+            )
+            is_small_subset = adata.n_vars < 1000  # Likely a filtered result, not full data
+
+            if is_de_modality or is_small_subset:
+                return f"""⚠️ Cannot create QC plots for '{modality_name}'
+
+**Scientific Reason**: QC metrics (n_genes, n_counts, percent_mito) are designed for full datasets, not filtered subsets.
+
+- **Current modality**: {adata.n_obs} cells × {adata.n_vars} genes
+- **Detection**: {'DE result modality' if is_de_modality else f'Small gene subset ({adata.n_vars} genes < 1000 threshold)'}
+
+**Recommendation**: QC plots should only be generated for:
+1. Raw data (before filtering)
+2. Normalized/preprocessed full datasets
+3. Datasets with >1000 genes
+
+For DE results, use volcano plots, MA plots, or heatmaps instead.
+
+**Report to Supervisor**: Skipped inappropriate QC visualization (scientific correctness maintained)"""
+
             # Default QC metrics if not specified
             if metrics is None:
                 metrics = []
