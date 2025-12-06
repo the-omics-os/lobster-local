@@ -246,14 +246,7 @@ class SingleCellVisualizationService:
             fig.update_layout(
                 showlegend=show_legend,
                 legend=(
-                    dict(
-                        orientation="v",
-                        yanchor="top",
-                        y=0.99,
-                        xanchor="left",
-                        x=1.01,
-                        itemsizing='constant'  # FIX ISSUE 1: Ensure legend markers are readable size
-                    )
+                    dict(orientation="v", yanchor="top", y=0.99, xanchor="left", x=1.01)
                     if show_legend
                     else None
                 ),
@@ -262,26 +255,6 @@ class SingleCellVisualizationService:
                 xaxis=dict(showgrid=True, gridcolor="lightgray", zeroline=True),
                 yaxis=dict(showgrid=True, gridcolor="lightgray", zeroline=True),
             )
-
-            # FIX ISSUE 1: Increase legend marker size for categorical plots (e.g., sample_id)
-            if show_legend and is_categorical:
-                fig.update_traces(marker=dict(size=point_size, opacity=alpha), selector=dict(mode='markers'))
-                # Override legend marker size to make it more visible
-                for trace in fig.data:
-                    if hasattr(trace, 'marker'):
-                        trace.marker.size = point_size  # Keep data point size
-                fig.update_layout(
-                    legend=dict(
-                        orientation="v",
-                        yanchor="top",
-                        y=0.99,
-                        xanchor="left",
-                        x=1.01,
-                        itemsizing='constant',
-                        tracegroupgap=5,
-                        itemwidth=30
-                    )
-                )
 
             return fig
 
@@ -1085,7 +1058,7 @@ class SingleCellVisualizationService:
                     "M. Doublet Detection" if has_doublet else "M. Ribo% Distribution",
                     "N. QC Thresholds",  # Threshold visualization
                     "O. Cell Filtering Impact",  # Before/after
-                    "P. Batch Effects" if batch_col else "",  # FIX ISSUE 4: Remove subtitle for gauge (it has its own title)
+                    "P. Batch Effects" if batch_col else "P. Overall Quality",
                 ],
                 specs=[
                     [
@@ -1752,7 +1725,7 @@ class SingleCellVisualizationService:
                 title={
                     "text": title
                     or "Comprehensive Single-Cell RNA-seq Quality Control Report",
-                    "font": {"size": 24, "family": "Arial, sans-serif"},  # FIX ISSUE 3: Increased from 18 to 24
+                    "font": {"size": 18, "family": "Arial, sans-serif"},
                     "x": 0.5,
                     "xanchor": "center",
                 },
@@ -1762,7 +1735,7 @@ class SingleCellVisualizationService:
                 plot_bgcolor="white",
                 paper_bgcolor="white",
                 font=dict(size=9),
-                margin=dict(l=50, r=50, t=80, b=100),  # FIX ISSUE 2: Increased bottom margin from 60 to 100
+                margin=dict(l=50, r=50, t=80, b=60),
             )
 
             # Add annotation with dataset info
@@ -1857,30 +1830,15 @@ class SingleCellVisualizationService:
                 if normalize:
                     composition = composition * 100
 
-                # Create extended color palette for 12+ samples
-                import plotly.colors as pc
-
-                n_clusters = len(composition.columns)
-                if n_clusters <= 12:
-                    # Use Set3 (12 distinct colors)
-                    colors = pc.qualitative.Set3[:n_clusters]
-                elif n_clusters <= 24:
-                    # Combine Set3 + Paired
-                    colors = (pc.qualitative.Set3 + pc.qualitative.Paired)[:n_clusters]
-                else:
-                    # Sample from continuous colorscale for many clusters
-                    colors = pc.sample_colorscale("viridis", n_clusters)
-
                 # Create stacked bar plot
                 fig = go.Figure()
 
-                for idx, cluster in enumerate(composition.columns):
+                for cluster in composition.columns:
                     fig.add_trace(
                         go.Bar(
                             name=f"Cluster {cluster}",
                             x=composition.index,
                             y=composition[cluster],
-                            marker_color=colors[idx],
                         )
                     )
 

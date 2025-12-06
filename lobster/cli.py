@@ -4,16 +4,6 @@ Modern, user-friendly CLI for the Multi-Agent Bioinformatics System.
 Installable via pip or curl, with rich terminal interface.
 """
 
-# Python 3.13 compatibility: Fix multiprocessing/tqdm file descriptor issue
-# Must be done FIRST before any imports that might use multiprocessing
-import sys
-if sys.version_info >= (3, 13):
-    import multiprocessing as _mp
-    try:
-        _mp.set_start_method("fork", force=True)
-    except RuntimeError:
-        pass  # Already set
-
 import os
 import threading
 from pathlib import Path
