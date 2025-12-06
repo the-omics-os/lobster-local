@@ -712,35 +712,51 @@ class SingleCellVisualizationService:
             # Create dot plot
             fig = go.Figure()
 
-            # Add dots for each gene-group combination
+            # BUGFIX (2024-12): Collect all dots into arrays for single trace (enables continuous color gradient)
+            # OLD: Created 1 trace per dot (1600+) → categorical colors
+            # NEW: 1 trace with arrays → continuous gradient
+            x_coords = []
+            y_coords = []
+            sizes = []
+            colors = []
+            hover_texts = []
+
+            # Collect data for all gene-group combinations
             for i, gene in enumerate(genes):
                 for j, group in enumerate(groups):
+                    x_coords.append(j)
+                    y_coords.append(i)
                     # Size based on percentage expressing
-                    size = pct_expr[i, j] / 100 * 30  # Scale to max size of 30
-
+                    sizes.append(pct_expr[i, j] / 100 * 30)  # Scale to max size of 30
                     # Color based on mean expression
-                    color = mean_expr[i, j]
-
-                    fig.add_trace(
-                        go.Scatter(
-                            x=[j],
-                            y=[i],
-                            mode="markers",
-                            marker=dict(
-                                size=size,
-                                color=color,
-                                colorscale=self.expression_colorscale,
-                                showscale=(i == 0 and j == 0),  # Show colorbar once
-                                colorbar=dict(title="Mean<br>Expression", x=1.15),
-                                line=dict(width=0.5, color="black"),
-                            ),
-                            text=f"Gene: {gene}<br>Group: {group}<br>"
-                            f"Mean Expr: {mean_expr[i, j]:.2f}<br>"
-                            f"% Expressing: {pct_expr[i, j]:.1f}%",
-                            hovertemplate="%{text}<extra></extra>",
-                            showlegend=False,
-                        )
+                    colors.append(mean_expr[i, j])
+                    hover_texts.append(
+                        f"Gene: {gene}<br>Group: {group}<br>"
+                        f"Mean Expr: {mean_expr[i, j]:.2f}<br>"
+                        f"% Expressing: {pct_expr[i, j]:.1f}%"
                     )
+
+            # Add single trace with all dots (enables continuous color mapping)
+            fig.add_trace(
+                go.Scatter(
+                    x=x_coords,
+                    y=y_coords,
+                    mode="markers",
+                    marker=dict(
+                        size=sizes,  # Array of sizes
+                        color=colors,  # Array of colors → continuous gradient!
+                        colorscale=self.expression_colorscale,
+                        showscale=True,
+                        colorbar=dict(title="Mean<br>Expression", x=1.15),
+                        cmin=np.min(colors) if len(colors) > 0 else 0,  # Explicit color range
+                        cmax=np.max(colors) if len(colors) > 0 else 1,
+                        line=dict(width=0.5, color="black"),
+                    ),
+                    text=hover_texts,
+                    hovertemplate="%{text}<extra></extra>",
+                    showlegend=False,
+                )
+            )
 
             # Add size legend
             for size_pct in [25, 50, 75, 100]:
