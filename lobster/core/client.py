@@ -28,9 +28,17 @@ from lobster.core.archive_utils import (
 )
 from lobster.core.data_manager_v2 import DataManagerV2
 
-# Import extraction cache manager
-from lobster.core.extraction_cache import ExtractionCacheManager
+# Import extraction cache manager (premium feature - graceful fallback if unavailable)
+try:
+    from lobster.core.extraction_cache import ExtractionCacheManager
+    HAS_EXTRACTION_CACHE = True
+except ImportError:
+    # Premium feature not available in open-core distribution
+    ExtractionCacheManager = None
+    HAS_EXTRACTION_CACHE = False
+
 from lobster.core.interfaces.base_client import BaseClient
+from lobster.core.workspace import resolve_workspace
 from lobster.utils.callbacks import TokenTrackingCallback
 
 # Configure logging
@@ -47,6 +55,7 @@ class AgentClient(BaseClient):
         workspace_path: Optional[Path] = None,
         custom_callbacks: Optional[List] = None,
         manual_model_params: Optional[Dict[str, Any]] = None,
+        provider_override: Optional[str] = None,
     ):
         """
         Initialize the agent client with DataManagerV2.
@@ -56,9 +65,11 @@ class AgentClient(BaseClient):
             session_id: Unique session identifier
             enable_reasoning: Show agent reasoning/thinking process
             enable_langfuse: Enable Langfuse debugging callback
-            workspace_path: Path to workspace for file operations
+            workspace_path: Path to workspace for file operations.
+                Resolution order: explicit path > LOBSTER_WORKSPACE env var > cwd/.lobster_workspace
             custom_callbacks: Additional callback handlers
             manual_model_params: Manual model parameter overrides
+            provider_override: Optional explicit provider name (e.g., "bedrock", "anthropic", "ollama")
         """
         # Set up session
         self.session_id = (
@@ -66,9 +77,10 @@ class AgentClient(BaseClient):
         )
         self.enable_reasoning = enable_reasoning
 
-        # Set up workspace
-        self.workspace_path = workspace_path or Path.cwd()
-        self.workspace_path.mkdir(parents=True, exist_ok=True)
+        # Set up workspace using centralized resolver
+        self.workspace_path = resolve_workspace(
+            explicit_path=workspace_path, create=True
+        )
 
         # Initialize DataManagerV2
         if data_manager is None:
@@ -81,6 +93,15 @@ class AgentClient(BaseClient):
             logger.info("Initialized with DataManagerV2 (modular multi-omics)")
         else:
             self.data_manager = data_manager
+
+        self.profile_timings_enabled = getattr(
+            self.data_manager, "profile_timings_enabled", False
+        )
+        self._publication_queue_ref = None
+        self._publication_queue_unavailable = False
+
+        # Store provider override for runtime switching
+        self.provider_override = provider_override
 
         # Set up callbacks
         self.callbacks = []
@@ -105,6 +126,7 @@ class AgentClient(BaseClient):
             store=self.store,
             callback_handler=self.callbacks,  # Pass the list of callbacks
             manual_model_params=manual_model_params,  # Placeholder for future manual model params
+            provider_override=provider_override,  # Pass provider override to graph
         )
 
         # Conversation state
@@ -142,6 +164,18 @@ class AgentClient(BaseClient):
             return self._stream_query(graph_input, config)
         else:
             return self._run_query(graph_input, config)
+
+    @property
+    def publication_queue(self):
+        if self._publication_queue_unavailable:
+            return None
+        if self._publication_queue_ref is None:
+            pq = getattr(self.data_manager, "publication_queue", None)
+            if pq is None:
+                self._publication_queue_unavailable = True
+                return None
+            self._publication_queue_ref = pq
+        return self._publication_queue_ref
 
     def _run_query(self, graph_input: Dict, config: Dict) -> Dict[str, Any]:
         """Run a query and return the complete response."""
@@ -821,7 +855,7 @@ class AgentClient(BaseClient):
                     counter += 1
 
             # Step 1: Merge quantification files using BulkRNASeqService
-            from lobster.tools.bulk_rnaseq_service import BulkRNASeqService
+            from lobster.services.analysis.bulk_rnaseq_service import BulkRNASeqService
 
             bulk_service = BulkRNASeqService()
 
@@ -974,7 +1008,9 @@ class AgentClient(BaseClient):
         self, directory: Path, modality_base: str
     ) -> Dict[str, Any]:
         """Load GEO RAW files (GSM*.txt.gz) from extracted directory."""
-        from lobster.tools.concatenation_service import ConcatenationService
+        from lobster.services.data_management.concatenation_service import (
+            ConcatenationService,
+        )
 
         # Find GEO sample files
         geo_files = []
@@ -1407,6 +1443,17 @@ class AgentClient(BaseClient):
                     f"Detected nested archive with {nested_info.total_count} samples"
                 )
 
+                # Check if extraction cache is available (premium feature)
+                if not HAS_EXTRACTION_CACHE:
+                    return {
+                        "success": False,
+                        "type": "nested_archive",
+                        "nested_info": nested_info,
+                        "error": "Nested archive caching requires premium features. "
+                        "Use extract_and_load_archive() to load entire archive instead.",
+                        "message": f"Detected nested archive with {nested_info.total_count} samples (caching unavailable)",
+                    }
+
                 extractor = ArchiveExtractor()
                 extract_dir = extractor.extract_to_temp(
                     archive_path, prefix=f"lobster_nested_{archive_path.stem}_"
@@ -1496,6 +1543,14 @@ class AgentClient(BaseClient):
             - message: str
             - error: str (if failed)
         """
+        # Check if extraction cache is available (premium feature)
+        if not HAS_EXTRACTION_CACHE:
+            return {
+                "success": False,
+                "error": "Cache loading requires premium features. "
+                "Use extract_and_load_archive() to load entire archive instead.",
+            }
+
         try:
             # 1. Get matching files from cache
             cache_manager = ExtractionCacheManager(self.workspace_path)
@@ -1571,7 +1626,9 @@ class AgentClient(BaseClient):
             merged_modality = None
             if len(results) > 1:
                 try:
-                    from lobster.tools.concatenation_service import ConcatenationService
+                    from lobster.services.data_management.concatenation_service import (
+                        ConcatenationService,
+                    )
 
                     concat_service = ConcatenationService(self.data_manager)
 
@@ -1828,10 +1885,196 @@ class AgentClient(BaseClient):
         """
         return self.token_tracker.get_usage_summary()
 
+    def switch_provider(self, provider_name: str) -> Dict[str, Any]:
+        """
+        Switch LLM provider at runtime and recreate the agent graph.
+
+        Args:
+            provider_name: Provider to switch to ("bedrock", "anthropic", "ollama")
+
+        Returns:
+            Dictionary with success status and message
+        """
+        from lobster.config.llm_factory import LLMFactory, LLMProvider
+
+        try:
+            # Validate provider
+            try:
+                provider = LLMProvider(provider_name)
+            except ValueError:
+                valid_providers = ", ".join([p.value for p in LLMProvider])
+                return {
+                    "success": False,
+                    "error": f"Invalid provider '{provider_name}'. Valid options: {valid_providers}",
+                }
+
+            # Check if provider is configured
+            available_providers = LLMFactory.get_available_providers()
+            if provider_name not in available_providers:
+                return {
+                    "success": False,
+                    "error": f"Provider '{provider_name}' is not configured. Available: {', '.join(available_providers)}",
+                    "hint": "Run 'lobster init' to configure providers",
+                }
+
+            # Store old provider for rollback
+            old_provider = self.provider_override
+
+            # Update provider override
+            self.provider_override = provider_name
+
+            # Recreate graph with new provider
+            try:
+                self.graph = create_bioinformatics_graph(
+                    data_manager=self.data_manager,
+                    checkpointer=self.checkpointer,
+                    store=self.store,
+                    callback_handler=self.callbacks,
+                    provider_override=provider_name,
+                )
+
+                logger.info(f"Successfully switched to provider: {provider_name}")
+                return {
+                    "success": True,
+                    "provider": provider_name,
+                    "message": f"Switched to {provider_name} provider",
+                }
+            except Exception as e:
+                # Rollback on failure
+                self.provider_override = old_provider
+                self.graph = create_bioinformatics_graph(
+                    data_manager=self.data_manager,
+                    checkpointer=self.checkpointer,
+                    store=self.store,
+                    callback_handler=self.callbacks,
+                    provider_override=old_provider,
+                )
+                return {
+                    "success": False,
+                    "error": f"Failed to switch provider: {str(e)}",
+                    "provider": old_provider,
+                }
+
+        except Exception as e:
+            logger.error(f"Provider switch failed: {e}")
+            return {
+                "success": False,
+                "error": f"Unexpected error: {str(e)}",
+            }
+
     def reset(self):
         """Reset the conversation state."""
         self.messages = []
         self.metadata["reset_at"] = datetime.now().isoformat()
+
+    def load_publication_list(
+        self,
+        file_path: str,
+        priority: int = 5,
+        schema_type: str = "general",
+        extraction_level: str = "methods",
+    ) -> Dict[str, Any]:
+        """
+        Load .ris publication list and create queue entries.
+
+        Args:
+            file_path: Path to .ris file
+            priority: Processing priority (1-10, default: 5)
+            schema_type: Schema type for validation (default: "general")
+            extraction_level: Target extraction depth (default: "methods")
+
+        Returns:
+            Dict with added_count, entry_ids, skipped_count, and errors
+
+        Raises:
+            FileNotFoundError: If file does not exist
+            ValueError: If file is not .ris format
+            ImportError: If publication queue feature is not available
+        """
+        if self.publication_queue is None:
+            raise ImportError(
+                "Publication queue feature is not available. "
+                "This is a premium feature not included in the open-source distribution."
+            )
+
+        try:
+            from lobster.core.ris_parser import RISParser
+        except ImportError:
+            raise ImportError(
+                "RIS parser not available. "
+                "This is a premium feature not included in the open-source distribution."
+            )
+
+        file_path_obj = Path(file_path)
+
+        # Validate file exists
+        if not file_path_obj.exists():
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        # Validate file extension
+        if file_path_obj.suffix.lower() not in [".ris", ".txt"]:
+            raise ValueError(
+                f"File must have .ris or .txt extension, got {file_path_obj.suffix}"
+            )
+
+        # Parse RIS file
+        parser = RISParser()
+        try:
+            entries = parser.parse_file(file_path_obj, encoding="utf-8")
+        except Exception as e:
+            logger.error(f"Failed to parse RIS file: {e}")
+            return {
+                "added_count": 0,
+                "entry_ids": [],
+                "skipped_count": 0,
+                "errors": [str(e)],
+            }
+
+        # Add entries to queue
+        added_ids = []
+        failed_entries = []
+
+        for entry in entries:
+            try:
+                # Override priority, schema_type, extraction_level if provided
+                if priority != 5:
+                    entry.priority = priority
+                if schema_type != "general":
+                    entry.schema_type = schema_type
+                if extraction_level != "methods":
+                    try:
+                        from lobster.core.schemas.publication_queue import (
+                            ExtractionLevel,
+                        )
+
+                        entry.extraction_level = ExtractionLevel(
+                            extraction_level.lower()
+                        )
+                    except ImportError:
+                        logger.warning("ExtractionLevel not available, using default")
+
+                entry_id = self.publication_queue.add_entry(entry)
+                added_ids.append(entry_id)
+            except Exception as e:
+                failed_entries.append(str(e))
+                logger.warning(f"Failed to add entry to queue: {e}")
+
+        # Get parser statistics
+        stats = parser.get_statistics()
+
+        result = {
+            "added_count": len(added_ids),
+            "entry_ids": added_ids,
+            "skipped_count": stats.get("skipped", 0),
+            "errors": stats.get("errors", []) + failed_entries,
+        }
+
+        logger.info(
+            f"Loaded {result['added_count']} publications from {file_path}, "
+            f"skipped {result['skipped_count']}"
+        )
+
+        return result
 
     def export_session(self, export_path: Optional[Path] = None) -> Path:
         """Export the current session data."""

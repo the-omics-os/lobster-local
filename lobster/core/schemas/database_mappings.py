@@ -33,6 +33,8 @@ class DatabaseAccession:
         description: Field purpose and usage notes
         modalities: Which data modalities use this field
         required: Whether this field is required (vs optional)
+        access_type: Data access type ("open", "controlled", "embargoed")
+        access_notes: Instructions for accessing controlled/embargoed data
     """
 
     field_name: str
@@ -44,6 +46,8 @@ class DatabaseAccession:
     description: str
     modalities: List[str]
     required: bool = False
+    access_type: str = "open"  # "open", "controlled", "embargoed"
+    access_notes: str = ""  # Instructions for controlled access
 
 
 # =============================================================================
@@ -106,6 +110,163 @@ NCBI_ACCESSIONS = {
         modalities=["transcriptomics", "metagenomics"],
         required=False,
     ),
+    "sra_sample_accession": DatabaseAccession(
+        field_name="sra_sample_accession",
+        database_name="NCBI Sequence Read Archive (Sample)",
+        database_url_template="https://www.ncbi.nlm.nih.gov/sra/{accession}",
+        prefix_pattern=r"SRS",
+        full_pattern=r"^SRS\d{6,}$",
+        example="SRS123456",
+        description="SRA Sample accession for biological sample",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+}
+
+# =============================================================================
+# ENA (European Nucleotide Archive) Accessions
+# =============================================================================
+
+ENA_ACCESSIONS = {
+    "ena_study_accession": DatabaseAccession(
+        field_name="ena_study_accession",
+        database_name="ENA Sequence Read Archive (Study)",
+        database_url_template="https://www.ebi.ac.uk/ena/browser/view/{accession}",
+        prefix_pattern=r"ERP",
+        full_pattern=r"^ERP\d{6,}$",
+        example="ERP123456",
+        description="ENA Study accession (European equivalent of SRP)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "ena_experiment_accession": DatabaseAccession(
+        field_name="ena_experiment_accession",
+        database_name="ENA Sequence Read Archive (Experiment)",
+        database_url_template="https://www.ebi.ac.uk/ena/browser/view/{accession}",
+        prefix_pattern=r"ERX",
+        full_pattern=r"^ERX\d{6,}$",
+        example="ERX123456",
+        description="ENA Experiment accession (European equivalent of SRX)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "ena_run_accession": DatabaseAccession(
+        field_name="ena_run_accession",
+        database_name="ENA Sequence Read Archive (Run)",
+        database_url_template="https://www.ebi.ac.uk/ena/browser/view/{accession}",
+        prefix_pattern=r"ERR",
+        full_pattern=r"^ERR\d{6,}$",
+        example="ERR123456",
+        description="ENA Run accession (European equivalent of SRR)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "ena_sample_accession": DatabaseAccession(
+        field_name="ena_sample_accession",
+        database_name="ENA Sequence Read Archive (Sample)",
+        database_url_template="https://www.ebi.ac.uk/ena/browser/view/{accession}",
+        prefix_pattern=r"ERS",
+        full_pattern=r"^ERS\d{6,}$",
+        example="ERS123456",
+        description="ENA Sample accession (European equivalent of SRS)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "bioproject_ena_accession": DatabaseAccession(
+        field_name="bioproject_ena_accession",
+        database_name="ENA BioProject",
+        database_url_template="https://www.ebi.ac.uk/ena/browser/view/{accession}",
+        prefix_pattern=r"PRJEB",
+        full_pattern=r"^PRJEB\d{4,}$",
+        example="PRJEB83385",
+        description="ENA BioProject accession (European equivalent of PRJNA)",
+        modalities=["transcriptomics", "proteomics", "metabolomics", "metagenomics"],
+        required=False,
+    ),
+    "biosample_ena_accession": DatabaseAccession(
+        field_name="biosample_ena_accession",
+        database_name="ENA BioSample",
+        database_url_template="https://www.ebi.ac.uk/ena/browser/view/{accession}",
+        prefix_pattern=r"SAME",
+        full_pattern=r"^SAME[A-Z]?\d{6,}$",
+        example="SAMEA123456",
+        description="ENA BioSample accession (European equivalent of SAMN)",
+        modalities=["transcriptomics", "proteomics", "metabolomics", "metagenomics"],
+        required=False,
+    ),
+}
+
+# =============================================================================
+# DDBJ (DNA Data Bank of Japan) Accessions
+# =============================================================================
+
+DDBJ_ACCESSIONS = {
+    "ddbj_study_accession": DatabaseAccession(
+        field_name="ddbj_study_accession",
+        database_name="DDBJ Sequence Read Archive (Study)",
+        database_url_template="https://ddbj.nig.ac.jp/resource/sra-study/{accession}",
+        prefix_pattern=r"DRP",
+        full_pattern=r"^DRP\d{6,}$",
+        example="DRP123456",
+        description="DDBJ Study accession (Japanese equivalent of SRP)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "ddbj_experiment_accession": DatabaseAccession(
+        field_name="ddbj_experiment_accession",
+        database_name="DDBJ Sequence Read Archive (Experiment)",
+        database_url_template="https://ddbj.nig.ac.jp/resource/sra-experiment/{accession}",
+        prefix_pattern=r"DRX",
+        full_pattern=r"^DRX\d{6,}$",
+        example="DRX123456",
+        description="DDBJ Experiment accession (Japanese equivalent of SRX)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "ddbj_run_accession": DatabaseAccession(
+        field_name="ddbj_run_accession",
+        database_name="DDBJ Sequence Read Archive (Run)",
+        database_url_template="https://ddbj.nig.ac.jp/resource/sra-run/{accession}",
+        prefix_pattern=r"DRR",
+        full_pattern=r"^DRR\d{6,}$",
+        example="DRR123456",
+        description="DDBJ Run accession (Japanese equivalent of SRR)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "ddbj_sample_accession": DatabaseAccession(
+        field_name="ddbj_sample_accession",
+        database_name="DDBJ Sequence Read Archive (Sample)",
+        database_url_template="https://ddbj.nig.ac.jp/resource/sra-sample/{accession}",
+        prefix_pattern=r"DRS",
+        full_pattern=r"^DRS\d{6,}$",
+        example="DRS123456",
+        description="DDBJ Sample accession (Japanese equivalent of SRS)",
+        modalities=["transcriptomics", "metagenomics"],
+        required=False,
+    ),
+    "bioproject_ddbj_accession": DatabaseAccession(
+        field_name="bioproject_ddbj_accession",
+        database_name="DDBJ BioProject",
+        database_url_template="https://ddbj.nig.ac.jp/resource/bioproject/{accession}",
+        prefix_pattern=r"PRJDB",
+        full_pattern=r"^PRJDB\d{4,}$",
+        example="PRJDB12345",
+        description="DDBJ BioProject accession (Japanese equivalent of PRJNA)",
+        modalities=["transcriptomics", "proteomics", "metabolomics", "metagenomics"],
+        required=False,
+    ),
+    "biosample_ddbj_accession": DatabaseAccession(
+        field_name="biosample_ddbj_accession",
+        database_name="DDBJ BioSample",
+        database_url_template="https://ddbj.nig.ac.jp/resource/biosample/{accession}",
+        prefix_pattern=r"SAMD",
+        full_pattern=r"^SAMD\d{8,}$",
+        example="SAMD12345678",
+        description="DDBJ BioSample accession (Japanese equivalent of SAMN)",
+        modalities=["transcriptomics", "proteomics", "metabolomics", "metagenomics"],
+        required=False,
+    ),
 }
 
 # =============================================================================
@@ -121,6 +282,39 @@ GEO_ACCESSIONS = {
         full_pattern=r"^GSE\d{3,}$",
         example="GSE194247",
         description="GEO Series accession for gene expression datasets",
+        modalities=["transcriptomics"],
+        required=False,
+    ),
+    "geo_sample_accession": DatabaseAccession(
+        field_name="geo_sample_accession",
+        database_name="NCBI Gene Expression Omnibus (Sample)",
+        database_url_template="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",
+        prefix_pattern=r"GSM",
+        full_pattern=r"^GSM\d{3,}$",
+        example="GSM1234567",
+        description="GEO Sample accession for individual samples",
+        modalities=["transcriptomics"],
+        required=False,
+    ),
+    "geo_platform_accession": DatabaseAccession(
+        field_name="geo_platform_accession",
+        database_name="NCBI Gene Expression Omnibus (Platform)",
+        database_url_template="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",
+        prefix_pattern=r"GPL",
+        full_pattern=r"^GPL\d{2,}$",
+        example="GPL570",
+        description="GEO Platform accession for array/sequencing platform",
+        modalities=["transcriptomics"],
+        required=False,
+    ),
+    "geo_dataset_accession": DatabaseAccession(
+        field_name="geo_dataset_accession",
+        database_name="NCBI Gene Expression Omnibus (Dataset)",
+        database_url_template="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc={accession}",
+        prefix_pattern=r"GDS",
+        full_pattern=r"^GDS\d{3,}$",
+        example="GDS5093",
+        description="GEO Dataset accession for curated datasets",
         modalities=["transcriptomics"],
         required=False,
     ),
@@ -200,17 +394,20 @@ METAGENOMICS_ACCESSIONS = {
         modalities=["metagenomics"],
         required=False,
     ),
-    "qiita_accession": DatabaseAccession(
-        field_name="qiita_accession",
-        database_name="Qiita",
-        database_url_template="https://qiita.ucsd.edu/study/description/{accession}",
-        prefix_pattern=r"\d",
-        full_pattern=r"^\d{1,}$",
-        example="10317",
-        description="Qiita study ID for microbiome data",
-        modalities=["metagenomics"],
-        required=False,
-    ),
+    # NOTE: Qiita uses pure numeric IDs which are problematic for text extraction
+    # (causes false positives). Only use for explicit validation, not text search.
+    # Commented out from registry to prevent extraction issues.
+    # "qiita_accession": DatabaseAccession(
+    #     field_name="qiita_accession",
+    #     database_name="Qiita",
+    #     database_url_template="https://qiita.ucsd.edu/study/description/{accession}",
+    #     prefix_pattern=r"\d",
+    #     full_pattern=r"^\d{1,}$",
+    #     example="10317",
+    #     description="Qiita study ID for microbiome data",
+    #     modalities=["metagenomics"],
+    #     required=False,
+    # ),
 }
 
 # =============================================================================
@@ -243,17 +440,123 @@ CROSS_PLATFORM_ACCESSIONS = {
 }
 
 # =============================================================================
+# EGA (European Genome-phenome Archive) Accessions - Controlled Access
+# =============================================================================
+
+EGA_ACCESSIONS = {
+    "ega_study_accession": DatabaseAccession(
+        field_name="ega_study_accession",
+        database_name="European Genome-phenome Archive (Study)",
+        database_url_template="https://ega-archive.org/studies/{accession}",
+        prefix_pattern=r"EGAS",
+        full_pattern=r"^EGAS\d{11}$",
+        example="EGAS00001234567",
+        description="EGA Study accession for controlled-access human data",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Requires Data Access Committee (DAC) application via https://ega-archive.org",
+    ),
+    "ega_dataset_accession": DatabaseAccession(
+        field_name="ega_dataset_accession",
+        database_name="European Genome-phenome Archive (Dataset)",
+        database_url_template="https://ega-archive.org/datasets/{accession}",
+        prefix_pattern=r"EGAD",
+        full_pattern=r"^EGAD\d{11}$",
+        example="EGAD50000000740",
+        description="EGA Dataset accession for controlled-access data files",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Requires Data Access Committee (DAC) application via https://ega-archive.org",
+    ),
+    "ega_sample_accession": DatabaseAccession(
+        field_name="ega_sample_accession",
+        database_name="European Genome-phenome Archive (Sample)",
+        database_url_template="https://ega-archive.org/samples/{accession}",
+        prefix_pattern=r"EGAN",
+        full_pattern=r"^EGAN\d{11}$",
+        example="EGAN00001234567",
+        description="EGA Sample accession",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Requires Data Access Committee (DAC) application via https://ega-archive.org",
+    ),
+    "ega_experiment_accession": DatabaseAccession(
+        field_name="ega_experiment_accession",
+        database_name="European Genome-phenome Archive (Experiment)",
+        database_url_template="https://ega-archive.org/metadata/v2/experiments/{accession}",
+        prefix_pattern=r"EGAX",
+        full_pattern=r"^EGAX\d{11}$",
+        example="EGAX00001234567",
+        description="EGA Experiment accession for sequencing experiment",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Requires Data Access Committee (DAC) application via https://ega-archive.org",
+    ),
+    "ega_run_accession": DatabaseAccession(
+        field_name="ega_run_accession",
+        database_name="European Genome-phenome Archive (Run)",
+        database_url_template="https://ega-archive.org/metadata/v2/runs/{accession}",
+        prefix_pattern=r"EGAR",
+        full_pattern=r"^EGAR\d{11}$",
+        example="EGAR00001234567",
+        description="EGA Run accession for sequencing run",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Requires Data Access Committee (DAC) application via https://ega-archive.org",
+    ),
+    "ega_analysis_accession": DatabaseAccession(
+        field_name="ega_analysis_accession",
+        database_name="European Genome-phenome Archive (Analysis)",
+        database_url_template="https://ega-archive.org/metadata/v2/analyses/{accession}",
+        prefix_pattern=r"EGAZ",
+        full_pattern=r"^EGAZ\d{11}$",
+        example="EGAZ00001234567",
+        description="EGA Analysis accession for processed analysis files",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Requires Data Access Committee (DAC) application via https://ega-archive.org",
+    ),
+    "ega_policy_accession": DatabaseAccession(
+        field_name="ega_policy_accession",
+        database_name="European Genome-phenome Archive (Policy)",
+        database_url_template="https://ega-archive.org/metadata/v2/policies/{accession}",
+        prefix_pattern=r"EGAP",
+        full_pattern=r"^EGAP\d{11}$",
+        example="EGAP00001234567",
+        description="EGA Policy accession for data access policy",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Defines data access committee and application process",
+    ),
+    "ega_dac_accession": DatabaseAccession(
+        field_name="ega_dac_accession",
+        database_name="European Genome-phenome Archive (DAC)",
+        database_url_template="https://ega-archive.org/metadata/v2/dacs/{accession}",
+        prefix_pattern=r"EGAC",
+        full_pattern=r"^EGAC\d{11}$",
+        example="EGAC00001234567",
+        description="EGA Data Access Committee accession",
+        modalities=["transcriptomics", "metagenomics"],
+        access_type="controlled",
+        access_notes="Identifies the committee responsible for data access decisions",
+    ),
+}
+
+# =============================================================================
 # Consolidated Database Mapping Registry
 # =============================================================================
 
 # Combine all accession types into single registry
 DATABASE_ACCESSION_REGISTRY: Dict[str, DatabaseAccession] = {
     **NCBI_ACCESSIONS,
+    **ENA_ACCESSIONS,
+    **DDBJ_ACCESSIONS,
     **GEO_ACCESSIONS,
     **PROTEOMICS_ACCESSIONS,
     **METABOLOMICS_ACCESSIONS,
     **METAGENOMICS_ACCESSIONS,
     **CROSS_PLATFORM_ACCESSIONS,
+    **EGA_ACCESSIONS,
 }
 
 

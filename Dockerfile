@@ -88,7 +88,7 @@ USER lobsteruser
 # Environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    LOBSTER_WORKSPACE_DIR=/app/.lobster_workspace \
+    LOBSTER_WORKSPACE=/app/.lobster_workspace \
     LOBSTER_CACHE_DIR=/app/data/cache
 
 # Labels for metadata

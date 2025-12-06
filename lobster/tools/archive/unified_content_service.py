@@ -30,29 +30,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.docling_service import DoclingService
+from lobster.services.data_access.docling_service import DoclingService
 from lobster.tools.providers.abstract_provider import AbstractProvider
 from lobster.tools.providers.pmc_provider import PMCNotAvailableError, PMCProvider
 from lobster.tools.providers.webpage_provider import WebpageProvider
+from lobster.tools.url_transforms import transform_publisher_url
 
 logger = logging.getLogger(__name__)
-
-
-# Publisher-specific URL transformations for Docling compatibility
-# Maps known problematic URL patterns to working article page URLs
-PUBLISHER_URL_TRANSFORMS = {
-    "link.springer.com": {
-        "pattern": r"link\.springer\.com/content/pdf/(10\.\d+/[^/]+)\.pdf",
-        "replacement": r"link.springer.com/article/\1",
-        "description": "Springer PDF URL → HTML article page",
-    },
-    # Add more publishers as needed:
-    # "www.nature.com": {
-    #     "pattern": r"...",
-    #     "replacement": r"...",
-    #     "description": "Nature PDF → HTML",
-    # },
-}
 
 
 class ContentExtractionError(Exception):
@@ -626,16 +610,4 @@ class UnifiedContentService:
             ... )
             "https://link.springer.com/article/10.1007/s123"
         """
-        import re
-
-        for domain, config in PUBLISHER_URL_TRANSFORMS.items():
-            if domain in url:
-                transformed = re.sub(config["pattern"], config["replacement"], url)
-                if transformed != url:
-                    logger.info(
-                        f"Transformed {domain} URL ({config['description']}): "
-                        f"{url} → {transformed}"
-                    )
-                    return transformed
-
-        return url  # No transformation needed
+        return transform_publisher_url(url)

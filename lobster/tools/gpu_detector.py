@@ -103,24 +103,24 @@ class GPUDetector:
 
         if nvidia_available:
             return {
-                "profile": "scvi-gpu",
+                "profile": "ml-gpu",
                 "device": "cuda",
                 "info": f"NVIDIA GPU detected: {gpu_info}",
-                "command": "pip install 'lobster[scvi-gpu]'",
+                "command": "pip install lobster-ai[ml]",
             }
         elif apple_silicon:
             return {
-                "profile": "scvi-mac",
+                "profile": "ml-mps",
                 "device": "mps",
                 "info": "Apple Silicon Mac detected - MPS acceleration available",
-                "command": "pip install 'lobster[scvi-mac]'",
+                "command": "pip install lobster-ai[ml]",
             }
         else:
             return {
-                "profile": "scvi-cpu",
+                "profile": "ml-cpu",
                 "device": "cpu",
                 "info": "No GPU detected - CPU-only mode",
-                "command": "pip install 'lobster[scvi-cpu]'",
+                "command": "pip install lobster-ai[ml]",
             }
 
     @staticmethod

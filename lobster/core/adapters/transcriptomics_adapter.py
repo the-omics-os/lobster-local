@@ -119,6 +119,9 @@ class TranscriptomicsAdapter(BaseAdapter):
                     df=source,
                     obs_metadata=dataframe_params.get("obs_metadata"),
                     var_metadata=dataframe_params.get("var_metadata"),
+                    transpose=dataframe_params.get(
+                        "transpose", False
+                    ),  # BUG FIX: Pass transpose param
                 )
             elif isinstance(source, (str, Path)):
                 adata = self._load_from_file(source, **kwargs)
@@ -258,11 +261,10 @@ class TranscriptomicsAdapter(BaseAdapter):
             else:
                 raise ValueError(f"Unsupported file format: {format_type}")
         except Exception as e:
-            print(e)
-            logger.debug(
-                f"Transcriptomics adapter failed to load from file with path: {path}"
+            logger.error(
+                f"Transcriptomics adapter failed to load from file with path {path}: {e}"
             )
-            return "failed to load from source"
+            raise
 
     def _load_csv_transcriptomics_data(
         self, path: Union[str, Path], **kwargs

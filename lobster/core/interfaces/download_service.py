@@ -86,35 +86,50 @@ class IDownloadService(ABC):
         """
         self.data_manager = data_manager
 
-    @classmethod
     @abstractmethod
-    def supports_database(cls, database: str) -> bool:
+    def supported_databases(self) -> List[str]:
         """
-        Check if this service handles the given database type.
+        Get list of database identifiers this service handles.
 
         This method enables the DownloadOrchestrator to route download requests
         to the appropriate service implementation based on the database identifier.
 
+        Returns:
+            List[str]: List of database identifiers (lowercase). Examples:
+                - ["geo"] - GEO service
+                - ["sra", "ena", "ddbj"] - SRA service (handles multiple archives)
+                - ["pride", "pxd"] - PRIDE service
+                - ["massive", "msv"] - MassIVE service
+
+        Example:
+            >>> service = GEODownloadService(data_manager)
+            >>> service.supported_databases()
+            ["geo"]
+            >>> service = PRIDEDownloadService(data_manager)
+            >>> service.supported_databases()
+            ["pride", "pxd"]
+        """
+        pass
+
+    @classmethod
+    def supports_database(cls, database: str) -> bool:
+        """
+        Check if this service class handles the given database type.
+
+        This is a convenience class method. For instance-level checks,
+        use `supported_databases()` instead.
+
         Args:
-            database: Database identifier (case-insensitive). Examples:
-                - "geo" - NCBI Gene Expression Omnibus
-                - "sra" - Sequence Read Archive
-                - "pride" - PRIDE proteomics database
-                - "metabolights" - MetaboLights metabolomics database
-                - "arrayexpress" - ArrayExpress microarray database
+            database: Database identifier (case-insensitive).
 
         Returns:
             bool: True if this service can handle the database, False otherwise
 
-        Example:
-            >>> GEODownloadService.supports_database("geo")
-            True
-            >>> GEODownloadService.supports_database("sra")
-            False
-            >>> SRADownloadService.supports_database("SRA")  # case-insensitive
-            True
+        Note:
+            Default implementation returns False. Subclasses should override
+            if they want to support class-level database detection.
         """
-        pass
+        return False
 
     @abstractmethod
     def download_dataset(
@@ -271,6 +286,23 @@ class IDownloadService(ABC):
         """
         pass
 
+    def validate_strategy(self, strategy_override: Dict[str, Any]) -> None:
+        """
+        Validate strategy override parameters, raising exception on failure.
+
+        This is a convenience wrapper around validate_strategy_params() that
+        raises an exception instead of returning a tuple. Used by DownloadOrchestrator.
+
+        Args:
+            strategy_override: Dictionary of strategy parameters to validate
+
+        Raises:
+            ValueError: If validation fails, with descriptive error message
+        """
+        is_valid, error_message = self.validate_strategy_params(strategy_override)
+        if not is_valid:
+            raise ValueError(error_message or "Invalid strategy parameters")
+
     @classmethod
     @abstractmethod
     def get_supported_strategies(cls) -> List[str]:
@@ -329,11 +361,7 @@ class IDownloadService(ABC):
         """
         return {
             "service_name": self.__class__.__name__,
-            "supported_databases": [
-                db
-                for db in ["geo", "sra", "pride", "metabolights", "arrayexpress"]
-                if self.supports_database(db)
-            ],
+            "supported_databases": self.supported_databases(),
             "supported_strategies": self.get_supported_strategies(),
             "version": "1.0.0",
         }

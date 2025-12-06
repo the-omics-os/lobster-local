@@ -95,11 +95,52 @@ class DownloadOrchestrator:
         """
         Register default download services.
 
-        Currently empty - placeholder for future automatic service registration.
+        Auto-registers available download services (GEO, SRA, PRIDE, MassIVE).
+        Services are registered lazily to avoid import errors if dependencies missing.
         """
-        # Future: auto-register GEODownloadService, SRADownloadService, etc.
-        # This will allow plug-and-play service registration without manual setup
-        pass
+        # Try to register GEO service
+        try:
+            from lobster.services.data_access.geo_download_service import (
+                GEODownloadService,
+            )
+
+            self.register_service(GEODownloadService(self.data_manager))
+            logger.info("Auto-registered GEODownloadService")
+        except ImportError as e:
+            logger.warning(f"GEODownloadService not available: {e}")
+
+        # Try to register SRA service
+        try:
+            from lobster.services.data_access.sra_download_service import (
+                SRADownloadService,
+            )
+
+            self.register_service(SRADownloadService(self.data_manager))
+            logger.info("Auto-registered SRADownloadService")
+        except ImportError as e:
+            logger.warning(f"SRADownloadService not available: {e}")
+
+        # Try to register PRIDE service
+        try:
+            from lobster.services.data_access.pride_download_service import (
+                PRIDEDownloadService,
+            )
+
+            self.register_service(PRIDEDownloadService(self.data_manager))
+            logger.info("Auto-registered PRIDEDownloadService")
+        except ImportError as e:
+            logger.warning(f"PRIDEDownloadService not available: {e}")
+
+        # Try to register MassIVE service
+        try:
+            from lobster.services.data_access.massive_download_service import (
+                MassIVEDownloadService,
+            )
+
+            self.register_service(MassIVEDownloadService(self.data_manager))
+            logger.info("Auto-registered MassIVEDownloadService")
+        except ImportError as e:
+            logger.warning(f"MassIVEDownloadService not available: {e}")
 
     def register_service(self, service: IDownloadService) -> None:
         """

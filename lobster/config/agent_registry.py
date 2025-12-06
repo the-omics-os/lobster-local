@@ -6,14 +6,20 @@ making it easy to add new agents without modifying multiple files.
 """
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
-
-from langchain_core.tools import BaseTool
+from typing import Callable, Dict, List, Optional
 
 
 @dataclass
 class AgentRegistryConfig:
-    """Configuration for an agent in the system."""
+    """Configuration for an agent in the system.
+
+    Attributes:
+        supervisor_accessible: Controls whether supervisor can directly handoff to this agent.
+            - None (default): Inferred from child_agents relationships. If this agent
+              appears in ANY parent's child_agents list, it's NOT supervisor-accessible.
+            - True: Explicitly allow supervisor access (override inference).
+            - False: Explicitly deny supervisor access (override inference).
+    """
 
     name: str
     display_name: str
@@ -21,6 +27,10 @@ class AgentRegistryConfig:
     factory_function: str  # Module path to the factory function
     handoff_tool_name: Optional[str] = None
     handoff_tool_description: Optional[str] = None
+    child_agents: Optional[List[str]] = (
+        None  # List of agent names this agent can delegate to
+    )
+    supervisor_accessible: Optional[bool] = None  # None=infer, True/False=override
 
 
 # Central registry of all agents in the system
@@ -32,6 +42,7 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         factory_function="lobster.agents.data_expert.data_expert",
         handoff_tool_name="handoff_to_data_expert_agent",
         handoff_tool_description="Assign LOCAL data operations: execute downloads from validated queue entries, load local files via adapters, manage modalities (list/inspect/remove/validate), retry failed downloads. DO NOT delegate online operations (metadata/URL extraction) - those go to research_agent",
+        child_agents=["metadata_assistant"],
     ),
     "research_agent": AgentRegistryConfig(
         name="research_agent",
@@ -40,22 +51,37 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         factory_function="lobster.agents.research_agent.research_agent",
         handoff_tool_name="handoff_to_research_agent",
         handoff_tool_description="Assign literature search, dataset discovery, method analysis, parameter extraction, and download queue creation to the research agent",
+        child_agents=["metadata_assistant"],
     ),
-    "singlecell_expert_agent": AgentRegistryConfig(
-        name="singlecell_expert_agent",
-        display_name="Single-Cell Expert",
-        description="Handles single-cell RNA-seq analysis (cluster, QC, filter/normalize, automatic and manual cell annotation, differential expression etc) tasks (excluding visualization)",
-        factory_function="lobster.agents.singlecell_expert.singlecell_expert",
-        handoff_tool_name="handoff_to_singlecell_expert_agent",
-        handoff_tool_description="Assign single-cell RNA-seq analysis tasks to the single-cell expert agent",
+    # === NEW: Unified Transcriptomics Expert (parent agent) ===
+    "transcriptomics_expert": AgentRegistryConfig(
+        name="transcriptomics_expert",
+        display_name="Transcriptomics Expert",
+        description="Unified expert for single-cell AND bulk RNA-seq analysis. Handles QC, clustering, and orchestrates annotation and DE analysis via specialized sub-agents.",
+        factory_function="lobster.agents.transcriptomics.transcriptomics_expert.transcriptomics_expert",
+        handoff_tool_name="handoff_to_transcriptomics_expert",
+        handoff_tool_description="Assign ALL transcriptomics analysis tasks (single-cell OR bulk RNA-seq): QC, clustering, cell type annotation, differential expression, pseudobulk, pathway analysis",
+        child_agents=["annotation_expert", "de_analysis_expert"],
     ),
-    "bulk_rnaseq_expert_agent": AgentRegistryConfig(
-        name="bulk_rnaseq_expert_agent",
-        display_name="Bulk RNA-seq Expert",
-        description="Handles bulk RNA-seq analysis tasks (excluding visualization)",
-        factory_function="lobster.agents.bulk_rnaseq_expert.bulk_rnaseq_expert",
-        handoff_tool_name="handoff_to_bulk_rnaseq_expert_agent",
-        handoff_tool_description="Assign bulk RNA-seq analysis tasks to the bulk RNA-seq expert agent",
+    # === NEW: Annotation Expert (sub-agent, not supervisor-accessible) ===
+    "annotation_expert": AgentRegistryConfig(
+        name="annotation_expert",
+        display_name="Annotation Expert",
+        description="Cell type annotation sub-agent: automatic annotation, manual cluster labeling, debris detection, annotation templates",
+        factory_function="lobster.agents.transcriptomics.annotation_expert.annotation_expert",
+        handoff_tool_name=None,  # Not directly accessible
+        handoff_tool_description=None,
+        supervisor_accessible=False,  # Only via transcriptomics_expert
+    ),
+    # === NEW: DE Analysis Expert (sub-agent, not supervisor-accessible) ===
+    "de_analysis_expert": AgentRegistryConfig(
+        name="de_analysis_expert",
+        display_name="DE Analysis Expert",
+        description="Differential expression sub-agent: pseudobulk, pyDESeq2, formula-based DE, pathway enrichment",
+        factory_function="lobster.agents.transcriptomics.de_analysis_expert.de_analysis_expert",
+        handoff_tool_name=None,  # Not directly accessible
+        handoff_tool_description=None,
+        supervisor_accessible=False,  # Only via transcriptomics_expert
     ),
     "metadata_assistant": AgentRegistryConfig(
         name="metadata_assistant",
@@ -73,6 +99,14 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         handoff_tool_name="handoff_to_machine_learning_expert_agent",
         handoff_tool_description="Assign all machine learning related tasks (scVI, classification etc) to the machine learning expert agent",
     ),
+    "custom_feature_agent": AgentRegistryConfig(
+        name="custom_feature_agent",
+        display_name="Custom Feature Agent",
+        description="Creates new Lobster agents, services, tools, tests, and documentation using Claude Code SDK",
+        factory_function="lobster.agents.custom_feature_agent.custom_feature_agent",
+        handoff_tool_name="handoff_to_custom_feature_agent",
+        handoff_tool_description="Hand off to the custom feature agent when the user wants to create new agents, services, or extend Lobster with new capabilities. Use when user requests feature development, new analysis types, or custom tools.",
+    ),
     "visualization_expert_agent": AgentRegistryConfig(
         name="visualization_expert_agent",
         display_name="Visualization Expert",
@@ -89,68 +123,15 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         handoff_tool_name="handoff_to_protein_structure_visualization_expert_agent",
         handoff_tool_description="Assign protein structure visualization tasks to the protein structure visualization expert agent",
     ),
-    # 'ms_proteomics_expert_agent': AgentRegistryConfig(
-    #     name='ms_proteomics_expert_agent',
-    #     display_name='MS Proteomics Expert',
-    #     description='Handles mass spectrometry proteomics data analysis including DDA/DIA workflows with database search artifact removal',
-    #     factory_function='lobster.agents.ms_proteomics_expert.ms_proteomics_expert',
-    #     handoff_tool_name='handoff_to_ms_proteomics_expert_agent',
-    #     handoff_tool_description='Assign mass spectrometry proteomics analysis tasks to the MS proteomics expert agent'
-    # ),
-    # 'affinity_proteomics_expert_agent': AgentRegistryConfig(
-    #     name='affinity_proteomics_expert_agent',
-    #     display_name='Affinity Proteomics Expert',
-    #     description='Handles affinity proteomics data analysis including Olink and targeted protein panels with antibody validation',
-    #     factory_function='lobster.agents.affinity_proteomics_expert.affinity_proteomics_expert',
-    #     handoff_tool_name='handoff_to_affinity_proteomics_expert_agent',
-    #     handoff_tool_description='Assign affinity proteomics and targeted panel analysis tasks to the affinity proteomics expert agent'
-    # ),
-    # 'custom_feature_agent': AgentRegistryConfig(
-    #     name='custom_feature_agent',
-    #     display_name='Custom Feature Agent',
-    #     description="""META-AGENT that generates new Lobster components using Claude Code SDK.
-    #
-    #     Capabilities:
-    #     - Generate new agents following Lobster architectural patterns (registry-driven, stateless services)
-    #     - Create services with 3-tuple return pattern (AnnData, stats, IR)
-    #     - Build providers for external data sources (PubMed, GEO, custom APIs)
-    #     - Generate adapters for new file formats (H5AD, CSV, custom formats)
-    #     - Create comprehensive test suites (unit, integration)
-    #     - Validate integration with registry patterns
-    #     - Research best practices via Linkup SDK (GitHub repos, Python packages)
-    #     - Generate complete documentation (wiki pages, usage examples)
-    #
-    #     When to delegate:
-    #     - User requests NEW CAPABILITIES or MODALITIES (e.g., metabolomics, metagenomics, spatial)
-    #     - Need to ADD NEW DATA SOURCES (e.g., PRIDE, Metabolomics Workbench)
-    #     - Request involves GENERATING CODE (not analyzing data)
-    #     - Building custom extensions for new analysis types
-    #     - Creating providers for external APIs
-    #     - Need adapters for specialized file formats
-    #
-    #     DO NOT delegate for:
-    #     - Standard data analysis tasks (use domain experts: singlecell, bulk, proteomics)
-    #     - Visualization requests (use visualization_expert)
-    #     - Literature search (use research_agent)
-    #     - Data loading/download (use data_expert)
-    #     - Metadata operations (use metadata_assistant)
-    #
-    #     Note: This is a CODE GENERATION agent, not a DATA ANALYSIS agent.
-    #     Uses Claude Code SDK for file creation and Linkup SDK for research.
-    #     """,
-    #     factory_function='lobster.agents.custom_feature_agent.custom_feature_agent',
-    #     handoff_tool_name='handoff_to_custom_feature_agent',
-    #     handoff_tool_description="""Delegate to Custom Feature Agent when user requests:
-    #     1. NEW CAPABILITIES: "Add support for metabolomics", "Create metagenomics analysis"
-    #     2. NEW DATA SOURCES: "Integrate PRIDE database", "Add Metabolomics Workbench"
-    #     3. CODE GENERATION: "Generate an agent for...", "Create a service for..."
-    #     4. CUSTOM EXTENSIONS: "Build adapter for X format", "Create provider for Y API"
-    #
-    #     Key indicators: "add support", "create agent", "generate", "build", "integrate new", "extend with"
-    #
-    #     DO NOT delegate for standard analysis (clustering, DE, QC, visualization, literature search).
-    #     """
-    # ),
+    # === NEW: Unified Proteomics Expert ===
+    "proteomics_expert": AgentRegistryConfig(
+        name="proteomics_expert",
+        display_name="Proteomics Expert",
+        description="Unified expert for mass spectrometry AND affinity proteomics. Auto-detects platform type. Handles QC, normalization, batch correction, differential protein expression, peptide mapping (MS), antibody validation (affinity).",
+        factory_function="lobster.agents.proteomics.proteomics_expert.proteomics_expert",
+        handoff_tool_name="handoff_to_proteomics_expert",
+        handoff_tool_description="Assign ALL proteomics analysis tasks (mass spectrometry OR affinity platforms): QC, normalization, batch correction, differential protein expression, peptide mapping, antibody validation",
+    ),
 }
 
 
@@ -180,241 +161,46 @@ def import_agent_factory(factory_path: str) -> Callable:
     return getattr(module, function_name)
 
 
-def create_expert_handoff_tools(available_agents: List[str]) -> Dict[str, BaseTool]:
+# =============================================================================
+# PLUGIN DISCOVERY AND REGISTRY MERGING
+# =============================================================================
+# Discover and merge agents from premium/custom packages at module load time.
+# This allows lobster-premium and lobster-custom-* packages to register
+# additional agents that become available based on subscription tier.
+
+
+def _merge_plugin_agents() -> None:
     """
-    Automatically create handoff tools between compatible experts
-    based on available agents and handoff patterns.
+    Discover and merge plugin agents into the registry.
 
-    ⚠️ CURRENTLY DISABLED: Direct sub-agent handoffs are disabled for supervisor-mediated flow.
-    This function returns an empty dict but is preserved for interface compatibility.
+    Called at module load time to incorporate agents from:
+    - lobster-premium: Shared premium features
+    - lobster-custom-*: Customer-specific packages
 
-    Args:
-        available_agents: List of available agent names
-
-    Returns:
-        Dictionary of handoff tools keyed by tool name (empty dict when disabled)
+    Plugin agents are only discovered if the corresponding packages
+    are installed and authorized in the user's entitlement.
     """
-    import logging
+    try:
+        from lobster.core.plugin_loader import discover_plugins
 
-    logger = logging.getLogger(__name__)
+        plugin_agents = discover_plugins()
+        if plugin_agents:
+            AGENT_REGISTRY.update(plugin_agents)
+            # Log at debug level to avoid noise during imports
+            import logging
 
-    # Direct sub-agent handoffs are currently disabled
-    # Return empty dict to maintain interface compatibility
-    logger.debug(
-        "create_expert_handoff_tools called but handoffs are disabled for supervisor-mediated flow"
-    )
-    return {}
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Merged {len(plugin_agents)} plugin agents into registry")
+    except ImportError:
+        # plugin_loader not available (shouldn't happen in normal installs)
+        pass
+    except Exception as e:
+        # Don't let plugin discovery failures break the core system
+        import logging
 
-    # COMMENTED OUT: Original implementation for when direct handoffs are re-enabled
-    # from lobster.tools.enhanced_handoff_tool import create_expert_handoff_tool
-    # from lobster.tools.expert_handoff_patterns import EXPERT_HANDOFF_PATTERNS
-    #
-    # handoff_tools = {}
-    #
-    # # Normalize agent names by removing '_agent' suffix if present
-    # normalized_agents = {}
-    # for agent_name in available_agents:
-    #     if agent_name.endswith("_agent"):
-    #         normalized_name = agent_name[:-6]  # Remove '_agent'
-    #     else:
-    #         normalized_name = agent_name
-    #     normalized_agents[normalized_name] = agent_name
-    #
-    # for pattern_name, pattern in EXPERT_HANDOFF_PATTERNS.items():
-    #     from_expert_norm = pattern.from_expert
-    #     to_expert_norm = pattern.to_expert
-    #
-    #     # Check if both experts are available
-    #     if (
-    #         from_expert_norm in normalized_agents
-    #         and to_expert_norm in normalized_agents
-    #     ):
-    #         from_agent_name = normalized_agents[from_expert_norm]
-    #         to_agent_name = normalized_agents[to_expert_norm]
-    #
-    #         # Create handoff tools for each task type
-    #         for task_type in pattern.task_types:
-    #             tool_name = (
-    #                 f"handoff_{from_expert_norm}_to_{to_expert_norm}_{task_type}"
-    #             )
-    #
-    #             # Create the enhanced handoff tool
-    #             handoff_tool = create_expert_handoff_tool(
-    #                 from_expert=from_expert_norm,
-    #                 to_expert=to_expert_norm,
-    #                 task_type=task_type,
-    #                 context_schema=pattern.context_schema,
-    #                 return_to_sender=(pattern.return_flow == "sender"),
-    #                 custom_description=f"Hand off {task_type} task from {pattern.from_expert} to {pattern.to_expert}",
-    #             )
-    #
-    #             handoff_tools[tool_name] = handoff_tool
-    #
-    # return handoff_tools
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Plugin discovery failed: {e}")
 
 
-def get_handoff_tools_for_agent(
-    agent_name: str, available_agents: List[str]
-) -> List[BaseTool]:
-    """
-    Get all handoff tools relevant to a specific agent.
-
-    ⚠️ CURRENTLY DISABLED: Direct sub-agent handoffs are disabled for supervisor-mediated flow.
-    This function returns an empty list but is preserved for interface compatibility.
-
-    Args:
-        agent_name: Name of the agent to get handoff tools for
-        available_agents: List of all available agent names
-
-    Returns:
-        List of handoff tools that this agent can use (empty list when disabled)
-    """
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    # Direct sub-agent handoffs are currently disabled
-    # Return empty list to maintain interface compatibility
-    logger.debug(
-        f"get_handoff_tools_for_agent called for {agent_name} but handoffs are disabled"
-    )
-    return []
-
-    # COMMENTED OUT: Original implementation for when direct handoffs are re-enabled
-    # from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
-    #
-    # # Normalize agent name
-    # if agent_name.endswith("_agent"):
-    #     normalized_name = agent_name[:-6]
-    # else:
-    #     normalized_name = agent_name
-    #
-    # # Get all handoff tools
-    # all_handoff_tools = create_expert_handoff_tools(available_agents)
-    #
-    # # Filter tools relevant to this agent (outgoing handoffs)
-    # relevant_tools = []
-    # for tool_name, tool in all_handoff_tools.items():
-    #     if tool_name.startswith(f"handoff_{normalized_name}_to_"):
-    #         relevant_tools.append(tool)
-    #
-    # return relevant_tools
-
-
-def get_available_handoff_destinations(from_agent: str) -> List[str]:
-    """
-    Get list of agents that the given agent can hand off to.
-
-    Args:
-        from_agent: Source agent name
-
-    Returns:
-        List of destination agent names
-    """
-    from lobster.tools.expert_handoff_patterns import get_handoff_patterns_for_expert
-
-    # Normalize agent name
-    if from_agent.endswith("_agent"):
-        normalized_name = from_agent[:-6]
-    else:
-        normalized_name = from_agent
-
-    patterns = get_handoff_patterns_for_expert(normalized_name, direction="from")
-    destinations = [pattern.to_expert for pattern in patterns]
-
-    # Convert back to agent names
-    destination_agents = []
-    for dest in destinations:
-        # Check if this destination exists in the registry
-        for agent_name, config in AGENT_REGISTRY.items():
-            if (
-                agent_name.startswith(dest)
-                or config.display_name.lower().replace(" ", "_") == dest
-            ):
-                destination_agents.append(agent_name)
-                break
-
-    return destination_agents
-
-
-def validate_handoff_compatibility(
-    from_agent: str, to_agent: str, task_type: str
-) -> bool:
-    """
-    Validate if a handoff between two agents is supported.
-
-    Args:
-        from_agent: Source agent name
-        to_agent: Target agent name
-        task_type: Task type to validate
-
-    Returns:
-        True if handoff is supported, False otherwise
-    """
-    from lobster.tools.expert_handoff_patterns import validate_handoff_pattern
-
-    # Normalize agent names
-    def normalize_agent_name(name):
-        if name.endswith("_agent"):
-            return name[:-6]
-        return name
-
-    from_normalized = normalize_agent_name(from_agent)
-    to_normalized = normalize_agent_name(to_agent)
-
-    return validate_handoff_pattern(from_normalized, to_normalized, task_type)
-
-
-def get_handoff_registry_summary() -> Dict[str, Any]:
-    """
-    Get a summary of the handoff registry for debugging and monitoring.
-
-    Returns:
-        Dictionary with handoff registry information
-    """
-    from lobster.tools.expert_handoff_patterns import list_all_handoff_patterns
-
-    patterns = list_all_handoff_patterns()
-    available_agents = get_all_agent_names()
-
-    summary = {
-        "total_patterns": len(patterns),
-        "available_agents": len(available_agents),
-        "agents": available_agents,
-        "patterns_by_priority": {},
-        "handoff_matrix": {},
-    }
-
-    # Group patterns by priority
-    for pattern_name, pattern in patterns.items():
-        priority = pattern.priority
-        if priority not in summary["patterns_by_priority"]:
-            summary["patterns_by_priority"][priority] = []
-        summary["patterns_by_priority"][priority].append(
-            {
-                "name": pattern_name,
-                "from": pattern.from_expert,
-                "to": pattern.to_expert,
-                "task_types": pattern.task_types,
-                "description": pattern.description,
-            }
-        )
-
-    # Create handoff matrix
-    expert_names = set()
-    for pattern in patterns.values():
-        expert_names.add(pattern.from_expert)
-        expert_names.add(pattern.to_expert)
-
-    for from_expert in expert_names:
-        summary["handoff_matrix"][from_expert] = {}
-        for to_expert in expert_names:
-            if from_expert != to_expert:
-                # Check if handoff exists
-                handoff_exists = any(
-                    p.from_expert == from_expert and p.to_expert == to_expert
-                    for p in patterns.values()
-                )
-                summary["handoff_matrix"][from_expert][to_expert] = handoff_exists
-
-    return summary
+# Merge plugins at module load time
+_merge_plugin_agents()

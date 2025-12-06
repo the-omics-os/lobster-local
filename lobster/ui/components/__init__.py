@@ -12,6 +12,11 @@ from .multi_progress import (
     get_multi_progress_manager,
     track_multi_task_operation,
 )
+from .parallel_workers_progress import (
+    ParallelWorkersProgress,
+    WorkerState,
+    parallel_workers_progress,
+)
 from .status_display import (
     EnhancedStatusDisplay,
     create_analysis_dashboard,
@@ -33,4 +38,7 @@ __all__ = [
     "get_multi_progress_manager",
     "create_multi_progress_layout",
     "track_multi_task_operation",
+    "ParallelWorkersProgress",
+    "WorkerState",
+    "parallel_workers_progress",
 ]

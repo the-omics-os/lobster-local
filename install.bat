@@ -22,7 +22,7 @@ echo.
 
 REM Find Python
 set PYTHON_CMD=
-for %%P in (python python3 python3.12 python3.13 py) do (
+for %%P in (python python3 python3.11 python3.12 python3.13 py) do (
     %%P --version >nul 2>&1
     if %ERRORLEVEL% EQU 0 (
         set PYTHON_CMD=%%P
@@ -32,9 +32,9 @@ for %%P in (python python3 python3.12 python3.13 py) do (
 
 :found_python
 if "%PYTHON_CMD%"=="" (
-    echo ERROR: Python 3.12+ not found!
+    echo ERROR: Python 3.11+ not found!
     echo.
-    echo Please install Python 3.12 or higher from:
+    echo Please install Python 3.11 or higher from:
     echo   https://www.python.org/downloads/
     echo.
     echo Make sure to check 'Add Python to PATH' during installation!
@@ -46,9 +46,9 @@ echo Found Python: %PYTHON_CMD%
 echo.
 
 REM Check Python version
-%PYTHON_CMD% -c "import sys; exit(0 if sys.version_info >= (3,12) else 1)" >nul 2>&1
+%PYTHON_CMD% -c "import sys; exit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Python 3.12 or higher is required!
+    echo ERROR: Python 3.11 or higher is required!
     echo Your version:
     %PYTHON_CMD% --version
     echo.

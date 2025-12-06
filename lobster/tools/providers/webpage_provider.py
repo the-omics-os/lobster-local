@@ -15,7 +15,12 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.docling_service import DoclingError, DoclingService
+from lobster.services.data_access.docling_service import (
+    DoclingError,
+    DoclingService,
+    PDFExtractionError,
+)
+from lobster.tools.rate_limiter import DomainHeaderProvider
 from lobster.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -91,6 +96,9 @@ class WebpageProvider:
         self.docling_service = DoclingService(
             cache_dir=cache_dir, data_manager=data_manager
         )
+
+        # Initialize DomainHeaderProvider for domain-specific headers
+        self.header_provider = DomainHeaderProvider()
 
         logger.debug(
             f"Initialized WebpageProvider with Docling "
@@ -218,6 +226,7 @@ class WebpageProvider:
         keywords: Optional[list] = None,
         max_paragraphs: int = 100,
         max_retries: int = 2,
+        headers: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Extract content from webpage as clean markdown.
@@ -230,6 +239,7 @@ class WebpageProvider:
             keywords: Optional section keywords (for Methods detection)
             max_paragraphs: Maximum paragraphs to extract (default: 100)
             max_retries: Maximum retry attempts (default: 2)
+            headers: Optional HTTP headers (auto-injected from domain config if None)
 
         Returns:
             Clean markdown string with:
@@ -263,7 +273,15 @@ class WebpageProvider:
             ... )
         """
         try:
-            logger.info(f"Extracting webpage content from: {url}")
+            logger.debug(f"Extracting webpage content from: {url}")
+
+            # Get domain-specific headers if not provided
+            if headers is None:
+                config = self.header_provider.get_request_config(url)
+                headers = config.headers
+                logger.debug(
+                    f"Using {config.header_strategy.value} headers for {config.domain}"
+                )
 
             # Check if Docling is available
             if not self.docling_service.is_available():
@@ -285,6 +303,7 @@ class WebpageProvider:
                 keywords=keywords,
                 max_paragraphs=max_paragraphs,
                 max_retries=max_retries,
+                headers=headers,
             )
 
             # Get markdown content (already has images filtered)
@@ -309,7 +328,7 @@ class WebpageProvider:
                     f"{len(result.get('formulas', []))} formulas",
                 )
 
-            logger.info(
+            logger.debug(
                 f"Successfully extracted webpage: {len(markdown)} chars, "
                 f"{len(result.get('tables', []))} tables"
             )
@@ -336,6 +355,7 @@ class WebpageProvider:
         keywords: Optional[list] = None,
         max_paragraphs: int = 100,
         max_retries: int = 2,
+        headers: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Extract webpage content with full metadata.
@@ -348,6 +368,7 @@ class WebpageProvider:
             keywords: Optional section keywords
             max_paragraphs: Maximum paragraphs to extract
             max_retries: Maximum retry attempts
+            headers: Optional HTTP headers (auto-injected from domain config if None)
 
         Returns:
             Dictionary with:
@@ -369,7 +390,15 @@ class WebpageProvider:
             >>> print(f"Software: {', '.join(result['software_mentioned'])}")
         """
         try:
-            logger.info(f"Extracting webpage with metadata from: {url[:80]}...")
+            logger.debug(f"Extracting webpage with metadata from: {url[:80]}...")
+
+            # Get domain-specific headers if not provided
+            if headers is None:
+                config = self.header_provider.get_request_config(url)
+                headers = config.headers
+                logger.debug(
+                    f"Using {config.header_strategy.value} headers for {config.domain}"
+                )
 
             # Check Docling availability
             if not self.docling_service.is_available():
@@ -383,6 +412,7 @@ class WebpageProvider:
                 keywords=keywords,
                 max_paragraphs=max_paragraphs,
                 max_retries=max_retries,
+                headers=headers,
             )
 
             # Log provenance
@@ -393,7 +423,7 @@ class WebpageProvider:
                     description=f"Full webpage extraction: {len(result['methods_text'])} chars",
                 )
 
-            logger.info(
+            logger.debug(
                 f"Extracted webpage with metadata: "
                 f"{len(result['methods_text'])} chars, "
                 f"{len(result['tables'])} tables, "
@@ -401,6 +431,11 @@ class WebpageProvider:
             )
 
             return result
+
+        except PDFExtractionError as e:
+            # Expected HTTP errors (403, 400, etc.) from paywalled publishers - log without traceback
+            logger.warning(f"Webpage extraction failed (expected): {e}")
+            raise WebpageExtractionError(f"Webpage extraction failed: {str(e)}")
 
         except Exception as e:
             logger.exception(f"Error extracting webpage with metadata: {e}")

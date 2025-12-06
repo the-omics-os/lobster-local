@@ -21,6 +21,8 @@ class PublicationSource(Enum):
     ARXIV = "arxiv"
     GEO = "geo"
     SRA = "sra"
+    PRIDE = "pride"
+    MASSIVE = "massive"
 
 
 class ProviderCapability:
@@ -100,7 +102,13 @@ class ProviderCapability:
 
 
 class DatasetType(Enum):
-    """Enum for different dataset types."""
+    """
+    Enum for different dataset types.
+
+    .. deprecated::
+        Use :class:`lobster.core.schemas.database_registry.SupportedDatabase` instead.
+        This enum is kept for backward compatibility but will be removed in a future version.
+    """
 
     GEO = "geo"
     SRA = "sra"
@@ -109,6 +117,25 @@ class DatasetType(Enum):
     BIOSAMPLE = "biosample"
     ARRAYEXPRESS = "arrayexpress"
     ENA = "ena"
+    PRIDE = "pride"
+    MASSIVE = "massive"
+
+    @classmethod
+    def from_supported_database(
+        cls, db: "SupportedDatabase"
+    ) -> Optional["DatasetType"]:
+        """Convert from SupportedDatabase enum (for migration)."""
+        try:
+            return cls(db.value)
+        except ValueError:
+            return None
+
+
+# Re-export SupportedDatabase for gradual migration
+try:
+    from lobster.core.schemas.database_registry import SupportedDatabase
+except ImportError:
+    SupportedDatabase = None  # type: ignore
 
 
 class PublicationMetadata(BaseModel):

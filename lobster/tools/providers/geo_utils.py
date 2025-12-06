@@ -25,6 +25,8 @@ def detect_accession_type(query: str) -> Optional[DatasetType]:
     """
     Detect the dataset type from an accession string.
 
+    Uses centralized AccessionResolver for pattern matching.
+
     Args:
         query: The query string to analyze
 
@@ -34,35 +36,43 @@ def detect_accession_type(query: str) -> Optional[DatasetType]:
     if not query or not isinstance(query, str):
         return None
 
-    query = query.strip().upper()
+    from lobster.core.identifiers import get_accession_resolver
 
-    # GEO accessions
-    if re.match(r"^GS[EMDPL]\d+$", query):
+    resolver = get_accession_resolver()
+
+    # Check if GEO
+    if resolver.is_geo_identifier(query):
         return DatasetType.GEO
 
-    # SRA accessions
-    if re.match(r"^SR[APRSX]\d+$", query):
+    # Check if SRA/ENA/DDBJ
+    if resolver.is_sra_identifier(query):
+        db = resolver.detect_database(query)
+        if db and "ENA" in db:
+            return DatasetType.ENA
+        elif db and "DDBJ" in db:
+            return DatasetType.SRA  # DDBJ uses SRA DatasetType
         return DatasetType.SRA
 
-    # BioProject accessions
-    if re.match(r"^PRJNA\d+$", query):
+    # Check BioProject
+    field = resolver.detect_field(query)
+    if field and "bioproject" in field:
+        db = resolver.detect_database(query)
+        if db and "ENA" in db:
+            return DatasetType.ENA
         return DatasetType.BIOPROJECT
 
-    # BioSample accessions
-    if re.match(r"^SAMN\d+$", query):
+    # Check BioSample
+    if field and "biosample" in field:
         return DatasetType.BIOSAMPLE
 
-    # dbGaP accessions
-    if re.match(r"^phs\d+", query, re.IGNORECASE):
-        return DatasetType.DBGAP
-
-    # ArrayExpress accessions
-    if re.match(r"^E-\w+-\d+$", query):
+    # Check ArrayExpress
+    if field == "arrayexpress_accession":
         return DatasetType.ARRAYEXPRESS
 
-    # ENA accessions
-    if re.match(r"^PR[JD][NE][AB]\d+$", query):
-        return DatasetType.ENA
+    # dbGaP accessions (not in AccessionResolver, keep pattern)
+    query_upper = query.strip().upper()
+    if re.match(r"^PHS\d+", query_upper):
+        return DatasetType.DBGAP
 
     return None
 
@@ -70,6 +80,8 @@ def detect_accession_type(query: str) -> Optional[DatasetType]:
 def detect_geo_accession_subtype(query: str) -> Optional[GEOAccessionType]:
     """
     Detect specific GEO accession subtype.
+
+    Uses centralized AccessionResolver for pattern matching.
 
     Args:
         query: The query string to analyze
@@ -80,15 +92,18 @@ def detect_geo_accession_subtype(query: str) -> Optional[GEOAccessionType]:
     if not query or not isinstance(query, str):
         return None
 
-    query = query.strip().upper()
+    from lobster.core.identifiers import get_accession_resolver
 
-    if re.match(r"^GSE\d+$", query):
+    resolver = get_accession_resolver()
+    field = resolver.detect_field(query)
+
+    if field == "geo_accession":
         return GEOAccessionType.SERIES
-    elif re.match(r"^GSM\d+$", query):
+    elif field == "geo_sample_accession":
         return GEOAccessionType.SAMPLE
-    elif re.match(r"^GDS\d+$", query):
+    elif field == "geo_dataset_accession":
         return GEOAccessionType.DATASET
-    elif re.match(r"^GPL\d+$", query):
+    elif field == "geo_platform_accession":
         return GEOAccessionType.PLATFORM
 
     return None

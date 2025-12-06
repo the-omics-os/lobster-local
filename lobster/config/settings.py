@@ -7,7 +7,7 @@ including the new professional agent configuration system.
 
 import os
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 
@@ -55,12 +55,6 @@ class Settings:
 
         # Base directories
         self.BASE_DIR = Path(__file__).resolve().parent.parent
-        self.CACHE_DIR = os.environ.get(
-            "LOBSTER_CACHE_DIR", str(self.BASE_DIR / "data" / "cache")
-        )
-
-        # Create cache directory if it doesn't exist
-        Path(self.CACHE_DIR).mkdir(parents=True, exist_ok=True)
 
         # API keys
         self.OPENAI_API_KEY = os.environ.get(
@@ -73,6 +67,16 @@ class Settings:
         self.ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
         self.NCBI_API_KEY = os.environ.get("NCBI_API_KEY", "")
         self.NCBI_EMAIL = os.environ.get("NCBI_EMAIL", "")
+        # Multi-key support for parallelization (NCBI_API_KEY_1, NCBI_API_KEY_2, etc.)
+        self._ncbi_api_keys = self._load_ncbi_api_keys()
+
+        # Ollama settings (local LLM support)
+        self.OLLAMA_BASE_URL = os.environ.get(
+            "OLLAMA_BASE_URL", "http://localhost:11434"
+        )
+        self.OLLAMA_DEFAULT_MODEL = os.environ.get(
+            "OLLAMA_DEFAULT_MODEL", "llama3:8b-instruct"
+        )
 
         # Git automation settings (for sync scripts and CI/CD)
         self.GIT_USER_NAME = os.environ.get("GIT_USER_NAME", "")
@@ -92,10 +96,6 @@ class Settings:
             os.environ.get("LOBSTER_CLUSTER_RESOLUTION", "0.5")
         )
 
-        # GEO database settings
-        self.GEO_CACHE_DIR = os.path.join(self.CACHE_DIR, "geo")
-        Path(self.GEO_CACHE_DIR).mkdir(parents=True, exist_ok=True)
-
         # SSL/HTTPS settings
         self.SSL_VERIFY = os.environ.get("LOBSTER_SSL_VERIFY", "true").lower() == "true"
         self.SSL_CERT_PATH = os.environ.get("LOBSTER_SSL_CERT_PATH", None)
@@ -113,6 +113,8 @@ class Settings:
         """Detect which LLM provider to use based on available credentials."""
         if os.environ.get("LOBSTER_LLM_PROVIDER"):
             return os.environ.get("LOBSTER_LLM_PROVIDER")
+        elif os.environ.get("OLLAMA_BASE_URL"):
+            return "ollama"
         elif self.ANTHROPIC_API_KEY:
             return "anthropic"
         elif self.AWS_BEDROCK_ACCESS_KEY and self.AWS_BEDROCK_SECRET_ACCESS_KEY:
@@ -182,6 +184,63 @@ For detailed setup instructions, see:
             return False, error_msg
 
         return True, ""
+
+    def _load_ncbi_api_keys(self) -> List[str]:
+        """
+        Load all NCBI API keys from environment variables.
+
+        Supports multiple keys for parallelization:
+        - NCBI_API_KEY (primary, backward compatible)
+        - NCBI_API_KEY_1, NCBI_API_KEY_2, ... NCBI_API_KEY_9
+
+        Returns:
+            List of API keys found in environment
+        """
+        keys = []
+        # Primary key (backward compatible)
+        primary = os.environ.get("NCBI_API_KEY", "")
+        if primary:
+            keys.append(primary)
+        # Additional keys for parallelization
+        for i in range(1, 10):
+            key = os.environ.get(f"NCBI_API_KEY_{i}", "")
+            if key:
+                keys.append(key)
+        return keys
+
+    def get_ncbi_api_key(self, index: int = 0) -> str:
+        """
+        Get NCBI API key by index (for parallelization).
+
+        Uses round-robin if index exceeds available keys.
+
+        Args:
+            index: Worker index (0-based)
+
+        Returns:
+            API key string, or empty string if no keys configured
+        """
+        if not self._ncbi_api_keys:
+            return ""
+        return self._ncbi_api_keys[index % len(self._ncbi_api_keys)]
+
+    def get_all_ncbi_api_keys(self) -> List[str]:
+        """
+        Get all available NCBI API keys for parallel workers.
+
+        Returns:
+            List of all configured API keys
+        """
+        return self._ncbi_api_keys.copy()
+
+    def get_ncbi_key_count(self) -> int:
+        """
+        Get the number of NCBI API keys available.
+
+        Returns:
+            Number of keys (useful for determining parallelization factor)
+        """
+        return len(self._ncbi_api_keys)
 
     def get_agent_llm_params(self, agent_name: str) -> Dict[str, Any]:
         """

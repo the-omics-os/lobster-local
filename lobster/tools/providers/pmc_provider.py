@@ -32,6 +32,10 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.services.metadata.protocol_extraction import get_protocol_service
+from lobster.services.metadata.protocol_extraction.amplicon.details import (
+    AmpliconProtocolDetails,
+)
 from lobster.tools.providers.pubmed_provider import PubMedProvider, PubMedProviderConfig
 from lobster.utils.logger import get_logger
 
@@ -70,6 +74,7 @@ class PMCFullText(BaseModel):
     methods_section: str = ""  # Extracted methods section only
     results_section: str = ""  # Extracted results section only
     discussion_section: str = ""  # Extracted discussion section only
+    data_availability_section: str = ""  # Extracted Data Availability section only
 
     # Structured data
     tables: List[Dict] = Field(default_factory=list)
@@ -237,10 +242,10 @@ class PMCProvider:
 
     def get_pmc_id(self, identifier: str) -> Optional[str]:
         """
-        Get PMC ID from PMID or DOI using NCBI elink.
+        Get PMC ID from PMID, DOI, or return directly if already a PMC ID.
 
         Args:
-            identifier: PMID (with or without "PMID:" prefix) or DOI
+            identifier: PMID (with or without "PMID:" prefix), DOI, or PMC ID
 
         Returns:
             PMC ID (without "PMC" prefix) if available, None otherwise
@@ -253,8 +258,26 @@ class PMCProvider:
             >>> # Check availability
             >>> if provider.get_pmc_id("PMID:35042229"):
             >>>     print("PMC full text available!")
+            >>>
+            >>> # Direct PMC ID
+            >>> pmc_id = provider.get_pmc_id("PMC10425240")
+            >>> print(pmc_id)  # "10425240"
         """
         try:
+            identifier = identifier.strip()
+
+            # If already a PMC ID, extract the numeric portion and return
+            if identifier.upper().startswith("PMC"):
+                pmc_num = identifier[3:].strip()  # Remove "PMC" prefix
+                if pmc_num.isdigit():
+                    logger.debug(f"Identifier is already a PMC ID: {identifier}")
+                    return pmc_num
+                else:
+                    logger.warning(
+                        f"Invalid PMC ID format: {identifier} (non-numeric after 'PMC')"
+                    )
+                    return None
+
             # Normalize identifier to PMID
             pmid = self._normalize_to_pmid(identifier)
             if not pmid:
@@ -282,11 +305,15 @@ class PMCProvider:
                 for linkset in response["linksets"]:
                     if "linksetdbs" in linkset:
                         for db in linkset["linksetdbs"]:
-                            if db["dbto"] == "pmc":
+                            # Only accept direct full-text links (pubmed_pmc), not references (pubmed_pmc_refs)
+                            if (
+                                db["dbto"] == "pmc"
+                                and db.get("linkname") == "pubmed_pmc"
+                            ):
                                 links = db.get("links", [])
                                 if links:
                                     pmc_id = str(links[0])  # First PMC ID
-                                    logger.info(
+                                    logger.debug(
                                         f"Found PMC ID: PMC{pmc_id} for PMID: {pmid}"
                                     )
                                     return pmc_id
@@ -300,7 +327,10 @@ class PMCProvider:
 
     def fetch_full_text_xml(self, pmc_id: str) -> str:
         """
-        Fetch structured full text XML from PMC using efetch with db=pmc.
+        Fetch structured full text XML from PMC.
+
+        Uses OAI-PMH endpoint as primary (returns full text for all open access papers),
+        with efetch as fallback (some publishers restrict full text via efetch).
 
         Args:
             pmc_id: PMC ID (without "PMC" prefix), e.g., "8764123"
@@ -309,43 +339,213 @@ class PMCProvider:
             Raw XML string from PMC
 
         Raises:
-            PMCAPIError: If XML retrieval fails
+            PMCAPIError: If XML retrieval fails from both endpoints
 
         Performance:
-            - Typical response: 500ms (PMC XML API)
-            - Structured XML with semantic tags
-            - No HTML scraping required
+            - OAI-PMH: 600-800ms, returns full text including <back> section
+            - efetch fallback: 500ms, may be publisher-restricted
+
+        Note:
+            The efetch endpoint returns publisher-restricted XML for many papers
+            (e.g., Science, Nature) with a comment like:
+            "The publisher of this article does not allow downloading of the full text in XML form."
+
+            The OAI-PMH endpoint returns full JATS XML for all open access papers,
+            including the <back> section with data availability statements.
         """
+        # Normalize pmc_id: strip "PMC" prefix if present (handle both formats)
+        pmc_id_normalized = pmc_id
+        if pmc_id.upper().startswith("PMC"):
+            pmc_id_normalized = pmc_id[3:]
+
+        logger.debug(f"Fetching PMC full text XML: PMC{pmc_id_normalized}")
+
+        # Strategy 1: Try OAI-PMH first (returns full text for all open access papers)
         try:
-            logger.info(f"Fetching PMC full text XML: PMC{pmc_id}")
-
-            # Build PMC efetch URL (KEY: db=pmc, not db=pubmed)
-            url = self.pubmed_provider.build_ncbi_url(
-                "efetch",
-                {
-                    "db": "pmc",  # KEY DIFFERENCE: PMC database, not PubMed
-                    "id": pmc_id,
-                    "retmode": "xml",
-                    "rettype": "full",  # Full article XML
-                },
-            )
-
-            # Use PubMedProvider's centralized request handler (rate limiting, retries, etc.)
-            xml_content = self.pubmed_provider._make_ncbi_request(
-                url, f"fetch PMC full text PMC{pmc_id}"
-            )
-
-            xml_text = xml_content.decode("utf-8")
-
-            logger.info(f"Successfully fetched PMC XML: {len(xml_text)} bytes")
-
-            return xml_text
-
+            xml_text = self._fetch_via_oai_pmh(pmc_id_normalized)
+            if xml_text and self._has_body_content(xml_text):
+                logger.debug(
+                    f"Successfully fetched PMC XML via OAI-PMH: {len(xml_text)} bytes"
+                )
+                return xml_text
+            else:
+                logger.debug(
+                    f"OAI-PMH returned empty or restricted content for PMC{pmc_id_normalized}"
+                )
         except Exception as e:
-            logger.error(f"Error fetching PMC full text: {e}")
-            raise PMCAPIError(
-                f"Failed to fetch PMC full text for PMC{pmc_id}: {str(e)}"
-            )
+            logger.debug(f"OAI-PMH fetch failed for PMC{pmc_id_normalized}: {e}")
+
+        # Strategy 2: Fallback to efetch (may work for some papers)
+        try:
+            xml_text = self._fetch_via_efetch(pmc_id_normalized)
+            if xml_text and self._has_body_content(xml_text):
+                logger.debug(
+                    f"Successfully fetched PMC XML via efetch: {len(xml_text)} bytes"
+                )
+                return xml_text
+            else:
+                logger.warning(
+                    f"efetch returned publisher-restricted content for PMC{pmc_id_normalized}"
+                )
+        except Exception as e:
+            logger.debug(f"efetch fetch failed for PMC{pmc_id_normalized}: {e}")
+
+        # If both failed, raise error with helpful message
+        raise PMCAPIError(
+            f"Failed to fetch PMC full text for PMC{pmc_id_normalized}: "
+            f"Both OAI-PMH and efetch endpoints returned empty or restricted content. "
+            f"This paper may not have open access full text available."
+        )
+
+    def _fetch_via_oai_pmh(self, pmc_id: str) -> str:
+        """
+        Fetch full text XML via PMC OAI-PMH endpoint.
+
+        The OAI-PMH endpoint returns full JATS XML for all open access papers,
+        including the <back> section with acknowledgements and data availability.
+
+        Note: OAI-PMH doesn't accept NCBI's email/tool parameters, so we use
+        direct urllib requests instead of _make_ncbi_request.
+
+        Args:
+            pmc_id: PMC ID without "PMC" prefix
+
+        Returns:
+            Raw XML string (article element extracted from OAI-PMH wrapper)
+
+        OAI-PMH Response Structure:
+            <OAI-PMH>
+              <GetRecord>
+                <record>
+                  <metadata>
+                    <article>...</article>  <!-- Full JATS article -->
+                  </metadata>
+                </record>
+              </GetRecord>
+            </OAI-PMH>
+        """
+        import ssl
+        import urllib.request
+
+        # Build OAI-PMH URL (new endpoint as of 2024 - old oai.cgi redirects here)
+        # Note: OAI-PMH rejects NCBI-specific params (email, tool, api_key)
+        oai_url = (
+            f"https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/?"
+            f"verb=GetRecord&"
+            f"identifier=oai:pubmedcentral.nih.gov:{pmc_id}&"
+            f"metadataPrefix=pmc"
+        )
+
+        logger.debug(f"Fetching via OAI-PMH: {oai_url}")
+
+        # Make direct request (OAI-PMH doesn't accept NCBI email parameter)
+        ssl_context = ssl.create_default_context()
+        request = urllib.request.Request(
+            oai_url,
+            headers={
+                "User-Agent": "lobster-ai/1.0 (https://github.com/the-omics-os/lobster)"
+            },
+        )
+
+        with urllib.request.urlopen(
+            request, timeout=30, context=ssl_context
+        ) as response:
+            xml_text = response.read().decode("utf-8")
+
+        # Extract <article> element from OAI-PMH wrapper
+        # OAI-PMH wraps the article in <OAI-PMH><GetRecord><record><metadata><article>
+        article_xml = self._extract_article_from_oai_pmh(xml_text)
+
+        return article_xml
+
+    def _extract_article_from_oai_pmh(self, oai_xml: str) -> str:
+        """
+        Extract the <article> element from OAI-PMH response wrapper.
+
+        The OAI-PMH response wraps the JATS article in several layers.
+        This method extracts just the <article>...</article> portion.
+
+        Args:
+            oai_xml: Full OAI-PMH response XML
+
+        Returns:
+            Extracted article XML string, or original if extraction fails
+        """
+        # Pattern to extract <article ...>...</article> (handles namespaces)
+        # Using DOTALL to match across newlines
+        article_pattern = re.compile(
+            r"(<article[^>]*>.*?</article>)", re.DOTALL | re.IGNORECASE
+        )
+        match = article_pattern.search(oai_xml)
+
+        if match:
+            return match.group(1)
+
+        # If no match, check for OAI-PMH error response
+        if "<error" in oai_xml.lower():
+            logger.warning(f"OAI-PMH returned error response")
+            return ""
+
+        # Return original if we can't extract (let parse_pmc_xml handle it)
+        logger.debug(
+            "Could not extract <article> from OAI-PMH, returning full response"
+        )
+        return oai_xml
+
+    def _fetch_via_efetch(self, pmc_id: str) -> str:
+        """
+        Fetch full text XML via PMC efetch endpoint (legacy method).
+
+        Note: efetch may return publisher-restricted XML for some papers.
+
+        Args:
+            pmc_id: PMC ID without "PMC" prefix
+
+        Returns:
+            Raw XML string from PMC
+        """
+        # Build PMC efetch URL
+        url = self.pubmed_provider.build_ncbi_url(
+            "efetch",
+            {
+                "db": "pmc",
+                "id": pmc_id,
+                "retmode": "xml",
+                "rettype": "full",
+            },
+        )
+
+        xml_content = self.pubmed_provider._make_ncbi_request(
+            url, f"efetch PMC{pmc_id}"
+        )
+        return xml_content.decode("utf-8")
+
+    def _has_body_content(self, xml_text: str) -> bool:
+        """
+        Check if XML contains actual body content (not publisher-restricted).
+
+        Publisher-restricted responses contain a comment like:
+        "The publisher of this article does not allow downloading of the full text in XML form."
+
+        Args:
+            xml_text: XML string to check
+
+        Returns:
+            True if XML has body content, False if restricted or empty
+        """
+        # Check for publisher restriction comment
+        if "does not allow downloading" in xml_text:
+            return False
+
+        # Check for <body> element with content
+        if "<body>" in xml_text or "<body " in xml_text:
+            # Also verify there's actual content in body (not just empty tags)
+            body_pattern = re.compile(r"<body[^>]*>(.+?)</body>", re.DOTALL)
+            match = body_pattern.search(xml_text)
+            if match and len(match.group(1).strip()) > 100:
+                return True
+
+        return False
 
     def parse_pmc_xml(self, xml_text: str) -> PMCFullText:
         """
@@ -389,13 +589,22 @@ class PMCProvider:
             # Parse XML to dictionary
             parsed = self.parse_xml(xml_text)
 
-            # Navigate XML structure
-            if "pmc-articleset" not in parsed:
-                raise ValueError("Invalid PMC XML: missing <pmc-articleset>")
+            # Navigate XML structure - support both PMC and bioRxiv/medRxiv formats
+            # PMC format: <pmc-articleset><article>...</article></pmc-articleset>
+            # bioRxiv/medRxiv format: <article>...</article> (direct root element)
+            if "pmc-articleset" in parsed:
+                # PMC format: unwrap from articleset
+                article = parsed["pmc-articleset"].get("article", {})
+            elif "article" in parsed:
+                # bioRxiv/medRxiv format: direct article element
+                article = parsed["article"]
+            else:
+                raise ValueError(
+                    "Invalid JATS XML: missing <pmc-articleset> or <article> root element"
+                )
 
-            article = parsed["pmc-articleset"].get("article", {})
             if not article:
-                raise ValueError("Invalid PMC XML: missing <article>")
+                raise ValueError("Invalid JATS XML: empty <article> element")
 
             # Extract metadata from <front>
             front = article.get("front", {})
@@ -412,10 +621,21 @@ class PMCProvider:
 
             full_text = self._extract_full_text(body)
 
+            # 🔧 CRITICAL FIX: Extract <back> section (acknowledgements, data availability)
+            # This section contains 60-70% of dataset identifiers in PMC papers
+            back = article.get("back", {})
+            back_text = self._extract_back_section(back)
+            if back_text:
+                full_text = full_text + "\n\n" + back_text
+
+            # Extract Data Availability section separately for identifier prioritization
+            # This enables provenance validation: identifiers from DA section are "primary"
+            data_availability_section = self.extract_data_availability_section(back)
+
             # Extract methods section with paragraph fallback for PLOS-style XML
             methods_section = self._extract_section(body, "methods")
             if not methods_section:
-                logger.info(
+                logger.debug(
                     "No formal methods section found, attempting paragraph-based extraction"
                 )
                 methods_section = self._extract_methods_from_paragraphs(body)
@@ -432,7 +652,7 @@ class PMCProvider:
 
             extraction_time = time.time() - start_time
 
-            logger.info(
+            logger.debug(
                 f"Parsed PMC XML: {len(full_text)} chars, "
                 f"{len(methods_section)} chars methods, "
                 f"{len(tables)} tables, "
@@ -450,6 +670,7 @@ class PMCProvider:
                 methods_section=methods_section,
                 results_section=results_section,
                 discussion_section=discussion_section,
+                data_availability_section=data_availability_section,
                 tables=tables,
                 figures=figures,
                 software_tools=software_tools,
@@ -464,17 +685,21 @@ class PMCProvider:
             logger.error(f"Error parsing PMC XML: {e}")
             raise PMCProviderError(f"Failed to parse PMC XML: {str(e)}")
 
-    def extract_full_text(self, identifier: str) -> PMCFullText:
+    def extract_full_text(
+        self, identifier: str, known_pmc_id: Optional[str] = None
+    ) -> PMCFullText:
         """
         Extract full text content from PMC (main public API).
 
         This is the primary method that:
-        1. Checks if PMC full text is available (via elink)
+        1. Checks if PMC full text is available (via elink) - SKIPPED if known_pmc_id provided
         2. Fetches structured XML (via efetch with db=pmc)
         3. Parses XML to extract methods, tables, parameters
 
         Args:
             identifier: PMID (with or without "PMID:" prefix) or DOI
+            known_pmc_id: Optional pre-resolved PMC ID to skip E-Link lookup
+                         (Phase B2 optimization - saves ~10s network round trip)
 
         Returns:
             PMCFullText object with structured content
@@ -485,6 +710,7 @@ class PMCProvider:
 
         Performance:
             - Typical response: 500ms (PMC XML API)
+            - With known_pmc_id: ~400ms (skips E-Link lookup)
             - 10x faster than HTML scraping (2-5s)
             - 95% accuracy for method extraction (vs. 70% from abstracts)
 
@@ -498,17 +724,27 @@ class PMCProvider:
             >>>     print(f"Tables: {len(full_text.tables)}")
             >>> except PMCNotAvailableError:
             >>>     print("PMC full text not available - try PDF fallback")
+            >>>
+            >>> # With known PMC ID (Phase B2 optimization)
+            >>> full_text = provider.extract_full_text("PMID:35042229", known_pmc_id="PMC8891176")
         """
         try:
-            logger.info(f"Extracting PMC full text for: {identifier}")
+            logger.debug(f"Extracting PMC full text for: {identifier}")
 
-            # Step 1: Check if PMC full text available
-            pmc_id = self.get_pmc_id(identifier)
-            if not pmc_id:
-                raise PMCNotAvailableError(
-                    f"PMC full text not available for: {identifier}. "
-                    "Paper may not be open access or embargo period not expired."
+            # Step 1: Use known PMC ID or look it up via E-Link
+            # Phase B2 optimization: Skip E-Link call when PMC ID already known
+            if known_pmc_id:
+                pmc_id = known_pmc_id
+                logger.debug(
+                    f"Using pre-resolved PMC ID: {pmc_id} (skipping E-Link lookup)"
                 )
+            else:
+                pmc_id = self.get_pmc_id(identifier)
+                if not pmc_id:
+                    raise PMCNotAvailableError(
+                        f"PMC full text not available for: {identifier}. "
+                        "Paper may not be open access or embargo period not expired."
+                    )
 
             # Step 2: Fetch structured XML from PMC
             xml_text = self.fetch_full_text_xml(pmc_id)
@@ -659,6 +895,159 @@ class PMCProvider:
 
         return "\n\n".join(full_text_parts)
 
+    def _extract_back_section(self, back: dict) -> str:
+        """
+        Extract content from <back> section (acknowledgements, data availability).
+
+        This section typically contains 60-70% of dataset identifiers in PMC papers.
+
+        Args:
+            back: Back section dictionary from XML
+
+        Returns:
+            Markdown-formatted back section text
+        """
+        if not back:
+            return ""
+
+        parts = []
+
+        # Extract acknowledgements (<ack>)
+        ack = back.get("ack", {})
+        if ack:
+            ack_text = self._extract_section_recursive(ack, level=2)
+            if ack_text.strip():
+                parts.append(ack_text)
+
+        # Extract other back sections (data availability, notes, etc.)
+        sections = back.get("sec", [])
+        if isinstance(sections, dict):
+            sections = [sections]
+
+        for section in sections:
+            section_text = self._extract_section_recursive(section, level=2)
+            if section_text.strip():
+                parts.append(section_text)
+
+        # FIX: Also extract <notes> elements (contains Data Availability in many journals)
+        # PMC papers often have Data Availability in <notes notes-type="data-availability">
+        notes = back.get("notes", [])
+        if isinstance(notes, dict):
+            notes = [notes]
+
+        for note in notes:
+            if isinstance(note, dict):
+                note_text = self._extract_text_from_element(note)
+                if note_text.strip():
+                    parts.append(note_text)
+
+        return "\n\n".join(parts)
+
+    def extract_data_availability_section(self, back: dict) -> str:
+        """
+        Extract text specifically from Data Availability section in <back>.
+
+        Data Availability sections typically contain the study's primary dataset
+        identifiers and are the most reliable source for provenance validation.
+
+        Args:
+            back: Back section dictionary from XML
+
+        Returns:
+            Text from Data Availability sections only (not acknowledgements)
+
+        Note:
+            PMC papers often have Data Availability in these locations:
+            - <sec sec-type="data-availability">
+            - <sec> with title containing "data availability", "data access", etc.
+            - <notes notes-type="data-availability">
+        """
+        if not back:
+            return ""
+
+        data_availability_keywords = [
+            "data availability",
+            "data access",
+            "data deposition",
+            "accession",
+            "deposited",
+            "available at",
+            "repository",
+            "data statement",
+            "availability of data",
+        ]
+
+        da_text_parts = []
+
+        # Check <sec> elements in back
+        sections = back.get("sec", [])
+        if isinstance(sections, dict):
+            sections = [sections]
+
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+
+            # Check section title for Data Availability keywords
+            title = section.get("title", "")
+            if isinstance(title, dict):
+                title = title.get("#text", "")
+            elif isinstance(title, list):
+                title = " ".join(
+                    str(t.get("#text", t)) if isinstance(t, dict) else str(t)
+                    for t in title
+                )
+
+            title_lower = str(title).lower() if title else ""
+
+            # Match on title keywords
+            if any(kw in title_lower for kw in data_availability_keywords):
+                section_text = self._extract_section_recursive(section, level=2)
+                if section_text.strip():
+                    da_text_parts.append(section_text)
+                continue
+
+            # Also check @sec-type attribute
+            sec_type = section.get("@sec-type", "").lower()
+            if "data" in sec_type or "availability" in sec_type:
+                section_text = self._extract_section_recursive(section, level=2)
+                if section_text.strip():
+                    da_text_parts.append(section_text)
+
+        # Check <notes> elements (some journals use this for data availability)
+        notes = back.get("notes", [])
+        if isinstance(notes, dict):
+            notes = [notes]
+
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+
+            notes_type = note.get("@notes-type", "").lower()
+            if "data" in notes_type or "availability" in notes_type:
+                note_text = self._extract_text_from_element(note)
+                if note_text.strip():
+                    da_text_parts.append(note_text)
+                continue
+
+            # Check note title
+            title = note.get("title", "")
+            if isinstance(title, dict):
+                title = title.get("#text", "")
+            title_lower = str(title).lower() if title else ""
+
+            if any(kw in title_lower for kw in data_availability_keywords):
+                note_text = self._extract_text_from_element(note)
+                if note_text.strip():
+                    da_text_parts.append(note_text)
+
+        if da_text_parts:
+            logger.debug(
+                f"Extracted Data Availability from {len(da_text_parts)} sections"
+            )
+
+        return "\n\n".join(da_text_parts)
+
     def _extract_section_recursive(self, section: dict, level: int = 2) -> str:
         """
         Recursively extract text from a section and its subsections.
@@ -793,7 +1182,7 @@ class PMCProvider:
             # Try all keyword variations
             for keyword in keywords:
                 if keyword in title_lower or title_lower in keyword:
-                    logger.info(
+                    logger.debug(
                         f"Found section via title match: '{title}' matches '{keyword}'"
                     )
                     return self._extract_section_recursive(section, level=2)
@@ -815,7 +1204,9 @@ class PMCProvider:
                 # Check subsection sec-type
                 sec_type = subsection.get("@sec-type", "").lower()
                 if section_type.lower() in sec_type:
-                    logger.info(f"Found section in subsection via sec-type: {sec_type}")
+                    logger.debug(
+                        f"Found section in subsection via sec-type: {sec_type}"
+                    )
                     return self._extract_section_recursive(subsection, level=2)
 
                 # Check subsection title
@@ -826,7 +1217,7 @@ class PMCProvider:
 
                 for keyword in keywords:
                     if keyword in title_lower or title_lower in keyword:
-                        logger.info(
+                        logger.debug(
                             f"Found section in subsection via title: '{title}' matches '{keyword}'"
                         )
                         return self._extract_section_recursive(subsection, level=2)
@@ -927,7 +1318,7 @@ class PMCProvider:
         # Concatenate methods paragraphs with proper spacing
         methods_content = "\n\n".join(methods_paragraphs)
 
-        logger.info(
+        logger.debug(
             f"Extracted methods from {len(methods_paragraphs)} body paragraphs "
             f"({len(methods_content)} chars total)"
         )
@@ -1184,9 +1575,77 @@ class PMCProvider:
         )
 
     def _extract_parameters(self, methods_text: str) -> Dict[str, str]:
-        """Extract parameters from methods text."""
-        # TODO: Implement parameter extraction using pattern matching
-        return {}
+        """
+        Extract protocol parameters from methods text.
+
+        Uses AmpliconProtocolService to extract:
+        - Primer sequences (515F, 806R, etc.)
+        - V-region amplified (V3-V4, V4, etc.)
+        - PCR conditions (annealing temp, cycles)
+        - Sequencing parameters (platform, read length)
+        - Reference databases (SILVA, Greengenes)
+        - Bioinformatics pipelines (QIIME2, DADA2)
+
+        Args:
+            methods_text: Methods section text
+
+        Returns:
+            Dictionary of extracted parameters
+        """
+        if not methods_text or len(methods_text) < 50:
+            return {}
+
+        try:
+            service = get_protocol_service("amplicon")
+            details, result = service.extract_protocol(methods_text, source="pmc")
+
+            # Convert to flat dictionary for compatibility
+            params = {}
+            if details.v_region:
+                params["v_region"] = details.v_region
+            if details.forward_primer:
+                params["forward_primer"] = details.forward_primer
+            if details.forward_primer_sequence:
+                params["forward_primer_sequence"] = details.forward_primer_sequence
+            if details.reverse_primer:
+                params["reverse_primer"] = details.reverse_primer
+            if details.reverse_primer_sequence:
+                params["reverse_primer_sequence"] = details.reverse_primer_sequence
+            if details.annealing_temperature:
+                params["annealing_temperature"] = f"{details.annealing_temperature}°C"
+            if details.pcr_cycles:
+                params["pcr_cycles"] = str(details.pcr_cycles)
+            if details.platform:
+                params["sequencing_platform"] = details.platform
+            if details.read_length:
+                params["read_length"] = f"{details.read_length} bp"
+            if details.paired_end is not None:
+                params["paired_end"] = "yes" if details.paired_end else "no"
+            if details.reference_database:
+                db_str = details.reference_database
+                if details.database_version:
+                    db_str += f" {details.database_version}"
+                params["reference_database"] = db_str
+            if details.pipeline:
+                pipeline_str = details.pipeline
+                if details.pipeline_version:
+                    pipeline_str += f" {details.pipeline_version}"
+                params["bioinformatics_pipeline"] = pipeline_str
+            if details.clustering_method:
+                params["clustering_method"] = details.clustering_method
+            if details.clustering_threshold:
+                params["clustering_threshold"] = f"{details.clustering_threshold}%"
+
+            if params:
+                logger.debug(
+                    f"Extracted {len(params)} protocol parameters from methods"
+                )
+
+            return params
+
+        except Exception as e:
+            logger.warning(f"Protocol extraction failed: {e}")
+            return {}
 
     def get_supported_features(self) -> Dict[str, bool]:
         """Get supported features for this provider."""

@@ -6,11 +6,12 @@ agent modules and extracting @tool decorated functions, enabling dynamic
 supervisor prompt generation without manual updates.
 """
 
+import ast
 import importlib
 import inspect
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, types
 
 # Import registry functions at module level for easier mocking in tests
 from lobster.config.agent_registry import get_agent_registry_config, get_all_agent_names
@@ -162,103 +163,123 @@ class AgentCapabilityExtractor:
 
     @staticmethod
     def _is_tool_function(obj: Any) -> bool:
-        """Check if an object is a @tool decorated function.
+        # 1️⃣ Plain wrapped function (langchain <0.1)
+        if isinstance(obj, types.FunctionType) and getattr(obj, "_tool_name", None):
+            return True
 
-        Args:
-            obj: The object to check
+        # 2️⃣ StructuredTool / Tool instance (langchain >=0.1)
+        if hasattr(obj, "name") and hasattr(obj, "func"):
+            return True
 
-        Returns:
-            bool: True if the object is a tool function
-        """
-        # Check for langchain @tool decorator
-        if hasattr(obj, "__wrapped__") and hasattr(obj, "__name__"):
-            # Additional check for tool-specific attributes
-            if hasattr(obj, "name") or hasattr(obj, "description"):
-                return True
-            # Check if it's a callable with a docstring (likely a tool)
-            if callable(obj) and obj.__doc__:
-                return True
         return False
+
+    @staticmethod
+    def _extract_tools_from_factory(factory_func: Callable) -> List[Callable]:
+        """
+        Return a list of *callable* objects that are decorated with @tool
+        inside *factory_func*.
+        """
+        source = inspect.getsource(factory_func)
+        tree = ast.parse(source)
+
+        tools: List[Callable] = []
+
+        class ToolVisitor(ast.NodeVisitor):
+            def visit_FunctionDef(self, node: ast.FunctionDef):
+                # look for @tool
+                for deco in node.decorator_list:
+                    if isinstance(deco, ast.Name) and deco.id == "tool":
+                        # compile the function definition
+                        func_code = compile(
+                            ast.Module([node], type_ignores=[]),
+                            filename="<ast>",
+                            mode="exec",
+                        )
+                        # exec in the factory's globals so the decorator is known
+                        namespace = {}
+                        exec(func_code, factory_func.__globals__, namespace)
+                        tools.append(namespace[node.name])
+                # keep walking
+                self.generic_visit(node)
+
+        ToolVisitor().visit(tree)
+        return tools
 
     @classmethod
     def extract_capabilities(cls, agent_name: str) -> AgentCapabilities:
-        """Extract all @tool decorated functions from an agent.
-
-        Args:
-            agent_name: Name of the agent to analyze
-
-        Returns:
-            AgentCapabilities object containing all discovered capabilities
-        """
-        # Get agent config from registry
+        """Extract all @tool‑decorated functions from an agent."""
         config = get_agent_registry_config(agent_name)
         if not config:
-            error_msg = f"Agent '{agent_name}' not found in registry"
-            logger.warning(error_msg)
             return AgentCapabilities(
                 agent_name=agent_name,
                 display_name=agent_name,
                 description="Unknown agent",
                 tools=[],
-                error=error_msg,
+                error=f"Agent '{agent_name}' not found in registry",
             )
 
-        capabilities = []
-        error = None
+        capabilities: List[AgentCapability] = []
+        error: Optional[str] = None
 
         try:
-            # Extract module path from factory function
-            module_path = config.factory_function.rsplit(".", 1)[0]
-
-            # Import the agent module
+            # 1️⃣  Load the module and factory
+            module_path, factory_name = config.factory_function.rsplit(".", 1)
             module = importlib.import_module(module_path)
+            factory_func = getattr(module, factory_name)
 
-            # Find the factory function
-            factory_name = config.factory_function.rsplit(".", 1)[1]
-            if not hasattr(module, factory_name):
-                raise ImportError(
-                    f"Factory function '{factory_name}' not found in module"
+            inner_tools = cls._extract_tools_from_factory(factory_func)
+
+            for tool_obj in inner_tools:
+                if not cls._is_tool_function(tool_obj):
+                    continue
+
+                # ── StructuredTool path ──────────────────────────────────────
+                if hasattr(tool_obj, "name"):
+                    tool_name = tool_obj.name
+                    description = getattr(tool_obj, "description", "")
+                    func = tool_obj.func
+                else:  # fallback to plain function
+                    tool_name = getattr(tool_obj, "_tool_name", tool_obj.__name__)
+                    description = getattr(tool_obj, "__doc__", "") or ""
+                    func = tool_obj
+
+                doc_info = cls._parse_docstring(func.__doc__ or "")
+                params = cls._extract_parameters(func)
+
+                # Merge param descriptions from docstring
+                for p_name, p_desc in doc_info.get("params", {}).items():
+                    if p_name in params:
+                        params[p_name] = p_desc
+
+                capability = AgentCapability(
+                    tool_name=tool_name,
+                    description=doc_info.get("description", ""),
+                    parameters=params,
+                    return_type=doc_info.get("returns", ""),
                 )
+                capabilities.append(capability)
+                logger.debug(f"Found tool '{tool_name}' in {agent_name}")
 
-            # Get the factory function
-            getattr(module, factory_name)
-
-            # Look for tool functions defined within the factory function's module
-            # This requires parsing the source code of the factory function
-            # For now, we'll look for tool functions at module level
-            for name, obj in inspect.getmembers(module):
-                if cls._is_tool_function(obj):
-                    # Parse docstring
-                    doc_info = cls._parse_docstring(obj.__doc__ or "")
-
-                    # Extract parameters
-                    params = cls._extract_parameters(obj)
-
-                    # Merge parameter descriptions from docstring if available
-                    for param_name, param_desc in doc_info.get("params", {}).items():
-                        if param_name in params:
-                            params[param_name] = param_desc
-
-                    capability = AgentCapability(
-                        tool_name=name,
-                        description=doc_info["description"],
-                        parameters=params,
-                        return_type=doc_info["returns"],
-                    )
-                    capabilities.append(capability)
-                    logger.debug(f"Found tool '{name}' in {agent_name}")
-
-            # If no module-level tools found, try to analyze the factory function itself
-            # This is more complex as tools are often defined inside the factory
+            # 3️⃣  Optional fallback to module‑level tools
             if not capabilities:
-                logger.debug(
-                    f"No module-level tools found for {agent_name}, checking factory function"
-                )
-                # This would require more sophisticated analysis
-                # For now, we'll return empty capabilities
+                for name, obj in inspect.getmembers(module):
+                    if cls._is_tool_function(obj):
+                        doc_info = cls._parse_docstring(obj.__doc__ or "")
+                        params = cls._extract_parameters(obj)
+                        for p_name, p_desc in doc_info.get("params", {}).items():
+                            if p_name in params:
+                                params[p_name] = p_desc
+
+                        capability = AgentCapability(
+                            tool_name=name,
+                            description=doc_info.get("description", ""),
+                            parameters=params,
+                            return_type=doc_info.get("returns", ""),
+                        )
+                        capabilities.append(capability)
 
         except Exception as e:
-            error = f"Error extracting capabilities: {str(e)}"
+            error = f"Error extracting capabilities: {e}"
             logger.warning(f"Could not extract capabilities for {agent_name}: {e}")
 
         return AgentCapabilities(
@@ -309,12 +330,12 @@ class AgentCapabilityExtractor:
             for tool in caps.tools[:max_tools]:
                 # Truncate long descriptions
                 desc = tool.description
-                if len(desc) > 100:
-                    desc = desc[:97] + "..."
-                summary += f"\n    • {tool.tool_name}: {desc}"
+                if len(desc) > 120:
+                    desc = desc[:117] + "..."
+                summary += f"\n{tool.tool_name}: {desc}"
 
             if len(caps.tools) > max_tools:
-                summary += f"\n    • ...and {len(caps.tools) - max_tools} more tools"
+                summary += f"\n...and {len(caps.tools) - max_tools} more tools"
 
         return summary
 

@@ -18,7 +18,7 @@ from lobster.agents.state import VisualizationExpertState
 from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.visualization_service import (
+from lobster.services.visualization.visualization_service import (
     SingleCellVisualizationService,
 )
 from lobster.utils.logger import get_logger

@@ -5,6 +5,7 @@ Installable via pip or curl, with rich terminal interface.
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Optional
 
@@ -29,12 +30,28 @@ from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 from rich.table import Table
 
+from lobster.cli_internal.utils.path_resolution import (  # BUG FIX #6: Secure path resolution
+    PathResolver,
+)
+from lobster.config import provider_setup
 from lobster.config.agent_config import (
     LobsterAgentConfigurator,
     get_agent_configurator,
     initialize_configurator,
 )
 from lobster.core.client import AgentClient
+
+# Import extraction cache manager (premium feature - graceful fallback if unavailable)
+try:
+    from lobster.core.extraction_cache import ExtractionCacheManager
+    HAS_EXTRACTION_CACHE = True
+except ImportError:
+    # Premium feature not available in open-core distribution
+    ExtractionCacheManager = None
+    HAS_EXTRACTION_CACHE = False
+
+from lobster.core.queue_storage import queue_file_lock
+from lobster.core.workspace import resolve_workspace
 
 # Import new UI system
 from lobster.ui import LobsterTheme, setup_logging
@@ -71,6 +88,24 @@ except ImportError:
 # Module logger
 logger = logging.getLogger(__name__)
 
+_COMMAND_HISTORY_LOCK = threading.Lock()
+
+
+# ============================================================================
+# Queue Command Exceptions
+# ============================================================================
+
+
+class QueueFileTypeNotSupported(NotImplementedError):
+    """Raised when /queue load encounters an unsupported file type.
+
+    This exception provides helpful messaging for users about which file types
+    are currently supported and which are planned for future releases.
+    """
+
+    pass
+
+
 # ============================================================================
 # Progress Management
 # ============================================================================
@@ -91,6 +126,10 @@ class NoOpProgress:
 
     def update(self, *args, **kwargs):
         """No-op update."""
+        pass
+
+    def remove_task(self, *args, **kwargs):
+        """No-op task removal."""
         pass
 
 
@@ -279,8 +318,40 @@ class CloudAwareCache:
 # FIXME currenlty langraph implementation
 def _add_command_to_history(
     client: AgentClient, command: str, summary: str, is_error: bool = False
-) -> None:
-    """Add command execution to conversation history for AI context."""
+) -> bool:
+    """
+    Add command execution to conversation history for AI context.
+
+    BUG FIX #4: Enhanced error handling with full logging and file backup.
+    - Returns bool to indicate success/failure
+    - Logs full error messages with stack traces (not truncated to 50 chars)
+    - Implements file backup for audit trail and recovery
+    - Provides detailed diagnostics for debugging
+
+    Args:
+        client: AgentClient instance
+        command: Command that was executed
+        summary: Summary of command result
+        is_error: Whether this was an error result
+
+    Returns:
+        True if successfully logged, False otherwise
+    """
+    # 1. Validate inputs
+    if not command or not summary:
+        logger.warning("Empty command or summary provided to history logger")
+        return False
+
+    # 2. Check client compatibility
+    if not hasattr(client, "messages") or not isinstance(client.messages, list):
+        logger.info(
+            f"Client type {type(client).__name__} doesn't support message history. "
+            f"Commands will not be available in AI context."
+        )
+        return False
+
+    # 3. Attempt primary logging (graph state)
+    primary_logged = False
     try:
         # Import required message types
         from langchain_core.messages import AIMessage, HumanMessage
@@ -291,34 +362,102 @@ def _add_command_to_history(
         ai_message_command_response = f"Command {status_prefix}: {summary}"
 
         # Add messages directly to client.messages (the correct API)
-        if hasattr(client, "messages") and isinstance(client.messages, list):
-            config = dict(configurable=dict(thread_id=client.session_id))
-            # first we add to clinet message history for future use (currently langraph implementation )
-            client.messages.append(HumanMessage(content=human_message_command_usage))
-            client.messages.append(AIMessage(content=ai_message_command_response))
-            # then we use the client method to add to history
-            client.graph.update_state(
-                config,
-                dict(
-                    messages=[
-                        HumanMessage(human_message_command_usage),
-                        AIMessage(ai_message_command_response),
-                    ]
-                ),
-            )
-        else:
-            # Fallback for other client types (cloud, API, etc.)
-            console.print(
-                "[dim yellow]Command history not supported for this client type[/dim yellow]",
-                style="dim",
-            )
+        config = dict(configurable=dict(thread_id=client.session_id))
+        human_msg = HumanMessage(content=human_message_command_usage)
+        ai_msg = AIMessage(content=ai_message_command_response)
+
+        # Add to client message history
+        client.messages.append(human_msg)
+        client.messages.append(ai_msg)
+
+        # Update graph state
+        client.graph.update_state(
+            config,
+            dict(messages=[human_msg, ai_msg]),
+        )
+
+        logger.debug(f"✓ Logged command to graph state: {command[:50]}")
+        primary_logged = True
+
+    except ImportError as e:
+        logger.error(f"Cannot import langchain message types: {e}")
+        return False
+
+    except AttributeError as e:
+        # BUG FIX #4: Full error logging with diagnostic info
+        logger.error(
+            f"Client missing required attributes for history logging: {e}. "
+            f"Client type: {type(client).__name__}, "
+            f"Has messages: {hasattr(client, 'messages')}, "
+            f"Has graph: {hasattr(client, 'graph')}"
+        )
 
     except Exception as e:
-        # Never break CLI functionality for history logging
-        console.print(
-            f"[dim yellow]History logging failed: {str(e)[:50]}[/dim yellow]",
-            style="dim",
+        # BUG FIX #4: Log FULL exception with stack trace (not truncated)
+        logger.error(
+            f"Failed to log command '{command}' to graph state: {e}",
+            exc_info=True,  # Include full traceback for debugging
         )
+
+    # 4. Backup to file (always, for audit trail and recovery)
+    backup_logged = _backup_command_to_file(
+        client, command, summary, is_error, primary_logged
+    )
+
+    return primary_logged or backup_logged
+
+
+def _backup_command_to_file(
+    client: AgentClient,
+    command: str,
+    summary: str,
+    is_error: bool,
+    primary_logged: bool,
+) -> bool:
+    """
+    Write command to backup file for audit trail and recovery.
+
+    BUG FIX #4: Dual-channel logging - backup commands to file even if graph state succeeds.
+    Provides audit trail, enables session reconstruction, supports compliance requirements.
+
+    Args:
+        client: AgentClient instance
+        command: Command that was executed
+        summary: Summary of command result
+        is_error: Whether this was an error result
+        primary_logged: Whether primary (graph state) logging succeeded
+
+    Returns:
+        True if backup successful, False otherwise
+    """
+    try:
+        history_dir = client.data_manager.workspace_path / ".lobster"
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_file = history_dir / "command_history.jsonl"
+        lock_path = history_file.with_suffix(".lock")
+
+        from datetime import datetime
+
+        record = {
+            "timestamp": datetime.now().isoformat(),
+            "session_id": client.session_id,
+            "command": command,
+            "summary": summary,
+            "is_error": is_error,
+            "logged_to_graph": primary_logged,
+        }
+
+        with queue_file_lock(_COMMAND_HISTORY_LOCK, lock_path):
+            with open(history_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+
+        logger.debug(f"✓ Backed up command to file: {command[:50]}")
+        return True
+
+    except Exception as e:
+        # BUG FIX #4: Log backup failures with full stack trace
+        logger.error(f"Failed to write command backup: {e}", exc_info=True)
+        return False
 
 
 def check_for_missing_slash_command(user_input: str) -> Optional[str]:
@@ -355,9 +494,18 @@ def extract_available_commands() -> Dict[str, str]:
         "/tree": "Show directory tree view",
         "/data": "Show current data summary",
         "/metadata": "Show detailed metadata information",
+        # Queue commands (temporary, intent-driven)
+        "/queue": "Show queue status",
+        "/queue load": "Load file into queue (supports .ris, more coming)",
+        "/queue list": "List queued items",
+        "/queue clear": "Clear queue",
+        "/queue export": "Export queue to workspace for persistence",
+        # Workspace commands (persistent)
         "/workspace": "Show workspace status and information",
         "/workspace list": "List available datasets in workspace",
-        "/workspace load": "Load specific dataset from workspace",
+        "/workspace load": "Load dataset or file into workspace",
+        "/workspace save": "Save modality to workspace",
+        "/workspace info": "Show dataset information",
         "/restore": "Restore previous session datasets",
         "/modalities": "Show detailed modality information",
         "/describe": "Show detailed information about a specific modality",
@@ -365,13 +513,20 @@ def extract_available_commands() -> Dict[str, str]:
         "/plot": "Open plots directory or specific plot",
         "/open": "Open file or folder in system default application",
         "/save": "Save current state to workspace",
-        "/read": "Read a file from workspace (supports glob patterns)",
+        "/read": "View file contents (inspection only)",
         "/export": "Export session data",
         "/reset": "Reset conversation",
         "/mode": "Change operation mode",
         "/modes": "List available modes",
+        "/provider": "List available LLM providers",
+        "/provider list": "List available LLM providers with status",
+        "/provider anthropic": "Switch to Anthropic provider",
+        "/provider bedrock": "Switch to AWS Bedrock provider",
+        "/provider ollama": "Switch to Ollama (local) provider",
         "/clear": "Clear screen",
         "/exit": "Exit the chat",
+        # Deprecated commands
+        "/load": "[DEPRECATED] Use /queue load instead",
     }
 
     # Try to extract dynamically as fallback, but use static definitions as primary
@@ -607,6 +762,31 @@ if PROMPT_TOOLKIT_AVAILABLE:
                 except Exception:
                     pass
 
+            elif text.startswith("/provider "):
+                # Suggest provider options (anthropic, bedrock, ollama, list)
+                prefix = text.replace("/provider ", "")
+                providers = ["anthropic", "bedrock", "ollama", "list"]
+
+                for provider in providers:
+                    if provider.lower().startswith(prefix.lower()):
+                        # Get provider status using LLMFactory
+                        from lobster.config.llm_factory import LLMFactory
+
+                        if provider == "list":
+                            meta = "Show providers with status"
+                        else:
+                            available = LLMFactory.get_available_providers()
+                            status = "✓ configured" if provider in available else "✗ not configured"
+                            meta = status
+
+                        yield Completion(
+                            text=provider,
+                            start_position=-len(prefix),
+                            display=HTML(f"<ansiyellow>{provider}</ansiyellow>"),
+                            display_meta=HTML(f"<dim>{meta}</dim>"),
+                            style="class:completion.provider",
+                        )
+
             elif any(text.startswith(cmd + " ") for cmd in self.file_commands):
                 # File completion for file-accepting commands
                 if self.adapter.can_read_files():
@@ -693,12 +873,68 @@ client: Optional[AgentClient] = None
 # Global current directory tracking
 current_directory = Path.cwd()
 
+PROFILE_TIMINGS_ENV = "LOBSTER_PROFILE_TIMINGS"
+
+
+def _str_to_bool(value: Optional[str]) -> Optional[bool]:
+    if value is None:
+        return None
+    value = value.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _resolve_profile_timings_flag(cli_flag: Optional[bool]) -> bool:
+    if cli_flag is not None:
+        return cli_flag
+    env_value = _str_to_bool(os.environ.get(PROFILE_TIMINGS_ENV))
+    return bool(env_value)
+
+
+def _collect_profile_timings(
+    client: AgentClient, clear: bool = True
+) -> Dict[str, Dict[str, float]]:
+    timings: Dict[str, Dict[str, float]] = {}
+    data_manager = getattr(client, "data_manager", None)
+    if data_manager and hasattr(data_manager, "get_latest_timings"):
+        dm_timings = data_manager.get_latest_timings(clear=clear)
+        if dm_timings:
+            timings["DataManager"] = dm_timings
+    return timings
+
+
+def _maybe_print_timings(client: AgentClient, context: str) -> None:
+    if not getattr(client, "profile_timings_enabled", False):
+        return
+
+    timing_sources = _collect_profile_timings(client, clear=True)
+    if not timing_sources:
+        return
+
+    table = Table(title=f"{context} Timings", box=box.ROUNDED)
+    table.add_column("Component", style="cyan", no_wrap=True)
+    table.add_column("Step", style="white")
+    table.add_column("Seconds", justify="right")
+
+    for component, entries in timing_sources.items():
+        for step, value in sorted(
+            entries.items(), key=lambda item: item[1], reverse=True
+        ):
+            table.add_row(component, step, f"{value:.2f}")
+
+    console.print(table)
+
 
 def init_client(
     workspace: Optional[Path] = None,
     reasoning: bool = False,
     verbose: bool = False,
     debug: bool = False,
+    profile_timings: Optional[bool] = None,
+    provider_override: Optional[str] = None,
 ) -> AgentClient:
     """Initialize either local or cloud client based on environment."""
     global client
@@ -846,16 +1082,18 @@ def init_client(
     else:
         setup_logging(logging.WARNING)  # Suppress INFO logs
 
-    # Set workspace
-    if workspace is None:
-        workspace = Path.cwd() / ".lobster_workspace"
-
-    workspace.mkdir(parents=True, exist_ok=True)
+    # Set workspace using centralized resolver
+    # Resolution order: explicit --workspace > LOBSTER_WORKSPACE env var > cwd/.lobster_workspace
+    workspace = resolve_workspace(explicit_path=workspace, create=True)
 
     # Initialize DataManagerV2 with workspace support and console for progress tracking
     from lobster.core.data_manager_v2 import DataManagerV2
 
     data_manager = DataManagerV2(workspace_path=workspace, console=console)
+
+    profile_timings_enabled = _resolve_profile_timings_flag(profile_timings)
+    if profile_timings_enabled and hasattr(data_manager, "enable_timing"):
+        data_manager.enable_timing(True)
 
     # Create callback using the appropriate terminal_callback_handler
     # Configure callbacks based on reasoning and verbose flags independently
@@ -882,7 +1120,10 @@ def init_client(
         enable_reasoning=reasoning,
         # enable_langfuse=debug,
         custom_callbacks=callbacks,  # Pass the proper callback
+        provider_override=provider_override,  # Pass provider override from CLI flag
     )
+
+    client.profile_timings_enabled = profile_timings_enabled
 
     # Show graph visualization in debug mode
     if debug:
@@ -1423,54 +1664,26 @@ def get_current_agent_name() -> str:
 
 
 def display_welcome():
-    """Display welcome message with enhanced orange branding."""
-    # Create branded header
-    header_text = LobsterTheme.create_title_text("LOBSTER by Omics-OS", "🦞")
+    """Display minimal welcome message with OS-like branding."""
+    from lobster.core.license_manager import get_current_tier
 
-    # Check for enhanced input capabilities
-    input_features = console_manager.get_input_features()
-    input_status = ""
-    if PROMPT_TOOLKIT_AVAILABLE and input_features["arrow_navigation"]:
-        input_status = f"[dim {LobsterTheme.PRIMARY_ORANGE}]✨ Enhanced input: Arrow navigation, command history, reverse search, and Tab autocomplete enabled[/dim {LobsterTheme.PRIMARY_ORANGE}]"
-    elif PROMPT_TOOLKIT_AVAILABLE:
-        input_status = f"[dim {LobsterTheme.PRIMARY_ORANGE}]✨ Enhanced input: Tab autocomplete enabled[/dim {LobsterTheme.PRIMARY_ORANGE}]"
-    else:
-        input_status = "[dim grey50]💡 Enhanced input & autocomplete available: pip install prompt-toolkit[/dim grey50]"
+    # Get current tier for badge
+    tier = get_current_tier()
+    tier_badge = f" - {tier.capitalize()}" if tier != "free" else ""
 
-    welcome_content = f"""[bold white]Multi-Agent Bioinformatics Analysis System v{__version__}[/bold white]
+    # Create minimal welcome content
+    welcome_content = f"""[bold white]Multi-Agent Bioinformatics Platform[/bold white]"""
 
-{input_status}
-
-[bold {LobsterTheme.PRIMARY_ORANGE}]Key Tasks:[/bold {LobsterTheme.PRIMARY_ORANGE}]
-• Analyze RNA-seq data
-• Generate visualizations and plots
-• Extract insights from bioinformatics datasets
-• Access GEO & literature databases
-
-[bold {LobsterTheme.PRIMARY_ORANGE}]Essential Commands:[/bold {LobsterTheme.PRIMARY_ORANGE}]
-[{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}]         - Show all available commands
-[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       - Show system status
-[{LobsterTheme.PRIMARY_ORANGE}]/files[/{LobsterTheme.PRIMARY_ORANGE}]        - List all workspace files
-[{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         - Show current dataset information
-[{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     - Show detailed metadata information
-[{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    - Show workspace status and configuration
-[{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        - List all generated visualizations
-[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         - Open plots directory in file manager
-[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    - Open a specific plot by ID or name
-[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  - Read file from workspace (supports subdirectories)
-[{LobsterTheme.PRIMARY_ORANGE}]/modes[/{LobsterTheme.PRIMARY_ORANGE}]        - List available operation modes
-
-[bold {LobsterTheme.PRIMARY_ORANGE}]Additional Features:[/bold {LobsterTheme.PRIMARY_ORANGE}]
-• Configuration management via [{LobsterTheme.PRIMARY_ORANGE}]lobster config[/{LobsterTheme.PRIMARY_ORANGE}] subcommands
-• Single query mode via [{LobsterTheme.PRIMARY_ORANGE}]lobster query[/{LobsterTheme.PRIMARY_ORANGE}] command
-• API server mode via [{LobsterTheme.PRIMARY_ORANGE}]lobster serve[/{LobsterTheme.PRIMARY_ORANGE}] command
-
-[dim grey50]Powered by LangGraph | © 2025 Omics-OS[/dim grey50]"""
-
-    # Create branded welcome panel
-    welcome_panel = LobsterTheme.create_panel(welcome_content, title=str(header_text))
+    # Create branded welcome panel with tier badge in title
+    welcome_panel = LobsterTheme.create_panel(
+        welcome_content,
+        title=f"🦞 Lobster OS v{__version__}{tier_badge}"
+    )
 
     console_manager.print(welcome_panel)
+    console_manager.print(
+        f"\n[dim]💬 Ready. Type your analysis request or [{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}] for commands.[/dim]\n"
+    )
 
 
 def show_default_help():
@@ -1697,48 +1910,34 @@ def display_status(client: AgentClient):
 
 
 def _show_workspace_prompt(client):
-    """Display workspace restoration prompt on startup."""
+    """Display compact session status line."""
+    from lobster.config.agent_registry import AGENT_REGISTRY
+
     datasets = client.data_manager.available_datasets
-    session = client.data_manager.session_data
+    session_id = client.session_id
 
-    if not datasets:
-        return
+    # Count supervisor-accessible agents
+    child_agent_names = set()
+    for config in AGENT_REGISTRY.values():
+        if config.child_agents:
+            child_agent_names.update(config.child_agents)
 
-    # Calculate workspace info
-    total_size = sum(d["size_mb"] for d in datasets.values())
-    dataset_count = len(datasets)
+    agent_count = sum(
+        1 for name, config in AGENT_REGISTRY.items()
+        if config.supervisor_accessible is not False and name not in child_agent_names
+    )
 
-    # Get last session info
-    last_used = "unknown"
-    if session and "last_modified" in session:
-        from datetime import datetime
+    # Build compact status line
+    if datasets:
+        total_size = sum(d["size_mb"] for d in datasets.values())
+        dataset_count = len(datasets)
+        dataset_info = f"{dataset_count} dataset{'s' if dataset_count > 1 else ''} ({total_size:.1f} MB)"
+    else:
+        dataset_info = "no data loaded"
 
-        last_modified = datetime.fromisoformat(session["last_modified"])
-        time_diff = datetime.now() - last_modified
-        if time_diff.days > 0:
-            last_used = f"{time_diff.days} day{'s' if time_diff.days > 1 else ''} ago"
-        elif time_diff.seconds > 3600:
-            hours = time_diff.seconds // 3600
-            last_used = f"{hours} hour{'s' if hours > 1 else ''} ago"
-        else:
-            minutes = time_diff.seconds // 60
-            last_used = f"{minutes} minute{'s' if minutes > 1 else ''} ago"
-
-    # Create informative panel
-    panel_content = f"""📂 Found existing workspace (last used: {last_used})
-   • {dataset_count} datasets available ({total_size:.1f} MB)
-
-Type [{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}] to continue where you left off
-Type [{LobsterTheme.PRIMARY_ORANGE}]/workspace list[/{LobsterTheme.PRIMARY_ORANGE}] to see available datasets
-Type [{LobsterTheme.PRIMARY_ORANGE}]/workspace load <name>[/{LobsterTheme.PRIMARY_ORANGE}] to load specific datasets"""
-
+    # Display one-line status
     console.print(
-        Panel(
-            panel_content,
-            title="Workspace Detected",
-            border_style=LobsterTheme.PRIMARY_ORANGE,
-            padding=(1, 2),
-        )
+        f"[dim]Session: {session_id} | {dataset_info} | {agent_count} agents ready[/dim]\n"
     )
 
 
@@ -1747,46 +1946,32 @@ def init_client_with_animation(
     reasoning: bool = False,
     verbose: bool = False,
     debug: bool = False,
+    profile_timings: Optional[bool] = None,
+    provider_override: Optional[str] = None,
 ) -> AgentClient:
-    """Initialize client with simple agent loading animation."""
-    import time
-
+    """Initialize client with minimal loading message."""
     from lobster.config.agent_registry import AGENT_REGISTRY
 
     get_console_manager()
 
-    # Agent emojis
-    agent_emojis = {
-        "data_expert_agent": "🗄️",
-        "singlecell_expert_agent": "🧬",
-        "bulk_rnaseq_expert_agent": "📊",
-        "research_agent": "📚",
-        "ms_proteomics_expert_agent": "🧪",
-        "affinity_proteomics_expert_agent": "🔗",
-        "machine_learning_expert_agent": "🤖",
-        "visualization_expert_agent": "🌸",
-    }
+    # Count supervisor-accessible agents
+    child_agent_names = set()
+    for config in AGENT_REGISTRY.values():
+        if config.child_agents:
+            child_agent_names.update(config.child_agents)
 
-    console.print(
-        f"[bold {LobsterTheme.PRIMARY_ORANGE}]🦞 Initializing Lobster AI...[/bold {LobsterTheme.PRIMARY_ORANGE}]"
+    supervisor_accessible_count = sum(
+        1 for name, config in AGENT_REGISTRY.items()
+        if config.supervisor_accessible is not False and name not in child_agent_names
     )
 
-    # Show agents being loaded
-    for agent_name, config in AGENT_REGISTRY.items():
-        emoji = agent_emojis.get(agent_name, "⚡")
-        with console.status(
-            f"[{LobsterTheme.PRIMARY_ORANGE}]{emoji} Loading {config.display_name}...[/{LobsterTheme.PRIMARY_ORANGE}]"
-        ):
-            time.sleep(0.1)  # Brief loading time
-        console.print(f"  [green]✓[/green] {emoji} {config.display_name}")
+    # Single-line loading message
+    with console.status(
+        f"[{LobsterTheme.PRIMARY_ORANGE}]🦞 Loading {supervisor_accessible_count} agents...[/{LobsterTheme.PRIMARY_ORANGE}]"
+    ):
+        client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider_override)
 
-    # Actually initialize the client
-    console.print(
-        f"\n[{LobsterTheme.PRIMARY_ORANGE}]🔧 Starting multi-agent system...[/{LobsterTheme.PRIMARY_ORANGE}]"
-    )
-    client = init_client(workspace, reasoning, verbose, debug)
-
-    console.print("[bold green]✅ Lobster is cooked and ready![/bold green]\n")
+    console.print(f"[green]✓[/green] Lobster is ready\n")
     return client
 
 
@@ -2006,35 +2191,58 @@ def config_show():
     anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
     bedrock_access = os.environ.get("AWS_BEDROCK_ACCESS_KEY")
     bedrock_secret = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
+    llm_provider = os.environ.get("LOBSTER_LLM_PROVIDER")
+    ollama_model = os.environ.get("OLLAMA_DEFAULT_MODEL")
 
     table.add_row("", "")  # Spacing
     table.add_row("[bold]LLM Provider", "")
 
+    # Show detected provider first
+    from lobster.config.llm_factory import LLMFactory
+
+    provider = LLMFactory.detect_provider()
+    if provider:
+        table.add_row("  [dim]Detected Provider[/dim]", f"[green]{provider.value}[/green]")
+
+    # Anthropic API
     if anthropic_key:
         table.add_row("  ANTHROPIC_API_KEY", mask_secret(anthropic_key))
-        from lobster.config.llm_factory import LLMFactory
-
-        provider = LLMFactory.detect_provider()
-        if provider:
-            table.add_row("  [dim]Provider[/dim]", f"[green]{provider.value}[/green]")
     else:
         table.add_row("  ANTHROPIC_API_KEY", "[dim]Not set[/dim]")
 
+    # AWS Bedrock
     if bedrock_access or bedrock_secret:
         table.add_row("  AWS_BEDROCK_ACCESS_KEY", mask_secret(bedrock_access))
         table.add_row("  AWS_BEDROCK_SECRET_ACCESS_KEY", mask_secret(bedrock_secret))
-        if not anthropic_key:
-            from lobster.config.llm_factory import LLMFactory
-
-            provider = LLMFactory.detect_provider()
-            if provider:
-                table.add_row(
-                    "  [dim]Provider[/dim]", f"[green]{provider.value}[/green]"
-                )
     else:
-        if not anthropic_key:
-            table.add_row("  AWS_BEDROCK_ACCESS_KEY", "[dim]Not set[/dim]")
-            table.add_row("  AWS_BEDROCK_SECRET_ACCESS_KEY", "[dim]Not set[/dim]")
+        table.add_row("  AWS_BEDROCK_ACCESS_KEY", "[dim]Not set[/dim]")
+        table.add_row("  AWS_BEDROCK_SECRET_ACCESS_KEY", "[dim]Not set[/dim]")
+
+    # Ollama - use provider_setup module
+    if llm_provider == "ollama" or provider and provider.value == "ollama":
+        table.add_row("  LOBSTER_LLM_PROVIDER", "[green]ollama[/green]")
+
+        # Get Ollama status using provider_setup
+        ollama_status = provider_setup.get_ollama_status()
+
+        if ollama_status.running:
+            table.add_row("  [dim]Ollama Status[/dim]", "[green]✓ Running[/green]")
+            if ollama_status.models:
+                model_count = len(ollama_status.models)
+                table.add_row(
+                    "  [dim]Available Models[/dim]", f"[cyan]{model_count} model(s)[/cyan]"
+                )
+        else:
+            table.add_row("  [dim]Ollama Status[/dim]", "[yellow]Not running[/yellow]")
+
+        if ollama_model:
+            table.add_row("  OLLAMA_DEFAULT_MODEL", f"[yellow]{ollama_model}[/yellow]")
+        else:
+            table.add_row(
+                "  OLLAMA_DEFAULT_MODEL", "[dim]llama3:8b-instruct (default)[/dim]"
+            )
+    else:
+        table.add_row("  LOBSTER_LLM_PROVIDER", "[dim]Not set (using cloud)[/dim]")
 
     # NCBI API (optional)
     table.add_row("", "")  # Spacing
@@ -2071,12 +2279,350 @@ def config_show():
         console.print(
             Panel.fit(
                 "[red]❌ No LLM provider configured[/red]\n\n"
-                "Please set either ANTHROPIC_API_KEY or AWS_BEDROCK credentials.\n"
+                "Please configure one of:\n"
+                "  • Claude API (ANTHROPIC_API_KEY)\n"
+                "  • AWS Bedrock (AWS_BEDROCK credentials)\n"
+                "  • Ollama (local, LOBSTER_LLM_PROVIDER=ollama)\n\n"
                 f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]",
                 border_style="red",
                 padding=(1, 2),
             )
         )
+
+
+@app.command()
+def status():
+    """Display subscription tier, installed packages, and available agents."""
+    from rich.table import Table
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold {LobsterTheme.PRIMARY_ORANGE}]🦞 Lobster Status[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+            border_style=LobsterTheme.PRIMARY_ORANGE,
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
+    # Get entitlement status
+    try:
+        from lobster.core.license_manager import get_entitlement_status
+
+        entitlement = get_entitlement_status()
+    except ImportError:
+        entitlement = {"tier": "free", "tier_display": "Free", "source": "default"}
+
+    # Get installed packages
+    try:
+        from lobster.core.plugin_loader import get_installed_packages
+
+        packages = get_installed_packages()
+    except ImportError:
+        packages = {"lobster-ai": "unknown"}
+
+    # Get available agents
+    try:
+        from lobster.config.agent_registry import get_worker_agents
+        from lobster.config.subscription_tiers import is_agent_available
+
+        worker_agents = get_worker_agents()
+        tier = entitlement.get("tier", "free")
+        available = [name for name in worker_agents if is_agent_available(name, tier)]
+        restricted = [
+            name for name in worker_agents if not is_agent_available(name, tier)
+        ]
+    except ImportError:
+        available = []
+        restricted = []
+        tier = "free"
+
+    # Subscription tier section
+    tier_display = entitlement.get("tier_display", "Free")
+    tier_emoji = {"free": "🆓", "premium": "⭐", "enterprise": "🏢"}.get(
+        entitlement.get("tier", "free"), "🆓"
+    )
+
+    console.print(f"[bold]Subscription Tier:[/bold] {tier_emoji} {tier_display}")
+    console.print(f"[dim]Source: {entitlement.get('source', 'default')}[/dim]")
+
+    if entitlement.get("expires_at"):
+        days = entitlement.get("days_until_expiry")
+        if days is not None and days < 30:
+            console.print(f"[yellow]⚠️  License expires in {days} days[/yellow]")
+        else:
+            console.print(f"[dim]Expires: {entitlement.get('expires_at')}[/dim]")
+
+    if entitlement.get("warnings"):
+        for warning in entitlement["warnings"]:
+            console.print(f"[red]⚠️  {warning}[/red]")
+
+    console.print()
+
+    # Installed packages table
+    console.print("[bold]Installed Packages:[/bold]")
+    pkg_table = Table(box=box.ROUNDED, border_style="cyan", show_header=True)
+    pkg_table.add_column("Package", style="white")
+    pkg_table.add_column("Version", style="cyan")
+    pkg_table.add_column("Status", style="green")
+
+    for pkg_name, version in packages.items():
+        if version == "missing":
+            status_str = "[red]Missing[/red]"
+        elif version == "dev":
+            status_str = "[yellow]Development[/yellow]"
+        else:
+            status_str = "[green]Installed[/green]"
+        pkg_table.add_row(pkg_name, version, status_str)
+
+    console.print(pkg_table)
+    console.print()
+
+    # Available agents
+    if available:
+        console.print(f"[bold]Available Agents ({len(available)}):[/bold]")
+        agent_list = ", ".join(sorted(available))
+        console.print(f"[green]{agent_list}[/green]")
+        console.print()
+
+    # Restricted agents (upgrade prompt)
+    if restricted:
+        console.print(f"[bold]Premium Agents ({len(restricted)}):[/bold]")
+        restricted_list = ", ".join(sorted(restricted))
+        console.print(f"[dim]{restricted_list}[/dim]")
+        console.print()
+        console.print(
+            Panel.fit(
+                f"[yellow]⭐ Upgrade to Premium to unlock {len(restricted)} additional agents[/yellow]\n"
+                f"[dim]Visit https://omics-os.com/pricing or run 'lobster activate <code>'[/dim]",
+                border_style="yellow",
+                padding=(0, 2),
+            )
+        )
+
+    # Features
+    features = entitlement.get("features", [])
+    if features:
+        console.print()
+        console.print("[bold]Enabled Features:[/bold]")
+        console.print(f"[cyan]{', '.join(features)}[/cyan]")
+
+
+@app.command()
+def activate(
+    access_code: str = typer.Argument(
+        ..., help="Premium activation code from Omics-OS"
+    ),
+    server_url: Optional[str] = typer.Option(
+        None,
+        "--server",
+        help="License server URL (defaults to https://licenses.omics-os.com)",
+    ),
+):
+    """
+    Activate a premium license using an access code.
+
+    This command contacts the Omics-OS license server to validate your
+    access code and activate premium features on this machine.
+
+    Examples:
+      lobster activate ABC123-XYZ789
+      lobster activate ABC123-XYZ789 --server https://custom.server.com
+    """
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold {LobsterTheme.PRIMARY_ORANGE}]🦞 License Activation[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+            border_style=LobsterTheme.PRIMARY_ORANGE,
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
+    # Check if already activated
+    try:
+        from lobster.core.license_manager import get_entitlement_status
+
+        current = get_entitlement_status()
+        if (
+            current.get("tier") not in ("free", None)
+            and current.get("source") == "license_file"
+        ):
+            console.print(
+                f"[yellow]⚠️  You already have an active {current.get('tier_display', 'Premium')} license[/yellow]"
+            )
+            console.print(f"[dim]Source: {current.get('source')}[/dim]")
+            console.print()
+            if not Confirm.ask("Replace existing license?", default=False):
+                console.print("[yellow]Activation cancelled[/yellow]")
+                raise typer.Exit(0)
+    except ImportError:
+        pass  # Continue with activation
+
+    console.print("[dim]Contacting license server...[/dim]")
+
+    try:
+        from lobster.core.license_manager import activate_license
+
+        result = activate_license(access_code, license_server_url=server_url)
+
+        if result.get("success"):
+            entitlement = result.get("entitlement", {})
+            tier = entitlement.get("tier", "premium").title()
+            packages_installed = result.get("packages_installed", [])
+            packages_failed = result.get("packages_failed", [])
+
+            # Build the success message
+            msg_lines = [
+                f"[bold green]✅ License Activated Successfully![/bold green]\n",
+                f"Tier: [bold]{tier}[/bold]",
+                f"Features: {', '.join(entitlement.get('features', []))}",
+            ]
+
+            # Show installed packages
+            if packages_installed:
+                msg_lines.append("")
+                msg_lines.append(
+                    f"[bold green]Custom Packages Installed ({len(packages_installed)}):[/bold green]"
+                )
+                for pkg in packages_installed:
+                    msg_lines.append(
+                        f"  [green]✓[/green] {pkg['name']} v{pkg['version']}"
+                    )
+
+            # Show failed packages with warnings
+            if packages_failed:
+                msg_lines.append("")
+                msg_lines.append(
+                    f"[bold yellow]⚠️  Package Installation Issues ({len(packages_failed)}):[/bold yellow]"
+                )
+                for pkg in packages_failed:
+                    error = pkg.get("error", "Unknown error")
+                    msg_lines.append(
+                        f"  [yellow]✗[/yellow] {pkg['name']}: {error[:50]}..."
+                    )
+                msg_lines.append("")
+                msg_lines.append(
+                    "[dim]You can retry later with: pip install <package_name>[/dim]"
+                )
+
+            msg_lines.append("")
+            msg_lines.append(
+                f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster status[/bold {LobsterTheme.PRIMARY_ORANGE}] to see available agents."
+            )
+
+            console.print()
+            console.print(
+                Panel.fit(
+                    "\n".join(msg_lines),
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
+        else:
+            error = result.get("error", "Unknown error")
+            console.print()
+            console.print(
+                Panel.fit(
+                    f"[bold red]❌ Activation Failed[/bold red]\n\n"
+                    f"Error: {error}\n\n"
+                    f"[dim]If this problem persists, contact support@omics-os.com[/dim]",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+            raise typer.Exit(1)
+
+    except ImportError as e:
+        console.print(f"[red]❌ License manager not available: {e}[/red]")
+        console.print("[dim]This may indicate an incomplete installation.[/dim]")
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Activation error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def deactivate():
+    """
+    Deactivate the current premium license.
+
+    This removes the local license file and reverts to the free tier.
+    Your license can be re-activated on another machine or re-used later.
+    """
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold {LobsterTheme.PRIMARY_ORANGE}]🦞 License Deactivation[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+            border_style=LobsterTheme.PRIMARY_ORANGE,
+            padding=(0, 2),
+        )
+    )
+    console.print()
+
+    # Check current status
+    try:
+        from lobster.core.license_manager import (
+            clear_entitlement,
+            get_entitlement_status,
+        )
+
+        current = get_entitlement_status()
+
+        if current.get("source") == "cloud_key":
+            console.print(
+                "[yellow]⚠️  Your premium tier is from LOBSTER_CLOUD_KEY environment variable.[/yellow]"
+            )
+            console.print(
+                "[dim]To deactivate, unset the LOBSTER_CLOUD_KEY environment variable.[/dim]"
+            )
+            raise typer.Exit(0)
+
+        if current.get("source") == "environment":
+            console.print(
+                "[yellow]⚠️  Your tier is set via LOBSTER_SUBSCRIPTION_TIER environment variable.[/yellow]"
+            )
+            console.print(
+                "[dim]To deactivate, unset the LOBSTER_SUBSCRIPTION_TIER environment variable.[/dim]"
+            )
+            raise typer.Exit(0)
+
+        if current.get("tier") == "free" or current.get("source") == "default":
+            console.print("[dim]No active license found. Already on free tier.[/dim]")
+            raise typer.Exit(0)
+
+        # Confirm deactivation
+        tier_display = current.get("tier_display", "Premium")
+        console.print(f"[bold]Current tier:[/bold] {tier_display}")
+        console.print(f"[dim]Source: {current.get('source')}[/dim]")
+        console.print()
+
+        if not Confirm.ask(
+            f"[yellow]Deactivate {tier_display} license and revert to Free tier?[/yellow]",
+            default=False,
+        ):
+            console.print("[yellow]Deactivation cancelled[/yellow]")
+            raise typer.Exit(0)
+
+        # Remove license file
+        if clear_entitlement():
+            console.print()
+            console.print(
+                Panel.fit(
+                    "[bold green]✅ License Deactivated[/bold green]\n\n"
+                    "You are now on the Free tier.\n"
+                    f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster activate <code>[/bold {LobsterTheme.PRIMARY_ORANGE}] to re-activate.",
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
+        else:
+            console.print("[red]❌ Failed to remove license file[/red]")
+            raise typer.Exit(1)
+
+    except ImportError as e:
+        console.print(f"[red]❌ License manager not available: {e}[/red]")
+        raise typer.Exit(1)
 
 
 @app.command()
@@ -2102,8 +2648,28 @@ def init(
         "--bedrock-secret-key",
         help="AWS Bedrock secret key (non-interactive mode)",
     ),
+    use_ollama: bool = typer.Option(
+        False,
+        "--use-ollama",
+        help="Use Ollama (local LLM) provider (non-interactive mode)",
+    ),
+    ollama_model: Optional[str] = typer.Option(
+        None,
+        "--ollama-model",
+        help="Ollama model name (default: llama3:8b-instruct, non-interactive mode)",
+    ),
     ncbi_key: Optional[str] = typer.Option(
         None, "--ncbi-key", help="NCBI API key (optional, non-interactive mode)"
+    ),
+    cloud_key: Optional[str] = typer.Option(
+        None,
+        "--cloud-key",
+        help="Lobster Cloud API key (optional, enables premium tier)",
+    ),
+    cloud_endpoint: Optional[str] = typer.Option(
+        None,
+        "--cloud-endpoint",
+        help="Custom cloud endpoint URL (optional)",
     ),
 ):
     """
@@ -2123,6 +2689,13 @@ def init(
       lobster init --non-interactive \\
         --bedrock-access-key=AKIA... \\
         --bedrock-secret-key=xxx                     # CI/CD: AWS Bedrock
+      lobster init --non-interactive \\
+        --use-ollama                                 # CI/CD: Ollama (local)
+      lobster init --non-interactive \\
+        --use-ollama --ollama-model=mixtral:8x7b-instruct  # CI/CD: Ollama with custom model
+      lobster init --non-interactive \\
+        --anthropic-key=sk-ant-xxx \\
+        --cloud-key=cloud_xxx                        # CI/CD: With cloud access
     """
     import datetime
 
@@ -2173,41 +2746,65 @@ def init(
         env_lines.append("# Lobster AI Configuration")
         env_lines.append("# Generated by lobster init --non-interactive\n")
 
-        # Validate that at least one provider is specified
+        # Validate provider configuration using provider_setup module
         has_anthropic = anthropic_key is not None
         has_bedrock = bedrock_access_key is not None and bedrock_secret_key is not None
+        has_ollama = use_ollama
 
-        if not has_anthropic and not has_bedrock:
-            console.print(
-                "[red]❌ Error: No API keys provided for non-interactive mode[/red]"
-            )
+        # Validate at least one provider
+        valid, error_msg = provider_setup.validate_provider_choice(
+            has_anthropic, has_bedrock, has_ollama
+        )
+        if not valid:
+            console.print(f"[red]❌ Error: {error_msg}[/red]")
             console.print()
-            console.print("You must provide either:")
+            console.print("You must provide one of:")
             console.print("  • Claude API: --anthropic-key=xxx")
             console.print(
                 "  • AWS Bedrock: --bedrock-access-key=xxx --bedrock-secret-key=xxx"
             )
+            console.print("  • Ollama (Local): --use-ollama")
             raise typer.Exit(1)
 
-        if has_anthropic and has_bedrock:
-            console.print(
-                "[yellow]⚠️  Warning: Both Claude API and AWS Bedrock keys provided.[/yellow]"
-            )
-            console.print(
-                "[yellow]   Using Claude API. Remove --anthropic-key to use Bedrock.[/yellow]"
-            )
+        # Warn if multiple providers
+        priority_warning = provider_setup.get_provider_priority_warning(
+            has_anthropic, has_bedrock, has_ollama
+        )
+        if priority_warning:
+            console.print(f"[yellow]⚠️  Warning: {priority_warning}[/yellow]")
 
+        # Create provider configuration
         if has_anthropic:
-            env_lines.append(f"ANTHROPIC_API_KEY={anthropic_key.strip()}")
+            config = provider_setup.create_anthropic_config(anthropic_key)
+            if config.success:
+                for key, value in config.env_vars.items():
+                    env_lines.append(f"{key}={value}")
         elif has_bedrock:
-            env_lines.append(f"AWS_BEDROCK_ACCESS_KEY={bedrock_access_key.strip()}")
-            env_lines.append(
-                f"AWS_BEDROCK_SECRET_ACCESS_KEY={bedrock_secret_key.strip()}"
+            config = provider_setup.create_bedrock_config(
+                bedrock_access_key, bedrock_secret_key
             )
+            if config.success:
+                for key, value in config.env_vars.items():
+                    env_lines.append(f"{key}={value}")
+        elif has_ollama:
+            config = provider_setup.create_ollama_config(model_name=ollama_model)
+            if config.success:
+                for key, value in config.env_vars.items():
+                    env_lines.append(f"{key}={value}")
+                console.print("[green]✓ Ollama provider configured[/green]")
 
         if ncbi_key:
             env_lines.append(f"\n# Optional: Enhanced literature search")
             env_lines.append(f"NCBI_API_KEY={ncbi_key.strip()}")
+
+        if cloud_key:
+            env_lines.append(f"\n# Lobster Cloud configuration (enables premium tier)")
+            env_lines.append(f"LOBSTER_CLOUD_KEY={cloud_key.strip()}")
+            if cloud_endpoint:
+                env_lines.append(f"LOBSTER_ENDPOINT={cloud_endpoint.strip()}")
+            console.print(
+                "[green]✓ Cloud API key configured (premium tier enabled)[/green]"
+            )
 
         # Write .env file
         try:
@@ -2244,10 +2841,11 @@ def init(
             "  [cyan]1[/cyan] - Claude API (Anthropic) - Quick testing, development"
         )
         console.print("  [cyan]2[/cyan] - AWS Bedrock - Production, enterprise use")
+        console.print("  [cyan]3[/cyan] - Ollama (Local) - Privacy, zero cost, offline")
         console.print()
 
         provider = Prompt.ask(
-            "[bold white]Choose provider[/bold white]", choices=["1", "2"], default="1"
+            "[bold white]Choose provider[/bold white]", choices=["1", "2", "3"], default="1"
         )
 
         env_lines = []
@@ -2271,7 +2869,7 @@ def init(
 
             env_lines.append(f"ANTHROPIC_API_KEY={api_key.strip()}")
 
-        else:
+        elif provider == "2":
             # AWS Bedrock setup
             console.print("\n[bold white]🔑 AWS Bedrock Configuration[/bold white]")
             console.print(
@@ -2292,9 +2890,121 @@ def init(
             env_lines.append(f"AWS_BEDROCK_ACCESS_KEY={access_key.strip()}")
             env_lines.append(f"AWS_BEDROCK_SECRET_ACCESS_KEY={secret_key.strip()}")
 
-        # Optional NCBI key
-        console.print("\n[bold white]📚 NCBI API Key (Optional)[/bold white]")
-        console.print("Enhances literature search capabilities.")
+        else:  # provider == "3"
+            # Ollama (local LLM) setup using provider_setup module
+            console.print("\n[bold white]🏠 Ollama (Local LLM) Configuration[/bold white]")
+            console.print("Ollama runs models locally - no API keys needed!\n")
+
+            # Get Ollama status
+            ollama_status = provider_setup.get_ollama_status()
+
+            if not ollama_status.installed:
+                # Ollama not installed - show instructions
+                console.print(
+                    "[yellow]⚠️  Ollama is not installed on this system.[/yellow]"
+                )
+                console.print()
+                console.print("[bold white]To install Ollama:[/bold white]")
+                install_instructions = provider_setup.get_ollama_install_instructions()
+                console.print(f"  • macOS/Linux: {install_instructions['macos_linux']}")
+                console.print(f"  • Windows: {install_instructions['windows']}")
+                console.print()
+
+                install_later = Confirm.ask(
+                    "Configure for Ollama anyway? (you can install it later)",
+                    default=True,
+                )
+
+                if not install_later:
+                    console.print(
+                        "[yellow]Please install Ollama first, then run 'lobster init' again[/yellow]"
+                    )
+                    raise typer.Exit(0)
+
+                # User wants to configure anyway
+                config = provider_setup.create_ollama_config()
+                for key, value in config.env_vars.items():
+                    env_lines.append(f"{key}={value}")
+                env_lines.append(
+                    "# Install Ollama: curl -fsSL https://ollama.com/install.sh | sh"
+                )
+                env_lines.append("# Then run: ollama pull llama3:8b-instruct")
+                console.print(
+                    "[green]✓ Ollama provider configured (install Ollama to use)[/green]"
+                )
+
+            else:
+                # Ollama is installed
+                console.print("[green]✓ Ollama is installed[/green]")
+                if ollama_status.version:
+                    console.print(f"[dim]  Version: {ollama_status.version}[/dim]")
+
+                if not ollama_status.running:
+                    console.print("[yellow]⚠️  Ollama server is not running[/yellow]")
+                    console.print("Start it with: ollama serve")
+                    console.print()
+
+                # Show available models if any
+                if ollama_status.running and ollama_status.models:
+                    console.print("\n[bold white]Available models:[/bold white]")
+                    for model in ollama_status.models[:5]:  # Show first 5
+                        console.print(f"  • {model}")
+                    if len(ollama_status.models) > 5:
+                        console.print(
+                            f"  ... and {len(ollama_status.models) - 5} more"
+                        )
+                    console.print()
+
+                    # Ask which model to use
+                    use_custom_model = Confirm.ask(
+                        "Specify a model? (default: llama3:8b-instruct)", default=False
+                    )
+
+                    if use_custom_model:
+                        model_name = Prompt.ask(
+                            "[bold white]Enter model name[/bold white]",
+                            default="llama3:8b-instruct",
+                        )
+                        config = provider_setup.create_ollama_config(
+                            model_name=model_name
+                        )
+                    else:
+                        config = provider_setup.create_ollama_config()
+
+                    for key, value in config.env_vars.items():
+                        env_lines.append(f"{key}={value}")
+
+                else:
+                    # No models available - show recommendations
+                    console.print("\n[yellow]No models found. Pull a model first:[/yellow]")
+                    recommended = provider_setup.get_recommended_models()
+                    for model_info in recommended:
+                        console.print(
+                            f"  ollama pull {model_info['name']}  # {model_info['description']}"
+                        )
+                    console.print()
+
+                    proceed = Confirm.ask("Configure for Ollama anyway?", default=True)
+
+                    if not proceed:
+                        console.print(
+                            "[yellow]Setup cancelled. Pull a model first, then run 'lobster init'[/yellow]"
+                        )
+                        raise typer.Exit(0)
+
+                    # Configure anyway
+                    config = provider_setup.create_ollama_config()
+                    for key, value in config.env_vars.items():
+                        env_lines.append(f"{key}={value}")
+
+                console.print("[green]✓ Ollama provider configured[/green]")
+
+        # Optional NCBI key(s) - supports multiple for parallelization
+        console.print("\n[bold white]📚 NCBI API Key(s) (Optional)[/bold white]")
+        console.print("Enhances literature search capabilities (10 req/sec per key).")
+        console.print(
+            "Multiple keys enable parallel processing for large publication batches."
+        )
         console.print(
             "Get key from: [link]https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/[/link]\n"
         )
@@ -2302,12 +3012,128 @@ def init(
         add_ncbi = Confirm.ask("Add NCBI API key?", default=False)
 
         if add_ncbi:
+            ncbi_keys = []
+            key_count = 0
+
+            # First key (primary - NCBI_API_KEY)
             ncbi_key = Prompt.ask(
                 "[bold white]Enter your NCBI API key[/bold white]", password=True
             )
             if ncbi_key.strip():
-                env_lines.append(f"\n# Optional: Enhanced literature search")
-                env_lines.append(f"NCBI_API_KEY={ncbi_key.strip()}")
+                ncbi_keys.append(("NCBI_API_KEY", ncbi_key.strip()))
+                key_count += 1
+
+                # Ask for additional keys
+                while True:
+                    add_another = Confirm.ask(
+                        f"Add another NCBI API key? ({key_count} added)",
+                        default=False,
+                    )
+                    if not add_another:
+                        break
+
+                    additional_key = Prompt.ask(
+                        f"[bold white]Enter NCBI API key #{key_count + 1}[/bold white]",
+                        password=True,
+                    )
+                    if additional_key.strip():
+                        # Additional keys use NCBI_API_KEY_1, NCBI_API_KEY_2, etc.
+                        ncbi_keys.append(
+                            (f"NCBI_API_KEY_{key_count}", additional_key.strip())
+                        )
+                        key_count += 1
+                    else:
+                        console.print("[yellow]Empty key skipped[/yellow]")
+
+            # Write all NCBI keys to env
+            if ncbi_keys:
+                env_lines.append(f"\n# NCBI API keys for literature search")
+                if len(ncbi_keys) > 1:
+                    env_lines.append(
+                        f"# Multiple keys enable parallel processing (10 req/sec each)"
+                    )
+                for key_name, key_value in ncbi_keys:
+                    env_lines.append(f"{key_name}={key_value}")
+                console.print(
+                    f"[green]✓ Added {len(ncbi_keys)} NCBI API key(s)[/green]"
+                )
+
+        # Optional Premium/Cloud configuration
+        console.print("\n[bold white]⭐ Premium Features (Optional)[/bold white]")
+        console.print("Unlock advanced agents and cloud processing capabilities.")
+        console.print("Options:")
+        console.print("  [cyan]1[/cyan] - Skip (stay on Free tier)")
+        console.print("  [cyan]2[/cyan] - I have an activation code")
+        console.print("  [cyan]3[/cyan] - I have a cloud API key")
+        console.print()
+
+        premium_choice = Prompt.ask(
+            "[bold white]Choose option[/bold white]",
+            choices=["1", "2", "3"],
+            default="1",
+        )
+
+        if premium_choice == "2":
+            # Activation code - activate license immediately
+            console.print("\n[bold white]🔑 License Activation[/bold white]")
+            console.print(
+                "Enter your activation code from Omics-OS to unlock premium features.\n"
+            )
+            activation_code = Prompt.ask(
+                "[bold white]Enter activation code[/bold white]", password=False
+            )
+
+            if activation_code.strip():
+                console.print("[dim]Contacting license server...[/dim]")
+                try:
+                    from lobster.core.license_manager import activate_license
+
+                    result = activate_license(activation_code.strip())
+
+                    if result.get("success"):
+                        entitlement = result.get("entitlement", {})
+                        tier = entitlement.get("tier", "premium").title()
+                        console.print(
+                            f"[green]✓ License activated: {tier} tier[/green]"
+                        )
+                        # Note: License is stored in ~/.lobster/license.json, not .env
+                    else:
+                        error = result.get("error", "Unknown error")
+                        console.print(f"[yellow]⚠️  Activation failed: {error}[/yellow]")
+                        console.print(
+                            f"[dim]You can retry later with: lobster activate <code>[/dim]"
+                        )
+                except ImportError:
+                    console.print("[yellow]⚠️  License manager not available[/yellow]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠️  Activation error: {e}[/yellow]")
+                    console.print(
+                        f"[dim]You can retry later with: lobster activate <code>[/dim]"
+                    )
+
+        elif premium_choice == "3":
+            # Cloud API key - store in .env
+            console.print("\n[bold white]🌩️  Cloud API Key[/bold white]")
+            console.print("Enter your Lobster Cloud API key for cloud processing.\n")
+            cloud_key = Prompt.ask(
+                "[bold white]Enter your cloud API key[/bold white]", password=True
+            )
+
+            if cloud_key.strip():
+                env_lines.append(f"\n# Lobster Cloud configuration")
+                env_lines.append(f"LOBSTER_CLOUD_KEY={cloud_key.strip()}")
+                console.print("[green]✓ Cloud API key configured[/green]")
+
+                # Optional: custom endpoint
+                custom_endpoint = Confirm.ask(
+                    "Configure custom cloud endpoint?", default=False
+                )
+                if custom_endpoint:
+                    endpoint = Prompt.ask(
+                        "[bold white]Enter endpoint URL[/bold white]",
+                        default="https://api.lobster.omics-os.com",
+                    )
+                    env_lines.append(f"LOBSTER_ENDPOINT={endpoint.strip()}")
 
         # Write .env file
         with open(env_path, "w") as f:
@@ -2337,7 +3163,10 @@ def init(
 @app.command()
 def chat(
     workspace: Optional[Path] = typer.Option(
-        None, "--workspace", "-w", help="Workspace directory"
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory. Can also be set via LOBSTER_WORKSPACE env var. Default: ./.lobster_workspace",
     ),
     reasoning: Optional[bool] = typer.Option(
         None,
@@ -2356,6 +3185,17 @@ def chat(
     ),
     debug: bool = typer.Option(
         False, "--debug", "-d", help="Enable debug mode with enhanced error reporting"
+    ),
+    profile_timings: Optional[bool] = typer.Option(
+        None,
+        "--profile-timings/--no-profile-timings",
+        help="Enable timing diagnostics for data manager operations",
+    ),
+    provider: Optional[str] = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="LLM provider to use (bedrock, anthropic, ollama). Overrides auto-detection.",
     ),
 ):
     """
@@ -2412,7 +3252,9 @@ def chat(
 
     # Initialize client with animated loading sequence
     try:
-        client = init_client_with_animation(workspace, not no_reasoning, verbose, debug)
+        client = init_client_with_animation(
+            workspace, not no_reasoning, verbose, debug, profile_timings
+        )
     except Exception as e:
         console_manager.print_error_panel(
             f"Failed to initialize Lobster: {str(e)}",
@@ -2420,16 +3262,8 @@ def chat(
         )
         raise
 
-    # Check for existing workspace and show restoration prompt
+    # Show compact session status
     _show_workspace_prompt(client)
-
-    # Show initial status
-    display_status(client)
-
-    # Chat loop
-    console.print(
-        "\n[bold white on red] 💬 Chat Interface [/bold white on red] [grey50]Type your questions or use /help for commands[/grey50]\n"
-    )
 
     while True:
         try:
@@ -2470,19 +3304,22 @@ def chat(
             if execute_shell_command(user_input):
                 continue
 
-            # Process query with appropriate progress indication
+            # BUG FIX #7: Remove fake progress bar overhead (saves ~100ms per query)
+            # Process query with simple status message instead of spinner context manager
             if should_show_progress(client):
-                # Normal mode: show progress spinner
-                with create_progress(client_arg=client) as progress:
-                    progress.add_task(
-                        f"🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}",
-                        total=None,
-                    )
-                    result = client.query(user_input, stream=False)
-            else:
-                # Verbose/reasoning mode: no progress indication at all
-                # The callback handlers will provide detailed output
-                result = client.query(user_input, stream=False)
+                # Normal mode: show simple processing message
+                console_manager.print(
+                    f"[dim cyan]🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}[/dim cyan]",
+                    end="",
+                    flush=True,
+                )
+
+            # Single code path - no duplication
+            result = client.query(user_input, stream=False)
+
+            if should_show_progress(client):
+                # Clear the status line after query completes
+                console_manager.print("\r" + " " * 100 + "\r", end="", flush=True)
 
             # Display response with enhanced theming
             if result["success"]:
@@ -2522,6 +3359,8 @@ def chat(
                     )
             else:
                 console_manager.print_error_panel(result["error"])
+
+            _maybe_print_timings(client, "Chat Query")
 
         except KeyboardInterrupt:
             if Confirm.ask(
@@ -2601,6 +3440,8 @@ def handle_command(command: str, client: AgentClient):
         if command_summary:
             _add_command_to_history(client, command, command_summary)
 
+        _maybe_print_timings(client, f"Command {cmd}")
+
     except Exception as e:
         # Enhanced command error handling
         error_message = str(e)
@@ -2623,6 +3464,296 @@ def handle_command(command: str, client: AgentClient):
         console_manager.print_error_panel(
             f"Command failed ({error_type}): {error_message}", suggestion
         )
+
+
+# ============================================================================
+# Queue Command Helpers
+# ============================================================================
+
+
+def _show_queue_status(client: AgentClient, console: Console) -> Optional[str]:
+    """Display status of the publication queue.
+
+    Returns:
+        Summary string for conversation history, or None.
+    """
+    if client.publication_queue is None:
+        console.print("[yellow]Publication queue not initialized[/yellow]")
+        return None
+
+    stats = client.publication_queue.get_statistics()
+
+    console.print("\n[bold cyan]📋 Queue Status[/bold cyan]\n")
+
+    # Create status table
+    table = Table(box=box.ROUNDED)
+    table.add_column("Status", style="cyan")
+    table.add_column("Count", style="white", justify="right")
+
+    by_status = stats.get("by_status", {})
+    total_entries = stats.get("total_entries", 0)
+
+    table.add_row("Pending", str(by_status.get("pending", 0)))
+    table.add_row("Extracting", str(by_status.get("extracting", 0)))
+    table.add_row("Completed", str(by_status.get("completed", 0)))
+    table.add_row("Failed", str(by_status.get("failed", 0)))
+    table.add_row("[bold]Total[/bold]", f"[bold]{total_entries}[/bold]")
+
+    console.print(table)
+
+    console.print("\n[cyan]💡 Commands:[/cyan]")
+    console.print("  • [white]/queue load <file>[/white] - Load file into queue")
+    console.print("  • [white]/queue list[/white] - List queued items")
+    console.print("  • [white]/queue clear[/white] - Clear the queue")
+
+    return f"Queue status: {total_entries} total items"
+
+
+def _queue_load_file(
+    client: AgentClient,
+    filename: str,
+    console: Console,
+    current_directory: Path,
+) -> Optional[str]:
+    """Load file into queue - type determines handler, user determines intent.
+
+    Args:
+        client: The AgentClient instance
+        filename: File path to load
+        console: Rich console for output
+        current_directory: Current working directory
+
+    Returns:
+        Summary string for conversation history, or None
+
+    Raises:
+        QueueFileTypeNotSupported: For unsupported file types
+    """
+    if not filename:
+        console.print("[yellow]Usage: /queue load <file>[/yellow]")
+        return None
+
+    # BUG FIX #6: Use PathResolver for secure path resolution
+    resolver = PathResolver(
+        current_directory=current_directory,
+        workspace_path=(
+            client.data_manager.workspace_path
+            if hasattr(client, "data_manager")
+            else None
+        ),
+    )
+    resolved = resolver.resolve(filename, search_workspace=True, must_exist=True)
+
+    if not resolved.is_safe:
+        console.print(f"[red]❌ Security error: {resolved.error}[/red]")
+        return None
+
+    if not resolved.exists:
+        console.print(f"[red]❌ File not found: {filename}[/red]")
+        return None
+
+    file_path = resolved.path
+
+    ext = file_path.suffix.lower()
+
+    # Supported: .ris files
+    if ext in [".ris", ".txt"]:
+        console.print(f"[cyan]📚 Loading into queue: {file_path.name}[/cyan]\n")
+
+        try:
+            result = client.load_publication_list(
+                file_path=str(file_path),
+                priority=5,
+                schema_type="general",
+                extraction_level="methods",
+            )
+
+            if result["added_count"] > 0:
+                console.print(
+                    f"[green]✅ Loaded {result['added_count']} items into queue[/green]\n"
+                )
+
+                if result["skipped_count"] > 0:
+                    console.print(
+                        f"[yellow]⚠️  Skipped {result['skipped_count']} malformed entries[/yellow]"
+                    )
+
+                console.print(
+                    "\n[bold cyan]What would you like to do with these publications?[/bold cyan]"
+                )
+                console.print("  • Extract methods and parameters")
+                console.print("  • Search for related datasets (GEO)")
+                console.print("  • Build citation network")
+                console.print("  • Custom analysis (describe your intent)\n")
+
+                return f"Loaded {result['added_count']} publications into queue from {file_path.name}. Awaiting user intent."
+            else:
+                console.print("[red]❌ No items could be loaded from file[/red]")
+                if result.get("errors"):
+                    for error in result["errors"][:3]:
+                        console.print(f"  • {error}")
+                return None
+
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load file: {str(e)}[/red]")
+            return None
+
+    # Placeholder: .bib files (BibTeX)
+    elif ext == ".bib":
+        raise QueueFileTypeNotSupported(
+            "BibTeX (.bib) support coming soon. "
+            "Convert to .ris format or wait for future release."
+        )
+
+    # Placeholder: .csv files (custom lists)
+    elif ext == ".csv":
+        raise QueueFileTypeNotSupported(
+            "CSV queue loading coming soon. "
+            "Expected format: columns for DOI, PMID, or title."
+        )
+
+    # Placeholder: .json files (API exports)
+    elif ext == ".json":
+        raise QueueFileTypeNotSupported(
+            "JSON queue loading coming soon. " "Planned support for PubMed API exports."
+        )
+
+    # Unknown type
+    else:
+        raise QueueFileTypeNotSupported(
+            f"Unsupported file type: {ext}. "
+            f"Currently supported: .ris. Coming soon: .bib, .csv, .json"
+        )
+
+
+def _queue_list(client: AgentClient, console: Console) -> Optional[str]:
+    """List items in the publication queue.
+
+    Returns:
+        Summary string for conversation history, or None.
+    """
+    if client.publication_queue is None:
+        console.print("[yellow]Publication queue not initialized[/yellow]")
+        return None
+
+    entries = client.publication_queue.list_entries()
+
+    if not entries:
+        console.print("[yellow]Queue is empty[/yellow]")
+        return "Queue is empty"
+
+    # Limit display to first 20 entries
+    display_entries = entries[:20]
+    total_count = len(entries)
+
+    console.print(
+        f"\n[bold cyan]📋 Queue Items ({len(display_entries)} of {total_count} shown)[/bold cyan]\n"
+    )
+
+    table = Table(box=box.ROUNDED, show_lines=True)
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Title", style="white", max_width=50, overflow="ellipsis")
+    table.add_column("Year", style="cyan", width=6)
+    table.add_column("Status", style="yellow", width=12)
+    table.add_column("PMID/DOI", style="dim", width=20)
+
+    for i, entry in enumerate(display_entries, 1):
+        title = (
+            entry.title[:47] + "..."
+            if entry.title and len(entry.title) > 50
+            else (entry.title or "N/A")
+        )
+        year = str(entry.year) if entry.year else "N/A"
+        status = (
+            entry.status.value if hasattr(entry.status, "value") else str(entry.status)
+        )
+        identifier = entry.pmid or entry.doi or "N/A"
+
+        table.add_row(str(i), title, year, status, identifier)
+
+    console.print(table)
+
+    if total_count > 20:
+        console.print(f"\n[dim]... and {total_count - 20} more items[/dim]")
+
+    return f"Listed {len(display_entries)} of {total_count} items from queue"
+
+
+def _queue_clear(client: AgentClient, console: Console) -> Optional[str]:
+    """Clear all items from the publication queue.
+
+    Returns:
+        Summary string for conversation history, or None.
+    """
+    if client.publication_queue is None:
+        console.print("[yellow]Publication queue not initialized[/yellow]")
+        return None
+
+    # Get count before clearing
+    stats = client.publication_queue.get_statistics()
+    total = stats.get("total_entries", 0)
+
+    if total == 0:
+        console.print("[yellow]Queue is already empty[/yellow]")
+        return "Queue was already empty"
+
+    # Confirm with user
+    confirm = Confirm.ask(f"[yellow]Clear all {total} items from queue?[/yellow]")
+
+    if confirm:
+        client.publication_queue.clear_queue()
+        console.print(f"[green]✅ Cleared {total} items from queue[/green]")
+        return f"Cleared {total} items from queue"
+    else:
+        console.print("[cyan]Operation cancelled[/cyan]")
+        return None
+
+
+def _queue_export(
+    client: AgentClient, name: Optional[str], console: Console
+) -> Optional[str]:
+    """Export queue to workspace for persistence.
+
+    Args:
+        client: The AgentClient instance
+        name: Optional name for the exported dataset
+        console: Rich console for output
+
+    Returns:
+        Summary string for conversation history, or None.
+    """
+    if client.publication_queue is None:
+        console.print("[yellow]Publication queue not initialized[/yellow]")
+        return None
+
+    stats = client.publication_queue.get_statistics()
+    if stats.get("total_entries", 0) == 0:
+        console.print("[yellow]Queue is empty, nothing to export[/yellow]")
+        return None
+
+    # Generate export name if not provided
+    if not name:
+        from datetime import datetime
+
+        name = f"queue_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    console.print(f"[cyan]📦 Exporting queue to workspace as '{name}'...[/cyan]")
+
+    try:
+        # Export queue data by copying the queue file to workspace
+        source_path = client.publication_queue.queue_file
+        export_path = client.data_manager.workspace_path / f"{name}.jsonl"
+
+        # Copy the queue file
+        shutil.copy2(source_path, export_path)
+
+        console.print(
+            f"[green]✅ Exported {stats.get('total', 0)} items to: {export_path}[/green]"
+        )
+        return f"Exported {stats.get('total', 0)} queue items to workspace as '{name}'"
+    except Exception as e:
+        console.print(f"[red]❌ Export failed: {str(e)}[/red]")
+        return None
 
 
 def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
@@ -2714,6 +3845,7 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/open[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Open file or folder in system default application
 [{LobsterTheme.PRIMARY_ORANGE}]/save[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Save current state to workspace
 [{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
+[{LobsterTheme.PRIMARY_ORANGE}]/load[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Load .ris publication list into queue for processing
 [{LobsterTheme.PRIMARY_ORANGE}]/export[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Export session data
 [{LobsterTheme.PRIMARY_ORANGE}]/pipeline export[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Export session as Jupyter notebook
 [{LobsterTheme.PRIMARY_ORANGE}]/pipeline list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available notebooks
@@ -2722,6 +3854,8 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
 [{LobsterTheme.PRIMARY_ORANGE}]/reset[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Reset conversation
 [{LobsterTheme.PRIMARY_ORANGE}]/mode[/{LobsterTheme.PRIMARY_ORANGE}] <name>  [grey50]-[/grey50] Change operation mode
 [{LobsterTheme.PRIMARY_ORANGE}]/modes[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List available modes
+[{LobsterTheme.PRIMARY_ORANGE}]/provider[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] List available LLM providers
+[{LobsterTheme.PRIMARY_ORANGE}]/provider[/{LobsterTheme.PRIMARY_ORANGE}] <name> [grey50]-[/grey50] Switch LLM provider (anthropic, bedrock, ollama)
 [{LobsterTheme.PRIMARY_ORANGE}]/clear[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Clear screen
 [{LobsterTheme.PRIMARY_ORANGE}]/exit[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Exit the chat
 
@@ -3079,7 +4213,9 @@ when they are started by agents or analysis workflows.
             console_manager.print(tree_panel)
 
             # Also show workspace tree if it exists
-            workspace_path = Path(".lobster_workspace")
+            from lobster.core.workspace import resolve_workspace
+
+            workspace_path = resolve_workspace(explicit_path=workspace, create=False)
             if workspace_path.exists():
                 console_manager.print()  # Add spacing
                 workspace_tree = create_workspace_tree(workspace_path)
@@ -3095,601 +4231,510 @@ when they are started by agents or analysis workflows.
                 "Check directory permissions and try again",
             )
 
+    # =========================================================================
+    # /read - File Inspection Only (no state change, view-only)
+    # =========================================================================
     elif cmd.startswith("/read "):
         filename = cmd[6:].strip()
 
-        # Convert to Path object for directory checking
-        file_path = (
-            Path(filename)
-            if Path(filename).is_absolute()
-            else current_directory / filename
-        )
-
-        # Check if this is a quantification directory BEFORE checking glob patterns
-        tool_type = _is_quantification_directory(file_path)
-        if tool_type:
-            # This is a Kallisto or Salmon quantification directory
+        if not filename:
+            console.print("[yellow]Usage: /read <file|pattern>[/yellow]")
+            console.print("[grey50]  View file contents (text files only)[/grey50]")
             console.print(
-                f"[cyan]🧬 Detected {tool_type.title()} quantification directory[/cyan]"
+                "[grey50]  Use /workspace load <file> to load data files[/grey50]"
             )
-            console.print(
-                f"[dim]Loading quantification files from: {file_path}[/dim]\n"
-            )
+            return None
 
-            try:
-                with create_progress(client_arg=client) as progress:
-                    task = progress.add_task(
-                        f"[cyan]Loading {tool_type.title()} quantification files...",
-                        total=None,
-                    )
-
-                    # Route to client method for quantification loading
-                    load_result = client.load_quantification_directory(
-                        directory_path=str(file_path), tool_type=tool_type
-                    )
-
-                    progress.remove_task(task)
-
-                # Display results
-                if load_result["success"]:
-                    console.print(f"[green]✅ {load_result['message']}[/green]\n")
-                    console.print("[cyan]📊 Data Summary:[/cyan]")
-                    console.print(
-                        f"  • Modality: [bold]{load_result['modality_name']}[/bold]"
-                    )
-                    console.print(f"  • Tool: {load_result['tool_type'].title()}")
-                    console.print(
-                        f"  • Shape: {load_result['n_samples']} samples × {load_result['n_genes']:,} genes"
-                    )
-                    console.print(f"  • Source: {load_result['file_path']}\n")
-                else:
-                    console.print(
-                        f"[bold red on white] ⚠️  Error [/bold red on white] "
-                        f"[red]{load_result['error']}[/red]"
-                    )
-
-            except Exception as e:
-                console.print(
-                    f"[bold red on white] ⚠️  Error [/bold red on white] "
-                    f"[red]Failed to load quantification directory: {str(e)}[/red]"
-                )
-
-            return None  # Skip the rest of the /read logic (quantification handled)
-
-        # Check if filename contains glob patterns
+        # Check if filename contains glob patterns (before path resolution)
         import glob as glob_module
 
         is_glob_pattern = any(char in filename for char in ["*", "?", "[", "]"])
 
-        if is_glob_pattern:
-            # Handle glob patterns for multiple files
+        # BUG FIX #6: Use PathResolver for secure path resolution (non-glob paths)
+        if not is_glob_pattern:
+            resolver = PathResolver(
+                current_directory=current_directory,
+                workspace_path=(
+                    client.data_manager.workspace_path
+                    if hasattr(client, "data_manager")
+                    else None
+                ),
+            )
+            resolved = resolver.resolve(
+                filename, search_workspace=True, must_exist=False
+            )
 
-            # Use current directory as base for relative patterns
+            if not resolved.is_safe:
+                console.print(f"[red]❌ Security error: {resolved.error}[/red]")
+                return None
+
+            file_path = resolved.path
+        else:
+            # Glob patterns need special handling - construct search pattern
+            file_path = (
+                Path(filename)
+                if Path(filename).is_absolute()
+                else current_directory / filename
+            )
+
+        if is_glob_pattern:
+            # Handle glob patterns - show contents of matching text files
             if not Path(filename).is_absolute():
                 base_path = current_directory
                 search_pattern = str(base_path / filename)
             else:
                 search_pattern = filename
 
-            # Find matching files
-            matching_files = glob_module.glob(search_pattern)
+            # BUG FIX #3: Use lazy evaluation to prevent memory explosion
+            # Only load first 10 file paths instead of all matches
+            import itertools
+
+            matching_files = list(
+                itertools.islice(glob_module.iglob(search_pattern), 10)
+            )
 
             if not matching_files:
                 console_manager.print_error_panel(
                     f"No files found matching pattern: {filename}",
                     f"Searched in: {current_directory}",
                 )
-                return
+                return None
 
-            # Sort files for consistent output
+            # Count total matches without loading all paths
+            total_count = sum(1 for _ in glob_module.iglob(search_pattern))
+
             matching_files.sort()
-
             console.print(
-                f"[cyan]📁 Found {len(matching_files)} files matching pattern '[white]{filename}[/white]'[/cyan]"
+                f"[cyan]📁 Found {total_count} files matching '[white]{filename}[/white]', displaying first 10[/cyan]\n"
             )
 
-            loaded_files = []
-            failed_files = []
+            displayed_count = 0
+            for match_path in matching_files:  # Already limited to 10
+                match_file = Path(match_path)
+                file_info = client.detect_file_type(match_file)
 
-            for file_path in matching_files:
-                file_name = Path(file_path).name
-                console.print(
-                    f"\n[cyan]📄 Processing: [white]{file_name}[/white][/cyan]"
-                )
-
-                # Use existing file processing logic
-                file_info = client.locate_file(file_name)
-
-                if not file_info["found"]:
-                    # Try with full path if locate_file fails with just filename
+                # Only display text files
+                if not file_info.get("binary", True):
                     try:
-                        file_info = {
-                            "found": True,
-                            "path": Path(file_path),
-                            "type": "unknown",
-                            "category": "bioinformatics",
-                            "description": "File from glob pattern",
+                        # BUG FIX #3: Add file size check before reading (10MB limit)
+                        file_size = match_file.stat().st_size
+                        if file_size > 10_000_000:  # 10MB
+                            console.print(
+                                f"[yellow]⚠️  {match_file.name} too large to display ({file_size / 1_000_000:.1f}MB, limit: 10MB)[/yellow]"
+                            )
+                            continue
+
+                        content = match_file.read_text(encoding="utf-8")
+                        lines = content.splitlines()
+
+                        # Language detection
+                        ext = match_file.suffix.lower()
+                        language_map = {
+                            ".py": "python",
+                            ".js": "javascript",
+                            ".ts": "typescript",
+                            ".html": "html",
+                            ".css": "css",
+                            ".json": "json",
+                            ".xml": "xml",
+                            ".yaml": "yaml",
+                            ".yml": "yaml",
+                            ".sh": "bash",
+                            ".bash": "bash",
+                            ".md": "markdown",
+                            ".txt": "text",
+                            ".log": "text",
+                            ".r": "r",
+                            ".csv": "csv",
+                            ".tsv": "csv",
+                            ".ris": "text",
                         }
-                        # Detect format based on extension
-                        ext = Path(file_path).suffix.lower()
-                        if ext in [".h5ad"]:
-                            file_info["type"] = "h5ad_data"
-                        elif ext in [".csv", ".tsv", ".txt"]:
-                            file_info["type"] = "delimited_data"
-                        elif ext in [".xlsx", ".xls"]:
-                            file_info["type"] = "spreadsheet_data"
-                    except Exception:
-                        failed_files.append(file_name)
+                        language = language_map.get(ext, "text")
+
+                        syntax = Syntax(
+                            content, language, theme="monokai", line_numbers=True
+                        )
                         console.print(
-                            f"[red]   ❌ Failed to process: {file_name}[/red]"
+                            Panel(
+                                syntax,
+                                title=f"[bold white] 📄 {match_file.name} [/bold white]",
+                                subtitle=f"[grey50]{len(lines)} lines[/grey50]",
+                                border_style="cyan",
+                                box=box.ROUNDED,
+                            )
                         )
-                        continue
-
-                # Process based on file type (reusing existing logic)
-                file_type = file_info["type"]
-                file_category = file_info["category"]
-                file_description = file_info["description"]
-
-                console.print(f"[grey50]   Type: {file_description}[/grey50]")
-
-                try:
-                    if file_category == "bioinformatics" or (
-                        file_category == "tabular"
-                        and file_type
-                        in ["delimited_data", "spreadsheet_data", "h5ad_data"]
-                    ):
-                        # Load data file using existing logic
-                        with create_progress(client_arg=client) as progress:
-                            progress.add_task(f"Loading {file_name}...", total=None)
-                            load_result = client.load_data_file(file_name)
-
-                        if load_result["success"]:
-                            loaded_files.append(
-                                {
-                                    "name": file_name,
-                                    "modality_name": load_result["modality_name"],
-                                    "shape": load_result["data_shape"],
-                                    "size_bytes": load_result["size_bytes"],
-                                }
-                            )
-                            console_manager.print(
-                                f"[green]   ✅ Loaded as: {load_result['modality_name']}[/green]"
-                            )
-                        else:
-                            failed_files.append(file_name)
-                            console_manager.print(
-                                f"[red]   ❌ Loading failed: {load_result.get('error', 'Unknown error')}[/red]"
-                            )
-
-                    else:
-                        # For non-data files, just acknowledge them
-                        console_manager.print(
-                            f"[yellow]   ⚠️  Skipped: {file_description} (not a data file)[/yellow]"
+                        displayed_count += 1
+                    except Exception as e:
+                        console.print(
+                            f"[yellow]⚠️  Could not read {match_file.name}: {e}[/yellow]"
                         )
-
-                except Exception as e:
-                    failed_files.append(file_name)
-                    console_manager.print(
-                        f"[red]   ❌ Error processing {file_name}: {e}[/red]"
-                    )
-
-            # Show summary
-            console_manager.print(
-                f"\n[bold {LobsterTheme.PRIMARY_ORANGE}]📊 Bulk Loading Summary[/bold {LobsterTheme.PRIMARY_ORANGE}]"
-            )
-
-            if loaded_files:
-                summary_table = Table(
-                    title="✅ Successfully Loaded Files",
-                    **LobsterTheme.get_table_style(),
-                    title_style="bold green",
-                )
-                summary_table.add_column("File", style="white")
-                summary_table.add_column("Modality Name", style="cyan")
-                summary_table.add_column("Shape", style="grey74")
-                summary_table.add_column("Size", style="grey50")
-
-                for loaded in loaded_files:
-                    # Format file size
-                    size_bytes = loaded["size_bytes"]
-                    if size_bytes < 1024:
-                        size_str = f"{size_bytes} bytes"
-                    elif size_bytes < 1024**2:
-                        size_str = f"{size_bytes/1024:.1f} KB"
-                    elif size_bytes < 1024**3:
-                        size_str = f"{size_bytes/1024**2:.1f} MB"
-                    else:
-                        size_str = f"{size_bytes/1024**3:.1f} GB"
-
-                    summary_table.add_row(
-                        loaded["name"],
-                        loaded["modality_name"],
-                        f"{loaded['shape'][0]:,} × {loaded['shape'][1]:,}",
-                        size_str,
-                    )
-
-                console.print(summary_table)
-
-                # Show next steps
-                console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
-                console.print(
-                    "[white]Use these commands to work with your data:[/white]"
-                )
-                console.print(
-                    "  • [yellow]/data[/yellow] - View data summary for all loaded datasets"
-                )
-                console.print(
-                    "  • [yellow]/modalities[/yellow] - View detailed information for each modality"
-                )
-                console.print(
-                    f"  • [yellow]Compare the {loaded_files[0]['modality_name']} and {loaded_files[-1]['modality_name']} datasets[/yellow] - Start comparative analysis"
-                )
-
-            if failed_files:
-                console.print(
-                    f"\n[red]❌ Failed to load {len(failed_files)} files:[/red]"
-                )
-                for failed in failed_files:
-                    console.print(f"  • [red]{failed}[/red]")
-
-            # Return summary for conversation history
-            if loaded_files:
-                modality_names = [f["modality_name"] for f in loaded_files]
-                if len(loaded_files) == 1:
-                    return f"Loaded 1 file '{loaded_files[0]['name']}' as modality '{loaded_files[0]['modality_name']}' - Shape: {loaded_files[0]['shape'][0]}×{loaded_files[0]['shape'][1]}"
                 else:
-                    return f"Bulk loaded {len(loaded_files)} files as modalities: {', '.join(modality_names[:3])}{'...' if len(modality_names) > 3 else ''}"
-            elif failed_files:
-                return f"Failed to load {len(failed_files)} files matching pattern '{filename}'"
-            else:
-                return f"No files found matching pattern '{filename}'"
-
-        # Single file processing (existing logic)
-        # First, locate and identify the file
-        file_info = client.locate_file(filename)
-
-        if not file_info["found"]:
-            console.print(
-                f"[bold red on white] ⚠️  Error [/bold red on white] [red]{file_info['error']}[/red]"
-            )
-            if "searched_paths" in file_info:
-                console.print("[grey50]Searched in:[/grey50]")
-                for path in file_info["searched_paths"][:5]:  # Show first 5 paths
-                    console.print(f"  • [grey50]{path}[/grey50]")
-                if len(file_info["searched_paths"]) > 5:
                     console.print(
-                        f"  • [grey50]... and {len(file_info['searched_paths'])-5} more[/grey50]"
+                        f"[grey50]  • {match_file.name} (binary file - skipped)[/grey50]"
                     )
-            return f"File '{filename}' not found"
 
-        # Show file location info
-        file_path = file_info["path"]
-        file_type = file_info["type"]
-        file_category = file_info["category"]
-        file_description = file_info["description"]
+            if total_count > 10:
+                console.print(
+                    f"\n[grey50]... and {total_count - 10} more files (not loaded)[/grey50]"
+                )
 
-        console.print(f"[cyan]📄 Located file:[/cyan] [white]{file_path.name}[/white]")
+            return f"Displayed {displayed_count} text files matching '{filename}' (total: {total_count})"
+
+        # Single file processing
+        if not file_path.exists():
+            # Try to locate via client (searches workspace directories)
+            file_info = client.locate_file(filename)
+            if not file_info["found"]:
+                console.print(
+                    f"[bold red on white] ⚠️  Error [/bold red on white] [red]{file_info['error']}[/red]"
+                )
+                if "searched_paths" in file_info:
+                    console.print("[grey50]Searched in:[/grey50]")
+                    for path in file_info["searched_paths"][:5]:
+                        console.print(f"  • [grey50]{path}[/grey50]")
+                return f"File '{filename}' not found"
+            file_path = file_info["path"]
+
+        # Get file info
+        file_info = client.detect_file_type(file_path)
+        file_description = file_info.get("description", "Unknown")
+        file_category = file_info.get("category", "unknown")
+        is_binary = file_info.get("binary", True)
+
+        # Show file location
+        console.print(f"[cyan]📄 File:[/cyan] [white]{file_path.name}[/white]")
         console.print(f"[grey50]   Path: {file_path}[/grey50]")
         console.print(f"[grey50]   Type: {file_description}[/grey50]")
 
-        # Handle different file types
-        if file_category == "bioinformatics" or (
-            file_category == "tabular"
-            and file_type in ["delimited_data", "spreadsheet_data"]
-        ):
-            # This is a data file - load it into DataManager
-            console.print("[cyan]🧬 Loading data into workspace...[/cyan]")
-
-            with create_progress(client_arg=client) as progress:
-                progress.add_task("Loading data...", total=None)
-                load_result = client.load_data_file(filename)
-
-            if load_result["success"]:
-                console.print(f"[bold green]✅ {load_result['message']}[/bold green]")
-
-                # Create info table
-                info_table = Table(
-                    title=f"🧬 Data Summary: {load_result['modality_name']}",
-                    box=box.ROUNDED,
-                    border_style="green",
-                    title_style="bold green on white",
-                )
-                info_table.add_column("Property", style="bold grey93")
-                info_table.add_column("Value", style="white")
-
-                info_table.add_row("Modality Name", load_result["modality_name"])
-                info_table.add_row("File Type", load_result["file_type"])
-                info_table.add_row(
-                    "Data Shape",
-                    f"{load_result['data_shape'][0]:,} × {load_result['data_shape'][1]:,}",
-                )
-
-                # Format file size
-                size_bytes = load_result["size_bytes"]
-                if size_bytes < 1024:
-                    size_str = f"{size_bytes} bytes"
-                elif size_bytes < 1024**2:
-                    size_str = f"{size_bytes/1024:.1f} KB"
-                elif size_bytes < 1024**3:
-                    size_str = f"{size_bytes/1024**2:.1f} MB"
-                else:
-                    size_str = f"{size_bytes/1024**3:.1f} GB"
-
-                info_table.add_row("File Size", size_str)
-
-                console.print(info_table)
-
-                # Provide next step suggestions
-                console.print("\n[bold white]🎯 Ready for Analysis![/bold white]")
-                console.print("[white]Use these commands to analyze your data:[/white]")
-                console.print("  • [yellow]/data[/yellow] - View data summary")
-                console.print(
-                    f"  • [yellow]Analyze the {load_result['modality_name']} dataset[/yellow] - Start analysis"
-                )
-                console.print(
-                    f"  • [yellow]Generate a quality control report for {load_result['modality_name']}[/yellow] - QC analysis"
-                )
-                console.print(
-                    f"  • [yellow]Show me the first few rows of {load_result['modality_name']}[/yellow] - Data preview"
-                )
-
-                # Return summary for conversation history
-                return f"Loaded file '{filename}' as modality '{load_result['modality_name']}' - Shape: {load_result['data_shape'][0]:,}×{load_result['data_shape'][1]:,}, Size: {size_str}"
-            else:
-                console.print(
-                    f"[bold red on white] ⚠️  Loading Failed [/bold red on white] [red]{load_result['error']}[/red]"
-                )
-                if "suggestion" in load_result:
-                    console.print(
-                        f"[yellow]💡 Suggestion: {load_result['suggestion']}[/yellow]"
-                    )
-
-                # Return summary for conversation history
-                return f"Failed to load file '{filename}': {load_result['error']}"
-
-        elif file_category in [
-            "code",
-            "documentation",
-            "metadata",
-        ] or not file_info.get("binary", True):
-            # This is a text file - display content
+        # Handle text files - display content
+        if not is_binary:
             try:
-                content = client.read_file(filename)
-                if content and not content.startswith("Error reading file"):
-                    # Try to guess syntax from extension, fallback to plain text
-                    import mimetypes
+                content = file_path.read_text(encoding="utf-8")
+                lines = content.splitlines()
 
-                    ext = file_path.suffix
-                    mime, _ = mimetypes.guess_type(str(file_path))
+                # Language detection
+                ext = file_path.suffix.lower()
+                language_map = {
+                    ".py": "python",
+                    ".js": "javascript",
+                    ".ts": "typescript",
+                    ".html": "html",
+                    ".css": "css",
+                    ".json": "json",
+                    ".xml": "xml",
+                    ".yaml": "yaml",
+                    ".yml": "yaml",
+                    ".sh": "bash",
+                    ".bash": "bash",
+                    ".md": "markdown",
+                    ".txt": "text",
+                    ".log": "text",
+                    ".r": "r",
+                    ".csv": "csv",
+                    ".tsv": "csv",
+                    ".ris": "text",
+                }
+                language = language_map.get(ext, "text")
 
-                    # Enhanced language detection
-                    language_map = {
-                        ".py": "python",
-                        ".js": "javascript",
-                        ".ts": "typescript",
-                        ".html": "html",
-                        ".css": "css",
-                        ".json": "json",
-                        ".xml": "xml",
-                        ".yaml": "yaml",
-                        ".yml": "yaml",
-                        ".sh": "bash",
-                        ".bash": "bash",
-                        ".zsh": "bash",
-                        ".sql": "sql",
-                        ".md": "markdown",
-                        ".txt": "text",
-                        ".log": "text",
-                        ".conf": "text",
-                        ".cfg": "text",
-                        ".r": "r",
-                        ".csv": "csv",
-                        ".tsv": "csv",
-                    }
-
-                    language = language_map.get(ext.lower(), "text")
-                    if language == "text" and mime and "/" in mime:
-                        language = mime.split("/")[1]
-
-                    syntax = Syntax(
-                        content, language, theme="monokai", line_numbers=True
-                    )
-                    console.print(
-                        Panel(
-                            syntax,
-                            title=f"[bold white on red] 📄 {file_path.name} [/bold white on red]",
-                            border_style="red",
-                            box=box.DOUBLE,
-                        )
-                    )
-
-                    # Return summary for conversation history
-                    return f"Displayed text file '{filename}' ({file_description}, {len(content.splitlines())} lines)"
-                else:
-                    console.print(
-                        "[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file content[/red]"
-                    )
-                    return f"Failed to read text file '{filename}'"
-            except Exception as e:
+                syntax = Syntax(content, language, theme="monokai", line_numbers=True)
                 console.print(
-                    f"[bold red on white] ⚠️  Error [/bold red on white] [red]Could not read file: {e}[/red]"
+                    Panel(
+                        syntax,
+                        title=f"[bold white on red] 📄 {file_path.name} [/bold white on red]",
+                        border_style="red",
+                        box=box.DOUBLE,
+                    )
                 )
-                return f"Error reading text file '{filename}': {str(e)}"
 
-        else:
-            # Binary file or unsupported type
-            console.print("[bold yellow on black] ℹ️  File Info [/bold yellow on black]")
+                return f"Displayed text file '{filename}' ({file_description}, {len(lines)} lines)"
+
+            except UnicodeDecodeError:
+                console.print(
+                    "[yellow]⚠️  File appears to be binary despite extension[/yellow]"
+                )
+                is_binary = True
+            except Exception as e:
+                console.print(f"[red]Error reading file: {e}[/red]")
+                return f"Error reading file '{filename}': {str(e)}"
+
+        # Handle binary/data files - show info only, suggest /workspace load
+        if is_binary:
             console.print(
-                f"[white]File type '[yellow]{file_description}[/yellow]' is not supported for reading or loading.[/white]"
-            )
-            console.print(
-                "[grey50]This appears to be a binary file or unsupported format.[/grey50]"
+                "\n[bold yellow on black] ℹ️  File Info [/bold yellow on black]"
             )
 
-            if file_category == "image":
+            # Format file size
+            size_bytes = file_path.stat().st_size
+            if size_bytes < 1024:
+                size_str = f"{size_bytes} bytes"
+            elif size_bytes < 1024**2:
+                size_str = f"{size_bytes/1024:.1f} KB"
+            elif size_bytes < 1024**3:
+                size_str = f"{size_bytes/1024**2:.1f} MB"
+            else:
+                size_str = f"{size_bytes/1024**3:.1f} GB"
+
+            console.print(f"[white]Size: [yellow]{size_str}[/yellow][/white]")
+
+            # Provide guidance based on file type
+            if file_category == "bioinformatics":
+                console.print(
+                    f"\n[cyan]💡 This is a bioinformatics data file ({file_description}).[/cyan]"
+                )
+                console.print(
+                    f"[cyan]   To load into workspace: [yellow]/workspace load {filename}[/yellow][/cyan]"
+                )
+            elif file_category == "tabular":
+                console.print(
+                    f"\n[cyan]💡 This is a tabular data file ({file_description}).[/cyan]"
+                )
+                console.print(
+                    f"[cyan]   To load into workspace: [yellow]/workspace load {filename}[/yellow][/cyan]"
+                )
+            elif file_category == "archive":
+                console.print(
+                    f"\n[cyan]💡 This is an archive file ({file_description}).[/cyan]"
+                )
+                console.print(
+                    f"[cyan]   To extract and load: [yellow]/workspace load {filename}[/yellow][/cyan]"
+                )
+            elif file_category == "image":
                 console.print(
                     "[cyan]💡 This is an image file. Use your system's image viewer to open it.[/cyan]"
                 )
-            elif file_category == "archive":
-                # Smart archive handling - inspect first for nested archives
-                console.print(
-                    "[bold cyan on black] 📦 Archive Detected [/bold cyan on black]"
-                )
-                console.print(
-                    f"[white]Archive type: [yellow]{file_description}[/yellow][/white]"
-                )
-                console.print(
-                    f"[white]Size: [yellow]{file_info['size_bytes'] / 1024 / 1024:.2f} MB[/yellow][/white]"
-                )
-                console.print("\n[cyan]🔍 Inspecting archive structure...[/cyan]")
-
-                # Inspect archive to detect nested structures
-                with console.status("[cyan]Analyzing archive contents...[/cyan]"):
-                    inspection = client.inspect_archive(filename)
-
-                if not inspection["success"]:
-                    console.print("\n[red]✗ Archive inspection failed[/red]")
-                    console.print(f"[red]{inspection['error']}[/red]")
-                    return (
-                        f"Failed to inspect archive '{filename}': {inspection['error']}"
-                    )
-
-                # Handle nested archives with inspection workflow
-                if inspection["type"] == "nested_archive":
-                    nested_info = inspection["nested_info"]
-
-                    # Display inspection report
-                    console.print(
-                        "\n[bold green]✓ Detected Nested Archive Structure[/bold green]"
-                    )
-                    console.print(
-                        f"[white]Total nested archives: [yellow]{nested_info.total_count}[/yellow][/white]"
-                    )
-                    console.print(
-                        f"[white]Estimated memory: [yellow]{nested_info.estimated_memory / (1024**3):.1f} GB[/yellow][/white]"
-                    )
-
-                    # Show condition groups
-                    if nested_info.groups:
-                        console.print("\n[bold white]📂 Condition Groups:[/bold white]")
-                        groups_table = Table(box=box.ROUNDED, border_style="cyan")
-                        groups_table.add_column("Condition", style="bold orange1")
-                        groups_table.add_column("Samples", style="white")
-                        groups_table.add_column("GSM Range", style="grey70")
-
-                        for condition, samples in nested_info.groups.items():
-                            gsm_ids = [s["gsm_id"] for s in samples]
-                            groups_table.add_row(
-                                condition,
-                                str(len(samples)),
-                                f"{min(gsm_ids)}-{max(gsm_ids)}" if gsm_ids else "N/A",
-                            )
-
-                        console.print(groups_table)
-
-                    # Memory warning
-                    if nested_info.estimated_memory > 5 * 1024**3:
-                        console.print(
-                            f"\n[yellow]⚠️  Loading all samples requires ~{nested_info.estimated_memory / (1024**3):.1f} GB memory[/yellow]"
-                        )
-
-                    # Recommended actions
-                    console.print("\n[bold white]🎯 Next Steps:[/bold white]")
-                    console.print(
-                        "[orange1]  • /archive list[/orange1]           - Show detailed sample list"
-                    )
-                    console.print(
-                        "[orange1]  • /archive load <pattern>[/orange1] - Load specific samples"
-                    )
-                    console.print("[dim]    Examples:[/dim]")
-                    console.print("[dim]      /archive load GSM4710689[/dim]")
-                    console.print("[dim]      /archive load TISSUE[/dim]")
-                    console.print("[dim]      /archive load PDAC_* --limit 3[/dim]")
-
-                    # Store cache ID for subsequent commands
-                    client._last_archive_cache = inspection["cache_id"]
-                    client._last_archive_info = nested_info
-
-                    return f"Inspected nested archive: {nested_info.total_count} samples found. Use /archive commands to load selectively."
-
-                # Handle regular archives with auto-load
-                else:
-                    console.print("[cyan]🔄 Extracting and loading archive...[/cyan]")
-
-                    with console.status("[cyan]Extracting archive...[/cyan]"):
-                        extract_result = client.extract_and_load_archive(filename)
-
-                    if extract_result["success"]:
-                        console.print(
-                            "\n[green]✓ Successfully loaded archive contents[/green]"
-                        )
-                        console.print(
-                            f"[white]Modality: [bold cyan]{extract_result['modality_name']}[/bold cyan][/white]"
-                        )
-                        console.print(
-                            f"[white]Shape: [yellow]{extract_result['data_shape']}[/yellow][/white]"
-                        )
-
-                        if "n_samples" in extract_result:
-                            console.print(
-                                f"[white]Samples: [yellow]{extract_result['n_samples']}[/yellow][/white]"
-                            )
-
-                        console.print(
-                            f"\n[dim]{extract_result.get('message', '')}[/dim]"
-                        )
-
-                        return f"Successfully loaded archive '{filename}' as modality '{extract_result['modality_name']}' with shape {extract_result['data_shape']}"
-
-                    else:
-                        console.print("\n[red]✗ Archive extraction failed[/red]")
-                        console.print(f"[red]{extract_result['error']}[/red]")
-
-                        if "suggestion" in extract_result:
-                            console.print(
-                                f"\n[yellow]💡 Suggestion: {extract_result['suggestion']}[/yellow]"
-                            )
-
-                        if "manifest" in extract_result:
-                            manifest = extract_result["manifest"]
-                            console.print("\n[dim]Archive contents:[/dim]")
-                            console.print(
-                                f"[dim]  Files: {manifest['file_count']}[/dim]"
-                            )
-                            console.print(
-                                f"[dim]  Extensions: {dict(manifest['extensions'])}[/dim]"
-                            )
-
-                        return f"Failed to extract archive '{filename}': {extract_result['error']}"
-
             else:
                 console.print(
-                    "[cyan]💡 Consider converting to a supported format or use external tools to view this file.[/cyan]"
+                    "[cyan]💡 Binary file - use external tools to view.[/cyan]"
                 )
 
-            # Return summary for conversation history (for non-archive unsupported files)
-            if file_category != "archive":
-                return f"Identified file '{filename}' as {file_description} ({file_category}) - not supported for loading or display"
+            return f"Inspected file '{filename}' ({file_description}, {size_str}) - use /workspace load to load data files"
+
+    # =========================================================================
+    # /queue - Flexible Queue Operations (session-based, user determines intent)
+    # =========================================================================
+    elif cmd.startswith("/queue"):
+        parts = cmd.split()
+
+        if len(parts) == 1:
+            # Show queue status
+            return _show_queue_status(client, console)
+
+        subcommand = parts[1] if len(parts) > 1 else None
+
+        if subcommand == "load":
+            filename = parts[2] if len(parts) > 2 else None
+            try:
+                return _queue_load_file(client, filename, console, current_directory)
+            except QueueFileTypeNotSupported as e:
+                console.print(f"[yellow]⚠️  {str(e)}[/yellow]")
+                return None
+
+        elif subcommand == "list":
+            return _queue_list(client, console)
+
+        elif subcommand == "clear":
+            return _queue_clear(client, console)
+
+        elif subcommand == "export":
+            name = parts[2] if len(parts) > 2 else None
+            return _queue_export(client, name, console)
+
+        else:
+            console.print(f"[yellow]Unknown queue subcommand: {subcommand}[/yellow]")
+            console.print("[cyan]Available: load, list, clear, export[/cyan]")
+            return None
+
+    elif cmd.startswith("/load "):
+        # DEPRECATED: Use /queue load instead
+        console.print("[yellow]⚠️  Deprecation Warning: /load is deprecated.[/yellow]")
+        console.print("[yellow]   Use /queue load <file> for queue operations[/yellow]")
+        console.print("[yellow]   Use /workspace load <file> for data files[/yellow]\n")
+
+        # Load publication list from .ris file
+        filename = cmd[6:].strip()
+
+        # BUG FIX #6: Use PathResolver for secure path resolution
+        resolver = PathResolver(
+            current_directory=current_directory,
+            workspace_path=(
+                client.data_manager.workspace_path
+                if hasattr(client, "data_manager")
+                else None
+            ),
+        )
+        resolved = resolver.resolve(filename, search_workspace=True, must_exist=False)
+
+        if not resolved.is_safe:
+            console.print(f"[red]❌ Security error: {resolved.error}[/red]")
+            return None
+
+        file_path = resolved.path
+
+        # Validate file extension
+        if not file_path.suffix.lower() in [".ris", ".txt"]:
+            console_manager.print_error_panel(
+                f"Invalid file type: {file_path.suffix}",
+                "Only .ris or .txt files are supported for /load command",
+            )
+            return None
+
+        # Check if file exists
+        if not file_path.exists():
+            console_manager.print_error_panel(
+                f"File not found: {file_path}",
+                f"Searched in: {current_directory}",
+            )
+            return None
+
+        console.print(
+            f"[cyan]📚 Loading publication list from: {file_path.name}[/cyan]\n"
+        )
+
+        try:
+            with create_progress(client_arg=client) as progress:
+                task = progress.add_task(
+                    "[cyan]Parsing .ris file and creating queue entries...",
+                    total=None,
+                )
+
+                # Load publications into queue
+                result = client.load_publication_list(
+                    file_path=str(file_path),
+                    priority=5,  # Default priority
+                    schema_type="general",  # Default schema
+                    extraction_level="methods",  # Default extraction level
+                )
+
+                progress.remove_task(task)
+
+            # Display results
+            if result["added_count"] > 0:
+                console.print(
+                    f"[green]✅ Successfully loaded {result['added_count']} publications[/green]\n"
+                )
+
+                console.print("[cyan]📊 Load Summary:[/cyan]")
+                console.print(
+                    f"  • Added to queue: [bold]{result['added_count']}[/bold] publications"
+                )
+                if result["skipped_count"] > 0:
+                    console.print(
+                        f"  • Skipped: [yellow]{result['skipped_count']}[/yellow] entries (malformed or invalid)"
+                    )
+                console.print(
+                    f"  • Status: [bold]PENDING[/bold] (ready for processing)"
+                )
+                console.print(f"  • Queue file: publication_queue.jsonl\n")
+
+                console.print("[cyan]💡 Next steps:[/cyan]")
+                console.print(
+                    "  • View queue: [white]get_content_from_workspace(workspace='publication_queue')[/white]"
+                )
+                console.print(
+                    "  • Process queue: Ask the research agent to process pending publications\n"
+                )
+
+                if result.get("errors") and len(result["errors"]) > 0:
+                    console.print(
+                        f"[yellow]⚠️  {len(result['errors'])} error(s) occurred during parsing:[/yellow]"
+                    )
+                    for i, error in enumerate(
+                        result["errors"][:3], 1
+                    ):  # Show first 3 errors
+                        console.print(f"  {i}. {error}")
+                    if len(result["errors"]) > 3:
+                        console.print(f"  ... and {len(result['errors']) - 3} more")
+
+                # Return summary for conversation history
+                return f"Loaded {result['added_count']} publications from {file_path.name} into publication queue (skipped {result['skipped_count']})"
+            else:
+                console.print(
+                    f"[bold red on white] ⚠️  Error [/bold red on white] "
+                    f"[red]No publications could be loaded from file[/red]"
+                )
+                if result.get("errors"):
+                    console.print(f"\n[yellow]Errors:[/yellow]")
+                    for error in result["errors"][:5]:
+                        console.print(f"  • {error}")
+                return None
+
+        except FileNotFoundError as e:
+            console_manager.print_error_panel(
+                f"File not found: {str(e)}",
+                "Check the file path and try again",
+            )
+            return None
+        except ValueError as e:
+            console_manager.print_error_panel(
+                f"Invalid file format: {str(e)}",
+                "Ensure the file is a valid .ris format",
+            )
+            return None
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to load publication list: {str(e)}",
+                "Check the file format and try again",
+            )
+            return None
 
     elif cmd.startswith("/archive"):
-        # Handle nested archive commands
+        # BUG FIX #1: Handle nested archive commands with proper cache management
+        # Use ExtractionCacheManager instead of client instance variables to prevent race conditions
+
+        # Check if extraction cache is available (premium feature)
+        if not HAS_EXTRACTION_CACHE:
+            console.print(
+                "[yellow]Archive caching is a premium feature not available in this distribution.[/yellow]"
+            )
+            console.print(
+                "[dim]Use extract_and_load_archive() to load entire archives instead.[/dim]"
+            )
+            return None
+
         parts = cmd.split(maxsplit=2)
         subcommand = parts[1] if len(parts) > 1 else "help"
 
-        # Check if we have a cached archive from /read
-        if not hasattr(client, "_last_archive_cache"):
-            console.print("[red]❌ No archive inspection cached[/red]")
+        # Initialize cache manager (thread-safe, per-request instance)
+        cache_manager = ExtractionCacheManager(client.data_manager.workspace_path)
+        recent_caches = cache_manager.list_all_caches()
+
+        if not recent_caches:
+            console.print("[red]❌ No cached archives found[/red]")
             console.print(
                 "[yellow]💡 Run /read <archive.tar> first to inspect an archive[/yellow]"
             )
             return None
 
+        # Select cache: use most recent if only one, otherwise prompt user
+        if len(recent_caches) == 1:
+            cache_id = recent_caches[0]["cache_id"]
+        else:
+            # Multiple caches available - show list and use most recent
+            console.print(
+                f"\n[cyan]📦 Found {len(recent_caches)} cached archives (using most recent):[/cyan]"
+            )
+            for i, cache in enumerate(recent_caches[:3], 1):
+                age_hours = (time.time() - cache.get("timestamp", 0)) / 3600
+                console.print(f"  {i}. {cache['cache_id']} ({age_hours:.1f}h ago)")
+            cache_id = recent_caches[0]["cache_id"]  # Most recent
+
+        # Get cache info and nested_info
+        cache_info = cache_manager.get_cache_info(cache_id)
+        if not cache_info:
+            console.print(f"[red]❌ Cache {cache_id} metadata not found[/red]")
+            return None
+
+        nested_info = cache_info.get("nested_info")
+        if not nested_info:
+            console.print(
+                f"[red]❌ Cache {cache_id} missing nested structure info[/red]"
+            )
+            return None
+
         if subcommand == "list":
             # Show detailed list of all nested samples
-            nested_info = client._last_archive_info
-
             console.print("\n[bold white]📋 Archive Contents:[/bold white]")
-            console.print(f"[dim]Cache ID: {client._last_archive_cache}[/dim]\n")
+            console.print(f"[dim]Cache ID: {cache_id}[/dim]\n")
 
             samples_table = Table(
                 box=box.ROUNDED, border_style="cyan", title="All Samples"
@@ -3712,9 +4757,7 @@ when they are started by agents or analysis workflows.
             return f"Listed {nested_info.total_count} samples from cached archive"
 
         elif subcommand == "groups":
-            # Show condition groups summary
-            nested_info = client._last_archive_info
-
+            # Show condition groups summary (nested_info already loaded above)
             console.print("\n[bold white]📂 Condition Groups:[/bold white]\n")
 
             groups_table = Table(box=box.ROUNDED, border_style="cyan")
@@ -3765,9 +4808,7 @@ when they are started by agents or analysis workflows.
             )
 
             with console.status("[cyan]Loading samples...[/cyan]"):
-                result = client.load_from_cache(
-                    client._last_archive_cache, pattern, limit
-                )
+                result = client.load_from_cache(cache_id, pattern, limit)
 
             if result["success"]:
                 console.print(f"\n[green]✓ {result['message']}[/green]")
@@ -3855,9 +4896,7 @@ when they are started by agents or analysis workflows.
                 return f"Failed to load samples: {result['error']}"
 
         elif subcommand == "status":
-            # Show cache status
-            from lobster.core.extraction_cache import ExtractionCacheManager
-
+            # Show cache status (uses top-level import, already checked HAS_EXTRACTION_CACHE)
             cache_manager = ExtractionCacheManager(client.workspace_path)
             all_caches = cache_manager.list_all_caches()
 
@@ -3889,9 +4928,7 @@ when they are started by agents or analysis workflows.
             return f"Cache status: {len(all_caches)} active extractions"
 
         elif subcommand == "cleanup":
-            # Clean up old caches
-            from lobster.core.extraction_cache import ExtractionCacheManager
-
+            # Clean up old caches (uses top-level import, already checked HAS_EXTRACTION_CACHE)
             cache_manager = ExtractionCacheManager(client.workspace_path)
 
             console.print("[cyan]🧹 Cleaning up old cached extractions...[/cyan]")
@@ -4552,12 +5589,18 @@ when they are started by agents or analysis workflows.
         subcommand = parts[1] if len(parts) > 1 else "info"
 
         if subcommand == "list":
-            # Re-scan workspace to ensure we have latest files
-            if hasattr(client.data_manager, "_scan_workspace"):
-                client.data_manager._scan_workspace()
-
-            # Show available datasets without loading
-            available = client.data_manager.available_datasets
+            # BUG FIX #2: Use cached scan instead of explicit rescan (75% faster)
+            # Check if user wants to force refresh with --refresh flag
+            force_refresh = "--refresh" in cmd.lower()
+            if hasattr(client.data_manager, "get_available_datasets"):
+                available = client.data_manager.get_available_datasets(
+                    force_refresh=force_refresh
+                )
+            else:
+                # Fallback for older DataManager versions
+                if hasattr(client.data_manager, "_scan_workspace"):
+                    client.data_manager._scan_workspace()
+                available = client.data_manager.available_datasets
             loaded = set(client.data_manager.modalities.keys())
 
             if not available:
@@ -4645,11 +5688,17 @@ when they are started by agents or analysis workflows.
 
             selector = parts[2]
 
-            # Re-scan workspace to ensure we have latest files
-            if hasattr(client.data_manager, "_scan_workspace"):
-                client.data_manager._scan_workspace()
+            # BUG FIX #2: Use cached scan for info command
+            if hasattr(client.data_manager, "get_available_datasets"):
+                available = client.data_manager.get_available_datasets(
+                    force_refresh=False
+                )
+            else:
+                # Fallback for older DataManager versions
+                if hasattr(client.data_manager, "_scan_workspace"):
+                    client.data_manager._scan_workspace()
+                available = client.data_manager.available_datasets
 
-            available = client.data_manager.available_datasets
             loaded = set(client.data_manager.modalities.keys())
 
             if not available:
@@ -4746,24 +5795,78 @@ when they are started by agents or analysis workflows.
             return f"Displayed details for {len(matched_datasets)} dataset(s)"
 
         elif subcommand == "load":
-            # Load specific datasets by index or pattern
+            # Load specific datasets by index, pattern, or file path
             if len(parts) < 3:
-                console.print("[red]Usage: /workspace load <#|pattern>[/red]")
+                console.print("[red]Usage: /workspace load <#|pattern|file>[/red]")
                 console.print(
-                    "[dim]Examples: /workspace load 1, /workspace load recent, /workspace load *clustered*[/dim]"
+                    "[dim]Examples: /workspace load 1, /workspace load recent, /workspace load data.h5ad[/dim]"
                 )
                 return None
 
             selector = parts[2]
 
-            # Re-scan workspace to ensure we have latest files
-            if hasattr(client.data_manager, "_scan_workspace"):
-                client.data_manager._scan_workspace()
+            # BUG FIX #6: Use PathResolver for secure path resolution
+            resolver = PathResolver(
+                current_directory=current_directory,
+                workspace_path=(
+                    client.data_manager.workspace_path
+                    if hasattr(client, "data_manager")
+                    else None
+                ),
+            )
+            resolved = resolver.resolve(
+                selector, search_workspace=True, must_exist=False
+            )
 
-            available = client.data_manager.available_datasets
+            if not resolved.is_safe:
+                console.print(f"[red]❌ Security error: {resolved.error}[/red]")
+                return None
+
+            file_path = resolved.path
+
+            if file_path.exists() and file_path.is_file():
+                # Load file directly into workspace
+                console.print(
+                    f"[cyan]📂 Loading file into workspace: {file_path.name}[/cyan]\n"
+                )
+
+                try:
+                    result = client.load_data_file(str(file_path))
+
+                    if result.get("success"):
+                        console.print(
+                            f"[green]✅ Loaded '{result['modality_name']}' "
+                            f"({result['data_shape'][0]:,} × {result['data_shape'][1]:,})[/green]"
+                        )
+                        return f"Loaded file '{file_path.name}' as modality '{result['modality_name']}'"
+                    else:
+                        console.print(
+                            f"[red]❌ {result.get('error', 'Unknown error')}[/red]"
+                        )
+                        if result.get("suggestion"):
+                            console.print(f"[cyan]💡 {result['suggestion']}[/cyan]")
+                        return None
+
+                except Exception as e:
+                    console.print(f"[red]❌ Failed to load file: {str(e)}[/red]")
+                    return None
+
+            # BUG FIX #2: Use cached scan for load command
+            if hasattr(client.data_manager, "get_available_datasets"):
+                available = client.data_manager.get_available_datasets(
+                    force_refresh=False
+                )
+            else:
+                # Fallback for older DataManager versions
+                if hasattr(client.data_manager, "_scan_workspace"):
+                    client.data_manager._scan_workspace()
+                available = client.data_manager.available_datasets
 
             if not available:
                 console.print("[yellow]No datasets found in workspace[/yellow]")
+                console.print(
+                    f"[dim]Tip: If '{selector}' is a file, ensure the path is correct[/dim]"
+                )
                 return None
 
             # Determine if selector is an index or pattern
@@ -5336,36 +6439,24 @@ when they are started by agents or analysis workflows.
             console.print("[grey50]Usage: /open <file_or_folder>[/grey50]")
             return "No file or folder specified for /open command"
 
-        # Try to resolve path - check current directory first, then workspace
-        target_path = None
+        # BUG FIX #6: Use PathResolver for secure path resolution with workspace search
+        resolver = PathResolver(
+            current_directory=current_directory,
+            workspace_path=(
+                client.data_manager.workspace_path
+                if hasattr(client, "data_manager")
+                else None
+            ),
+        )
+        resolved = resolver.resolve(
+            file_or_folder, search_workspace=True, must_exist=True, allow_special=False
+        )
 
-        # Check current directory
-        if not file_or_folder.startswith("/") and not file_or_folder.startswith("~/"):
-            current_path = current_directory / file_or_folder
-            if current_path.exists():
-                target_path = current_path
+        if not resolved.is_safe:
+            console.print(f"[red]❌ Security error: {resolved.error}[/red]")
+            return None
 
-        # Check absolute/home path
-        if target_path is None:
-            abs_path = Path(file_or_folder).expanduser()
-            if abs_path.exists():
-                target_path = abs_path
-
-        # Check workspace if we have a client
-        if target_path is None and hasattr(client, "data_manager"):
-            # Look in workspace for the file
-            workspace_files = client.data_manager.list_workspace_files()
-            for category, files in workspace_files.items():
-                for file_info in files:
-                    if file_info["name"] == file_or_folder or file_info[
-                        "path"
-                    ].endswith(file_or_folder):
-                        target_path = Path(file_info["path"])
-                        break
-                if target_path:
-                    break
-
-        if not target_path or not target_path.exists():
+        if not resolved.exists:
             console.print(
                 f"[red]/open: '{file_or_folder}': No such file or directory[/red]"
             )
@@ -5373,6 +6464,8 @@ when they are started by agents or analysis workflows.
                 "[grey50]Check current directory, workspace, or use absolute path[/grey50]"
             )
             return f"File or folder '{file_or_folder}' not found"
+
+        target_path = resolved.path
 
         # Open file or folder using centralized system utility
         success, message = open_path(target_path)
@@ -5504,6 +6597,62 @@ when they are started by agents or analysis workflows.
                     console.print(f"  • {profile}")
             return f"Invalid mode '{new_mode}' - available modes: {', '.join(sorted(available_profiles.keys()))}"
 
+    elif cmd.startswith("/provider"):
+        # Handle provider switching and listing
+        parts = cmd.split()
+
+        if len(parts) == 1 or (len(parts) == 2 and parts[1] == "list"):
+            # /provider or /provider list - Show available providers
+            from lobster.config.llm_factory import LLMFactory
+
+            available_providers = LLMFactory.get_available_providers()
+            current_provider = client.provider_override or LLMFactory.get_current_provider()
+
+            provider_table = Table(title="🔌 LLM Providers", box=box.ROUNDED)
+            provider_table.add_column("Provider", style="cyan")
+            provider_table.add_column("Status", style="white")
+            provider_table.add_column("Active", style="green")
+
+            for provider in ["anthropic", "bedrock", "ollama"]:
+                configured = "✓ Configured" if provider in available_providers else "✗ Not configured"
+                active = "●" if provider == current_provider else ""
+
+                status_style = "green" if provider in available_providers else "grey50"
+                provider_table.add_row(
+                    provider.capitalize(),
+                    f"[{status_style}]{configured}[/{status_style}]",
+                    f"[bold green]{active}[/bold green]" if active else ""
+                )
+
+            console_manager.print(provider_table)
+
+            console_manager.print(f"\n[cyan]💡 Usage:[/cyan]")
+            console_manager.print("  • [white]/provider <name>[/white] - Switch to specified provider")
+            console_manager.print("  • [white]/provider list[/white] - Show this list")
+            console_manager.print("\n[cyan]Available providers:[/cyan] anthropic, bedrock, ollama")
+
+            if current_provider:
+                console_manager.print(f"\n[green]✓ Current provider: {current_provider}[/green]")
+
+        elif len(parts) == 2:
+            # /provider <name> - Switch provider
+            new_provider = parts[1].lower()
+
+            console_manager.print(f"[yellow]Switching to {new_provider} provider...[/yellow]")
+
+            result = client.switch_provider(new_provider)
+
+            if result["success"]:
+                console_manager.print(
+                    f"[green]✓ Successfully switched to {result['provider']} provider[/green]"
+                )
+            else:
+                error_msg = result.get("error", "Unknown error")
+                hint = result.get("hint", "")
+                console_manager.print_error_panel(error_msg, hint)
+        else:
+            console_manager.print("[red]Invalid syntax. Use: /provider [list|<name>][/red]")
+
     elif cmd == "/clear":
         console.clear()
 
@@ -5530,10 +6679,50 @@ Your feedback matters! Please take 1 minute to share your experience:
         )
 
 
+@app.command(name="os")
+def os_command(
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory. Can also be set via LOBSTER_WORKSPACE env var. Default: ./.lobster_workspace",
+    ),
+):
+    """
+    Launch interactive OS-like workspace (Textual UI).
+
+    This command starts a Textual-based interactive terminal UI with:
+    - Multi-panel layout for browsing datasets
+    - Keyboard-first navigation (vim-like bindings)
+    - Non-blocking operations (Phase 3+)
+    - Live streaming query responses (Phase 3+)
+
+    Press 'Q' to quit, '?' for help.
+    """
+    try:
+        from lobster.ui.os_app import run_lobster_os
+
+        run_lobster_os(workspace)
+    except ImportError as e:
+        console.print(
+            f"[red]❌ Failed to import Textual UI: {str(e)}[/red]\n"
+            "[yellow]Ensure textual>=0.79.1 is installed: pip install textual[/yellow]"
+        )
+        raise typer.Exit(1)
+    except Exception as e:
+        console.print(f"[red]❌ Failed to launch Lobster OS: {str(e)}[/red]")
+        raise typer.Exit(1)
+
+
 @app.command()
 def query(
     question: str,
-    workspace: Optional[Path] = typer.Option(None, "--workspace", "-w"),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory. Can also be set via LOBSTER_WORKSPACE env var. Default: ./.lobster_workspace",
+    ),
     reasoning: Optional[bool] = typer.Option(
         None,
         "--reasoning",
@@ -5552,6 +6741,17 @@ def query(
         False, "--debug", "-d", help="Enable debug mode with detailed logging"
     ),
     output: Optional[Path] = typer.Option(None, "--output", "-o"),
+    profile_timings: Optional[bool] = typer.Option(
+        None,
+        "--profile-timings/--no-profile-timings",
+        help="Enable timing diagnostics for data manager operations",
+    ),
+    provider: Optional[str] = typer.Option(
+        None,
+        "--provider",
+        "-p",
+        help="LLM provider to use (bedrock, anthropic, ollama). Overrides auto-detection.",
+    ),
 ):
     """
     Send a single query to the agent system.
@@ -5567,7 +6767,7 @@ def query(
         raise typer.Exit(1)
 
     # Initialize client
-    client = init_client(workspace, not no_reasoning, verbose, debug)
+    client = init_client(workspace, not no_reasoning, verbose, debug, profile_timings, provider)
 
     # Process query
     if should_show_progress(client):
@@ -5597,6 +6797,8 @@ def query(
         console.print(
             f"[bold red on white] ⚠️  Error [/bold red on white] [red]{result['error']}[/red]"
         )
+
+    _maybe_print_timings(client, "Query")
 
 
 @app.command()

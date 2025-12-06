@@ -26,6 +26,7 @@ class PublicationResolutionResult:
         self,
         identifier: str,
         pdf_url: Optional[str] = None,
+        html_url: Optional[str] = None,
         source: str = "unknown",
         access_type: str = "unknown",
         alternative_urls: Optional[List[str]] = None,
@@ -46,6 +47,7 @@ class PublicationResolutionResult:
         """
         self.identifier = identifier
         self.pdf_url = pdf_url
+        self.html_url = html_url
         self.source = source
         self.access_type = access_type
         self.alternative_urls = alternative_urls or []
@@ -57,6 +59,7 @@ class PublicationResolutionResult:
         return {
             "identifier": self.identifier,
             "pdf_url": self.pdf_url,
+            "html_url": self.html_url,
             "source": self.source,
             "access_type": self.access_type,
             "alternative_urls": self.alternative_urls,
@@ -66,7 +69,8 @@ class PublicationResolutionResult:
 
     def is_accessible(self) -> bool:
         """Check if PDF is accessible."""
-        return self.pdf_url is not None and self.access_type != "paywalled"
+        has_url = self.pdf_url is not None or self.html_url is not None
+        return has_url and self.access_type != "paywalled"
 
 
 class PublicationResolver:
@@ -350,21 +354,19 @@ class PublicationResolver:
                     access_type="not_in_pmc",
                 )
 
-            # Step 2: Construct PMC HTML article URL
-            # PMC HTML articles have better structure extraction than PDF directory
-            # Docling auto-detects format and handles both HTML and PDF intelligently
-            pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/"
+            # Step 2: Construct PMC HTML + PDF URLs
+            html_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/"
+            pdf_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"
 
             logger.info(f"Found PMC article: PMC{pmc_id}")
 
             return PublicationResolutionResult(
                 identifier=f"PMID:{pmid}",
                 pdf_url=pdf_url,
+                html_url=html_url,
                 source="pmc",
                 access_type="open_access",
-                alternative_urls=[
-                    f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{pmc_id}/pdf/"  # PDF directory as fallback
-                ],
+                alternative_urls=[html_url],
                 metadata={"pmc_id": f"PMC{pmc_id}"},
             )
 
@@ -426,9 +428,15 @@ class PublicationResolver:
                                 logger.info(
                                     f"Found LinkOut URL for PMID {pmid}: {provider_url}"
                                 )
+                                provider_url_lower = provider_url.lower()
+                                url_kwargs = (
+                                    {"pdf_url": provider_url}
+                                    if provider_url_lower.endswith(".pdf")
+                                    else {"html_url": provider_url}
+                                )
+
                                 return PublicationResolutionResult(
                                     identifier=f"PMID:{pmid}",
-                                    pdf_url=provider_url,
                                     source="linkout",
                                     access_type="publisher",
                                     metadata={
@@ -436,6 +444,7 @@ class PublicationResolver:
                                             "provider", {}
                                         ).get("name", "Unknown")
                                     },
+                                    **url_kwargs,
                                 )
             except (KeyError, IndexError, TypeError) as e:
                 logger.debug(f"No LinkOut URL found for PMID {pmid}: {e}")
@@ -472,28 +481,32 @@ class PublicationResolver:
 
         # Check if DOI is from bioRxiv or medRxiv
         if "biorxiv.org" in doi.lower() or doi.startswith("10.1101/"):
-            # bioRxiv pattern: https://www.biorxiv.org/content/10.1101/{id}.full.pdf
-            pdf_url = f"https://www.biorxiv.org/content/{doi}.full.pdf"
+            content_base = f"https://www.biorxiv.org/content/{doi}"
+            html_url = f"{content_base}.full"
+            pdf_url = f"{html_url}.pdf"
 
             return PublicationResolutionResult(
                 identifier=doi,
                 pdf_url=pdf_url,
+                html_url=html_url,
                 source="biorxiv",
                 access_type="preprint",
-                alternative_urls=[f"https://www.biorxiv.org/content/{doi}"],
+                alternative_urls=[content_base],
                 metadata={"server": "biorxiv"},
             )
 
         elif "medrxiv.org" in doi.lower():
-            # medRxiv pattern: https://www.medrxiv.org/content/10.1101/{id}.full.pdf
-            pdf_url = f"https://www.medrxiv.org/content/{doi}.full.pdf"
+            content_base = f"https://www.medrxiv.org/content/{doi}"
+            html_url = f"{content_base}.full"
+            pdf_url = f"{html_url}.pdf"
 
             return PublicationResolutionResult(
                 identifier=doi,
                 pdf_url=pdf_url,
+                html_url=html_url,
                 source="medrxiv",
                 access_type="preprint",
-                alternative_urls=[f"https://www.medrxiv.org/content/{doi}"],
+                alternative_urls=[content_base],
                 metadata={"server": "medrxiv"},
             )
 

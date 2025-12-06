@@ -139,8 +139,8 @@ class GEOProvider(BasePublicationProvider):
 
         self.query_builder = GEOQueryBuilder()
 
-        # Initialize cache directory for GEOparse
-        self.cache_dir = Path(settings.GEO_CACHE_DIR)
+        # Initialize cache directory from workspace
+        self.cache_dir = self.data_manager.cache_dir / "geo"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize XML parser
@@ -236,23 +236,18 @@ class GEOProvider(BasePublicationProvider):
         """
         Validate GEO identifiers.
 
+        Uses centralized AccessionResolver for pattern matching.
+
         Args:
             identifier: Identifier to validate (GSE, GDS, GPL, etc.)
 
         Returns:
             bool: True if identifier is valid GEO format
         """
-        identifier = identifier.strip().upper()
+        from lobster.core.identifiers import get_accession_resolver
 
-        # Check for GEO accession patterns
-        geo_patterns = [
-            r"^GSE\d+$",  # Series
-            r"^GDS\d+$",  # Dataset
-            r"^GPL\d+$",  # Platform
-            r"^GSM\d+$",  # Sample
-        ]
-
-        return any(re.match(pattern, identifier) for pattern in geo_patterns)
+        resolver = get_accession_resolver()
+        return resolver.is_geo_identifier(identifier)
 
     def get_supported_features(self) -> Dict[str, bool]:
         """Return features supported by GEO provider."""
@@ -521,41 +516,69 @@ class GEOProvider(BasePublicationProvider):
 
         url = f"{self.base_url_esearch}?" + urllib.parse.urlencode(url_params)
 
-        # Execute request with retry logic
-        response_data = self._execute_request_with_retry(url)
+        # Retry logic for backend errors (NCBI search backend failures)
+        retry = 0
+        sleep_time = self.config.sleep_time
+        last_error = None
 
-        # Parse eSearch response
-        try:
-            json_data = json.loads(response_data)
-            esearch_result = json_data.get("esearchresult", {})
+        while retry <= self.config.max_retry:
+            # Execute request with retry logic
+            response_data = self._execute_request_with_retry(url)
 
-            # Check for API errors (e.g., invalid database name)
-            if "ERROR" in esearch_result:
-                error_msg = esearch_result["ERROR"]
-                logger.error(f"NCBI API error: {error_msg}")
-                raise ValueError(f"NCBI API error: {error_msg}")
+            # Parse eSearch response
+            try:
+                json_data = json.loads(response_data)
+                esearch_result = json_data.get("esearchresult", {})
 
-            count = int(esearch_result.get("count", "0"))
-            ids = esearch_result.get("idlist", [])
-            web_env = esearch_result.get("webenv")
-            query_key = esearch_result.get("querykey")
+                # Check for API errors (e.g., backend failures, database issues)
+                if "ERROR" in esearch_result:
+                    error_msg = esearch_result["ERROR"]
 
-            # Cache WebEnv session if available
-            if web_env and query_key:
-                cache_key = f"{web_env}:{query_key}"
-                self._session_cache[cache_key] = (web_env, query_key, datetime.now())
+                    # Backend errors like "Search Backend failed: Database is not supported"
+                    # are often transient - retry with exponential backoff
+                    if "Search Backend failed" in error_msg or "Database is not supported" in error_msg:
+                        last_error = error_msg
+                        if retry < self.config.max_retry:
+                            logger.warning(
+                                f"NCBI backend error (attempt {retry + 1}/{self.config.max_retry + 1}): {error_msg}. "
+                                f"Retrying in {sleep_time}s..."
+                            )
+                            time.sleep(sleep_time)
+                            sleep_time *= 2  # Exponential backoff
+                            retry += 1
+                            continue
+                        else:
+                            logger.error(f"NCBI API error after {self.config.max_retry + 1} attempts: {error_msg}")
+                            raise ValueError(
+                                f"NCBI backend error persists after {self.config.max_retry + 1} attempts: {error_msg}. "
+                                f"This may indicate a temporary NCBI service issue. Please try again later."
+                            )
+                    else:
+                        # Non-retryable errors (e.g., invalid syntax)
+                        logger.error(f"NCBI API error: {error_msg}")
+                        raise ValueError(f"NCBI API error: {error_msg}")
 
-            return GEOSearchResult(
-                count=count,
-                ids=ids,
-                web_env=web_env,
-                query_key=query_key,
-                query=complete_query,
-            )
+                count = int(esearch_result.get("count", "0"))
+                ids = esearch_result.get("idlist", [])
+                web_env = esearch_result.get("webenv")
+                query_key = esearch_result.get("querykey")
 
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.error(f"Error parsing eSearch response: {e}")
-            raise ValueError(f"Invalid eSearch response: {e}")
+                # Cache WebEnv session if available
+                if web_env and query_key:
+                    cache_key = f"{web_env}:{query_key}"
+                    self._session_cache[cache_key] = (web_env, query_key, datetime.now())
+
+                return GEOSearchResult(
+                    count=count,
+                    ids=ids,
+                    web_env=web_env,
+                    query_key=query_key,
+                    query=complete_query,
+                )
+
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.error(f"Error parsing eSearch response: {e}")
+                raise ValueError(f"Invalid eSearch response: {e}")
 
     def get_dataset_summaries(
         self, search_result: GEOSearchResult
@@ -664,7 +687,7 @@ class GEOProvider(BasePublicationProvider):
 
         return linked
 
-    def get_download_urls(self, geo_id: str) -> Dict[str, Any]:
+    def get_download_urls(self, geo_id: str) -> "DownloadUrlResult":
         """
         Extract download URLs from GEO metadata without downloading files.
 
@@ -678,22 +701,26 @@ class GEOProvider(BasePublicationProvider):
             geo_id: GEO accession (GSE12345, GDS5678, etc.)
 
         Returns:
-            Dict with structure:
-            {
-                "geo_id": str,
-                "matrix_url": Optional[str],  # Series matrix file
-                "raw_urls": List[str],        # Raw data files
-                "supplementary_urls": List[str],  # Supplementary files
-                "h5_url": Optional[str],      # H5AD file if exists
-                "ftp_base": str,              # Base FTP directory
-                "file_count": int,            # Total files found
-                "total_size_mb": Optional[float],  # Estimated size
-            }
+            DownloadUrlResult with standardized file structure containing:
+                - primary_files: Matrix and H5AD files
+                - raw_files: Raw data files (CEL, FASTQ, etc.)
+                - supplementary_files: Supplementary processed data
+                - ftp_base: Base FTP directory URL
+                - error: Error message if extraction failed
 
         Raises:
             ValueError: If geo_id format invalid
-            Exception: If GEO fetch fails
+
+        Examples:
+            >>> provider = GEOProvider(data_manager)
+            >>> result = provider.get_download_urls("GSE180759")
+            >>> print(result.matrix_url)  # Primary matrix URL
+            >>> print(len(result.raw_files))
+            >>> # Get legacy dict format if needed
+            >>> legacy = result.to_legacy_dict()
         """
+        from lobster.core.schemas.download_urls import DownloadFile, DownloadUrlResult
+
         # Validate GEO ID format
         if not geo_id or not isinstance(geo_id, str):
             raise ValueError(f"Invalid GEO ID: {geo_id}")
@@ -837,6 +864,9 @@ class GEOProvider(BasePublicationProvider):
                         ".sam",
                         ".sra",
                         ".srf",
+                        ".tar",  # Added: RAW.tar files common in GEO
+                        ".tar.gz",  # Added: compressed tar archives
+                        ".tgz",  # Added: alternative tar.gz extension
                     ]
                 ):
                     raw_urls.append(file_url)
@@ -849,26 +879,52 @@ class GEOProvider(BasePublicationProvider):
                     all_urls.append(file_url)
                     logger.debug(f"Found supplementary file: {file_url}")
 
-            # Calculate file count
-            file_count = len(all_urls)
+            # Build DownloadFile objects
+            primary_files = []
+            if matrix_url:
+                primary_files.append(
+                    DownloadFile(
+                        url=matrix_url,
+                        filename=matrix_url.split("/")[-1],
+                        file_type="matrix",
+                    )
+                )
+            if h5_url:
+                primary_files.append(
+                    DownloadFile(
+                        url=h5_url,
+                        filename=h5_url.split("/")[-1],
+                        file_type="h5ad",
+                    )
+                )
 
-            # Prepare result
-            result = {
-                "geo_id": geo_id,
-                "matrix_url": matrix_url,
-                "raw_urls": raw_urls,
-                "supplementary_urls": supplementary_urls,
-                "h5_url": h5_url,
-                "ftp_base": ftp_base,
-                "file_count": file_count,
-                "total_size_mb": None,  # Size estimation would require FTP SIZE commands
-            }
+            raw_file_objs = [
+                DownloadFile(url=url, filename=url.split("/")[-1], file_type="raw")
+                for url in raw_urls
+            ]
+
+            supp_file_objs = [
+                DownloadFile(
+                    url=url, filename=url.split("/")[-1], file_type="supplementary"
+                )
+                for url in supplementary_urls
+            ]
+
+            result = DownloadUrlResult(
+                accession=geo_id,
+                database="geo",
+                primary_files=primary_files,
+                raw_files=raw_file_objs,
+                supplementary_files=supp_file_objs,
+                ftp_base=ftp_base,
+                recommended_strategy="matrix" if primary_files else "raw",
+            )
 
             logger.info(
-                f"Extracted {file_count} URLs for {geo_id}: "
+                f"Extracted {result.file_count} URLs for {geo_id}: "
                 f"matrix={1 if matrix_url else 0}, "
-                f"raw={len(raw_urls)}, "
-                f"supplementary={len(supplementary_urls)}, "
+                f"raw={len(raw_file_objs)}, "
+                f"supplementary={len(supp_file_objs)}, "
                 f"h5={1 if h5_url else 0}"
             )
 
@@ -876,22 +932,17 @@ class GEOProvider(BasePublicationProvider):
 
         except Exception as e:
             logger.error(f"Failed to extract URLs for {geo_id}: {e}")
-            # Return partial results on error
-            return {
-                "geo_id": geo_id,
-                "matrix_url": None,
-                "raw_urls": [],
-                "supplementary_urls": [],
-                "h5_url": None,
-                "ftp_base": (
+            # Return result with error
+            return DownloadUrlResult(
+                accession=geo_id,
+                database="geo",
+                ftp_base=(
                     self._construct_ftp_base_url(geo_id)
                     if geo_id.startswith("GSE")
                     else ""
                 ),
-                "file_count": 0,
-                "total_size_mb": None,
-                "error": str(e),
-            }
+                error=str(e),
+            )
 
     def _construct_ftp_base_url(self, geo_id: str) -> str:
         """

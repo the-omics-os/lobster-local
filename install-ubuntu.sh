@@ -57,18 +57,18 @@ check_platform() {
     print_success "Detected: $PRETTY_NAME"
 }
 
-# Check for Python 3.12+
+# Check for Python 3.11+
 check_python() {
-    print_info "Checking for Python 3.12+..."
+    print_info "Checking for Python 3.11+..."
 
     # Try different Python commands
-    for cmd in python3.13 python3.12 python3 python; do
+    for cmd in python3.13 python3.12 python3.11 python3 python; do
         if command -v "$cmd" &> /dev/null; then
             version=$($cmd --version 2>&1 | grep -oP '\d+\.\d+' | head -1)
             major=$(echo "$version" | cut -d. -f1)
             minor=$(echo "$version" | cut -d. -f2)
 
-            if [ "$major" -ge 3 ] && [ "$minor" -ge 12 ]; then
+            if [ "$major" -ge 3 ] && [ "$minor" -ge 11 ]; then
                 PYTHON_CMD="$cmd"
                 print_success "Found Python $version at $cmd"
                 return 0
@@ -76,7 +76,7 @@ check_python() {
         fi
     done
 
-    print_error "Python 3.12+ not found!"
+    print_error "Python 3.11+ not found!"
     return 1
 }
 
@@ -108,7 +108,7 @@ check_dependencies() {
     # Check for Python dev package
     python_version=$(echo "$PYTHON_CMD" | grep -oP '\d+\.\d+')
     if [ -z "$python_version" ]; then
-        python_version="3.12"
+        python_version="3.11"
     fi
 
     local python_dev_pkg="python${python_version}-dev"
@@ -145,7 +145,7 @@ install_dependencies() {
     # Determine Python version for dev packages
     python_version=$(echo "$PYTHON_CMD" | grep -oP '\d+\.\d+')
     if [ -z "$python_version" ]; then
-        python_version="3.12"
+        python_version="3.11"
     fi
 
     # Update package lists
@@ -186,11 +186,11 @@ main() {
     # Check Python
     if ! check_python; then
         echo ""
-        print_info "Python 3.12+ is required. Install with:"
+        print_info "Python 3.11+ is required. Install with:"
         echo ""
         echo -e "  ${CYAN}sudo add-apt-repository ppa:deadsnakes/ppa${NC}"
         echo -e "  ${CYAN}sudo apt-get update${NC}"
-        echo -e "  ${CYAN}sudo apt-get install python3.12 python3.12-venv python3.12-dev${NC}"
+        echo -e "  ${CYAN}sudo apt-get install python3.11 python3.11-venv python3.11-dev${NC}"
         echo ""
         exit 1
     fi
@@ -211,7 +211,7 @@ main() {
             print_warning "Cannot proceed without system dependencies"
             print_info "Install manually with:"
             echo ""
-            echo -e "  ${CYAN}sudo apt-get install -y build-essential python3.12-dev libhdf5-dev libblas-dev${NC}"
+            echo -e "  ${CYAN}sudo apt-get install -y build-essential python3.11-dev libhdf5-dev libblas-dev${NC}"
             echo ""
             exit 1
         fi

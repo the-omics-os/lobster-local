@@ -1,0 +1,116 @@
+{
+  "primers": {
+    "27F": {
+      "sequence": "AGAGTTTGATCMTGGCTCAG",
+      "region": "V1",
+      "direction": "forward",
+      "source": "Weisburg et al. (1991). 16S ribosomal DNA amplification.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/1987160/",
+      "note": "The degenerate version 27F-CM (M=A/C) is used."
+    },
+    "338R": {
+      "sequence": "GCTGCCTCCCGTAGGAGT",
+      "region": "V2",
+      "direction": "reverse",
+      "source": "Amann et al. (1990) / Daims et al. (1999)",
+      "url": "https://academic.oup.com/sysbio/article/48/3/631/1653761",
+      "note": "Citation added, used for V1-V2 amplification."
+    },
+    "341F": {
+      "sequence": "CCTACGGGNGGCWGCAG",
+      "region": "V3",
+      "direction": "forward",
+      "source": "Klindworth et al. (2013). Evaluation of general 16S primers.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/23193283/"
+    },
+    "515F": {
+      "sequence": "GTGCCAGCMGCCGCGGTAA",
+      "region": "V4",
+      "direction": "forward",
+      "source": "Caporaso et al. (2012). Ultra-high-throughput microbial analysis.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/22402401/",
+      "warning": "Original EMP primer, biased against Crenarchaeota/Thaumarchaeota."
+    },
+    "515F-Y": {
+      "sequence": "GTGYCAGCMGCCGCGGTAA",
+      "region": "V4",
+      "direction": "forward",
+      "source": "Parada et al. (2016). Every base matters.",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/26271760/",
+      "note": "Modified version to reduce archaeal bias."
+    },
+    "785R": {
+      "sequence": "GACTACHVGGGTATCTAATCC",
+      "region": "V4",
+      "direction": "reverse",
+      "source": "Klindworth et al. (2013).",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/23193283/"
+    },
+    "806R": {
+      "sequence": "GGACTACHVGGGTWTCTAAT",
+      "region": "V4",
+      "direction": "reverse",
+      "source": "Caporaso et al. (2012).",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/22402401/",
+      "warning": "Original EMP primer, known to be biased against the SAR11 clade."
+    },
+    "806RB": {
+      "sequence": "GGACTACNVGGGTWTCTAAT",
+      "region": "V4",
+      "direction": "reverse",
+      "source": "Apprill et al. (2015). Minor revision to V4 region primer.",
+      "url": "https://www.int-res.com/abstracts/ame/v75/n2/p129-137/"
+    },
+    "926R": {
+      "sequence": "CCGYCAATTYMTTTRAGTTT",
+      "region": "V5",
+      "direction": "reverse",
+      "source": "Quince et al. (2011) and Parada et al. (2016).",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/21276213/"
+    },
+    "27F-full": {
+      "sequence": "AGAGTTTGATCCTGGCTCAG",
+      "region": "V1",
+      "direction": "forward",
+      "source": "Weisburg et al. (1991).",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/1987160/",
+      "note": "Non-degenerate version (uses C instead of M)."
+    },
+    "1492R": {
+      "sequence": "GGTTACCTTGTTACGACTT",
+      "region": "V9",
+      "direction": "reverse",
+      "source": "Weisburg et al. (1991).",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/1987160/",
+      "note": "This is the shorter variant. A longer variant exists in literature."
+    },
+    "ITS1F": {
+      "sequence": "CTTGGTCATTTAGAGGAAGTAA",
+      "region": "ITS1",
+      "direction": "forward",
+      "source": "Gardes & Bruns (1993). ITS primers with enhanced specificity.",
+      "url": "https://onlinelibrary.wiley.com/doi/10.1111/j.1365-294X.1993.tb00005.x"
+    },
+    "ITS2": {
+      "sequence": "GCTGCGTTCTTCATCGATGC",
+      "region": "ITS1",
+      "direction": "reverse",
+      "source": "White et al. (1990). PCR Protocols.",
+      "url": "https://books.google.com/books?id=fpsS2XJtKqMC"
+    },
+    "ITS3": {
+      "sequence": "GCATCGATGAAGAACGCAGC",
+      "region": "ITS2",
+      "direction": "forward",
+      "source": "White et al. (1990). PCR Protocols.",
+      "url": "https://books.google.com/books?id=fpsS2XJtKqMC"
+    },
+    "ITS4": {
+      "sequence": "TCCTCCGCTTATTGATATGC",
+      "region": "ITS2",
+      "direction": "reverse",
+      "source": "White et al. (1990). PCR Protocols.",
+      "url": "https://books.google.com/books?id=fpsS2XJtKqMC"
+    }
+  }
+}

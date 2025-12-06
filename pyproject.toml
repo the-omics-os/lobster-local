@@ -10,7 +10,7 @@ authors = [
 ]
 description = "Multi-Agent Bioinformatics Analysis System powered by LangGraph"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]
 classifiers = [
@@ -44,8 +44,10 @@ dependencies = [
     "langchain-aws>=0.1.0",
     "langgraph==0.6.7",
     "openai>=1.0.0",
+    # Claude Code SDK for custom feature creation
+    "claude-agent-sdk>=0.1.0",
     # Bioinformatics (bumped versions for Python 3.12 support)
-    "llvmlite>=0.39.0", # explicit to avoid old version being pulled
+    "llvmlite==0.44.0", # explicit to avoid old version being pulled
     "scipy>=1.10.0",
     "scikit-learn>=1.3.0",
     "anndata>=0.9.0",
@@ -89,9 +91,6 @@ dependencies = [
     "scanpy>=1.11.4",
     "pydeseq2>=0.5.2",
     "prompt-toolkit>=3.0.52",
-    "scvi-tools>=1.4.0",
-    # PyTorch support (required by scvi-tools)
-    "torch>=2.0.0",
     "langchain-anthropic>=0.3.20",
     "responses>=0.25.8",
     # Jupyter notebook support for pipeline replay
@@ -103,12 +102,23 @@ dependencies = [
     "docling-core>=2.50.0",
     "redis>=6.4.0",
     "pysradb>=2.5.1",
-    # Custom Feature Agent (META-AGENT for code generation)
-    "claude-agent-sdk>=0.1.0", # Claude Code SDK for programmatic agent creation
     "linkup>=0.1.0", # Linkup SDK for web research (GitHub repos, packages, best practices)
+    "rispy>=0.10.0",
+    "cloudscraper>=1.2.71",
+    "langchain-core>=0.3.79",
+    "textual>=6.7.1",
+    "langchain-ollama>=0.3.10",
+    "rapidfuzz>=3.14.3",
 ]
 
 [project.optional-dependencies]
+ml = [
+    # Machine Learning features (PREMIUM tier only)
+    # Deep learning-based embeddings and batch correction
+    "scvi-tools>=1.4.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
 dev = [
     # Core testing framework
     "pytest>=7.0.0",
@@ -162,6 +172,11 @@ dev = [
     "tabulate>=0.9.0",
 ]
 all = [
+    # Include ML extras for full development setup
+    "scvi-tools>=1.4.0",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    # Dev tools
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "pytest-xdist>=3.0.0",
@@ -254,7 +269,7 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
 [tool.bumpversion]
-current_version = "0.3.0"
+current_version = "0.3.3"
 commit = true
 tag = true
 

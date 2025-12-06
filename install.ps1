@@ -29,7 +29,7 @@ function Test-PythonVersion {
             $major = [int]$Matches[1]
             $minor = [int]$Matches[2]
 
-            if ($major -ge 3 -and $minor -ge 12) {
+            if ($major -ge 3 -and $minor -ge 11) {
                 return $true
             }
         }
@@ -41,7 +41,7 @@ function Test-PythonVersion {
 }
 
 function Find-Python {
-    $pythonCandidates = @("python", "python3", "python3.12", "python3.13", "py")
+    $pythonCandidates = @("python", "python3", "python3.11", "python3.12", "python3.13", "py")
 
     foreach ($cmd in $pythonCandidates) {
         if (Test-PythonVersion -PythonCmd $cmd) {
@@ -60,13 +60,13 @@ Write-ColorOutput "━━━━━━━━━━━━━━━━━━━━�
 Write-Host ""
 
 # Check Python
-Write-ColorOutput "🔍 Checking for Python 3.12+..." $BLUE
+Write-ColorOutput "🔍 Checking for Python 3.11+..." $BLUE
 $python = Find-Python
 
 if ($null -eq $python) {
-    Write-ColorOutput "❌ Python 3.12 or higher not found!" $RED
+    Write-ColorOutput "❌ Python 3.11 or higher not found!" $RED
     Write-Host ""
-    Write-ColorOutput "Please install Python 3.12+ from:" $YELLOW
+    Write-ColorOutput "Please install Python 3.11+ from:" $YELLOW
     Write-ColorOutput "  https://www.python.org/downloads/" $YELLOW
     Write-Host ""
     Write-ColorOutput "Make sure to check 'Add Python to PATH' during installation!" $YELLOW
