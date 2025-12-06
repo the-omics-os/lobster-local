@@ -405,6 +405,41 @@ MODEL_PRICING = {
 }
 
 
+# Default pricing for unknown models (use Sonnet as reasonable default)
+DEFAULT_PRICING = {
+    "input_per_million": 3.0,
+    "output_per_million": 15.0,
+}
+
+
+def calculate_token_cost(
+    input_tokens: int,
+    output_tokens: int,
+    model_id: str = None,
+) -> float:
+    """
+    Calculate cost in USD for token usage.
+
+    Args:
+        input_tokens: Number of input tokens
+        output_tokens: Number of output tokens
+        model_id: Model identifier (optional, uses default if not found)
+
+    Returns:
+        Cost in USD
+    """
+    pricing = MODEL_PRICING.get(model_id, DEFAULT_PRICING) if model_id else DEFAULT_PRICING
+
+    input_cost = (input_tokens / 1_000_000) * pricing.get(
+        "input_per_million", DEFAULT_PRICING["input_per_million"]
+    )
+    output_cost = (output_tokens / 1_000_000) * pricing.get(
+        "output_per_million", DEFAULT_PRICING["output_per_million"]
+    )
+
+    return input_cost + output_cost
+
+
 # Create singleton instance
 settings = Settings()
 
