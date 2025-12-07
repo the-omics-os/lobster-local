@@ -979,6 +979,9 @@ class TokenTrackingCallback(BaseCallbackHandler):
         """
         import json
 
+        # Ensure workspace directory exists
+        workspace_path.mkdir(parents=True, exist_ok=True)
+
         usage_file = workspace_path / "token_usage.json"
         with open(usage_file, "w") as f:
             json.dump(self.get_usage_summary(), f, indent=2)
