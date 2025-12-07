@@ -10,7 +10,7 @@
 
 - [✨ What is Lobster AI?](#-what-is-lobster-ai)
 - [⚡ Quick Start](#-quick-start)
-- [💡 Example Usage](#-example-usage)
+- [💡 Example Usage](#-example-usage) 
 - [🧬 Features](#-features)
 - [🚀 Installation](#-installation)
 - [🔬 Literature Mining & Metadata](#-literature-mining--metadata)
