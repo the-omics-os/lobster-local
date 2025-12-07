@@ -242,7 +242,7 @@ NCBI_API_KEY="your-ncbi-api-key-here"
 # =============================================================================
 
 # Profile-based configuration (recommended)
-# Available profiles: development, production, cost-optimized
+# Available profiles: development, production, ultra, godmode
 LOBSTER_PROFILE=production
 
 # OR use custom configuration file
@@ -281,14 +281,17 @@ LOBSTER_CACHE_DIR=data/cache
 # EXAMPLE CONFIGURATIONS
 # =============================================================================
 
-# Example 1: Development setup (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# Example 1: Development setup (Claude Haiku 4.5 - fastest, most affordable)
 # LOBSTER_PROFILE=development
 
-# Example 2: Production setup (Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# Example 2: Production setup (Claude Sonnet 4 - balanced quality & speed)
 # LOBSTER_PROFILE=production
 
-# Example 3: Cost-optimized setup (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
-# LOBSTER_PROFILE=cost-optimized
+# Example 3: Ultra setup (Claude Sonnet 4.5 - highest quality)
+# LOBSTER_PROFILE=ultra
+
+# Example 4: Godmode setup (Claude Opus 4.1 - experimental, most expensive)
+# LOBSTER_PROFILE=godmode
 """
 
     with open(".env.template", "w") as f:

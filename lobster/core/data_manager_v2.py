@@ -1509,6 +1509,21 @@ class DataManagerV2:
 
         return saved_items
 
+    def save_session(self) -> List[str]:
+        """
+        Save current session state.
+
+        This is an alias for auto_save_state() to maintain API compatibility
+        with UI components and legacy code.
+
+        Returns:
+            List[str]: List of saved items
+
+        See Also:
+            auto_save_state(): The underlying implementation method
+        """
+        return self.auto_save_state()
+
     def has_data(self) -> bool:
         """
         Check if any modalities are loaded.

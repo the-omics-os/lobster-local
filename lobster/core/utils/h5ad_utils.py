@@ -10,6 +10,7 @@ import collections
 import datetime
 import json
 import logging
+import math
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -100,26 +101,34 @@ def sanitize_value(
     if obj is None:
         return ""
 
-    # OrderedDict → dict (with recursive sanitization)
+    # OrderedDict → dict (with recursive sanitization + value stringification)
     if isinstance(obj, collections.OrderedDict):
-        return {
-            sanitize_key(k, slash_replacement): sanitize_value(
-                v, slash_replacement, strict
-            )
-            for k, v in obj.items()
-        }
+        result = {}
+        for k, v in obj.items():
+            sanitized_key = sanitize_key(k, slash_replacement)
+            # Stringify int/float dict values for HDF5 compatibility
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                result[sanitized_key] = str(v)
+            else:
+                result[sanitized_key] = sanitize_value(v, slash_replacement, strict)
+        return result
 
-    # tuple → list (with recursive sanitization)
-    # HDF5 cannot handle Python tuples in nested structures, but CAN handle lists
+    # tuple → list or numpy array (preserving numeric types when possible)
     if isinstance(obj, tuple):
-        # Convert to list, recursively sanitizing complex types but preserving primitives
-        return [sanitize_value(v, slash_replacement, strict) for v in obj]
+        # Check if all items are numeric (int or float, not bool)
+        all_numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in obj)
+        if all_numeric and len(obj) > 0:
+            # Preserve as numeric numpy array
+            return np.array(obj)
+        else:
+            # Convert to numpy string array for HDF5 compatibility
+            sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in obj]
+            return np.array([str(item) for item in sanitized_items], dtype=str)
 
-    # numpy scalars → Python scalars (DON'T RETURN - let fall through!)
-    # CRITICAL BUG FIX: Previously returned immediately, bypassing stringification
+    # numpy scalars → strings (CRITICAL for HDF5 compatibility)
     if isinstance(obj, (np.generic,)):
-        obj = obj.item()  # Convert to Python primitive but continue processing
-        # Fall through to subsequent type checks
+        # Convert numpy scalar to Python primitive, then stringify
+        return str(obj.item())
 
     # Pandas types → string representation
     # Handle pandas-specific types if pandas is available
@@ -172,6 +181,14 @@ def sanitize_value(
     if isinstance(obj, bool):
         return str(obj)
 
+    # NaN/inf handling for floats (BEFORE general float→string conversion)
+    if isinstance(obj, float):
+        # Check for NaN using math.isnan (works for float('nan') and np.nan)
+        if math.isnan(obj):
+            return ""  # Convert NaN to empty string for HDF5 compatibility
+        # inf and -inf get stringified normally
+        return str(obj)
+
     # dict → dict (with recursive sanitization)
     # CRITICAL: int/float values in dicts must be stringified for HDF5 compatibility
     # (HDF5 groups cannot store scalar numeric values)
@@ -179,49 +196,36 @@ def sanitize_value(
         result = {}
         for k, v in obj.items():
             sanitized_key = sanitize_key(k, slash_replacement)
+            # Handle NaN values in dicts specially
+            if isinstance(v, float) and math.isnan(v):
+                result[sanitized_key] = ""
             # Stringify int/float dict values for HDF5 compatibility
-            if isinstance(v, (int, float)) and not isinstance(v, bool):
+            elif isinstance(v, (int, float)) and not isinstance(v, bool):
                 result[sanitized_key] = str(v)
             else:
                 result[sanitized_key] = sanitize_value(v, slash_replacement, strict)
         return result
 
-    # int/float → preserve as-is (for tuple/list items)
-    # NOTE: int/float in dict values are already stringified above
-    if isinstance(obj, (int, float)) and not isinstance(obj, bool):
-        return obj
+    # int → convert to strings (HDF5 requirement for scalar values)
+    if isinstance(obj, int) and not isinstance(obj, bool):
+        return str(obj)
 
-    # list → recursively sanitized list (preserve as list, not numpy array)
+    # list → list or numpy array (preserving numeric types when possible)
     if isinstance(obj, list):
         # Empty lists are OK
         if not obj:
             return []
 
-        # Check if list contains dicts - if so, stringify the entire dict
-        # HDF5 cannot handle lists of dicts (anndata converts lists to arrays)
-        contains_dict = any(isinstance(item, dict) for item in obj)
-
-        if contains_dict:
-            # Stringify dict elements completely
-            sanitized_items = []
-            for item in obj:
-                if isinstance(item, dict):
-                    # Recursively sanitize the dict first, then stringify
-                    sanitized_dict = sanitize_value(item, slash_replacement, strict)
-                    sanitized_items.append(str(sanitized_dict))
-                else:
-                    sanitized_items.append(
-                        str(sanitize_value(item, slash_replacement, strict))
-                    )
-            # Return as list of strings
-            return sanitized_items
+        # Check if all items are numeric (int or float, not bool)
+        all_numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in obj)
+        if all_numeric:
+            # Preserve as numeric numpy array
+            return np.array(obj)
         else:
-            # No dicts - recursively sanitize items, preserving types
-            sanitized_items = [
-                sanitize_value(v, slash_replacement, strict) for v in obj
-            ]
-            # Return as list (H5AD will convert to appropriate array type)
-            return sanitized_items
+            # Recursively sanitize all items
+            sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in obj]
+            # Convert to numpy string array for HDF5 compatibility
+            return np.array([str(item) for item in sanitized_items], dtype=str)
 
     # numpy arrays
     if isinstance(obj, np.ndarray):

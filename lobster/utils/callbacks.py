@@ -477,7 +477,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         # Filter out known LLM model class names to avoid confusion
         llm_model_names = [
             "chatbedrock", "chatbedrockconverse", "chatanthropic",
-            "chatopenai", "chatollama", "llm", "chat"
+            "chatollama", "llm", "chat"
         ]
         chain_name_lower = chain_name.lower()
         if any(model in chain_name_lower for model in llm_model_names):

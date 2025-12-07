@@ -3135,6 +3135,11 @@ def init(
         "--ollama-model",
         help="Ollama model name (default: llama3:8b-instruct, non-interactive mode)",
     ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help="Agent profile (development, production, ultra, godmode). Only for Anthropic/Bedrock providers.",
+    ),
     ncbi_key: Optional[str] = typer.Option(
         None, "--ncbi-key", help="NCBI API key (optional, non-interactive mode)"
     ),
@@ -3162,12 +3167,16 @@ def init(
       lobster init                                    # Interactive setup
       lobster init --force                            # Reconfigure (overwrite existing)
       lobster init --non-interactive \\
-        --anthropic-key=sk-ant-xxx                   # CI/CD: Claude API
+        --anthropic-key=sk-ant-xxx                   # CI/CD: Claude API (default: production)
+      lobster init --non-interactive \\
+        --anthropic-key=sk-ant-xxx \\
+        --profile=development                        # CI/CD: Claude with dev profile
       lobster init --non-interactive \\
         --bedrock-access-key=AKIA... \\
-        --bedrock-secret-key=xxx                     # CI/CD: AWS Bedrock
+        --bedrock-secret-key=xxx \\
+        --profile=ultra                              # CI/CD: Bedrock with ultra profile
       lobster init --non-interactive \\
-        --use-ollama                                 # CI/CD: Ollama (local)
+        --use-ollama                                 # CI/CD: Ollama (profile not applicable)
       lobster init --non-interactive \\
         --use-ollama --ollama-model=mixtral:8x7b-instruct  # CI/CD: Ollama with custom model
       lobster init --non-interactive \\
@@ -3250,6 +3259,29 @@ def init(
         if priority_warning:
             console.print(f"[yellow]⚠️  Warning: {priority_warning}[/yellow]")
 
+        # Validate profile parameter (only relevant for Anthropic/Bedrock)
+        valid_profiles = ["development", "production", "ultra", "godmode"]
+        selected_profile = None
+
+        if profile:
+            # Profile provided - validate it
+            if profile not in valid_profiles:
+                console.print(f"[red]❌ Error: Invalid profile '{profile}'[/red]")
+                console.print(f"Valid profiles: {', '.join(valid_profiles)}")
+                raise typer.Exit(1)
+
+            # Warn if profile used with Ollama (it will be ignored)
+            if has_ollama and not has_anthropic and not has_bedrock:
+                console.print(
+                    f"[yellow]⚠️  Warning: --profile ignored for Ollama (uses local models)[/yellow]"
+                )
+            else:
+                selected_profile = profile
+        else:
+            # No profile provided - use default for Anthropic/Bedrock only
+            if has_anthropic or has_bedrock:
+                selected_profile = "production"  # Default profile
+
         # Create provider configuration
         if has_anthropic:
             config = provider_setup.create_anthropic_config(anthropic_key)
@@ -3269,6 +3301,13 @@ def init(
                 for key, value in config.env_vars.items():
                     env_lines.append(f"{key}={value}")
                 console.print("[green]✓ Ollama provider configured[/green]")
+
+        # Write profile configuration (only for Anthropic/Bedrock)
+        if selected_profile:
+            env_lines.append(f"\n# Agent Configuration Profile")
+            env_lines.append(f"# Determines which Claude models are used for analysis")
+            env_lines.append(f"LOBSTER_PROFILE={selected_profile}")
+            console.print(f"[green]✓ Profile set to: {selected_profile}[/green]")
 
         if ncbi_key:
             env_lines.append(f"\n# Optional: Enhanced literature search")
@@ -3475,6 +3514,44 @@ def init(
                         env_lines.append(f"{key}={value}")
 
                 console.print("[green]✓ Ollama provider configured[/green]")
+
+        # Profile selection (only for Anthropic/Bedrock providers)
+        profile_to_write = None
+        if provider in ["1", "2"]:  # Anthropic or Bedrock
+            console.print("\n[bold white]⚙️  Agent Configuration Profile[/bold white]")
+            console.print("Choose which Claude models to use for analysis:")
+            console.print()
+            console.print("  [cyan]1[/cyan] - Development  (Haiku 4.5 - fastest, most affordable)")
+            console.print("  [cyan]2[/cyan] - Production   (Sonnet 4 - balanced quality & speed) [recommended]")
+            console.print("  [cyan]3[/cyan] - Ultra        (Sonnet 4.5 - highest quality, slower)")
+            console.print("  [cyan]4[/cyan] - Godmode      (Opus 4.1 - experimental, most expensive)")
+            console.print()
+            console.print("[dim]💡 Tip: Development profile is great for testing, Production for real analysis[/dim]")
+            console.print("[dim]   You can change this later by editing .env or using the --profile flag[/dim]")
+            console.print()
+
+            profile_choice = Prompt.ask(
+                "[bold white]Choose profile[/bold white]",
+                choices=["1", "2", "3", "4"],
+                default="2"
+            )
+
+            profile_map = {
+                "1": "development",
+                "2": "production",
+                "3": "ultra",
+                "4": "godmode"
+            }
+            profile_to_write = profile_map[profile_choice]
+
+            env_lines.append(f"\n# Agent Configuration Profile")
+            env_lines.append(f"# Determines which Claude models are used for analysis")
+            env_lines.append(f"LOBSTER_PROFILE={profile_to_write}")
+            console.print(f"[green]✓ Profile set to: {profile_to_write}[/green]")
+
+        elif provider == "3":  # Ollama
+            # No profile needed - Ollama uses local models
+            console.print("[dim]ℹ️  Note: Ollama uses local models (profile configuration not applicable)[/dim]")
 
         # Optional NCBI key(s) - supports multiple for parallelization
         console.print("\n[bold white]📚 NCBI API Key(s) (Optional)[/bold white]")
@@ -7115,11 +7192,13 @@ when they are started by agents or analysis workflows.
             # Add descriptions for each mode based on actual configurations
             description = ""
             if profile == "development":
-                description = "Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - fast development"
+                description = "Claude Haiku 4.5 for all agents - fastest, most affordable"
             elif profile == "production":
-                description = "Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant - production ready"
-            elif profile == "cost-optimized":
-                description = "Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant - cost optimized"
+                description = "Claude Sonnet 4 for most agents - balanced quality & speed"
+            elif profile == "ultra":
+                description = "Claude Sonnet 4.5 for all agents - highest quality"
+            elif profile == "godmode":
+                description = "Claude Opus 4.1 for supervisor - experimental, most expensive"
 
             status = (
                 "[bold green]ACTIVE[/bold green]" if profile == current_mode else ""
@@ -7446,15 +7525,20 @@ def list_profiles():
 def show_config(
     profile: Optional[str] = typer.Option(
         None, "--profile", "-p", help="Profile to show"
-    )
+    ),
+    show_all: bool = typer.Option(
+        False,
+        "--show-all",
+        help="Show all configured agents regardless of license tier",
+    ),
 ):
-    """Show current configuration."""
+    """Show current configuration, filtered by license tier."""
     configurator = (
         initialize_configurator(profile=profile)
         if profile
         else LobsterAgentConfigurator()
     )
-    configurator.print_current_config()
+    configurator.print_current_config(show_all=show_all)
 
 
 @config_app.command(name="test")
@@ -7610,7 +7694,7 @@ NCBI_API_KEY="your-ncbi-api-key-here"
 # =============================================================================
 
 # Profile-based configuration (recommended)
-# Available profiles: development, production, cost-optimized
+# Available profiles: development, production, ultra, godmode
 LOBSTER_PROFILE=production
 
 # OR use custom configuration file
@@ -7649,14 +7733,17 @@ LOBSTER_CACHE_DIR=data/cache
 # EXAMPLE CONFIGURATIONS
 # =============================================================================
 
-# Example 1: Development setup (Claude 3.7 Sonnet for all agents)
+# Example 1: Development setup (Claude Haiku 4.5 - fastest, most affordable)
 # LOBSTER_PROFILE=development
 
-# Example 2: Production setup (Claude 4 Sonnet for all agents except assistant)
+# Example 2: Production setup (Claude Sonnet 4 - balanced quality & speed)
 # LOBSTER_PROFILE=production
 
-# Example 3: Cost-optimized setup (Claude 3.7 Sonnet for all agents)
-# LOBSTER_PROFILE=cost-optimized
+# Example 3: Ultra setup (Claude Sonnet 4.5 - highest quality)
+# LOBSTER_PROFILE=ultra
+
+# Example 4: Godmode setup (Claude Opus 4.1 - experimental, most expensive)
+# LOBSTER_PROFILE=godmode
 """
 
     with open(".env.template", "w") as f:

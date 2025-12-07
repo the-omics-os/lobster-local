@@ -21,7 +21,6 @@ class ModelProvider(Enum):
     """Supported model providers."""
 
     BEDROCK_ANTHROPIC = "bedrock_anthropic"
-    OPENAI = "openai"  # TODO
     BEDROCK_META = "bedrock_meta"
     BEDROCK_AMAZON = "bedrock_amazon"
 
@@ -101,37 +100,37 @@ class LobsterAgentConfigurator:
 
     # Pre-defined model configurations - 3 models
     MODEL_PRESETS = {
-        # Development Model - Claude 3.7 Sonnet
+        # Development Model - Claude 4.5 Haiku (fastest, lightweight)
         "claude-4-5-haiku": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-haiku-4-5-20251001-v1:0",
-            tier=ModelTier.ULTRA,
+            tier=ModelTier.LIGHTWEIGHT,
             temperature=1.0,
             region="us-east-1",
             description="Claude 4.5 haiku for development and worker agents",
             supports_thinking=True,
         ),
-        # Production Model - Claude 4 Sonnet
+        # Production Model - Claude 4 Sonnet (balanced performance)
         "claude-4-sonnet": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-sonnet-4-20250514-v1:0",
-            tier=ModelTier.ULTRA,
+            tier=ModelTier.STANDARD,
             temperature=1.0,
             region="us-east-1",
             description="Claude 4 Sonnet for production",
             supports_thinking=True,
         ),
-        # ultra Model - Claude 4.5 Sonnet
+        # Ultra Mode - Claude 4.5 Sonnet (advanced capabilities)
         "claude-4-5-sonnet": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-            tier=ModelTier.ULTRA,
+            tier=ModelTier.HEAVY,
             temperature=1.0,
             region="us-east-1",
-            description="Claude 4.5 Sonnet for uktra mode",
+            description="Claude 4.5 Sonnet for ultra mode",
             supports_thinking=True,
         ),
-        # Godmode Model - Claude 4.5 Sonnet
+        # Godmode Model - Claude 4.1 Opus (most capable)
         "claude-4-1-opus": ModelConfig(
             provider=ModelProvider.BEDROCK_ANTHROPIC,
             model_id="us.anthropic.claude-opus-4-1-20250805-v1:0",
@@ -457,13 +456,6 @@ class LobsterAgentConfigurator:
                     ),
                 }
             )
-        elif model_config.provider == ModelProvider.OPENAI:  # TODO
-            params.update(
-                {
-                    "openai_api_key": os.environ.get("OPENAI_API_KEY"),
-                }
-            )
-
         # Add thinking configuration if enabled
         if agent_config.thinking_config and agent_config.thinking_config.enabled:
             thinking_params = agent_config.thinking_config.to_dict()
@@ -525,17 +517,44 @@ class LobsterAgentConfigurator:
         with open(filepath, "w") as f:
             json.dump(config_data, f, indent=2)
 
-    def print_current_config(self):
-        """Print current configuration in a readable format."""
+    def print_current_config(self, show_all: bool = False):
+        """
+        Print current configuration in a readable format.
+
+        Args:
+            show_all: If True, show all configured agents regardless of license tier.
+                      If False (default), filter by current license tier.
+        """
+        # Import license and tier utilities
+        from lobster.core.license_manager import get_current_tier
+        from lobster.config.subscription_tiers import (
+            is_agent_available,
+            get_tier_display_name,
+        )
+
+        # Get current tier
+        current_tier = get_current_tier()
+
         print("\n🔧 Lobster AI Configuration")
         print(f"Profile: {self.profile}")
+        print(f"License Tier: {get_tier_display_name(current_tier)}")
         print(f"{'='*60}")
 
+        # Filter agents based on tier availability
+        displayed_count = 0
+        filtered_count = 0
+
         for agent_name, agent_config in self._agent_configs.items():
+            # Check if agent is available for current tier (unless show_all is True)
+            if not show_all and not is_agent_available(agent_name, current_tier):
+                filtered_count += 1
+                continue
+
+            displayed_count += 1
             model = agent_config.model_config
             print(f"\n🤖 {agent_name.title()}")
             print(f"   Model: {model.model_id}")
-            print(f"   Tier: {model.tier.value}")
+            print(f"   Performance: {model.tier.value}")
             print(f"   Region: {model.region}")
             print(f"   Temperature: {model.temperature}")
             if model.description:
@@ -546,6 +565,17 @@ class LobsterAgentConfigurator:
                 )
             elif model.supports_thinking:
                 print("   🧠 Thinking: Available but disabled")
+
+        # Show summary if agents were filtered
+        if filtered_count > 0 and not show_all:
+            print(f"\n{'='*60}")
+            print(
+                f"📊 Summary: Showing {displayed_count} agents available for {current_tier} tier"
+            )
+            print(f"   ({filtered_count} premium agents hidden - upgrade to access)")
+            print(
+                f"   Tip: Use 'lobster config show-config --show-all' to see all configured agents"
+            )
 
 
 # Singleton instance

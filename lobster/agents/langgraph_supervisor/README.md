@@ -28,18 +28,18 @@ Here's a simple example of a supervisor managing two specialized agents:
 ![Supervisor Architecture](static/img/supervisor.png)
 
 ```bash
-pip install langgraph-supervisor langchain-openai
+pip install langgraph-supervisor langchain-anthropic
 
-export OPENAI_API_KEY=<your_api_key>
+export ANTHROPIC_API_KEY=<your_api_key>
 ```
 
 ```python
-from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 
 from langgraph_supervisor import create_supervisor
 from langgraph.prebuilt import create_react_agent
 
-model = ChatOpenAI(model="gpt-4o")
+model = ChatAnthropic(model="claude-3-5-sonnet-20241022")
 
 # Create specialized agents
 
@@ -293,21 +293,21 @@ This creates a tool named `forward_message` that the supervisor can invoke. The 
 Here's a simple example of a supervisor managing two specialized agentic workflows created using Functional API:
 
 ```bash
-pip install langgraph-supervisor langchain-openai
+pip install langgraph-supervisor langchain-anthropic
 
-export OPENAI_API_KEY=<your_api_key>
+export ANTHROPIC_API_KEY=<your_api_key>
 ```
 
 ```python
 from langgraph.prebuilt import create_react_agent
 from langgraph_supervisor import create_supervisor
 
-from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 
 from langgraph.func import entrypoint, task
 from langgraph.graph import add_messages
 
-model = ChatOpenAI(model="gpt-4o")
+model = ChatAnthropic(model="claude-3-5-sonnet-20241022")
 
 # Create specialized agents
 

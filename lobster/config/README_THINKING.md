@@ -19,14 +19,17 @@ Currently, only the following models support thinking:
 The easiest way to enable thinking is through the testing profiles in `agent_config.py`. The available profiles are:
 
 ```python
-# Development profile (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# Development profile (Claude Haiku 4.5 - fastest, most affordable)
 LOBSTER_PROFILE=development
 
-# Production profile (Claude 4 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
+# Production profile (Claude Sonnet 4 - balanced quality & speed)
 LOBSTER_PROFILE=production
 
-# Cost-optimized profile (Claude 3.7 Sonnet for all agents, 3.5 Sonnet v2 for assistant)
-LOBSTER_PROFILE=cost-optimized
+# Ultra profile (Claude Sonnet 4.5 - highest quality)
+LOBSTER_PROFILE=ultra
+
+# Godmode profile (Claude Opus 4.1 - experimental, most expensive)
+LOBSTER_PROFILE=godmode
 ```
 
 ### 2. Environment Variable Configuration

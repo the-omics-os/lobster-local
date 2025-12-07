@@ -151,7 +151,6 @@ LOBSTER_METHOD_AGENT_TEMPERATURE=0.3
 
 ### Required API Keys (unchanged)
 ```bash
-OPENAI_API_KEY="your-openai-api-key" #TODO
 AWS_BEDROCK_ACCESS_KEY="your-aws-access-key"
 AWS_BEDROCK_SECRET_ACCESS_KEY="your-aws-secret-key"
 NCBI_API_KEY="your-ncbi-api-key"

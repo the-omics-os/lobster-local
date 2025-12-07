@@ -150,7 +150,18 @@ class PathResolver:
             resolved = (self.current_directory / path_str).resolve()
             source = "relative"
 
-        # 2. Security check: prevent directory traversal
+        # 2. Check for special files first (more specific error)
+        if not allow_special and self._is_special_file(resolved):
+            logger.warning(f"Special file access blocked: '{resolved}'")
+            return ResolvedPath(
+                path=resolved,
+                source=source,
+                exists=True,
+                is_safe=False,
+                error=f"Special file access not allowed: {resolved.name} (device/pipe/socket)",
+            )
+
+        # 3. Security check: prevent directory traversal
         is_safe = self._is_safe_path(resolved)
         if not is_safe:
             logger.warning(
@@ -163,17 +174,6 @@ class PathResolver:
                 exists=False,
                 is_safe=False,
                 error=f"Path traversal detected: '{path_str}' escapes allowed directories",
-            )
-
-        # 3. Check for special files (security risk)
-        if not allow_special and self._is_special_file(resolved):
-            logger.warning(f"Special file access blocked: '{resolved}'")
-            return ResolvedPath(
-                path=resolved,
-                source=source,
-                exists=True,
-                is_safe=False,
-                error=f"Special file access not allowed: {resolved.name} (device/pipe/socket)",
             )
 
         # 4. Check if file exists

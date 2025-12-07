@@ -628,6 +628,11 @@ def validate_sra_sample(sample: Dict[str, Any]) -> ValidationResult:
             f"(library_strategy: {validated.library_strategy})"
         )
 
+        # Add info message to result for successful validation
+        result.add_info(
+            f"Sample {validated.run_accession} validated successfully"
+        )
+
     except ValidationError as e:
         # Pydantic validation failed - critical errors
         for error in e.errors():

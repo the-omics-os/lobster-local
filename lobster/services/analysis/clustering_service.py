@@ -364,8 +364,26 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
 
         Raises:
             ClusteringError: If clustering fails
+            TypeError: If adata is not an AnnData object
+            ValueError: If resolution is invalid
         """
+        # Input validation (outside try/except - these are caller errors, not clustering errors)
+        if not isinstance(adata, anndata.AnnData):
+            raise TypeError(
+                f"Expected AnnData object, got {type(adata).__name__}"
+            )
+
+        # Validate resolution parameter
+        if resolution is None:
+            resolution = self.default_cluster_resolution
+
+        if resolution is not None and resolution <= 0:
+            raise ValueError(
+                f"Resolution must be positive, got {resolution}"
+            )
+
         try:
+
             logger.debug("Starting clustering and visualization pipeline")
 
             # Initialize progress tracking
@@ -377,10 +395,6 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                 self.total_steps += 1
             if "marker_genes" not in skip_steps:
                 self.total_steps += 1
-
-            # Set resolution
-            if resolution is None:
-                resolution = self.default_cluster_resolution
 
             logger.debug(f"Performing clustering with resolution {resolution}")
 
@@ -672,6 +686,14 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             logger.info("Computing neighborhood graph from custom embedding")
             n_neighbors = 10 if demo_mode else 15
 
+            # Adjust n_neighbors if we have too few cells
+            if adata.n_obs <= n_neighbors:
+                old_n_neighbors = n_neighbors
+                n_neighbors = max(2, adata.n_obs - 1)
+                logger.warning(
+                    f"Adjusted n_neighbors from {old_n_neighbors} to {n_neighbors} due to small dataset ({adata.n_obs} cells)"
+                )
+
             with with_periodic_progress(
                 "Computing neighborhood graph from custom embedding",
                 self._create_progress_callback(),
@@ -760,6 +782,7 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                 adata.raw = adata.copy()
 
                 # Step 3: Subset to selected features
+                total_genes = adata.n_vars
                 if n_selected == 0:
                     raise ClusteringError(
                         "No highly deviant genes detected. This typically indicates:\n"
@@ -771,6 +794,35 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                         "- Ensure data is raw counts (not already normalized/log-transformed)\n"
                         "- Try filtering out low-quality cells/genes first"
                     )
+
+                # Validate that selected features have sufficient variance
+                selected_deviance = adata.var.loc[adata.var["highly_deviant"], "deviance_score"]
+                if len(selected_deviance) > 0:
+                    deviance_range = selected_deviance.max() - selected_deviance.min()
+                    deviance_mean = selected_deviance.mean()
+                    deviance_max = selected_deviance.max()
+
+                    # Check if variance spread is too low (coefficient of variation < 0.7)
+                    # This catches cases where genes have uniform deviance (e.g., all Poisson(1))
+                    # CV < 0.7 means the range is less than 70% of the mean, indicating poor discrimination
+                    is_too_uniform = deviance_mean > 0 and (deviance_range / deviance_mean) < 0.7
+
+                    # Check if absolute variance is too low (max deviance < 0.5)
+                    # AND all genes were selected (indicating no real differentiation)
+                    is_too_low_and_no_selection = deviance_max < 0.5 and n_selected >= total_genes * 0.95
+
+                    if is_too_uniform or is_too_low_and_no_selection:
+                        raise ClusteringError(
+                            "Insufficient features for clustering: selected features have very uniform variance.\n"
+                            "This typically indicates:\n"
+                            "1. Data has very low variance (all genes have similar expression)\n"
+                            "2. Dataset may be too homogeneous for clustering\n"
+                            "3. Data may need quality filtering before clustering\n\n"
+                            "Suggestions:\n"
+                            "- Check data quality (variance should differ between genes)\n"
+                            "- Filter out low-quality or uninformative cells/genes\n"
+                            "- Verify this is raw count data, not pre-processed"
+                        )
 
                 # In demo mode, further restrict features
                 if demo_mode and n_selected > 1000:
@@ -819,6 +871,25 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                         "- Consider using 'deviance' method instead (works on raw counts, no normalization bias)"
                     )
 
+                # Validate that selected features have sufficient variance spread
+                if "dispersions_norm" in adata.var.columns:
+                    selected_dispersion = adata.var.loc[adata.var.highly_variable, "dispersions_norm"]
+                    if len(selected_dispersion) > 0:
+                        disp_range = selected_dispersion.max() - selected_dispersion.min()
+                        disp_mean = selected_dispersion.mean()
+                        # Check if variance is too uniform
+                        if disp_mean > 0 and (disp_range / disp_mean) < 0.1:
+                            raise ClusteringError(
+                                "Selected features have insufficient variance spread. This typically indicates:\n"
+                                "1. Data has very uniform expression across all genes\n"
+                                "2. Dataset may be too homogeneous for clustering\n"
+                                "3. Data may need quality filtering before clustering\n\n"
+                                "Suggestions:\n"
+                                "- Check data quality (variance should differ between genes)\n"
+                                "- Filter out low-quality or uninformative cells/genes\n"
+                                "- Consider using 'deviance' method for better feature detection"
+                            )
+
                 # In demo mode, further restrict features
                 if demo_mode and n_hvg > 1000:
                     logger.info("Demo mode: Restricting to top 1000 variable genes")
@@ -848,20 +919,23 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                 15 if demo_mode else 30
             )  # Best practice: 30 PCs capture more variance
 
-            # ISSUE #7 FIX: Validate n_pcs against available features
+            # ISSUE #7 FIX: Validate n_pcs against available features AND cells
             n_features = adata_selected.n_vars
-            if n_features < n_pcs:
+            n_cells = adata_selected.n_obs
+
+            # PCA can compute at most min(n_cells, n_features) components
+            max_pcs = min(n_cells - 1, n_features - 1)
+
+            if n_pcs > max_pcs:
                 old_n_pcs = n_pcs
-                n_pcs = min(
-                    n_features - 1, n_features // 2
-                )  # Use at most half of features
+                n_pcs = max(1, max_pcs)
                 if n_pcs < 1:
                     raise ClusteringError(
-                        f"Insufficient features for PCA: only {n_features} highly variable genes detected, "
-                        f"but need at least 2 for PCA. Try using all genes or check data quality."
+                        f"Insufficient data for PCA: {n_cells} cells and {n_features} features, "
+                        f"but need at least 2 of each for PCA. Check data quality."
                     )
                 logger.warning(
-                    f"Reduced n_pcs from {old_n_pcs} to {n_pcs} due to limited features ({n_features} HVG)"
+                    f"Reduced n_pcs from {old_n_pcs} to {n_pcs} due to limited data ({n_cells} cells, {n_features} features)"
                 )
 
             logger.info(f"Using {n_pcs} principal components for neighborhood graph")
@@ -876,6 +950,14 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             n_neighbors = (
                 10 if demo_mode else 15
             )  # Use fewer neighbors in demo mode for speed
+
+            # Adjust n_neighbors if we have too few cells
+            if adata_selected.n_obs <= n_neighbors:
+                old_n_neighbors = n_neighbors
+                n_neighbors = max(2, adata_selected.n_obs - 1)
+                logger.warning(
+                    f"Adjusted n_neighbors from {old_n_neighbors} to {n_neighbors} due to small dataset ({adata_selected.n_obs} cells)"
+                )
 
             with with_periodic_progress(
                 "Computing neighborhood graph",

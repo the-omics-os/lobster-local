@@ -40,12 +40,8 @@ dependencies = [
     # LangChain and AI
     "langchain>=0.1.0",
     "langchain-community>=0.0.10",
-    "langchain-openai>=0.0.5",
     "langchain-aws>=0.1.0",
     "langgraph==0.6.7",
-    "openai>=1.0.0",
-    # Claude Code SDK for custom feature creation
-    "claude-agent-sdk>=0.1.0",
     # Bioinformatics (bumped versions for Python 3.12 support)
     "llvmlite==0.44.0", # explicit to avoid old version being pulled
     "scipy>=1.10.0",
@@ -102,9 +98,7 @@ dependencies = [
     "docling-core>=2.50.0",
     "redis>=6.4.0",
     "pysradb>=2.5.1",
-    "linkup>=0.1.0", # Linkup SDK for web research (GitHub repos, packages, best practices)
     "rispy>=0.10.0",
-    "cloudscraper>=1.2.71",
     "langchain-core>=0.3.79",
     "textual>=6.7.1",
     "langchain-ollama>=0.3.10",

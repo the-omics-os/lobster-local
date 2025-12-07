@@ -350,13 +350,13 @@ def create_supervisor(
         supervisor_name: Name of the supervisor node.
         include_agent_name: Use to specify how to expose the agent name to the underlying supervisor LLM.
 
-            - None: Relies on the LLM provider using the name attribute on the AI message. Currently, only OpenAI supports this.
+            - None: Relies on the LLM provider using the name attribute on the AI message.
             - `"inline"`: Add the agent name directly into the content field of the AI message using XML-style tags.
                 Example: `"How can I help you"` -> `"<name>agent_name</name><content>How can I help you?</content>"`
 
     Example:
         ```python
-        from langchain_openai import ChatOpenAI
+        from langchain_anthropic import ChatAnthropic
 
         from langgraph_supervisor import create_supervisor
         from langgraph.prebuilt import create_react_agent
@@ -372,13 +372,13 @@ def create_supervisor(
             return 'Here are the headcounts for each of the FAANG companies in 2024...'
 
         math_agent = create_react_agent(
-            model="openai:gpt-4o",
+            model="claude-3-5-sonnet-20241022",
             tools=[add],
             name="math_expert",
         )
 
         research_agent = create_react_agent(
-            model="openai:gpt-4o",
+            model="claude-3-5-sonnet-20241022",
             tools=[web_search],
             name="research_expert",
         )
@@ -386,7 +386,7 @@ def create_supervisor(
         # Create supervisor workflow
         workflow = create_supervisor(
             [research_agent, math_agent],
-            model=ChatOpenAI(model="gpt-4o"),
+            model=ChatAnthropic(model="claude-3-5-sonnet-20241022"),
         )
 
         # Compile and run

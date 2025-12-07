@@ -57,9 +57,6 @@ class Settings:
         self.BASE_DIR = Path(__file__).resolve().parent.parent
 
         # API keys
-        self.OPENAI_API_KEY = os.environ.get(
-            "OPENAI_API_KEY", ""
-        )  # TODO future support
         self.AWS_BEDROCK_ACCESS_KEY = os.environ.get("AWS_BEDROCK_ACCESS_KEY", "")
         self.AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get(
             "AWS_BEDROCK_SECRET_ACCESS_KEY", ""

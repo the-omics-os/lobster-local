@@ -21,8 +21,6 @@ class LLMProvider(Enum):
 
     ANTHROPIC_DIRECT = "anthropic"
     BEDROCK_ANTHROPIC = "bedrock"
-    OPENAI = "openai"  # Future support
-    AZURE_OPENAI = "azure_openai"  # Future support
     OLLAMA = "ollama"  # Local LLM support via Ollama
 
 
@@ -96,9 +94,6 @@ class LLMFactory:
             "AWS_BEDROCK_SECRET_ACCESS_KEY"
         ):
             return LLMProvider.BEDROCK_ANTHROPIC
-        elif os.environ.get("OPENAI_API_KEY"):
-            return LLMProvider.OPENAI
-
         return None
 
     @classmethod
@@ -384,12 +379,6 @@ class LLMFactory:
 
             return ChatOllama(**ollama_params)
 
-        elif provider == LLMProvider.OPENAI:
-            raise NotImplementedError(
-                "OpenAI provider support is planned for future release. "
-                "Please use Claude API or AWS Bedrock for now."
-            )
-
         else:
             raise ValueError(f"Provider {provider.value} is not yet implemented")
 
@@ -454,9 +443,6 @@ class LLMFactory:
             "AWS_BEDROCK_SECRET_ACCESS_KEY"
         ):
             available.append(LLMProvider.BEDROCK_ANTHROPIC.value)
-
-        if os.environ.get("OPENAI_API_KEY"):
-            available.append(LLMProvider.OPENAI.value)
 
         if os.environ.get("OLLAMA_BASE_URL") or cls._is_ollama_running():
             available.append(LLMProvider.OLLAMA.value)
