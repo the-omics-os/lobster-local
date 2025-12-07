@@ -1,0 +1,21 @@
+# =============================================================================
+# CPU-ONLY PYTORCH CONSTRAINTS FOR CI/CD
+# =============================================================================
+# This file enforces CPU-only PyTorch installations to prevent CUDA dependencies
+# from filling disk space in GitHub Actions (~3GB CUDA packages vs ~200MB CPU).
+#
+# USAGE:
+#   pip install . --extra-index-url https://download.pytorch.org/whl/cpu -c constraints-cpu.txt
+#
+# NOTE: The "+cpu" suffix directs pip to CPU-only wheels from PyTorch's index.
+# Update versions as needed from: https://download.pytorch.org/whl/cpu/torch_stable.html
+# =============================================================================
+
+# Core PyTorch packages - CPU only
+torch==2.5.1+cpu
+torchvision==0.20.1+cpu
+torchaudio==2.5.1+cpu
+
+# Triton is CUDA-only, exclude it entirely in CI (not needed for CPU inference)
+# This prevents triton from being installed as a torch dependency
+triton==0.0.0; sys_platform == 'never'
