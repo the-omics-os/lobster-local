@@ -451,6 +451,8 @@ class DataManagerV2:
 
         loaded_count = 0
         skipped_large = 0
+        corrupted_autosaves_cleaned = 0
+        corrupted_regular_files = []
 
         for h5ad_file in h5ad_files:
             try:
@@ -482,17 +484,35 @@ class DataManagerV2:
                 )
 
             except Exception as e:
-                logger.warning(
-                    f"Failed to auto-load {h5ad_file.name}: {e}. "
-                    f"File may be corrupted or require manual loading."
-                )
+                # Handle corrupted files differently based on type
+                is_autosave = h5ad_file.name.endswith("_autosave.h5ad")
+
+                if is_autosave:
+                    # Autosave files are transient - clean up corrupted ones silently
+                    try:
+                        h5ad_file.unlink()
+                        corrupted_autosaves_cleaned += 1
+                        logger.debug(f"Removed corrupted autosave: {h5ad_file.name}")
+                    except OSError as unlink_err:
+                        logger.debug(f"Could not remove corrupted autosave {h5ad_file.name}: {unlink_err}")
+                else:
+                    # Regular files may contain important data - track for summary warning
+                    corrupted_regular_files.append(h5ad_file.name)
                 continue
 
         if loaded_count > 0:
-            logger.info(f"✅ Auto-loaded {loaded_count} modalities from workspace")
+            logger.info(f"Auto-loaded {loaded_count} modalities from workspace")
         if skipped_large > 0:
             logger.info(
                 f"Skipped {skipped_large} large files (>2GB). Use load_modality tool to load explicitly."
+            )
+        if corrupted_autosaves_cleaned > 0:
+            logger.info(f"Cleaned up {corrupted_autosaves_cleaned} corrupted autosave file(s)")
+        if corrupted_regular_files:
+            logger.warning(
+                f"Could not load {len(corrupted_regular_files)} corrupted file(s): "
+                f"{', '.join(corrupted_regular_files[:3])}"
+                f"{' and more...' if len(corrupted_regular_files) > 3 else ''}"
             )
 
     @property
@@ -1749,6 +1769,9 @@ class DataManagerV2:
                         _, pio_module = _ensure_plotly()
                         pio_module.write_html(plot, html_path)
                         saved_files.append(str(html_path))
+
+                        # Store file path back in plot entry for UI access
+                        plot_entry["file_path"] = str(html_path)
 
                         # BUG010 FIX: Skip PNG export for large datasets (Kaleido limitation)
                         # Kaleido hangs indefinitely when exporting PNG with custom hover data for >50K points
@@ -3512,6 +3535,8 @@ https://github.com/OmicsOS/lobster
             if not data_dir.exists():
                 return datasets
 
+            corrupted_autosaves_cleaned = 0
+
             for h5ad_file in data_dir.glob("*.h5ad"):
                 try:
                     # Use h5py for efficient metadata extraction
@@ -3546,7 +3571,23 @@ https://github.com/OmicsOS/lobster
                             "type": "h5ad",
                         }
                 except Exception as e:
-                    logger.warning(f"Could not scan {h5ad_file}: {e}")
+                    # Handle corrupted files gracefully
+                    is_autosave = h5ad_file.name.endswith("_autosave.h5ad")
+
+                    if is_autosave:
+                        # Autosave files are transient - clean up corrupted ones silently
+                        try:
+                            h5ad_file.unlink()
+                            corrupted_autosaves_cleaned += 1
+                            logger.debug(f"Removed corrupted autosave during scan: {h5ad_file.name}")
+                        except OSError:
+                            pass  # Silently ignore if can't delete
+                    else:
+                        # Regular files - log at debug level during scan (warning already shown during load)
+                        logger.debug(f"Could not scan {h5ad_file.name}: {e}")
+
+            if corrupted_autosaves_cleaned > 0:
+                logger.debug(f"Scan cleaned up {corrupted_autosaves_cleaned} corrupted autosave file(s)")
 
             # Update self.available_datasets for backward compatibility
             self.available_datasets = datasets

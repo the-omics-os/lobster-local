@@ -45,11 +45,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Upgrade pip and install build tools inside the venv
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel packaging build
 
-# Install PyTorch CPU-only FIRST (avoids 3GB CUDA packages)
-# This must happen before installing the main package to avoid pulling CUDA version
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
 # Install application + dependencies inside venv
+# ML extras (torch/scvi) are now optional - add [ml] to include them:
+#   RUN pip install --no-cache-dir .[ml] --index-url https://download.pytorch.org/whl/cpu
 COPY . .
 RUN pip install --no-cache-dir .
 

@@ -65,6 +65,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         show_tools: bool = True,
         max_length: int = None,
         use_panels: bool = True,
+        minimal: bool = False,
     ):
         """
         Initialize the terminal callback handler.
@@ -76,6 +77,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
             show_tools: Display tool usage
             max_length: Maximum length for content display
             use_panels: Use Rich panels for output
+            minimal: Use minimal oh-my-zsh style output (◀ Agent Name)
         """
         self.console = console or Console()
         self.verbose = verbose
@@ -83,6 +85,7 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         self.show_tools = show_tools
         self.max_length = max_length
         self.use_panels = use_panels
+        self.minimal = minimal
 
         # State tracking
         self.current_agent: Optional[str] = None
@@ -122,6 +125,20 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         """Display an agent event with Rich formatting."""
         agent_display = self._format_agent_name(event.agent_name)
 
+        # Minimal mode: oh-my-zsh style (◀ Agent Name)
+        if self.minimal:
+            if event.type == EventType.AGENT_START:
+                self.console.print(f"[dim]◀ {agent_display}[/dim]")
+            elif event.type == EventType.AGENT_THINKING and self.show_reasoning:
+                # In minimal mode, only show agent indicator once (on start)
+                pass
+            elif event.type == EventType.HANDOFF:
+                to_agent = event.metadata.get("to", "Unknown")
+                self.console.print(f"[dim]◀ {self._format_agent_name(to_agent)}[/dim]")
+            # Skip other events in minimal mode
+            return
+
+        # Standard verbose mode (existing behavior)
         if event.type == EventType.AGENT_START:
             if self.use_panels:
                 panel = Panel(
@@ -171,19 +188,16 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         tool_name = event.metadata.get("tool_name", "Unknown Tool")
 
         if event.type == EventType.TOOL_START:
-            self.console.print(f"[yellow]   🔧 Using {tool_name}[/yellow]")
+            # Minimal oh-my-zsh style tool indicator
+            self.console.print(f"[dim]  → {tool_name}[/dim]")
             if self.verbose and event.content:
                 self.console.print(
                     f"[dim]      Input: {self._truncate_content(event.content)}[/dim]"
                 )
 
         elif event.type == EventType.TOOL_COMPLETE:
-            duration_str = ""
-            if event.duration:
-                duration_str = f" [{self._format_duration(event.duration)}]"
-            self.console.print(
-                f"[green]      ✓ {tool_name} complete{duration_str}[/green]"
-            )
+            # Silent completion - only show start
+            pass
             if self.verbose and event.content:
                 self.console.print(
                     f"[dim]      Result: {self._truncate_content(event.content)}[/dim]"
@@ -199,44 +213,38 @@ class TerminalCallbackHandler(BaseCallbackHandler):
     def on_llm_start(
         self, serialized: Dict[str, Any], prompts: List[str], **kwargs
     ) -> None:
-        """Called when an LLM starts."""
-        # Handle None serialized
-        if serialized is None:
-            serialized = {}
-        agent_name = kwargs.get("name") or serialized.get("name", "unknown")
+        """
+        Called when an LLM starts (completion models like GPT-3 davinci).
 
-        # Track start time
-        self.start_times[agent_name] = datetime.now()
-
-        # Create and display event
-        event = AgentEvent(type=EventType.AGENT_START, agent_name=agent_name)
-        self.events.append(event)
-        self._display_agent_event(event)
-
-        # Update current agent
-        if agent_name != self.current_agent:
-            self.current_agent = agent_name
-            self.agent_stack.append(agent_name)
+        NOTE: This only tracks run timing for the current agent.
+        Agent switching is handled ONLY by _handle_handoff via handoff_to_* tools.
+        We do NOT display events or change current_agent based on LLM model names.
+        """
+        # Only track start time for current agent if set
+        if self.current_agent:
+            self.start_times[self.current_agent] = datetime.now()
 
     def on_llm_end(self, response: LLMResult, **kwargs) -> None:
-        """Called when an LLM finishes."""
+        """
+        Called when an LLM finishes.
+
+        NOTE: We only show reasoning content, NOT AGENT_COMPLETE events.
+        Agent completion is implicit when the next handoff occurs or query ends.
+        This matches the Textual callback behavior.
+        """
         if not self.current_agent:
             return
 
-        # Calculate duration
-        duration = None
+        # Calculate duration (for timing tracking only)
         if self.current_agent in self.start_times:
-            duration = (
-                datetime.now() - self.start_times[self.current_agent]
-            ).total_seconds()
             del self.start_times[self.current_agent]
 
-        # Extract response content
+        # Extract response content for reasoning display
         content = ""
         if response.generations and response.generations[0]:
             content = response.generations[0][0].text
 
-        # Show reasoning if enabled
+        # Show reasoning/thinking if enabled (the actual agent thoughts)
         if self.show_reasoning and content:
             event = AgentEvent(
                 type=EventType.AGENT_THINKING,
@@ -245,15 +253,6 @@ class TerminalCallbackHandler(BaseCallbackHandler):
             )
             self.events.append(event)
             self._display_agent_event(event)
-
-        # Show completion
-        event = AgentEvent(
-            type=EventType.AGENT_COMPLETE,
-            agent_name=self.current_agent,
-            duration=duration,
-        )
-        self.events.append(event)
-        self._display_agent_event(event)
 
     def on_llm_error(
         self, error: Union[Exception, KeyboardInterrupt], **kwargs
@@ -333,14 +332,27 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         # Track start time
         self.start_times[f"tool_{tool_name}"] = datetime.now()
 
-        event = AgentEvent(
-            type=EventType.TOOL_START,
-            agent_name=self.current_agent or "system",
-            content=input_str,
-            metadata={"tool_name": tool_name},
-        )
-        self.events.append(event)
-        self._display_tool_event(event)
+        # PRIMARY handoff detection via tool names (matches Textual pattern)
+        # LangGraph uses: handoff_to_<agent_name> and transfer_back_to_supervisor
+        is_handoff = False
+        if tool_name.startswith("handoff_to_"):
+            is_handoff = True
+            target_agent = tool_name.replace("handoff_to_", "")
+            self._handle_handoff(target_agent)
+        elif tool_name.startswith("transfer_back_to_"):
+            is_handoff = True
+            self._handle_handoff("supervisor")
+
+        # Only show non-handoff tools in regular tool event
+        if not is_handoff:
+            event = AgentEvent(
+                type=EventType.TOOL_START,
+                agent_name=self.current_agent or "system",
+                content=input_str,
+                metadata={"tool_name": tool_name},
+            )
+            self.events.append(event)
+            self._display_tool_event(event)
 
     def on_tool_end(self, output: str, **kwargs) -> None:
         """Called when a tool finishes."""
@@ -350,6 +362,10 @@ class TerminalCallbackHandler(BaseCallbackHandler):
             if event.type == EventType.TOOL_START:
                 tool_name = event.metadata.get("tool_name", "unknown_tool")
                 break
+
+        # Skip logging handoff tool completions (already handled in on_tool_start)
+        if tool_name.startswith("handoff_to_") or tool_name.startswith("transfer_back_to_"):
+            return
 
         # Calculate duration
         duration = None
@@ -367,6 +383,42 @@ class TerminalCallbackHandler(BaseCallbackHandler):
         )
         self.events.append(event)
         self._display_tool_event(event)
+
+    def _handle_handoff(self, target_agent: str) -> None:
+        """Handle agent handoff detected from tool call (matches Textual pattern)."""
+        if target_agent == self.current_agent:
+            return  # No change
+
+        from_agent = self.current_agent or "system"
+
+        # Create and display handoff event
+        event = AgentEvent(
+            type=EventType.HANDOFF,
+            agent_name="system",
+            content="",
+            metadata={
+                "from": from_agent,
+                "to": target_agent,
+            },
+        )
+        self.events.append(event)
+        self._display_agent_event(event)
+
+        # Update current agent tracking
+        self.current_agent = target_agent
+        if target_agent not in self.agent_stack:
+            self.agent_stack.append(target_agent)
+
+        # Track start time for new agent
+        self.start_times[target_agent] = datetime.now()
+
+        # Show agent start event
+        start_event = AgentEvent(
+            type=EventType.AGENT_START,
+            agent_name=target_agent,
+        )
+        self.events.append(start_event)
+        self._display_agent_event(start_event)
 
     def on_tool_error(
         self, error: Union[Exception, KeyboardInterrupt], **kwargs
@@ -400,7 +452,16 @@ class TerminalCallbackHandler(BaseCallbackHandler):
     def on_chain_start(
         self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs
     ) -> None:
-        """Called when a chain starts."""
+        """
+        Called when a chain starts - BACKUP method for agent detection.
+
+        PRIMARY detection happens in on_tool_start via handoff_to_* tools.
+        This provides backup detection using the agent registry for cases
+        where chains are named after agents.
+
+        NOTE: LangGraph often sends empty chain names for LLM chains.
+        We filter these out to avoid noise.
+        """
         # Handle None values
         if serialized is None:
             serialized = {}
@@ -409,23 +470,25 @@ class TerminalCallbackHandler(BaseCallbackHandler):
 
         chain_name = serialized.get("name", "")
 
-        # Detect agent transitions using the agent registry
+        # Skip empty chain names (often LLM chains in LangGraph)
+        if not chain_name:
+            return
+
+        # Filter out known LLM model class names to avoid confusion
+        llm_model_names = [
+            "chatbedrock", "chatbedrockconverse", "chatanthropic",
+            "chatopenai", "chatollama", "llm", "chat"
+        ]
+        chain_name_lower = chain_name.lower()
+        if any(model in chain_name_lower for model in llm_model_names):
+            return
+
+        # Detect agent transitions using the agent registry (BACKUP only)
         agent_names = get_all_agent_names()
         for agent_name in agent_names:
-            if agent_name in chain_name.lower():
+            if agent_name in chain_name_lower:
                 if agent_name != self.current_agent:
-                    # This is a handoff
-                    event = AgentEvent(
-                        type=EventType.HANDOFF,
-                        agent_name="system",
-                        content=inputs.get("task", ""),
-                        metadata={
-                            "from": self.current_agent or "system",
-                            "to": agent_name,
-                        },
-                    )
-                    self.events.append(event)
-                    self._display_agent_event(event)
+                    self._handle_handoff(agent_name)
                 break
 
     def on_chain_end(self, outputs: Dict[str, Any], **kwargs) -> None:
@@ -545,13 +608,14 @@ class SimpleTerminalCallback(TerminalCallbackHandler):
     Inherits from TerminalCallbackHandler but provides simpler interface.
     """
 
-    def __init__(self, console: Console, show_reasoning: bool = True):
+    def __init__(self, console: Console, show_reasoning: bool = True, minimal: bool = False):
         super().__init__(
             console=console,
             verbose=False,  # Less verbose for CLI
             show_reasoning=show_reasoning,
             show_tools=True,
             use_panels=False,  # Simpler output for CLI
+            minimal=minimal,  # oh-my-zsh style output
         )
 
     def on_agent_start(self, agent_name: str):
@@ -568,7 +632,8 @@ class SimpleTerminalCallback(TerminalCallbackHandler):
 
     def on_tool_use(self, tool_name: str, tool_input: Any):
         """Display tool usage."""
-        self.console.print(f"[yellow]   🔧 Using {tool_name}[/yellow]")
+        # Minimal oh-my-zsh style tool indicator
+        self.console.print(f"[dim]  → {tool_name}[/dim]")
         if self.verbose:
             self.console.print(
                 f"[dim]      {self._truncate_content(str(tool_input))}[/dim]"
@@ -576,8 +641,8 @@ class SimpleTerminalCallback(TerminalCallbackHandler):
 
     def on_agent_complete(self, agent_name: str):
         """Simplified agent completion."""
-        formatted = self._format_agent_name(agent_name)
-        self.console.print(f"[green]   ✓ {formatted} completed[/green]")
+        # Silent - agent indicators shown at response time only
+        pass
 
 
 @dataclass

@@ -15,9 +15,10 @@ if sys.version_info >= (3, 13):
         pass  # Already set
 
 import os
+import random
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 os.environ["PYDEVD_WARN_EVALUATION_TIMEOUT"] = "900000"
 import ast
@@ -28,8 +29,13 @@ import shutil
 import time
 from typing import Any, Dict, Iterable, List
 
-import numpy as np
-import pandas as pd
+# Heavy imports moved to TYPE_CHECKING for lazy loading (saves ~5s startup time)
+if TYPE_CHECKING:
+    import numpy as np
+    import pandas as pd
+    from lobster.core.client import AgentClient
+    from lobster.utils import SimpleTerminalCallback, TerminalCallbackHandler, open_path
+
 import typer
 from rich import box
 from rich.console import Console
@@ -49,7 +55,6 @@ from lobster.config.agent_config import (
     get_agent_configurator,
     initialize_configurator,
 )
-from lobster.core.client import AgentClient
 
 # Import extraction cache manager (premium feature - graceful fallback if unavailable)
 try:
@@ -73,8 +78,7 @@ from lobster.ui.components import (
 )
 from lobster.ui.console_manager import get_console_manager
 
-# Import the proper callback handler and system utilities
-from lobster.utils import SimpleTerminalCallback, TerminalCallbackHandler, open_path
+# Note: SimpleTerminalCallback, TerminalCallbackHandler, open_path moved to lazy loading
 from lobster.version import __version__
 
 # Import prompt_toolkit for autocomplete functionality (optional dependency)
@@ -327,7 +331,7 @@ class CloudAwareCache:
 
 # FIXME currenlty langraph implementation
 def _add_command_to_history(
-    client: AgentClient, command: str, summary: str, is_error: bool = False
+    client: "AgentClient", command: str, summary: str, is_error: bool = False
 ) -> bool:
     """
     Add command execution to conversation history for AI context.
@@ -339,7 +343,7 @@ def _add_command_to_history(
     - Provides detailed diagnostics for debugging
 
     Args:
-        client: AgentClient instance
+        client: "AgentClient" instance
         command: Command that was executed
         summary: Summary of command result
         is_error: Whether this was an error result
@@ -418,7 +422,7 @@ def _add_command_to_history(
 
 
 def _backup_command_to_file(
-    client: AgentClient,
+    client: "AgentClient",
     command: str,
     summary: str,
     is_error: bool,
@@ -431,7 +435,7 @@ def _backup_command_to_file(
     Provides audit trail, enables session reconstruction, supports compliance requirements.
 
     Args:
-        client: AgentClient instance
+        client: "AgentClient" instance
         command: Command that was executed
         summary: Summary of command result
         is_error: Whether this was an error result
@@ -496,7 +500,8 @@ def extract_available_commands() -> Dict[str, str]:
         "/help": "Show this help message",
         "/status": "Show system status",
         "/input-features": "Show input capabilities and navigation features",
-        "/dashboard": "Show comprehensive system dashboard",
+        "/dashboard": "Switch to interactive dashboard (Textual UI)",
+        "/status-panel": "Show comprehensive system status panel",
         "/workspace-info": "Show detailed workspace overview",
         "/analysis-dash": "Show analysis monitoring dashboard",
         "/progress": "Show multi-task progress monitor",
@@ -508,7 +513,9 @@ def extract_available_commands() -> Dict[str, str]:
         "/queue": "Show queue status",
         "/queue load": "Load file into queue (supports .ris, more coming)",
         "/queue list": "List queued items",
-        "/queue clear": "Clear queue",
+        "/queue clear": "Clear publication queue",
+        "/queue clear download": "Clear download queue",
+        "/queue clear all": "Clear all queues (publication + download)",
         "/queue export": "Export queue to workspace for persistence",
         # Workspace commands (persistent)
         "/workspace": "Show workspace status and information",
@@ -565,9 +572,9 @@ def extract_available_commands() -> Dict[str, str]:
                         if cmd not in command_descriptions:
                             command_descriptions[cmd] = f"Execute {cmd} command"
 
-    except Exception as e:
-        # Fallback to static definitions if AST parsing fails
-        console.print(f"[dim yellow]Command extraction fallback: {e}[/dim yellow]")
+    except Exception:
+        # Fallback to static definitions if AST parsing fails (silent)
+        pass
 
     return command_descriptions
 
@@ -851,7 +858,7 @@ if PROMPT_TOOLKIT_AVAILABLE:
                 pass
 
 
-def change_mode(new_mode: str, current_client: AgentClient) -> AgentClient:
+def change_mode(new_mode: str, current_client: "AgentClient") -> "AgentClient":
     """
     Change the operation mode and reinitialize client with the new configuration.
 
@@ -909,7 +916,7 @@ def default_callback(ctx: typer.Context):
 
 
 # Global client instance
-client: Optional[AgentClient] = None
+client: Optional["AgentClient"] = None
 
 # Global current directory tracking
 current_directory = Path.cwd()
@@ -936,7 +943,7 @@ def _resolve_profile_timings_flag(cli_flag: Optional[bool]) -> bool:
 
 
 def _collect_profile_timings(
-    client: AgentClient, clear: bool = True
+    client: "AgentClient", clear: bool = True
 ) -> Dict[str, Dict[str, float]]:
     timings: Dict[str, Dict[str, float]] = {}
     data_manager = getattr(client, "data_manager", None)
@@ -947,7 +954,7 @@ def _collect_profile_timings(
     return timings
 
 
-def _maybe_print_timings(client: AgentClient, context: str) -> None:
+def _maybe_print_timings(client: "AgentClient", context: str) -> None:
     if not getattr(client, "profile_timings_enabled", False):
         return
 
@@ -976,12 +983,15 @@ def init_client(
     debug: bool = False,
     profile_timings: Optional[bool] = None,
     provider_override: Optional[str] = None,
-) -> AgentClient:
+) -> "AgentClient":
     """Initialize either local or cloud client based on environment."""
+    # Lazy imports for performance (saves ~5s startup time)
+    from lobster.core.client import AgentClient
+    from lobster.config.settings import settings
+
     global client
 
     # Check for configuration errors
-    from lobster.config.settings import settings
 
     if hasattr(settings, "_config_error") and settings._config_error:
         console.print(settings._config_error)
@@ -1113,8 +1123,6 @@ def init_client(
             console.print("[yellow]   Falling back to local mode...[/yellow]")
 
     # Use local client (existing code)
-    console.print("[bold red]💻 Using Lobster Local[/bold red]")
-
     # Configure logging level based on debug flag
     import logging
 
@@ -1138,6 +1146,8 @@ def init_client(
 
     # Create callback using the appropriate terminal_callback_handler
     # Configure callbacks based on reasoning and verbose flags independently
+    from lobster.utils import SimpleTerminalCallback, TerminalCallbackHandler
+
     callbacks = []
 
     if reasoning or verbose:
@@ -1150,8 +1160,12 @@ def init_client(
         )
         callbacks.append(callback)
     else:
-        # Use simplified callback for minimal, clean output (default)
-        simple_callback = SimpleTerminalCallback(console=console, show_reasoning=False)
+        # Use minimal oh-my-zsh style output (◀ Agent Name) for clean default
+        simple_callback = SimpleTerminalCallback(
+            console=console,
+            show_reasoning=False,
+            minimal=True,  # Enable minimal mode for clean agent indicators
+        )
         callbacks.append(simple_callback)
 
     # Initialize client with proper data_manager connection
@@ -1217,12 +1231,11 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
 
         # Try to use prompt_toolkit with autocomplete if available
         if PROMPT_TOOLKIT_AVAILABLE and client:
-            # Clean prompt text - remove Rich markup and emoji, keep it simple
-            clean_prompt = (
-                prompt_text.replace("[bold red]", "")
-                .replace("[/bold red]", "")
-                .replace("🦞 ", "")
-            )
+            # Clean prompt text - remove Rich markup, keep just the symbol
+            import re
+            clean_prompt = re.sub(r'\[.*?\]', '', prompt_text).strip()
+            if not clean_prompt:
+                clean_prompt = "❯ "
 
             # Create client-aware completer
             main_completer = ThreadedCompleter(LobsterContextualCompleter(client))
@@ -1230,18 +1243,19 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
             # Custom style to match Rich orange theme
             style = Style.from_dict(
                 {
+                    "prompt": "#e45c47 bold",
                     "completion-menu.completion": "bg:#2d2d2d #ffffff",
-                    "completion-menu.completion.current": "bg:#ff6600 #ffffff bold",
+                    "completion-menu.completion.current": "bg:#e45c47 #ffffff bold",
                     "completion-menu.meta": "bg:#2d2d2d #888888",
-                    "completion-menu.meta.current": "bg:#ff6600 #ffffff",
-                    "completion.command": "#ff6600",
+                    "completion-menu.meta.current": "bg:#e45c47 #ffffff",
+                    "completion.command": "#e45c47",
                     "completion.file": "#00aa00",
                 }
             )
 
-            # Use prompt_toolkit with autocomplete - simple grey prompt
+            # Use prompt_toolkit with autocomplete - orange prompt
             user_input = prompt(
-                HTML(f"<ansibrightblack>{clean_prompt}</ansibrightblack>"),
+                HTML(f"<style fg='#e45c47' bold='true'>{clean_prompt}</style>"),
                 completer=main_completer,
                 complete_while_typing=True,
                 # Disable mouse support so terminal scroll remains usable
@@ -1254,15 +1268,14 @@ def get_user_input_with_editing(prompt_text: str, client=None) -> str:
 
         elif PROMPT_TOOLKIT_AVAILABLE:
             # Clean prompt text for non-autocomplete mode too
-            clean_prompt = (
-                prompt_text.replace("[bold red]", "")
-                .replace("[/bold red]", "")
-                .replace("🦞 ", "")
-            )
+            import re
+            clean_prompt = re.sub(r'\[.*?\]', '', prompt_text).strip()
+            if not clean_prompt:
+                clean_prompt = "❯ "
 
             # Use prompt_toolkit without autocomplete (no client provided)
             user_input = prompt(
-                HTML(f"<ansibrightblack>{clean_prompt}</ansibrightblack>"),
+                HTML(f"<style fg='#e45c47' bold='true'>{clean_prompt}</style>"),
                 # Disable mouse support so terminal scroll remains usable
                 mouse_support=False,  # FIXME change this back to True if needed. I deactivated to allow scrolling
                 history=history_file,
@@ -1704,27 +1717,436 @@ def get_current_agent_name() -> str:
     return "🦞 Lobster"
 
 
+def _dna_helix_animation(width: int, duration: float = 0.7):
+    """
+    DNA sequence animation with colorful bases (A, T, C, G) flowing across the terminal.
+    Uses only capital DNA letters with biochemistry-inspired colors.
+    """
+    import sys
+    import math
+
+    # DNA base colors (biochemistry-inspired)
+    base_colors = {
+        'A': (0, 200, 83),    # Adenine - green (purine)
+        'T': (255, 82, 82),   # Thymine - red (pyrimidine)
+        'G': (255, 193, 7),   # Guanine - gold (purine)
+        'C': (41, 121, 255),  # Cytosine - blue (pyrimidine)
+    }
+
+    lobster_orange = (228, 92, 71)
+    white = (255, 255, 255)
+
+    num_frames = max(40, int(duration * 90))
+    frame_sleep = duration / num_frames
+
+    # Generate a random DNA sequence (only capital letters A, T, C, G)
+    sequence = ''.join(random.choices(['A', 'T', 'G', 'C'], k=width))
+
+    # Phase 1: DNA sequence assembly (flowing bases)
+    assembly_frames = int(num_frames * 0.45)
+    for frame in range(assembly_frames):
+        progress = (frame + 1) / assembly_frames
+        reveal_pos = int(width * progress)
+
+        line_parts = []
+        for i in range(width):
+            if i < reveal_pos:
+                base = sequence[i]
+                r, g, b = base_colors[base]
+                # Add glow effect for recently revealed bases
+                if i > reveal_pos - 5:
+                    glow = 1.3 - (reveal_pos - i) * 0.06
+                    r = min(255, int(r * glow))
+                    g = min(255, int(g * glow))
+                    b = min(255, int(b * glow))
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+            else:
+                line_parts.append(' ')
+
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+        time.sleep(frame_sleep * 0.5)
+
+    # Phase 2: DNA wave intensity effect (only capital letters)
+    helix_frames = int(num_frames * 0.35)
+    for frame in range(helix_frames):
+        line_parts = []
+        wave_offset = frame * 0.4
+
+        for i in range(width):
+            base = sequence[i]
+            # Sinusoidal wave for intensity variation (simulates depth)
+            wave = math.sin((i * 0.25) + wave_offset)
+            intensity = 0.5 + 0.5 * abs(wave)
+
+            r, g, b = base_colors[base]
+            r = int(r * intensity)
+            g = int(g * intensity)
+            b = int(b * intensity)
+
+            line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+        time.sleep(frame_sleep * 0.8)
+
+    # Phase 3: Orange sweep with centered "─ omics-os ─" brand text
+    sweep_frames = num_frames - assembly_frames - helix_frames
+    brand_text = "─ omics-os ─"
+    text_start = (width - len(brand_text)) // 2
+    text_end = text_start + len(brand_text)
+
+    for frame in range(sweep_frames + 1):
+        progress = frame / sweep_frames if sweep_frames > 0 else 1
+        sweep_pos = int(width * progress)
+
+        line_parts = []
+        for i in range(width):
+            if i < sweep_pos:
+                # Check if this position is part of the brand text
+                if text_start <= i < text_end:
+                    char_idx = i - text_start
+                    char = brand_text[char_idx]
+                    # White text on orange background
+                    r, g, b = lobster_orange
+                    line_parts.append(f'\033[48;2;{r};{g};{b}m\033[38;2;255;255;255;1m{char}\033[0m')
+                else:
+                    # Gradient orange fill
+                    gradient = 1.0 - (sweep_pos - i) / max(width, 1) * 0.12
+                    r = min(255, int(lobster_orange[0] * gradient))
+                    g = min(255, int(lobster_orange[1] * gradient))
+                    b = min(255, int(lobster_orange[2] * gradient))
+                    line_parts.append(f'\033[48;2;{r};{g};{b}m \033[0m')
+            elif i == sweep_pos:
+                # Bright leading edge
+                line_parts.append(f'\033[48;2;{white[0]};{white[1]};{white[2]}m \033[0m')
+            else:
+                # Fading DNA bases behind
+                base = sequence[i]
+                fade = max(0.15, 1.0 - (i - sweep_pos) * 0.08)
+                r, g, b = base_colors[base]
+                r, g, b = int(r * fade), int(g * fade), int(b * fade)
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+        time.sleep(frame_sleep * 1.0)
+
+    # Final orange bar with centered "─ omics-os ─"
+    r, g, b = lobster_orange
+    final_parts = []
+    for i in range(width):
+        if text_start <= i < text_end:
+            char = brand_text[i - text_start]
+            final_parts.append(f'\033[48;2;{r};{g};{b}m\033[38;2;255;255;255;1m{char}\033[0m')
+        else:
+            final_parts.append(f'\033[48;2;{r};{g};{b}m \033[0m')
+    sys.stdout.write('\r' + ''.join(final_parts) + '\n')
+    sys.stdout.flush()
+
+
 def display_welcome():
-    """Display minimal welcome message with OS-like branding."""
-    from lobster.core.license_manager import get_current_tier
+    """Display DNA sequence animation as bioinformatics-themed startup visualization."""
+    import sys
 
-    # Get current tier for badge
-    tier = get_current_tier()
-    tier_badge = f" - {tier.capitalize()}" if tier != "free" else ""
+    term_width = shutil.get_terminal_size().columns
+    sys.stdout.write("\n")
+    _dna_helix_animation(term_width, duration=random.uniform(0.6, 0.8))
+    sys.stdout.write("\n")
 
-    # Create minimal welcome content
-    welcome_content = f"""[bold white]Multi-Agent Bioinformatics Platform[/bold white]"""
 
-    # Create branded welcome panel with tier badge in title
-    welcome_panel = LobsterTheme.create_panel(
-        welcome_content,
-        title=f"🦞 Lobster OS v{__version__}{tier_badge}"
-    )
+def _dna_agent_loading_phase(width: int, agent_names: List[str], ready_queue=None, timeout: float = 10.0):
+    """
+    DNA-themed agent loading animation showing real-time progress.
 
-    console_manager.print(welcome_panel)
-    console_manager.print(
-        f"\n[dim]💬 Ready. Type your analysis request or [{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}] for commands.[/dim]\n"
-    )
+    Displays a progress bar made of DNA bases that fills as agents load,
+    with each agent name appearing with a DNA sequencing effect.
+    """
+    import sys
+    import math
+    import queue as queue_module
+
+    # DNA base colors (biochemistry-inspired)
+    base_colors = {
+        'A': (0, 200, 83),    # Adenine - green
+        'T': (255, 82, 82),   # Thymine - red
+        'G': (255, 193, 7),   # Guanine - gold
+        'C': (41, 121, 255),  # Cytosine - blue
+    }
+    lobster_orange = (228, 92, 71)
+
+    total_agents = len(agent_names)
+    loaded_count = 0
+    start_time = time.time()
+
+    # Generate DNA sequence for progress bar
+    sequence = ''.join(random.choices(['A', 'T', 'G', 'C'], k=width))
+
+    def render_progress_bar(progress: float, agent_name: str = "", wave_frame: int = 0):
+        """Render the DNA progress bar with current progress."""
+        filled_width = int(width * progress)
+
+        line_parts = []
+        for i in range(width):
+            base = sequence[i]
+            r, g, b = base_colors[base]
+
+            if i < filled_width:
+                # Filled section: bright with wave effect
+                wave = math.sin((i * 0.3) + (wave_frame * 0.3))
+                intensity = 0.8 + 0.2 * abs(wave)
+                r = min(255, int(r * intensity))
+                g = min(255, int(g * intensity))
+                b = min(255, int(b * intensity))
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+            elif i == filled_width and progress < 1.0:
+                # Leading edge: white glow
+                line_parts.append(f'\033[38;2;255;255;255;1m{base}\033[0m')
+            else:
+                # Unfilled section: dim
+                r, g, b = int(r * 0.2), int(g * 0.2), int(b * 0.2)
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+
+        # Clear line and render
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+
+        # Show agent name below progress bar (if provided)
+        if agent_name:
+            # Create compact DNA spinner
+            spinner_bases = ['A', 'T', 'G', 'C']
+            spinner_idx = wave_frame % len(spinner_bases)
+            spinner_base = spinner_bases[spinner_idx]
+            r, g, b = base_colors[spinner_base]
+
+            # Format agent name with DNA spinner
+            agent_text = f"  \033[38;2;{r};{g};{b};1m{spinner_base}\033[0m \033[38;2;200;200;200m{agent_name}\033[0m"
+
+            # Move cursor down, print agent name, move cursor back up
+            sys.stdout.write(f"\n{agent_text}\033[K")  # \033[K clears to end of line
+            sys.stdout.write("\033[1A")  # Move cursor up 1 line
+            sys.stdout.flush()
+
+    # Initial render: empty progress bar
+    render_progress_bar(0.0)
+    sys.stdout.write("\n\n")  # Reserve space for agent name
+    sys.stdout.write("\033[2A")  # Move cursor back to progress bar line
+    sys.stdout.flush()
+
+    # Animation loop
+    wave_frame = 0
+    last_agent_name = ""
+
+    if ready_queue:
+        # Real-time mode: wait for agent notifications
+        while loaded_count < total_agents:
+            # Check for timeout
+            if time.time() - start_time > timeout:
+                break
+
+            try:
+                # Non-blocking check for new agent
+                agent_loaded = ready_queue.get(timeout=0.05)
+                if agent_loaded == "__done__":
+                    break
+                loaded_count += 1
+                last_agent_name = agent_loaded
+
+                # Animate progress increase
+                old_progress = (loaded_count - 1) / total_agents
+                new_progress = loaded_count / total_agents
+
+                # Smooth transition over 10 frames
+                for frame in range(10):
+                    progress = old_progress + (new_progress - old_progress) * (frame / 10)
+                    render_progress_bar(progress, last_agent_name, wave_frame)
+                    wave_frame += 1
+                    time.sleep(0.03)
+
+            except queue_module.Empty:
+                # Keep animating while waiting
+                progress = loaded_count / total_agents
+                render_progress_bar(progress, last_agent_name, wave_frame)
+                wave_frame += 1
+                time.sleep(0.05)
+    else:
+        # Fallback mode: simulate loading (no real progress)
+        estimated_time_per_agent = timeout / total_agents
+
+        for agent_idx, agent_name in enumerate(agent_names):
+            agent_start = time.time()
+
+            # Animate this agent loading
+            while time.time() - agent_start < estimated_time_per_agent:
+                progress = (agent_idx + (time.time() - agent_start) / estimated_time_per_agent) / total_agents
+                progress = min(progress, 1.0)
+                render_progress_bar(progress, agent_name, wave_frame)
+                wave_frame += 1
+                time.sleep(0.05)
+
+            loaded_count += 1
+
+    # Final render: complete bar
+    render_progress_bar(1.0, "ready", wave_frame)
+
+    # Hold final state briefly
+    for _ in range(10):
+        render_progress_bar(1.0, "ready", wave_frame)
+        wave_frame += 1
+        time.sleep(0.04)
+
+    # Clear the agent name line and progress bar
+    sys.stdout.write("\r" + " " * width + "\n")  # Clear progress bar
+    sys.stdout.write(" " * width + "\n")  # Clear agent name
+    sys.stdout.write("\033[2A\r")  # Move cursor back up and to start
+    sys.stdout.flush()
+
+
+def _dna_exit_animation(width: int, duration: float = 0.5):
+    """
+    DNA exit animation - reverse of startup animation.
+    Orange bar dissolves back into DNA bases, which then fade out.
+    The "─ omics-os ─" brand text ALWAYS stays lobster orange.
+    """
+    import sys
+    import math
+
+    # DNA base colors (biochemistry-inspired)
+    base_colors = {
+        'A': (0, 200, 83),    # Adenine - green (purine)
+        'T': (255, 82, 82),   # Thymine - red (pyrimidine)
+        'G': (255, 193, 7),   # Guanine - gold (purine)
+        'C': (41, 121, 255),  # Cytosine - blue (pyrimidine)
+    }
+
+    lobster_orange = (228, 92, 71)
+    white = (255, 255, 255)
+
+    num_frames = max(30, int(duration * 70))
+    frame_sleep = duration / num_frames
+
+    # Generate a random DNA sequence
+    sequence = ''.join(random.choices(['A', 'T', 'G', 'C'], k=width))
+
+    brand_text = "─ omics-os ─"
+    text_start = (width - len(brand_text)) // 2
+    text_end = text_start + len(brand_text)
+
+    # Phase 1: Start with full orange bar, then reverse sweep (right to left dissolve)
+    # Brand text stays full orange throughout
+    dissolve_frames = int(num_frames * 0.5)
+    for frame in range(dissolve_frames + 1):
+        progress = frame / dissolve_frames if dissolve_frames > 0 else 1
+        # Dissolve from right to left
+        dissolve_pos = width - int(width * progress)
+
+        line_parts = []
+        for i in range(width):
+            # Brand text ALWAYS stays lobster orange (no background during dissolve)
+            if text_start <= i < text_end:
+                char = brand_text[i - text_start]
+                r, g, b = lobster_orange
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{char}\033[0m')
+            elif i >= dissolve_pos:
+                # DNA bases emerge from dissolution
+                base = sequence[i]
+                r, g, b = base_colors[base]
+                # Glow effect for recently revealed bases
+                if i < dissolve_pos + 5:
+                    glow = 1.3 - (i - dissolve_pos) * 0.06
+                    r = min(255, int(r * glow))
+                    g = min(255, int(g * glow))
+                    b = min(255, int(b * glow))
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+            elif i == dissolve_pos - 1 and dissolve_pos > 0:
+                # Bright dissolving edge
+                line_parts.append(f'\033[48;2;{white[0]};{white[1]};{white[2]}m \033[0m')
+            else:
+                # Orange bar fading as it dissolves
+                fade = max(0.4, 1.0 - progress * 0.6)
+                r, g, b = lobster_orange
+                r, g, b = int(r * fade), int(g * fade), int(b * fade)
+                line_parts.append(f'\033[48;2;{r};{g};{b}m \033[0m')
+
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+        time.sleep(frame_sleep * 0.8)
+
+    # Phase 2: DNA wave effect with brand text staying orange
+    wave_frames = int(num_frames * 0.25)
+    for frame in range(wave_frames):
+        line_parts = []
+        wave_offset = frame * 0.5
+
+        for i in range(width):
+            # Brand text ALWAYS stays lobster orange
+            if text_start <= i < text_end:
+                char = brand_text[i - text_start]
+                r, g, b = lobster_orange
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{char}\033[0m')
+            else:
+                base = sequence[i]
+                wave = math.sin((i * 0.25) + wave_offset)
+                intensity = 0.5 + 0.5 * abs(wave)
+
+                r, g, b = base_colors[base]
+                r = int(r * intensity)
+                g = int(g * intensity)
+                b = int(b * intensity)
+
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+        time.sleep(frame_sleep * 0.6)
+
+    # Phase 3: Fade out DNA sequence, brand text stays orange then fades last
+    fade_frames = num_frames - dissolve_frames - wave_frames
+    for frame in range(fade_frames + 1):
+        progress = frame / fade_frames if fade_frames > 0 else 1
+        fade_intensity = 1.0 - progress
+        # Brand fades slower - only starts fading at 70% progress
+        brand_fade = max(0, 1.0 - max(0, (progress - 0.7) / 0.3))
+
+        line_parts = []
+        for i in range(width):
+            # Brand text stays orange longer, then fades last
+            if text_start <= i < text_end:
+                char = brand_text[i - text_start]
+                r, g, b = lobster_orange
+                if brand_fade > 0.05:
+                    r = int(r * brand_fade)
+                    g = int(g * brand_fade)
+                    b = int(b * brand_fade)
+                    line_parts.append(f'\033[38;2;{r};{g};{b};1m{char}\033[0m')
+                else:
+                    line_parts.append(' ')
+            elif fade_intensity > 0.05:
+                base = sequence[i]
+                r, g, b = base_colors[base]
+                r = int(r * fade_intensity)
+                g = int(g * fade_intensity)
+                b = int(b * fade_intensity)
+                line_parts.append(f'\033[38;2;{r};{g};{b};1m{base}\033[0m')
+            else:
+                line_parts.append(' ')
+
+        sys.stdout.write('\r' + ''.join(line_parts))
+        sys.stdout.flush()
+        time.sleep(frame_sleep * 1.0)
+
+    # Clear the line
+    sys.stdout.write('\r' + ' ' * width + '\r')
+    sys.stdout.flush()
+
+
+def display_goodbye():
+    """Display DNA exit animation as bioinformatics-themed farewell visualization."""
+    import sys
+
+    term_width = shutil.get_terminal_size().columns
+    sys.stdout.write("\n")
+    _dna_exit_animation(term_width, duration=random.uniform(0.4, 0.6))
 
 
 def show_default_help():
@@ -1789,6 +2211,7 @@ def show_default_help():
 
 def _format_data_preview(matrix, max_rows: int = 5, max_cols: int = 5) -> Table:
     """Format a data matrix preview as a Rich table."""
+    import numpy as np
     import scipy.sparse as sp
 
     # Convert sparse to dense for preview if needed
@@ -1833,8 +2256,11 @@ def _format_data_preview(matrix, max_rows: int = 5, max_cols: int = 5) -> Table:
     return table
 
 
-def _format_dataframe_preview(df: pd.DataFrame, max_rows: int = 5) -> Table:
+def _format_dataframe_preview(df: "pd.DataFrame", max_rows: int = 5) -> Table:
     """Format a DataFrame preview as a Rich table."""
+    import numpy as np
+    import pandas as pd
+
     table = Table(box=box.SIMPLE)
 
     # Add index column
@@ -1880,8 +2306,10 @@ def _format_dataframe_preview(df: pd.DataFrame, max_rows: int = 5) -> Table:
     return table
 
 
-def _format_array_info(arrays_dict: Dict[str, np.ndarray]) -> Table:
+def _format_array_info(arrays_dict: Dict[str, "np.ndarray"]) -> Table:
     """Format array information (obsm/varm) as a table."""
+    import numpy as np
+
     if not arrays_dict:
         return None
 
@@ -1923,7 +2351,7 @@ def _get_matrix_info(matrix) -> Dict[str, Any]:
     return info
 
 
-def display_status(client: AgentClient):
+def display_status(client: "AgentClient"):
     """Display current system status with enhanced orange theming."""
     status = client.get_status()
 
@@ -1951,35 +2379,58 @@ def display_status(client: AgentClient):
 
 
 def _show_workspace_prompt(client):
-    """Display compact session status line."""
-    from lobster.config.agent_registry import AGENT_REGISTRY
+    """Display minimal oh-my-zsh style status with system information."""
+    try:
+        import psutil
+        import shutil
+        from lobster.core.license_manager import get_current_tier
+        from lobster.config.agent_registry import AGENT_REGISTRY, _ensure_plugins_loaded
+        from lobster.tools.gpu_detector import GPUDetector
 
-    datasets = client.data_manager.available_datasets
-    session_id = client.session_id
+        # Ensure plugins are loaded before accessing AGENT_REGISTRY
+        _ensure_plugins_loaded()
 
-    # Count supervisor-accessible agents
-    child_agent_names = set()
-    for config in AGENT_REGISTRY.values():
-        if config.child_agents:
-            child_agent_names.update(config.child_agents)
+        tier = get_current_tier()
+        tier_color = {"free": "green", "premium": "yellow", "enterprise": "magenta"}.get(tier, "white")
 
-    agent_count = sum(
-        1 for name, config in AGENT_REGISTRY.items()
-        if config.supervisor_accessible is not False and name not in child_agent_names
-    )
+        # Count agents
+        child_agent_names = set()
+        for config in AGENT_REGISTRY.values():
+            if config.child_agents:
+                child_agent_names.update(config.child_agents)
+        agent_count = sum(
+            1 for name, config in AGENT_REGISTRY.items()
+            if config.supervisor_accessible is not False and name not in child_agent_names
+        )
 
-    # Build compact status line
-    if datasets:
-        total_size = sum(d["size_mb"] for d in datasets.values())
-        dataset_count = len(datasets)
-        dataset_info = f"{dataset_count} dataset{'s' if dataset_count > 1 else ''} ({total_size:.1f} MB)"
-    else:
-        dataset_info = "no data loaded"
+        # Get system information
+        # RAM
+        ram_gb = round(psutil.virtual_memory().total / (1024**3))
 
-    # Display one-line status
-    console.print(
-        f"[dim]Session: {session_id} | {dataset_info} | {agent_count} agents ready[/dim]\n"
-    )
+        # GPU
+        hw_rec = GPUDetector.get_hardware_recommendation()
+        gpu_label = hw_rec["device"].upper()  # CUDA, MPS, or CPU
+
+        # Disk space (workspace)
+        try:
+            workspace_path = client.workspace_path if hasattr(client, 'workspace_path') else Path.cwd()
+            disk_usage = shutil.disk_usage(workspace_path)
+            disk_free_gb = round(disk_usage.free / (1024**3))
+        except Exception:
+            disk_free_gb = "?"
+
+        # Line 1: Application status
+        console.print(f"  [{tier_color}]●[/] lobster v{__version__} [{tier_color}]{tier}[/] [dim]│[/] {agent_count} agents [dim]│ local │[/] [dim italic]/help[/]")
+
+        # Line 2-3: System resources (stacked for clarity)
+        console.print(f"[dim]  └─ Compute:[/] {ram_gb}GB RAM [dim]│[/] {gpu_label}")
+        console.print(f"[dim]     Storage:[/] {disk_free_gb}GB free [dim](workspace)[/]")
+        console.print()
+    except Exception as e:
+        # Fallback to basic prompt if system info fails
+        console.print(f"[dim red]Error loading system info: {e}[/dim red]")
+        console.print(f"  [green]●[/] lobster v{__version__}")
+        console.print()
 
 
 def init_client_with_animation(
@@ -1989,30 +2440,15 @@ def init_client_with_animation(
     debug: bool = False,
     profile_timings: Optional[bool] = None,
     provider_override: Optional[str] = None,
-) -> AgentClient:
-    """Initialize client with minimal loading message."""
-    from lobster.config.agent_registry import AGENT_REGISTRY
-
+) -> "AgentClient":
+    """
+    Initialize client. Fast startup thanks to lazy imports.
+    """
     get_console_manager()
 
-    # Count supervisor-accessible agents
-    child_agent_names = set()
-    for config in AGENT_REGISTRY.values():
-        if config.child_agents:
-            child_agent_names.update(config.child_agents)
+    # Initialize client - lazy imports make this fast
+    client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider_override)
 
-    supervisor_accessible_count = sum(
-        1 for name, config in AGENT_REGISTRY.items()
-        if config.supervisor_accessible is not False and name not in child_agent_names
-    )
-
-    # Single-line loading message
-    with console.status(
-        f"[{LobsterTheme.PRIMARY_ORANGE}]🦞 Loading {supervisor_accessible_count} agents...[/{LobsterTheme.PRIMARY_ORANGE}]"
-    ):
-        client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider_override)
-
-    console.print(f"[green]✓[/green] Lobster is ready\n")
     return client
 
 
@@ -3209,17 +3645,11 @@ def chat(
         "-w",
         help="Workspace directory. Can also be set via LOBSTER_WORKSPACE env var. Default: ./.lobster_workspace",
     ),
-    reasoning: Optional[bool] = typer.Option(
-        None,
-        "--reasoning",
-        hidden=True,
-        help="[DEPRECATED] Reasoning is now enabled by default. Use --no-reasoning to disable.",
-    ),
-    no_reasoning: bool = typer.Option(
+    reasoning: bool = typer.Option(
         False,
-        "--no-reasoning",
+        "--reasoning",
         is_flag=True,
-        help="Disable agent reasoning display (enabled by default)",
+        help="Show agent reasoning and thinking process",
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show detailed tool usage and agent activity"
@@ -3242,7 +3672,7 @@ def chat(
     """
     Start an interactive chat session with the multi-agent system.
 
-    Agent reasoning is shown by default. Use --no-reasoning to disable.
+    Use --reasoning to see agent thinking process. Use --verbose for detailed tool output.
     """
     # Enhanced error handling setup
     if debug:
@@ -3272,35 +3702,21 @@ def chat(
     env_file = Path.cwd() / ".env"
     if not env_file.exists():
         console.print()
-        console.print(
-            Panel.fit(
-                "[bold red]⚠️  No Configuration Found[/bold red]\n\n"
-                "Lobster requires API keys to function. Please run the setup wizard:\n\n"
-                f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
-                "This will guide you through API key configuration.",
-                border_style="red",
-                padding=(1, 2),
-            )
-        )
+        console.print("[red]✗[/red] no config found")
+        console.print(f"  run [bold #e45c47]lobster init[/bold #e45c47]")
         console.print()
-        console.print("[dim]For manual configuration, see:[/dim]")
-        console.print(
-            "[link]https://github.com/the-omics-os/lobster-local/wiki/03-configuration[/link]"
-        )
         raise typer.Exit(1)
 
+    # Show DNA animation (starts instantly thanks to lazy imports)
     display_welcome()
 
-    # Initialize client with animated loading sequence
+    # Initialize client (heavy imports happen here)
     try:
         client = init_client_with_animation(
-            workspace, not no_reasoning, verbose, debug, profile_timings
+            workspace, reasoning, verbose, debug, profile_timings
         )
     except Exception as e:
-        console_manager.print_error_panel(
-            f"Failed to initialize Lobster: {str(e)}",
-            "Check your configuration and try again",
-        )
+        console.print(f"\n[red]✗[/red] init failed: {str(e)[:80]}")
         raise
 
     # Show compact session status
@@ -3308,14 +3724,20 @@ def chat(
 
     while True:
         try:
-            # Get user input with arrow key navigation support
-            current_path = (
-                str(current_directory.name) if current_directory != Path.home() else "~"
-            )
-            if current_directory == Path.cwd():
-                current_path = str(current_directory.name)
+            # Get current token usage for prompt prefix
+            token_prefix = ""
+            try:
+                token_usage = client.get_token_usage()
+                if token_usage and "error" not in token_usage:
+                    cost = token_usage.get("total_cost_usd", 0.0)
+                    tokens = token_usage.get("total_tokens", 0)
+                    token_prefix = f"[dim grey42]${cost:.4f} · {tokens:,}t[/dim grey42] "
+            except Exception:
+                pass
+
+            # Prompt with token costs on the left
             user_input = get_user_input_with_editing(
-                f"\n[bold red]🦞 {current_path}[/bold red] ", client
+                f"\n{token_prefix}[bold #e45c47]❯[/bold #e45c47] ", client
             )
 
             # Skip processing if input is empty or just whitespace
@@ -3345,93 +3767,41 @@ def chat(
             if execute_shell_command(user_input):
                 continue
 
-            # BUG FIX #7: Remove fake progress bar overhead (saves ~100ms per query)
-            # Process query with simple status message instead of spinner context manager
+            # Minimal processing indicator
             if should_show_progress(client):
-                # Normal mode: show simple processing message
-                console_manager.print(
-                    f"[dim cyan]🦞 Processing: {user_input[:50]}{'...' if len(user_input) > 50 else ''}[/dim cyan]",
-                    end="",
-                    flush=True,
-                )
+                console.print("[dim]...[/dim]", end="", flush=True)
 
             # Single code path - no duplication
             result = client.query(user_input, stream=False)
 
             if should_show_progress(client):
-                # Clear the status line after query completes
-                console_manager.print("\r" + " " * 100 + "\r", end="", flush=True)
+                console.print("\r   \r", end="", flush=True)
 
-            # Display response with enhanced theming
+            # Minimal response display - no boxes
             if result["success"]:
-                # Show which agent provided the response if available
+                # Agent indicator line
                 agent_name = result.get("last_agent", "supervisor")
                 if agent_name and agent_name != "__end__":
                     agent_display = agent_name.replace("_", " ").title()
-                    title = f"🦞 {agent_display} Response"
                 else:
-                    title = "🦞 Lobster Response"
+                    agent_display = "Lobster"
+                console.print(f"\n[dim]◀ {agent_display}[/dim]")
 
-                response_panel = LobsterTheme.create_panel(
-                    Markdown(result["response"]), title=title
-                )
-                console_manager.print(response_panel)
+                # Response as markdown (no panel)
+                console.print(Markdown(result["response"]))
 
-                # Show token usage and cost if available
-                if result.get("token_usage"):
-                    token_info = result["token_usage"]
-                    latest_cost = token_info.get("latest_cost_usd", 0.0)
-                    session_total = token_info.get("session_total_usd", 0.0)
-                    total_tokens = token_info.get("total_tokens", 0)
-
-                    # Format cost display
-                    cost_display = f"💰 Session cost: ${session_total:.4f}"
-                    if latest_cost > 0:
-                        cost_display += f" (+${latest_cost:.4f} this response)"
-                    cost_display += f" | Total tokens: {total_tokens:,}"
-
-                    console_manager.print(f"[dim grey50]{cost_display}[/dim grey50]")
-
-                # Show any generated plots with orange styling
+                # Plots indicator
                 if result.get("plots"):
-                    plot_text = f"📊 Generated {len(result['plots'])} visualization(s)"
-                    console_manager.print(
-                        f"[{LobsterTheme.PRIMARY_ORANGE}]{plot_text}[/{LobsterTheme.PRIMARY_ORANGE}]"
-                    )
+                    console.print(f"[dim #e45c47]◆ {len(result['plots'])} plot(s)[/dim #e45c47]")
             else:
-                console_manager.print_error_panel(result["error"])
+                console.print(f"\n[red]✗[/red] {result['error']}")
 
             _maybe_print_timings(client, "Chat Query")
 
         except KeyboardInterrupt:
-            if Confirm.ask(
-                f"\n[{LobsterTheme.PRIMARY_ORANGE}]🦞 Exit Lobster?[/{LobsterTheme.PRIMARY_ORANGE}]"
-            ):
-                # Get final token usage
-                try:
-                    token_usage = client.get_token_usage()
-                    if token_usage and "error" not in token_usage:
-                        total_cost = token_usage.get("total_cost_usd", 0.0)
-                        total_tokens = token_usage.get("total_tokens", 0)
-                        cost_info = f"\n[bold white]💰 Session Summary:[/bold white]\nTotal tokens used: {total_tokens:,}\nTotal cost: ${total_cost:.4f}\n"
-                    else:
-                        cost_info = ""
-                except Exception:
-                    cost_info = ""
-
-                goodbye_message = f"""👋 Thank you for using Lobster by Omics-OS!
-{cost_info}
-[bold white]🌟 Help us improve Lobster![/bold white]
-Your feedback matters! Please take 1 minute to share your experience:
-
-[bold {LobsterTheme.PRIMARY_ORANGE}]📝 Quick Survey:[/bold {LobsterTheme.PRIMARY_ORANGE}] [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]https://forms.cloud.microsoft/e/AkNk8J8nE8[/link]
-
-[dim grey50]Happy analyzing! 🧬🦞[/dim grey50]"""
-
-                exit_panel = LobsterTheme.create_panel(
-                    goodbye_message, title="🦞 Goodbye & Thank You!"
-                )
-                console_manager.print(exit_panel)
+            if Confirm.ask("\n[dim]exit?[/dim]"):
+                display_goodbye()
+                console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]\n")
                 break
             continue
         except Exception as e:
@@ -3469,7 +3839,7 @@ Your feedback matters! Please take 1 minute to share your experience:
                 )
 
 
-def handle_command(command: str, client: AgentClient):
+def handle_command(command: str, client: "AgentClient"):
     """Handle slash commands with enhanced error handling."""
     cmd = command.lower().strip()
 
@@ -3512,7 +3882,7 @@ def handle_command(command: str, client: AgentClient):
 # ============================================================================
 
 
-def _show_queue_status(client: AgentClient, console: Console) -> Optional[str]:
+def _show_queue_status(client: "AgentClient", console: Console) -> Optional[str]:
     """Display status of the publication queue.
 
     Returns:
@@ -3545,13 +3915,15 @@ def _show_queue_status(client: AgentClient, console: Console) -> Optional[str]:
     console.print("\n[cyan]💡 Commands:[/cyan]")
     console.print("  • [white]/queue load <file>[/white] - Load file into queue")
     console.print("  • [white]/queue list[/white] - List queued items")
-    console.print("  • [white]/queue clear[/white] - Clear the queue")
+    console.print("  • [white]/queue clear[/white] - Clear publication queue")
+    console.print("  • [white]/queue clear download[/white] - Clear download queue")
+    console.print("  • [white]/queue clear all[/white] - Clear all queues")
 
     return f"Queue status: {total_entries} total items"
 
 
 def _queue_load_file(
-    client: AgentClient,
+    client: "AgentClient",
     filename: str,
     console: Console,
     current_directory: Path,
@@ -3667,7 +4039,7 @@ def _queue_load_file(
         )
 
 
-def _queue_list(client: AgentClient, console: Console) -> Optional[str]:
+def _queue_list(client: "AgentClient", console: Console) -> Optional[str]:
     """List items in the publication queue.
 
     Returns:
@@ -3720,38 +4092,112 @@ def _queue_list(client: AgentClient, console: Console) -> Optional[str]:
     return f"Listed {len(display_entries)} of {total_count} items from queue"
 
 
-def _queue_clear(client: AgentClient, console: Console) -> Optional[str]:
-    """Clear all items from the publication queue.
+def _queue_clear(client: "AgentClient", console: Console, queue_type: str = "publication") -> Optional[str]:
+    """Clear items from specified queue(s).
+
+    Args:
+        client: "AgentClient" instance
+        console: Rich console for output
+        queue_type: "publication", "download", or "all"
 
     Returns:
         Summary string for conversation history, or None.
     """
-    if client.publication_queue is None:
-        console.print("[yellow]Publication queue not initialized[/yellow]")
-        return None
+    if queue_type == "all":
+        # Clear both queues
+        pub_total = 0
+        dl_total = 0
 
-    # Get count before clearing
-    stats = client.publication_queue.get_statistics()
-    total = stats.get("total_entries", 0)
+        # Get publication queue stats
+        if client.publication_queue is not None:
+            pub_stats = client.publication_queue.get_statistics()
+            pub_total = pub_stats.get("total_entries", 0)
 
-    if total == 0:
-        console.print("[yellow]Queue is already empty[/yellow]")
-        return "Queue was already empty"
+        # Get download queue stats
+        if hasattr(client, "data_manager") and client.data_manager:
+            dl_stats = client.data_manager.download_queue.get_statistics()
+            dl_total = dl_stats.get("total_entries", 0)
 
-    # Confirm with user
-    confirm = Confirm.ask(f"[yellow]Clear all {total} items from queue?[/yellow]")
+        grand_total = pub_total + dl_total
 
-    if confirm:
-        client.publication_queue.clear_queue()
-        console.print(f"[green]✅ Cleared {total} items from queue[/green]")
-        return f"Cleared {total} items from queue"
-    else:
-        console.print("[cyan]Operation cancelled[/cyan]")
-        return None
+        if grand_total == 0:
+            console.print("[yellow]All queues are already empty[/yellow]")
+            return "All queues were already empty"
+
+        # Confirm with user
+        console.print(f"[yellow]About to clear:[/yellow]")
+        console.print(f"  • Publication queue: {pub_total} items")
+        console.print(f"  • Download queue: {dl_total} items")
+        console.print(f"  • Total: {grand_total} items\n")
+        confirm = Confirm.ask(f"[yellow]Clear all {grand_total} items from both queues?[/yellow]")
+
+        if confirm:
+            cleared = []
+            if pub_total > 0:
+                client.publication_queue.clear_queue()
+                cleared.append(f"publication ({pub_total})")
+            if dl_total > 0:
+                client.data_manager.download_queue.clear_queue()
+                cleared.append(f"download ({dl_total})")
+
+            console.print(f"[green]✅ Cleared {grand_total} items from {', '.join(cleared)} queues[/green]")
+            return f"Cleared {grand_total} items from all queues"
+        else:
+            console.print("[cyan]Operation cancelled[/cyan]")
+            return None
+
+    elif queue_type == "download":
+        # Clear download queue
+        if not hasattr(client, "data_manager") or not client.data_manager:
+            console.print("[yellow]Data manager not initialized[/yellow]")
+            return None
+
+        download_queue = client.data_manager.download_queue
+        stats = download_queue.get_statistics()
+        total = stats.get("total_entries", 0)
+
+        if total == 0:
+            console.print("[yellow]Download queue is already empty[/yellow]")
+            return "Download queue was already empty"
+
+        # Confirm with user
+        confirm = Confirm.ask(f"[yellow]Clear all {total} items from download queue?[/yellow]")
+
+        if confirm:
+            download_queue.clear_queue()
+            console.print(f"[green]✅ Cleared {total} items from download queue[/green]")
+            return f"Cleared {total} items from download queue"
+        else:
+            console.print("[cyan]Operation cancelled[/cyan]")
+            return None
+
+    else:  # publication (default)
+        if client.publication_queue is None:
+            console.print("[yellow]Publication queue not initialized[/yellow]")
+            return None
+
+        # Get count before clearing
+        stats = client.publication_queue.get_statistics()
+        total = stats.get("total_entries", 0)
+
+        if total == 0:
+            console.print("[yellow]Publication queue is already empty[/yellow]")
+            return "Publication queue was already empty"
+
+        # Confirm with user
+        confirm = Confirm.ask(f"[yellow]Clear all {total} items from publication queue?[/yellow]")
+
+        if confirm:
+            client.publication_queue.clear_queue()
+            console.print(f"[green]✅ Cleared {total} items from publication queue[/green]")
+            return f"Cleared {total} items from publication queue"
+        else:
+            console.print("[cyan]Operation cancelled[/cyan]")
+            return None
 
 
 def _queue_export(
-    client: AgentClient, name: Optional[str], console: Console
+    client: "AgentClient", name: Optional[str], console: Console
 ) -> Optional[str]:
     """Export queue to workspace for persistence.
 
@@ -3797,13 +4243,14 @@ def _queue_export(
         return None
 
 
-def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
+def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
     """Execute individual slash commands.
 
     Returns:
         Optional[str]: Summary of command execution for conversation history,
                       or None if command should not be logged to history.
     """
+    from lobster.utils import open_path
 
     # -------------------------------------------------------------------------
     # Helper function for quantification directory detection
@@ -3860,68 +4307,29 @@ def _execute_command(cmd: str, client: AgentClient) -> Optional[str]:
         return None
 
     if cmd == "/help":
-        help_text = f"""[bold white]Available Commands:[/bold white]
+        help_text = f"""[bold white]Quick Start:[/bold white]
 
-[{LobsterTheme.PRIMARY_ORANGE}]/help[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show this help message
-[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Show system status
-[{LobsterTheme.PRIMARY_ORANGE}]/tokens[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Show token usage and cost for this session
-[{LobsterTheme.PRIMARY_ORANGE}]/input-features[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show input capabilities and navigation features
-[{LobsterTheme.PRIMARY_ORANGE}]/dashboard[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show comprehensive system dashboard
-[{LobsterTheme.PRIMARY_ORANGE}]/workspace-info[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show detailed workspace overview
-[{LobsterTheme.PRIMARY_ORANGE}]/analysis-dash[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show analysis monitoring dashboard
-[{LobsterTheme.PRIMARY_ORANGE}]/progress[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Show multi-task progress monitor
-[{LobsterTheme.PRIMARY_ORANGE}]/files[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List workspace files
-[{LobsterTheme.PRIMARY_ORANGE}]/tree[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show directory tree view
-[{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Show current data summary
-[{LobsterTheme.PRIMARY_ORANGE}]/metadata[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] Show detailed metadata information
-[{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Show workspace status and information
-[{LobsterTheme.PRIMARY_ORANGE}]/workspace list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available datasets in workspace
-[{LobsterTheme.PRIMARY_ORANGE}]/workspace remove[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Remove modality from memory
-[{LobsterTheme.PRIMARY_ORANGE}]/restore[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Restore previous session datasets
-[{LobsterTheme.PRIMARY_ORANGE}]/restore <pattern>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Restore datasets matching pattern (recent/all/*)
-[{LobsterTheme.PRIMARY_ORANGE}]/modalities[/{LobsterTheme.PRIMARY_ORANGE}]   [grey50]-[/grey50] Show detailed modality information
-[{LobsterTheme.PRIMARY_ORANGE}]/describe <name>[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show comprehensive details about a specific modality
-[{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List all generated plots
-[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Open plots directory in file manager
-[{LobsterTheme.PRIMARY_ORANGE}]/plot[/{LobsterTheme.PRIMARY_ORANGE}] <ID>    [grey50]-[/grey50] Open a specific plot by ID or name
-[{LobsterTheme.PRIMARY_ORANGE}]/open[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Open file or folder in system default application
-[{LobsterTheme.PRIMARY_ORANGE}]/save[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Save current state to workspace
-[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Read a file from workspace (supports glob patterns like *.h5ad)
-[{LobsterTheme.PRIMARY_ORANGE}]/load[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Load .ris publication list into queue for processing
-[{LobsterTheme.PRIMARY_ORANGE}]/export[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Export session data
-[{LobsterTheme.PRIMARY_ORANGE}]/pipeline export[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Export session as Jupyter notebook
-[{LobsterTheme.PRIMARY_ORANGE}]/pipeline list[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] List available notebooks
-[{LobsterTheme.PRIMARY_ORANGE}]/pipeline run[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Execute saved notebook with new data
-[{LobsterTheme.PRIMARY_ORANGE}]/pipeline info[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Show notebook details
-[{LobsterTheme.PRIMARY_ORANGE}]/reset[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Reset conversation
-[{LobsterTheme.PRIMARY_ORANGE}]/mode[/{LobsterTheme.PRIMARY_ORANGE}] <name>  [grey50]-[/grey50] Change operation mode
-[{LobsterTheme.PRIMARY_ORANGE}]/modes[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List available modes
-[{LobsterTheme.PRIMARY_ORANGE}]/provider[/{LobsterTheme.PRIMARY_ORANGE}]     [grey50]-[/grey50] List available LLM providers
-[{LobsterTheme.PRIMARY_ORANGE}]/provider[/{LobsterTheme.PRIMARY_ORANGE}] <name> [grey50]-[/grey50] Switch LLM provider (anthropic, bedrock, ollama)
+  [dim]• Just ask what you want to do in natural language
+  • Example: "analyze my single-cell data" or "find breast cancer datasets"
+  • Load data: /read <file> or drag-and-drop files (supports *.h5ad, *.csv, etc.)
+  • View results: /data, /plots, /workspace[/dim]
+
+[bold white]Key Commands:[/bold white]
+
+[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] System status
+[{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Current data summary
+[{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Workspace info
+[{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List generated plots
+[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] <file>  [grey50]-[/grey50] Load data file (supports glob: *.h5ad)
+[{LobsterTheme.PRIMARY_ORANGE}]/pipeline export[/{LobsterTheme.PRIMARY_ORANGE}] [grey50]-[/grey50] Export as Jupyter notebook
+[{LobsterTheme.PRIMARY_ORANGE}]/dashboard[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Interactive TUI dashboard
+[{LobsterTheme.PRIMARY_ORANGE}]/tokens[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Token usage & costs
 [{LobsterTheme.PRIMARY_ORANGE}]/clear[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] Clear screen
-[{LobsterTheme.PRIMARY_ORANGE}]/exit[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Exit the chat
+[{LobsterTheme.PRIMARY_ORANGE}]/exit[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Exit
 
-[bold white]File Loading Examples:[/bold white]
+[dim]Shell commands:[/dim] [grey50]Standard shell commands work directly (cd, ls, pwd, mkdir, etc.)[/grey50]"""
 
-[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] data.h5ad      [grey50]-[/grey50] Load single file
-[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] *.h5ad         [grey50]-[/grey50] Load all .h5ad files in current directory
-[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] data/*.csv     [grey50]-[/grey50] Load all .csv files in data/ directory
-[{LobsterTheme.PRIMARY_ORANGE}]/read[/{LobsterTheme.PRIMARY_ORANGE}] sample_*.h5ad  [grey50]-[/grey50] Load files matching pattern
-
-[bold white]Shell Commands:[/bold white] [grey50](execute directly without /)[/grey50]
-
-[{LobsterTheme.PRIMARY_ORANGE}]cd[/{LobsterTheme.PRIMARY_ORANGE}] <path>      [grey50]-[/grey50] Change directory
-[{LobsterTheme.PRIMARY_ORANGE}]pwd[/{LobsterTheme.PRIMARY_ORANGE}]            [grey50]-[/grey50] Print current directory
-[{LobsterTheme.PRIMARY_ORANGE}]ls[/{LobsterTheme.PRIMARY_ORANGE}] [path]      [grey50]-[/grey50] List directory contents
-[{LobsterTheme.PRIMARY_ORANGE}]open[/{LobsterTheme.PRIMARY_ORANGE}] <file>    [grey50]-[/grey50] Open file or folder in system default application
-[{LobsterTheme.PRIMARY_ORANGE}]mkdir[/{LobsterTheme.PRIMARY_ORANGE}] <dir>    [grey50]-[/grey50] Create directory
-[{LobsterTheme.PRIMARY_ORANGE}]touch[/{LobsterTheme.PRIMARY_ORANGE}] <file>   [grey50]-[/grey50] Create file
-[{LobsterTheme.PRIMARY_ORANGE}]cp[/{LobsterTheme.PRIMARY_ORANGE}] <src> <dst> [grey50]-[/grey50] Copy file/directory
-[{LobsterTheme.PRIMARY_ORANGE}]mv[/{LobsterTheme.PRIMARY_ORANGE}] <src> <dst> [grey50]-[/grey50] Move/rename file/directory
-[{LobsterTheme.PRIMARY_ORANGE}]rm[/{LobsterTheme.PRIMARY_ORANGE}] <file>      [grey50]-[/grey50] Remove file
-[{LobsterTheme.PRIMARY_ORANGE}]cat[/{LobsterTheme.PRIMARY_ORANGE}] <file>     [grey50]-[/grey50] Display file contents"""
-
-        help_panel = LobsterTheme.create_panel(help_text, title="🦞 Help Menu")
+        help_panel = LobsterTheme.create_panel(help_text, title="Help")
         console_manager.print(help_panel)
 
     elif cmd == "/status":
@@ -4067,7 +4475,30 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
         console_manager.print(features_panel)
 
     elif cmd == "/dashboard":
-        # Show comprehensive system health dashboard
+        # Launch interactive Textual dashboard
+        try:
+            from lobster.ui.os_app import run_lobster_os
+
+            console_manager.print(
+                f"[{LobsterTheme.PRIMARY_ORANGE}]Launching interactive dashboard...[/{LobsterTheme.PRIMARY_ORANGE}]"
+            )
+            # Get workspace from client
+            workspace_path = getattr(client, 'workspace_path', None)
+            run_lobster_os(workspace_path)
+            return True  # Exit chat loop after dashboard closes
+        except ImportError as e:
+            console_manager.print_error_panel(
+                f"Failed to import Textual UI: {str(e)}",
+                "Ensure textual>=0.79.1 is installed: pip install textual",
+            )
+        except Exception as e:
+            console_manager.print_error_panel(
+                f"Failed to launch dashboard: {e}",
+                "Check system permissions and try again",
+            )
+
+    elif cmd == "/status-panel":
+        # Show comprehensive system health dashboard (Rich panels)
         try:
             # Create a compact dashboard using individual panels instead of full-screen layout
             status_display = get_status_display()
@@ -4081,7 +4512,7 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
             console_manager.print(
                 LobsterTheme.create_panel(
                     f"[bold {LobsterTheme.PRIMARY_ORANGE}]System Health Dashboard[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-                    title="🦞 Dashboard",
+                    title="🦞 Status Panel",
                 )
             )
             console_manager.print(core_panel)
@@ -4090,7 +4521,7 @@ Install prompt-toolkit for arrow key navigation, command history, and Tab comple
 
         except Exception as e:
             console_manager.print_error_panel(
-                f"Failed to create system dashboard: {e}",
+                f"Failed to create status panel: {e}",
                 "Check system permissions and try again",
             )
 
@@ -4575,7 +5006,18 @@ when they are started by agents or analysis workflows.
             return _queue_list(client, console)
 
         elif subcommand == "clear":
-            return _queue_clear(client, console)
+            # Determine queue type from additional parameters
+            queue_type = "publication"  # default
+            if len(parts) > 2:
+                if parts[2] == "download":
+                    queue_type = "download"
+                elif parts[2] == "all":
+                    queue_type = "all"
+                else:
+                    console.print(f"[yellow]Unknown queue type: {parts[2]}[/yellow]")
+                    console.print("[cyan]Usage: /queue clear [download|all][/cyan]")
+                    return None
+            return _queue_clear(client, console, queue_type=queue_type)
 
         elif subcommand == "export":
             name = parts[2] if len(parts) > 2 else None
@@ -5359,6 +5801,10 @@ when they are started by agents or analysis workflows.
             return "Reset cancelled by user"
 
     elif cmd == "/data":
+        # Lazy imports for display functions
+        import numpy as np
+        import pandas as pd
+
         # Show current data summary with enhanced metadata display
         if client.data_manager.has_data():
             summary = client.data_manager.get_data_summary()
@@ -6771,20 +7217,9 @@ when they are started by agents or analysis workflows.
         console.clear()
 
     elif cmd == "/exit":
-        if Confirm.ask("[red]🦞 Exit Lobster?[/red]"):
-            goodbye_message = f"""👋 Thank you for using Lobster by Omics-OS!
-
-[bold white]🌟 Help us improve Lobster![/bold white]
-Your feedback matters! Please take 1 minute to share your experience:
-
-[bold {LobsterTheme.PRIMARY_ORANGE}]📝 Quick Survey:[/bold {LobsterTheme.PRIMARY_ORANGE}] [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]https://forms.cloud.microsoft/e/AkNk8J8nE8[/link]
-
-[dim grey50]Happy analyzing! 🧬🦞[/dim grey50]"""
-
-            exit_panel = LobsterTheme.create_panel(
-                goodbye_message, title="🦞 Goodbye & Thank You!"
-            )
-            console_manager.print(exit_panel)
+        if Confirm.ask("[dim]exit?[/dim]"):
+            display_goodbye()
+            console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]\n")
             raise KeyboardInterrupt
 
     else:
@@ -6793,8 +7228,8 @@ Your feedback matters! Please take 1 minute to share your experience:
         )
 
 
-@app.command(name="os")
-def os_command(
+@app.command(name="dashboard")
+def dashboard_command(
     workspace: Optional[Path] = typer.Option(
         None,
         "--workspace",
@@ -6803,15 +7238,15 @@ def os_command(
     ),
 ):
     """
-    Launch interactive OS-like workspace (Textual UI).
+    Launch interactive dashboard (Textual UI).
 
     This command starts a Textual-based interactive terminal UI with:
-    - Multi-panel layout for browsing datasets
-    - Keyboard-first navigation (vim-like bindings)
-    - Non-blocking operations (Phase 3+)
-    - Live streaming query responses (Phase 3+)
+    - Multi-panel cockpit layout for real-time monitoring
+    - Live agent activity tracking and handoff visualization
+    - Query input with streaming responses
+    - Token usage and system status panels
 
-    Press 'Q' to quit, '?' for help.
+    Press ESC to quit, ^P for command palette.
     """
     try:
         from lobster.ui.os_app import run_lobster_os
@@ -6824,7 +7259,7 @@ def os_command(
         )
         raise typer.Exit(1)
     except Exception as e:
-        console.print(f"[red]❌ Failed to launch Lobster OS: {str(e)}[/red]")
+        console.print(f"[red]❌ Failed to launch dashboard: {str(e)}[/red]")
         raise typer.Exit(1)
 
 
@@ -6837,16 +7272,11 @@ def query(
         "-w",
         help="Workspace directory. Can also be set via LOBSTER_WORKSPACE env var. Default: ./.lobster_workspace",
     ),
-    reasoning: Optional[bool] = typer.Option(
-        None,
-        "--reasoning",
-        hidden=True,
-        help="[DEPRECATED] Reasoning is now enabled by default. Use --no-reasoning to disable.",
-    ),
-    no_reasoning: bool = typer.Option(
+    reasoning: bool = typer.Option(
         False,
-        "--no-reasoning",
-        help="Disable agent reasoning display (enabled by default)",
+        "--reasoning",
+        is_flag=True,
+        help="Show agent reasoning and thinking process",
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show detailed tool usage and agent activity"
@@ -6881,7 +7311,7 @@ def query(
         raise typer.Exit(1)
 
     # Initialize client
-    client = init_client(workspace, not no_reasoning, verbose, debug, profile_timings, provider)
+    client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider)
 
     # Process query
     if should_show_progress(client):

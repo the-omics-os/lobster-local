@@ -14,7 +14,6 @@ from typing import List
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
-from lobster.agents.data_expert_assistant import DataExpertAssistant
 from lobster.agents.state import ResearchAgentState
 from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
@@ -25,10 +24,12 @@ from lobster.core.schemas.download_queue import (
     StrategyConfig,
     ValidationStatus,
 )
-from lobster.services.data_access.content_access_service import ContentAccessService
+# Lazy-loaded services (moved to function scope for 1.2s import speedup)
+# - ContentAccessService: 500-800ms
+# - DataExpertAssistant: 200-400ms
+# - MetadataValidationService: 200-400ms
 from lobster.services.metadata.metadata_validation_service import (
     MetadataValidationConfig,
-    MetadataValidationService,
     ValidationSeverity,
 )
 
@@ -154,11 +155,40 @@ def research_agent(
         callbacks = callback_handler if isinstance(callback_handler, list) else [callback_handler]
         llm = llm.with_config(callbacks=callbacks)
 
-    # Initialize services used by tools
-    content_access_service = ContentAccessService(data_manager=data_manager)
+    # ============================================================
+    # Lazy Service Loaders (1.2s import speedup)
+    # ============================================================
+    # These services are only imported when first used by tools
+    _content_service = None
+    _data_expert = None
+    _metadata_validator = None
 
-    # Initialize metadata validation service (Phase 2: extracted from ResearchAgentAssistant)
-    metadata_validator = MetadataValidationService(data_manager=data_manager)
+    def get_content_service():
+        """Lazy loader for ContentAccessService (saves 500-800ms on import)"""
+        nonlocal _content_service
+        if _content_service is None:
+            from lobster.services.data_access.content_access_service import ContentAccessService
+            _content_service = ContentAccessService(data_manager=data_manager)
+            logger.debug("Lazy-loaded ContentAccessService")
+        return _content_service
+
+    def get_data_expert():
+        """Lazy loader for DataExpertAssistant (saves 200-400ms on import)"""
+        nonlocal _data_expert
+        if _data_expert is None:
+            from lobster.agents.data_expert_assistant import DataExpertAssistant
+            _data_expert = DataExpertAssistant()
+            logger.debug("Lazy-loaded DataExpertAssistant")
+        return _data_expert
+
+    def get_metadata_validator():
+        """Lazy loader for MetadataValidationService (saves 200-400ms on import)"""
+        nonlocal _metadata_validator
+        if _metadata_validator is None:
+            from lobster.services.metadata.metadata_validation_service import MetadataValidationService
+            _metadata_validator = MetadataValidationService(data_manager=data_manager)
+            logger.debug("Lazy-loaded MetadataValidationService")
+        return _metadata_validator
 
     # Premium feature - only instantiate if available
     publication_processing_service = None
@@ -205,7 +235,7 @@ def research_agent(
             # Related paper discovery mode (merged from discover_related_studies)
             if related_to:
                 logger.debug(f"Finding papers related to: {related_to}")
-                results = content_access_service.find_related_publications(
+                results = get_content_service().find_related_publications(
                     identifier=related_to, max_results=max_results
                 )
                 logger.debug(f"Related paper discovery completed for: {related_to}")
@@ -236,7 +266,7 @@ def research_agent(
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid filters JSON: {filters}")
 
-            results, stats, ir = content_access_service.search_literature(
+            results, stats, ir = get_content_service().search_literature(
                 query=query,
                 max_results=max_results,
                 sources=source_list if source_list else None,
@@ -315,7 +345,7 @@ def research_agent(
                     if dtype in type_mapping:
                         type_list.append(type_mapping[dtype])
 
-            results = content_access_service.find_linked_datasets(
+            results = get_content_service().find_linked_datasets(
                 identifier=identifier,
                 dataset_types=type_list if type_list else None,
                 include_related=include_related,
@@ -405,7 +435,7 @@ def research_agent(
                 except json.JSONDecodeError:
                     logger.warning(f"Invalid filters JSON: {filters}")
 
-            results, stats, ir = content_access_service.discover_datasets(
+            results, stats, ir = get_content_service().discover_datasets(
                 query=query,
                 dataset_type=dataset_type,
                 max_results=max_results,
@@ -721,7 +751,7 @@ def research_agent(
                 # Keep source as string - service expects Optional[str]
                 source_str = None if source == "auto" else source.lower()
 
-                metadata = content_access_service.extract_metadata(
+                metadata = get_content_service().extract_metadata(
                     identifier=identifier, source=source_str
                 )
 
@@ -836,11 +866,7 @@ def research_agent(
                             )
 
                         # Extract strategy config for cached datasets
-                        from lobster.agents.data_expert_assistant import (
-                            DataExpertAssistant,
-                        )
-
-                        assistant = DataExpertAssistant()
+                        assistant = get_data_expert()
 
                         # Check if strategy_config already exists in cached data
                         cached_strategy_config = cached_data.get("strategy_config")
@@ -1031,7 +1057,7 @@ def research_agent(
                     )
 
                     # Use metadata validation service to validate metadata
-                    validation_result = metadata_validator.validate_dataset_metadata(
+                    validation_result = get_metadata_validator().validate_dataset_metadata(
                         metadata=metadata,
                         geo_id=accession,
                         required_fields=fields_list,
@@ -1041,7 +1067,7 @@ def research_agent(
 
                     if validation_result:
                         # Format the validation report
-                        report = metadata_validator.format_validation_report(
+                        report = get_metadata_validator().format_validation_report(
                             validation_result, accession
                         )
 
@@ -1086,11 +1112,7 @@ def research_agent(
                                 logger.info(
                                     f"Extracting download strategy for {accession}"
                                 )
-                                from lobster.agents.data_expert_assistant import (
-                                    DataExpertAssistant,
-                                )
-
-                                assistant = DataExpertAssistant()
+                                assistant = get_data_expert()
 
                                 # Extract file config using LLM (~2-5s)
                                 try:
@@ -1299,13 +1321,6 @@ def research_agent(
             extract_methods("PMID:123,PMID:456", focus="software")
         """
         try:
-            # Initialize UnifiedContentService (Phase 3 migration)
-            from lobster.services.data_access.content_access_service import (
-                ContentAccessService,
-            )
-
-            content_service = ContentAccessService(data_manager=data_manager)
-
             # Check if batch processing (comma-separated identifiers)
             identifiers = [id.strip() for id in url_or_pmid.split(",")]
 
@@ -1321,7 +1336,7 @@ def research_agent(
                         )
 
                         # Get full content
-                        content = content_service.get_full_content(
+                        content = get_content_service().get_full_content(
                             source=identifier,
                             prefer_webpage=True,
                             keywords=["methods", "materials", "analysis", "workflow"],
@@ -1329,7 +1344,7 @@ def research_agent(
                         )
 
                         # Extract methods
-                        methods = content_service.extract_methods(content)
+                        methods = get_content_service().extract_methods(content)
 
                         batch_results.append(
                             {
@@ -1394,7 +1409,7 @@ def research_agent(
                 identifier = identifiers[0]
 
                 # Get full content (webpage-first, with PDF fallback)
-                content = content_service.get_full_content(
+                content = get_content_service().get_full_content(
                     source=identifier,
                     prefer_webpage=True,
                     keywords=["methods", "materials", "analysis", "workflow"],
@@ -1402,7 +1417,7 @@ def research_agent(
                 )
 
                 # Extract methods section
-                methods = content_service.extract_methods(content)
+                methods = get_content_service().extract_methods(content)
 
                 # Apply focus filter if specified
                 if focus and focus.lower() in ["software", "parameters", "statistics"]:
@@ -1648,10 +1663,9 @@ Could not retrieve abstract for: {identifier}
             logger.info(
                 f"Using ContentAccessService for comprehensive extraction: {identifier}"
             )
-            content_service = ContentAccessService(data_manager=data_manager)
 
             # get_full_content() now handles DOI resolution automatically
-            content_result = content_service.get_full_content(
+            content_result = get_content_service().get_full_content(
                 source=identifier,
                 prefer_webpage=False,  # Already tried webpage above if applicable
                 keywords=["methods", "materials", "analysis"],
@@ -1835,45 +1849,154 @@ Could not extract content for: {identifier}
     @tool
     def process_publication_entry(
         entry_id: str,
-        extraction_tasks: str = "metadata,methods,identifiers",
+        extraction_tasks: str = "resolve_identifiers,ncbi_enrich,metadata,methods,identifiers,validate_provenance,fetch_sra_metadata",
+        status_override: str = None,
+        error_message: str = None,
     ) -> str:
         """
-        Process a publication queue entry (or create from PMID/DOI).
+        Process a publication queue entry OR manually update its status.
 
-        Flexible identifier handling - accepts either:
-        1. Queue entry ID: "pub_queue_doi_10_1234..." (existing entry)
-        2. PMID: "PMID:31204333" or "31204333" (find or create entry)
-        3. DOI: "10.1038/..." (find or create entry)
+        **Two modes of operation:**
+
+        1. **Processing mode** (default): Full 7-step pipeline with NCBI enrichment
+        2. **Status override mode**: Manually update status without processing (admin tool)
+
+        **Processing Mode** - Flexible identifier handling:
+        - Queue entry ID: "pub_queue_doi_10_1234..." (existing entry)
+        - PMID: "PMID:31204333" or "31204333" (find or create entry)
+        - DOI: "10.1038/..." (find or create entry)
 
         If PMID/DOI provided and not in queue:
         - Auto-creates queue entry with metadata from PubMed/DOI.org
         - Initializes queue file if doesn't exist
         - Returns processing report as normal
 
-        This enables single-publication workflows without requiring .ris files.
+        **Status Override Mode** - Use ONLY for:
+        - Resetting stale entries (stuck in "extracting") to "pending" before retry
+        - Marking unrecoverable entries as "failed" with error messages
+        - Administrative corrections when processing is impossible
 
         Args:
             entry_id: Entry ID OR PMID OR DOI (flexible)
-            extraction_tasks: Comma-separated tasks (default: "metadata,methods,identifiers")
-                            Options: "metadata", "methods", "identifiers", "full_text"
+            extraction_tasks: Comma-separated tasks (default: full 7-step pipeline)
+                            Individual tasks:
+                            - "resolve_identifiers": DOI → PMID resolution via NCBI ID Converter
+                            - "ncbi_enrich": E-Link dataset discovery (GEO, SRA, BioProject, BioSample)
+                            - "metadata": Abstract/introduction/methods extraction from PMC/publisher
+                            - "methods": Detailed methods section extraction
+                            - "identifiers": Regex-based identifier extraction from full text
+                            - "validate_provenance": Section-based provenance (primary vs referenced data)
+                            - "fetch_sra_metadata": BioProject → SRA sample metadata via pysradb
+                            Shortcuts:
+                            - "full_text": Runs all 7 steps (same as default)
+                            Subset examples:
+                            - "metadata,identifiers": Quick text mining only
+                            - "ncbi_enrich,fetch_sra_metadata": NCBI-only enrichment
+                            Ignored if status_override is set.
+            status_override: Manual status update (default: None = processing mode)
+                           Options: "pending", "extracting", "completed", "failed", "paywalled", "handoff_ready"
+                           When set, skips processing and directly updates status.
+            error_message: Error message for failed status (only used with status_override="failed")
 
         Returns:
-            Processing report with extracted content summary and updated status
+            Processing report with extracted content OR status update confirmation
 
         Examples:
-            # Process existing queue entry
+            # PROCESSING MODE: Process existing queue entry
             process_publication_entry("pub_queue_abc123")
 
-            # Process PMID (auto-creates entry if needed)
+            # PROCESSING MODE: Process PMID (auto-creates entry if needed)
             process_publication_entry("PMID:31204333")
             process_publication_entry("31204333")
 
-            # Process DOI (auto-creates entry if needed)
+            # PROCESSING MODE: Process DOI (auto-creates entry if needed)
             process_publication_entry("10.1038/s41586-021-03852-1")
+
+            # STATUS OVERRIDE MODE: Reset stale entry to pending
+            process_publication_entry("pub_queue_abc123", status_override="pending")
+
+            # STATUS OVERRIDE MODE: Mark as failed with error
+            process_publication_entry("pub_queue_abc123", status_override="failed",
+                                    error_message="Content not accessible")
+
+            # STATUS OVERRIDE MODE: Administrative correction
+            process_publication_entry("pub_queue_abc123", status_override="completed")
         """
         if not HAS_PUBLICATION_PROCESSING:
             return "Publication processing requires a premium subscription. Visit https://omics-os.com/pricing"
 
+        # STATUS OVERRIDE MODE: Manual status update without processing
+        if status_override:
+            try:
+                # Validate status
+                valid_statuses = [
+                    "pending",
+                    "extracting",
+                    "metadata_extracted",
+                    "metadata_enriched",
+                    "handoff_ready",
+                    "completed",
+                    "failed",
+                    "paywalled",
+                ]
+                if status_override.lower() not in valid_statuses:
+                    return f"Error: Invalid status '{status_override}'. Valid options: {', '.join(valid_statuses)}"
+
+                # Get current entry
+                try:
+                    entry = data_manager.publication_queue.get_entry(entry_id)
+                except Exception as e:
+                    return f"Error: Entry '{entry_id}' not found in publication queue: {str(e)}"
+
+                # Update status
+                old_status = str(entry.status)
+                data_manager.publication_queue.update_status(
+                    entry_id=entry_id,
+                    status=(
+                        status_override.lower()
+                        if isinstance(entry.status, str)
+                        else entry.status.__class__(status_override.lower())
+                    ),
+                    error=error_message if status_override.lower() == "failed" else None,
+                    processed_by="research_agent",
+                )
+
+                # Log to W3C-PROV for reproducibility (orchestration operation - no IR)
+                data_manager.log_tool_usage(
+                    tool_name="process_publication_entry",
+                    parameters={
+                        "entry_id": entry_id,
+                        "mode": "status_override",
+                        "old_status": old_status,
+                        "new_status": status_override.lower(),
+                        "error_message": (
+                            error_message if status_override.lower() == "failed" else None
+                        ),
+                        "title": entry.title or "N/A",
+                        "pmid": entry.pmid,
+                        "doi": entry.doi,
+                    },
+                    description=f"Updated publication status {entry_id}: {old_status} → {status_override.lower()}",
+                )
+
+                response = f"""## Publication Status Updated (Manual Override)
+
+**Entry ID**: {entry_id}
+**Title**: {entry.title or 'N/A'}
+**Old Status**: {old_status}
+**New Status**: {status_override.upper()}
+"""
+
+                if error_message:
+                    response += f"\n**Error Message**: {error_message}\n"
+
+                return response
+
+            except Exception as e:
+                logger.error(f"Failed to update publication status: {e}")
+                return f"Error updating publication status: {str(e)}"
+
+        # PROCESSING MODE: Full content extraction workflow
         # Resolve identifier: entry_id, PMID, or DOI → entry_id
         resolved_entry_id = _find_or_create_queue_entry(entry_id, data_manager)
 
@@ -1886,7 +2009,7 @@ Could not extract content for: {identifier}
     def process_publication_queue(
         status_filter: str = "pending",
         max_entries: int = 0,
-        extraction_tasks: str = "metadata,methods,identifiers",
+        extraction_tasks: str = "resolve_identifiers,ncbi_enrich,metadata,methods,identifiers,validate_provenance,fetch_sra_metadata",
         parallel_workers: int = 1,
     ) -> str:
         """
@@ -1896,7 +2019,20 @@ Could not extract content for: {identifier}
             status_filter: Queue status to target (default: "pending").
                           Options: pending, extracting, completed, handoff_ready, etc.
             max_entries: Maximum entries to process (default: 5, 0 = all matching).
-            extraction_tasks: Comma-separated tasks (default: "metadata,methods,identifiers").
+            extraction_tasks: Comma-separated tasks (default: full 7-step pipeline).
+                            Individual tasks:
+                            - "resolve_identifiers": DOI → PMID resolution via NCBI ID Converter
+                            - "ncbi_enrich": E-Link dataset discovery (GEO, SRA, BioProject, BioSample)
+                            - "metadata": Abstract/introduction/methods extraction from PMC/publisher
+                            - "methods": Detailed methods section extraction
+                            - "identifiers": Regex-based identifier extraction from full text
+                            - "validate_provenance": Section-based provenance (primary vs referenced data)
+                            - "fetch_sra_metadata": BioProject → SRA sample metadata via pysradb
+                            Shortcuts:
+                            - "full_text": Runs all 7 steps (same as default)
+                            Subset examples:
+                            - "metadata,identifiers": Quick text mining only
+                            - "ncbi_enrich,fetch_sra_metadata": NCBI-only enrichment
             parallel_workers: Number of parallel workers (default: 1 = sequential).
                              Use 2-3 for faster processing of large queues.
                              Higher values (>3) risk NCBI API rate limit issues.
@@ -1960,96 +2096,6 @@ Could not extract content for: {identifier}
                 extraction_tasks=extraction_tasks,
             )
 
-    @tool
-    def update_publication_status(
-        entry_id: str,
-        status: str,
-        error_message: str = None,
-    ) -> str:
-        """
-        Update publication queue entry status.
-
-        Args:
-            entry_id: Publication queue entry identifier
-            status: New status (pending/extracting/metadata_extracted/metadata_enriched/handoff_ready/completed/failed)
-            error_message: Optional error message for failed status
-
-        Returns:
-            Status update confirmation
-
-        Examples:
-            # Mark as completed
-            update_publication_status("pub_queue_abc123", "completed")
-
-            # Mark as failed with error
-            update_publication_status("pub_queue_abc123", "failed", "Content not accessible")
-        """
-        try:
-            # Validate status
-            valid_statuses = [
-                "pending",
-                "extracting",
-                "metadata_extracted",
-                "metadata_enriched",
-                "handoff_ready",
-                "completed",
-                "failed",
-            ]
-            if status.lower() not in valid_statuses:
-                return f"Error: Invalid status '{status}'. Valid options: {', '.join(valid_statuses)}"
-
-            # Get current entry
-            try:
-                entry = data_manager.publication_queue.get_entry(entry_id)
-            except Exception as e:
-                return f"Error: Entry '{entry_id}' not found in publication queue: {str(e)}"
-
-            # Update status
-            old_status = str(entry.status)
-            data_manager.publication_queue.update_status(
-                entry_id=entry_id,
-                status=(
-                    status.lower()
-                    if isinstance(entry.status, str)
-                    else entry.status.__class__(status.lower())
-                ),
-                error=error_message if status.lower() == "failed" else None,
-                processed_by="research_agent",
-            )
-
-            # Log to W3C-PROV for reproducibility (orchestration operation - no IR)
-            data_manager.log_tool_usage(
-                tool_name="update_publication_status",
-                parameters={
-                    "entry_id": entry_id,
-                    "old_status": old_status,
-                    "new_status": status.lower(),
-                    "error_message": (
-                        error_message if status.lower() == "failed" else None
-                    ),
-                    "title": entry.title or "N/A",
-                    "pmid": entry.pmid,
-                    "doi": entry.doi,
-                },
-                description=f"Updated publication status {entry_id}: {old_status} → {status.lower()}",
-            )
-
-            response = f"""## Publication Status Updated
-
-**Entry ID**: {entry_id}
-**Title**: {entry.title or 'N/A'}
-**Old Status**: {entry.status}
-**New Status**: {status.upper()}
-"""
-
-            if error_message:
-                response += f"\n**Error Message**: {error_message}\n"
-
-            return response
-
-        except Exception as e:
-            logger.error(f"Failed to update publication status: {e}")
-            return f"Error updating publication status: {str(e)}"
 
     # ============================================================
     # Phase 4 TOOLS: Workspace Management (shared tools from workspace_tool.py)
@@ -2311,9 +2357,8 @@ Could not extract content for: {identifier}
         extract_methods,
         # --------------------------------
         # Publication Queue Management (2 tools)
-        process_publication_entry,
+        process_publication_entry,  # Now includes status_override for manual updates
         process_publication_queue,
-        update_publication_status,
         # --------------------------------
         # Workspace management tools (2 tools)
         write_to_workspace,
@@ -2322,9 +2367,8 @@ Could not extract content for: {identifier}
         # System tools (1 tool)
         validate_dataset_metadata,
         # --------------------------------
-        # Total: 12 tools (3 discovery + 4 content + 2 pub queue + 2 workspace + 1 system)
-        # Phase 4 complete: Removed 6 tools, renamed 6, enhanced 4, added 2 workspace
-        # Phase 7 complete: Added 2 publication queue management tools
+        # Total: 11 tools (3 discovery + 4 content + 2 pub queue + 2 workspace + 1 system)
+        # Phase 8 complete: Merged update_publication_status into process_publication_entry (tool count reduction)
     ]
 
     tools = base_tools
@@ -2417,8 +2461,7 @@ Workspace tools:
 Validation and queue tools:
 -	validate_dataset_metadata: validate dataset metadata and recommend a download strategy. Produces a severity status and may create or update a download queue entry.
 -	process_publication_queue: batch process multiple publication_queue entries by status to extract metadata, methods, and identifiers.
--	process_publication_entry: process or reprocess a single publication_queue entry for targeted extraction tasks.
--	update_publication_status: manually adjust publication_queue status and record error messages for unrecoverable failures.
+-	process_publication_entry: process or reprocess a single publication_queue entry for targeted extraction tasks. Also supports status_override parameter to manually adjust status without processing (admin mode).
 
 Handoff tool:
 	-	handoff_to_metadata_assistant: send structured instructions to the metadata assistant.
@@ -2491,9 +2534,10 @@ Tier Restriction (IMPORTANT):
 - process_publication_entry for targeted reruns, partial extraction (metadata, methods, identifiers), or recovery of a single entry.
 - Respect and manage the state transitions:
 - pending → extracting → metadata_extracted → metadata_enriched → handoff_ready → completed or failed.
-- Use update_publication_status to:
-- Reset stale entries (e.g. long-lived extracting) to pending before retrying.
-- Mark unrecoverable entries as failed with a clear error_message explaining why (paywall, no accessible full text, irreparable parsing errors).
+- Use process_publication_entry with status_override parameter to manually update status:
+- Reset stale entries (e.g. long-lived extracting) to pending before retrying: process_publication_entry(entry_id, status_override="pending")
+- Mark unrecoverable entries as failed with a clear error_message: process_publication_entry(entry_id, status_override="failed", error_message="Paywall blocked")
+- Administrative corrections when processing is impossible: process_publication_entry(entry_id, status_override="completed")
 - Do not use the publication queue for simple single-paper, ad-hoc questions when direct tools (fast_abstract_search, read_full_publication) suffice.
 5. Workspace caching and naming conventions
 - Always cache reusable artifacts using write_to_workspace with consistent naming so the metadata assistant and data expert can refer to them.

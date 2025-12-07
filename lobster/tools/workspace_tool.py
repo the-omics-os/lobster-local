@@ -9,11 +9,13 @@ by multiple agents (research_agent, data_expert, supervisor):
 
 import json
 import re
+from pathlib import Path
 from typing import Optional
 
 from langchain_core.tools import tool
 
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.core.queue_storage import atomic_write_jsonl, queue_file_lock
 from lobster.core.schemas.export_schemas import (
     get_ordered_export_columns,
     infer_data_type,
@@ -1272,3 +1274,385 @@ def create_list_modalities_tool(data_manager: DataManagerV2):
             return f"Error listing modalities: {str(e)}"
 
     return list_available_modalities
+
+
+def create_delete_from_workspace_tool(data_manager: DataManagerV2):
+    """
+    Factory function to create delete_from_workspace tool with data_manager closure.
+
+    Unified deletion tool for removing workspace content, queue entries, and modalities
+    with safety validations and provenance tracking. Supervisor-only tool for data cleanup.
+
+    Args:
+        data_manager: DataManagerV2 instance for workspace access
+
+    Returns:
+        LangChain tool for deleting workspace content with preview/confirmation modes
+    """
+
+    @tool
+    def delete_from_workspace(
+        identifier: str,
+        workspace: str = None,
+        confirmation: bool = False,
+    ) -> str:
+        """
+        Delete cached content, queue entries, or modalities from workspace.
+
+        Unified deletion tool supporting:
+        - Cached workspace files (literature, data, metadata)
+        - Queue entries (download_queue, publication_queue)
+        - Modalities (loaded datasets)
+
+        Safety features:
+        - Preview mode (confirmation=False): Shows what will be deleted without executing
+        - Execution mode (confirmation=True): Performs actual deletion after preview
+        - Auto-detects workspace category from identifier format
+        - Validates existence before deletion
+        - Tracks all deletions via provenance logging
+
+        Workspace Categories (auto-detected):
+        - "literature": Publications, papers (pub_*, publication_*, pmid_*)
+        - "data": Dataset metadata (dataset_*, geo_*, gse_*)
+        - "metadata": Validation results, sample mappings (metadata_*, samples_*)
+        - "download_queue": Pending/completed download tasks (queue_*, dlq_*)
+        - "publication_queue": Publication extraction tasks (pub_queue_*)
+        - "modality": Loaded datasets in memory (any modality name)
+
+        Args:
+            identifier: Content identifier or modality name to delete
+            workspace: Optional workspace category override
+                      If None, auto-detects from identifier format
+            confirmation: If True, executes deletion. If False, shows preview only (default: False)
+
+        Returns:
+            Preview of deletion actions (confirmation=False) or
+            Confirmation of completed deletions (confirmation=True)
+
+        Examples:
+            # Preview deletion (safe - no actual deletion)
+            delete_from_workspace(
+                identifier="pub_queue_doi_10_1234_5678_metadata",
+                confirmation=False
+            )
+
+            # Execute deletion after preview
+            delete_from_workspace(
+                identifier="pub_queue_doi_10_1234_5678_metadata",
+                confirmation=True
+            )
+
+            # Delete queue entry
+            delete_from_workspace(
+                identifier="queue_entry_123",
+                workspace="download_queue",
+                confirmation=True
+            )
+
+            # Delete modality from memory
+            delete_from_workspace(
+                identifier="geo_gse12345_clustered",
+                workspace="modality",
+                confirmation=True
+            )
+
+            # Delete all cached files for a publication
+            delete_from_workspace(
+                identifier="pub_queue_doi_10_1234_5678",
+                confirmation=True
+            )
+        """
+        try:
+            workspace_service = WorkspaceContentService(data_manager=data_manager)
+
+            # Auto-detect workspace category if not specified
+            if workspace is None:
+                workspace = _auto_detect_workspace(identifier)
+                if workspace is None:
+                    # Could not auto-detect - check if it's a modality
+                    if identifier in data_manager.list_modalities():
+                        workspace = "modality"
+                    else:
+                        return (
+                            f"Error: Could not auto-detect workspace type for '{identifier}'.\n\n"
+                            f"Please specify workspace explicitly:\n"
+                            f"  • literature, data, metadata (for cached files)\n"
+                            f"  • download_queue, publication_queue (for queue entries)\n"
+                            f"  • modality (for loaded datasets)\n\n"
+                            f"Example: delete_from_workspace(identifier='{identifier}', workspace='modality', confirmation=True)"
+                        )
+
+            # Collect items to delete
+            items_to_delete = []
+            deletion_summary = {
+                "identifier": identifier,
+                "workspace": workspace,
+                "items_found": 0,
+                "items_deleted": 0,
+                "errors": [],
+            }
+
+            # Handle modality deletion
+            if workspace == "modality":
+                if identifier in data_manager.list_modalities():
+                    items_to_delete.append({
+                        "type": "modality",
+                        "identifier": identifier,
+                        "location": "memory",
+                    })
+                    deletion_summary["items_found"] = 1
+                else:
+                    return f"Error: Modality '{identifier}' not found in memory.\n\nAvailable modalities: {', '.join(data_manager.list_modalities())}"
+
+            # Handle download_queue deletion
+            elif workspace == "download_queue":
+                try:
+                    entry = workspace_service.read_download_queue_entry(identifier)
+                    items_to_delete.append({
+                        "type": "queue_entry",
+                        "identifier": identifier,
+                        "workspace": "download_queue",
+                        "details": f"{entry['dataset_id']} ({entry['status']})",
+                    })
+                    deletion_summary["items_found"] = 1
+                except FileNotFoundError:
+                    return f"Error: Download queue entry '{identifier}' not found."
+
+            # Handle publication_queue deletion
+            elif workspace == "publication_queue":
+                try:
+                    entry = workspace_service.read_publication_queue_entry(identifier)
+                    title = entry.get("title", "Untitled")
+                    items_to_delete.append({
+                        "type": "queue_entry",
+                        "identifier": identifier,
+                        "workspace": "publication_queue",
+                        "details": f"{title[:60]}... ({entry['status']})",
+                    })
+                    deletion_summary["items_found"] = 1
+                except FileNotFoundError:
+                    return f"Error: Publication queue entry '{identifier}' not found."
+
+            # Handle cached workspace files (literature, data, metadata)
+            else:
+                # Map workspace strings to ContentType enum
+                workspace_to_content_type = {
+                    "literature": ContentType.PUBLICATION,
+                    "data": ContentType.DATASET,
+                    "metadata": ContentType.METADATA,
+                }
+
+                if workspace not in workspace_to_content_type:
+                    return f"Error: Invalid workspace '{workspace}'. Valid: {', '.join(workspace_to_content_type.keys())}, download_queue, publication_queue, modality"
+
+                content_type = workspace_to_content_type[workspace]
+
+                # Find all files matching identifier (may be prefix match)
+                content_dir = workspace_service._get_content_dir(content_type)
+                if not content_dir.exists():
+                    return f"Error: Workspace directory '{workspace}' does not exist."
+
+                # Look for exact match or prefix match
+                sanitized_id = workspace_service._sanitize_filename(identifier)
+                matching_files = []
+
+                for file_path in content_dir.glob(f"{sanitized_id}*"):
+                    if file_path.is_file():
+                        matching_files.append(file_path)
+
+                if not matching_files:
+                    return f"Error: No cached files found matching '{identifier}' in workspace '{workspace}'."
+
+                for file_path in matching_files:
+                    items_to_delete.append({
+                        "type": "cached_file",
+                        "identifier": file_path.stem,
+                        "workspace": workspace,
+                        "path": str(file_path),
+                        "size": file_path.stat().st_size,
+                    })
+                deletion_summary["items_found"] = len(matching_files)
+
+            # Preview mode - show what will be deleted
+            if not confirmation:
+                response = f"## Deletion Preview for '{identifier}'\n\n"
+                response += f"**Workspace**: {workspace}\n"
+                response += f"**Items Found**: {deletion_summary['items_found']}\n\n"
+
+                if deletion_summary["items_found"] == 0:
+                    response += "⚠️ No items found to delete.\n"
+                else:
+                    response += "**Items that will be deleted:**\n\n"
+                    for item in items_to_delete:
+                        if item["type"] == "modality":
+                            try:
+                                adata = data_manager.get_modality(item["identifier"])
+                                response += f"- **{item['identifier']}** (modality)\n"
+                                response += f"  - Shape: {adata.n_obs} obs × {adata.n_vars} vars\n"
+                                response += f"  - Location: {item['location']}\n"
+                            except Exception:
+                                response += f"- **{item['identifier']}** (modality)\n"
+                        elif item["type"] == "queue_entry":
+                            response += f"- **{item['identifier']}** (queue entry)\n"
+                            response += f"  - Workspace: {item['workspace']}\n"
+                            response += f"  - Details: {item['details']}\n"
+                        elif item["type"] == "cached_file":
+                            size_mb = item['size'] / (1024 * 1024)
+                            response += f"- **{item['identifier']}** (cached file)\n"
+                            response += f"  - Workspace: {item['workspace']}\n"
+                            response += f"  - Path: {item['path']}\n"
+                            response += f"  - Size: {size_mb:.2f} MB\n"
+
+                    response += f"\n**⚠️ PREVIEW ONLY - No deletion performed**\n"
+                    response += f"**To execute deletion**: Set `confirmation=True`\n"
+
+                return response
+
+            # Execution mode - perform actual deletion
+            else:
+                response = f"## Deleting '{identifier}' from workspace '{workspace}'\n\n"
+
+                for item in items_to_delete:
+                    try:
+                        if item["type"] == "modality":
+                            # Use ModalityManagementService for modality deletion
+                            modality_service = ModalityManagementService(data_manager)
+                            success, stats, ir = modality_service.remove_modality(
+                                item["identifier"]
+                            )
+                            if success:
+                                data_manager.log_tool_usage(
+                                    tool_name="delete_from_workspace",
+                                    parameters={
+                                        "identifier": identifier,
+                                        "workspace": workspace,
+                                        "type": "modality",
+                                    },
+                                    description=f"Deleted modality: {item['identifier']}",
+                                    ir=ir,
+                                )
+                                deletion_summary["items_deleted"] += 1
+                                response += f"✓ Deleted modality: {item['identifier']}\n"
+                            else:
+                                deletion_summary["errors"].append(
+                                    f"Failed to delete modality: {item['identifier']}"
+                                )
+                                response += f"✗ Failed to delete modality: {item['identifier']}\n"
+
+                        elif item["type"] == "queue_entry":
+                            # Delete queue entry file (with atomic operations to prevent race conditions)
+                            queue_type = item["workspace"]
+                            queue_file = (
+                                data_manager.workspace_path / f"{queue_type}.jsonl"
+                            )
+                            lock_file = queue_file.parent / f".{queue_file.name}.lock"
+
+                            if queue_file.exists():
+                                # Use InterProcessFileLock to prevent concurrent access
+                                from lobster.core.queue_storage import InterProcessFileLock
+
+                                with InterProcessFileLock(lock_file):
+                                    # Read all entries
+                                    entries = []
+                                    with open(queue_file, "r") as f:
+                                        for line in f:
+                                            entry = json.loads(line.strip())
+                                            if entry.get("entry_id") != item["identifier"]:
+                                                entries.append(entry)
+
+                                    # Atomic write back without deleted entry
+                                    atomic_write_jsonl(
+                                        target_path=queue_file,
+                                        entries=entries,
+                                        serializer=lambda x: x,  # Already dict
+                                    )
+
+                                data_manager.log_tool_usage(
+                                    tool_name="delete_from_workspace",
+                                    parameters={
+                                        "identifier": identifier,
+                                        "workspace": workspace,
+                                        "type": "queue_entry",
+                                    },
+                                    description=f"Deleted queue entry: {item['identifier']}",
+                                )
+                                deletion_summary["items_deleted"] += 1
+                                response += f"✓ Deleted queue entry: {item['identifier']}\n"
+                            else:
+                                deletion_summary["errors"].append(
+                                    f"Queue file not found: {queue_file}"
+                                )
+                                response += f"✗ Queue file not found: {queue_file}\n"
+
+                        elif item["type"] == "cached_file":
+                            # Delete cached file
+                            file_path = Path(item["path"])
+                            if file_path.exists():
+                                file_path.unlink()
+                                data_manager.log_tool_usage(
+                                    tool_name="delete_from_workspace",
+                                    parameters={
+                                        "identifier": identifier,
+                                        "workspace": workspace,
+                                        "type": "cached_file",
+                                        "path": str(file_path),
+                                    },
+                                    description=f"Deleted cached file: {item['identifier']}",
+                                )
+                                deletion_summary["items_deleted"] += 1
+                                response += f"✓ Deleted file: {item['identifier']}\n"
+                            else:
+                                deletion_summary["errors"].append(
+                                    f"File not found: {file_path}"
+                                )
+                                response += f"✗ File not found: {file_path}\n"
+
+                    except Exception as e:
+                        deletion_summary["errors"].append(str(e))
+                        response += f"✗ Error deleting {item['identifier']}: {str(e)}\n"
+
+                # Summary
+                response += f"\n**Summary**:\n"
+                response += f"- Items found: {deletion_summary['items_found']}\n"
+                response += f"- Items deleted: {deletion_summary['items_deleted']}\n"
+                if deletion_summary["errors"]:
+                    response += f"- Errors: {len(deletion_summary['errors'])}\n"
+                    for error in deletion_summary["errors"]:
+                        response += f"  - {error}\n"
+
+                return response
+
+        except Exception as e:
+            logger.error(f"Error in delete_from_workspace: {e}")
+            return f"Error deleting from workspace: {str(e)}"
+
+    def _auto_detect_workspace(identifier: str) -> Optional[str]:
+        """Auto-detect workspace category from identifier format.
+
+        Returns None if pattern doesn't match any known workspace type,
+        requiring explicit workspace parameter from caller.
+        """
+        identifier_lower = identifier.lower()
+
+        # Queue patterns
+        if identifier_lower.startswith(("queue_", "dlq_")):
+            return "download_queue"
+        if identifier_lower.startswith("pub_queue_"):
+            return "publication_queue"
+
+        # Publication patterns
+        if identifier_lower.startswith(("pub_", "publication_", "pmid_", "doi_")):
+            return "literature"
+
+        # Dataset patterns
+        if identifier_lower.startswith(("dataset_", "geo_", "gse_", "gsm_", "gpl_")):
+            return "data"
+
+        # Metadata patterns
+        if identifier_lower.startswith(("metadata_", "samples_", "validation_")):
+            return "metadata"
+
+        # Return None instead of guessing - safer to error
+        return None
+
+    return delete_from_workspace

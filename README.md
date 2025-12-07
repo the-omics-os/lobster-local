@@ -125,6 +125,27 @@ lobster query --workspace ~/my_analysis "cluster the loaded dataset"
 lobster query --reasoning "differential expression between conditions"
 ```
 
+### Dashboard Mode
+
+Launch an interactive Textual-based dashboard with real-time monitoring:
+
+```bash
+# Launch dashboard directly
+lobster dashboard
+
+# Or switch from chat mode
+lobster chat
+# Then type: /dashboard
+```
+
+The dashboard provides:
+- Multi-panel cockpit layout for real-time monitoring
+- Live agent activity tracking and handoff visualization
+- Query input with streaming responses
+- Token usage and system status panels
+
+Press ESC to quit, ^P for command palette.
+
 ### Natural Language Examples
 
 ```bash

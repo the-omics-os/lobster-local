@@ -24,6 +24,7 @@ from lobster.config.supervisor_config import SupervisorConfig
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.tools.handoff_tool import create_custom_handoff_tool
 from lobster.tools.workspace_tool import (
+    create_delete_from_workspace_tool,
     create_get_content_from_workspace_tool,
     create_list_modalities_tool,
 )
@@ -271,6 +272,7 @@ def create_bioinformatics_graph(
     # Create shared tools with data_manager access
     list_available_modalities = create_list_modalities_tool(data_manager)
     get_content_from_workspace = create_get_content_from_workspace_tool(data_manager)
+    delete_from_workspace = create_delete_from_workspace_tool(data_manager)
 
     # Get list of supervisor-accessible agents (for prompt generation)
     active_agent_names = [agent.name for agent in supervisor_accessible_agents]
@@ -303,7 +305,12 @@ def create_bioinformatics_graph(
         # Change from "full_history" to "messages" or "last_message"
         # output_mode="full_history",  # This ensures the actual messages are returned
         output_mode="last_message",  # This ensures the actual messages are returned
-        tools=handoff_tools + [list_available_modalities, get_content_from_workspace],
+        tools=handoff_tools
+        + [
+            list_available_modalities,
+            get_content_from_workspace,
+            delete_from_workspace,
+        ],
         # + [forwarding_tool],  # Supervisor-only tools (handoff tools are auto-created)
     )
 

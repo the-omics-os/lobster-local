@@ -5,8 +5,13 @@ This module defines all agents used in the system with their configurations,
 making it easy to add new agents without modifying multiple files.
 """
 
+import threading
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
+
+# Thread-safe lazy plugin discovery
+_plugins_loaded = False
+_plugins_lock = threading.Lock()
 
 
 @dataclass
@@ -139,18 +144,39 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
 # SYSTEM_AGENTS = ['supervisor', 'transcriptomics_expert', 'method_agent', 'clarify_with_user']
 
 
+def _ensure_plugins_loaded() -> None:
+    """
+    Thread-safe lazy plugin discovery.
+
+    Uses double-checked locking to ensure plugins are loaded exactly once
+    across all threads. This defers the ~900ms plugin discovery cost until
+    the first access to AGENT_REGISTRY.
+    """
+    global _plugins_loaded
+    if _plugins_loaded:
+        return
+    with _plugins_lock:
+        if _plugins_loaded:  # Double-check after acquiring lock
+            return
+        _merge_plugin_agents()
+        _plugins_loaded = True
+
+
 def get_all_agent_names() -> list[str]:
     """Get all agent names including system agents."""
+    _ensure_plugins_loaded()
     return list(AGENT_REGISTRY.keys())
 
 
 def get_worker_agents() -> Dict[str, AgentRegistryConfig]:
     """Get only the worker agents (excluding system agents)."""
+    _ensure_plugins_loaded()
     return AGENT_REGISTRY.copy()
 
 
 def get_agent_registry_config(agent_name: str) -> Optional[AgentRegistryConfig]:
     """Get registry configuration for a specific agent."""
+    _ensure_plugins_loaded()
     return AGENT_REGISTRY.get(agent_name)
 
 
@@ -202,5 +228,5 @@ def _merge_plugin_agents() -> None:
         logger.warning(f"Plugin discovery failed: {e}")
 
 
-# Merge plugins at module load time
-_merge_plugin_agents()
+# Plugin merging is now lazy-loaded via _ensure_plugins_loaded()
+# This defers ~900ms of plugin discovery until first registry access
