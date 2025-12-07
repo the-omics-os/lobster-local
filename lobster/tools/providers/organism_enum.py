@@ -133,8 +133,9 @@ def to_sci_name(organism: str) -> str:
         >>> to_sci_name("unknown_organism")
         ValueError: Organism 'unknown_organism' not found in OrganismEnum...
     """
-    # Normalize: uppercase + replace spaces with underscores
-    organism_str = organism.strip().replace(" ", "_").upper()
+    # Normalize: uppercase + collapse multiple spaces, replace with underscores
+    import re
+    organism_str = re.sub(r'\s+', '_', organism.strip()).upper()
 
     try:
         enum_member = OrganismEnum[organism_str]
@@ -168,7 +169,8 @@ def validate_organism(organism: str) -> bool:
         >>> validate_organism("unknown")
         False
     """
-    organism_str = organism.strip().replace(" ", "_").upper()
+    import re
+    organism_str = re.sub(r'\s+', '_', organism.strip()).upper()
     return organism_str in OrganismEnum.__members__
 
 

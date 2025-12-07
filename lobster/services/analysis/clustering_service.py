@@ -493,9 +493,9 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                 "resolution": resolution,
                 "n_clusters": n_clusters,
                 "batch_correction": batch_correction,
-                "batch_key": batch_key,
+                "batch_key": batch_key if batch_correction else None,
                 "demo_mode": demo_mode,
-                "subsample_size": subsample_size,
+                "subsample_size": subsample_size if subsample_size else None,
                 "original_shape": original_shape,
                 "final_shape": adata_clustered.shape,
                 "cluster_counts": cluster_counts,
@@ -802,16 +802,13 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                     deviance_mean = selected_deviance.mean()
                     deviance_max = selected_deviance.max()
 
-                    # Check if variance spread is too low (coefficient of variation < 0.7)
-                    # This catches cases where genes have uniform deviance (e.g., all Poisson(1))
-                    # CV < 0.7 means the range is less than 70% of the mean, indicating poor discrimination
-                    is_too_uniform = deviance_mean > 0 and (deviance_range / deviance_mean) < 0.7
+                    # Two-tier validation (either condition indicates problematic data):
+                    # 1. Check if max deviance is extremely low (< 0.5) - catches Poisson(1) + noise type data
+                    # 2. Check if all selected genes have nearly identical deviance (CV < 0.02)
+                    is_too_low_variance = deviance_max < 0.5
+                    is_too_uniform = deviance_mean > 0 and (deviance_range / deviance_mean) < 0.02
 
-                    # Check if absolute variance is too low (max deviance < 0.5)
-                    # AND all genes were selected (indicating no real differentiation)
-                    is_too_low_and_no_selection = deviance_max < 0.5 and n_selected >= total_genes * 0.95
-
-                    if is_too_uniform or is_too_low_and_no_selection:
+                    if is_too_low_variance or is_too_uniform:
                         raise ClusteringError(
                             "Insufficient features for clustering: selected features have very uniform variance.\n"
                             "This typically indicates:\n"
@@ -877,8 +874,8 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                     if len(selected_dispersion) > 0:
                         disp_range = selected_dispersion.max() - selected_dispersion.min()
                         disp_mean = selected_dispersion.mean()
-                        # Check if variance is too uniform
-                        if disp_mean > 0 and (disp_range / disp_mean) < 0.1:
+                        # Check if variance is too uniform (very lenient threshold - catches only degenerate data)
+                        if disp_mean > 0 and (disp_range / disp_mean) < 0.01:
                             raise ClusteringError(
                                 "Selected features have insufficient variance spread. This typically indicates:\n"
                                 "1. Data has very uniform expression across all genes\n"
