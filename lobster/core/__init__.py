@@ -15,6 +15,11 @@ from lobster.core.exceptions import (
     UnsupportedPlatformError,
 )
 
+# Import configuration classes
+from lobster.core.config_resolver import ConfigResolver
+from lobster.core.global_config import GlobalProviderConfig
+from lobster.core.workspace_config import WorkspaceProviderConfig
+
 
 class DataManagerError(LobsterCoreError):
     """Exception raised for data manager operations."""
@@ -71,7 +76,7 @@ class DesignMatrixError(PseudobulkError):
     pass
 
 
-# Export all exceptions for easy importing
+# Export all exceptions and configuration classes for easy importing
 __all__ = [
     # Base exception and new exceptions from exceptions.py
     "LobsterCoreError",
@@ -90,4 +95,8 @@ __all__ = [
     "FormulaError",
     "InsufficientCellsError",
     "DesignMatrixError",
+    # Configuration classes
+    "WorkspaceProviderConfig",
+    "GlobalProviderConfig",
+    "ConfigResolver",
 ]

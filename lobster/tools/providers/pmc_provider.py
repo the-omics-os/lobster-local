@@ -524,28 +524,63 @@ class PMCProvider:
         """
         Check if XML contains actual body content (not publisher-restricted).
 
+        Philosophy (inspired by pubmed_parser library - peer-reviewed, 2015-2020+):
+        - Trust the PMC API: If XML is returned, it's valid open-access content
+        - Check for explicit restriction markers (defensive)
+        - Check for <body> element presence (structural requirement)
+        - No arbitrary character thresholds (content length is irrelevant)
+
         Publisher-restricted responses contain a comment like:
         "The publisher of this article does not allow downloading of the full text in XML form."
 
         Args:
-            xml_text: XML string to check
+            xml_text: Raw XML string from PMC API
 
         Returns:
-            True if XML has body content, False if restricted or empty
+            True if valid body content present, False otherwise
+
+        Examples:
+            >>> # Valid: structured XML with sections
+            >>> xml = '<body><sec><title>Methods</title><p>Content</p></sec></body>'
+            >>> provider._has_body_content(xml)
+            True
+
+            >>> # Valid: minimal whitespace but has <body>
+            >>> xml = '<body>\\n  <sec>\\n    <p>Text</p>\\n  </sec>\\n</body>'
+            >>> provider._has_body_content(xml)
+            True
+
+            >>> # Invalid: explicit publisher restriction
+            >>> xml = '<body>Publisher does not allow downloading</body>'
+            >>> provider._has_body_content(xml)
+            False
+
+            >>> # Invalid: no <body> element
+            >>> xml = '<article><front><title>Title</title></front></article>'
+            >>> provider._has_body_content(xml)
+            False
         """
-        # Check for publisher restriction comment
+        # Check 1: Explicit publisher restriction marker (defensive check)
         if "does not allow downloading" in xml_text:
+            logger.debug("Detected explicit publisher restriction marker")
             return False
 
-        # Check for <body> element with content
-        if "<body>" in xml_text or "<body " in xml_text:
-            # Also verify there's actual content in body (not just empty tags)
-            body_pattern = re.compile(r"<body[^>]*>(.+?)</body>", re.DOTALL)
-            match = body_pattern.search(xml_text)
-            if match and len(match.group(1).strip()) > 100:
-                return True
+        # Check 2: <body> element presence (required for JATS XML)
+        # If PMC API returns XML with <body>, trust it contains valid content
+        # This matches pubmed_parser's approach - no character counting
+        has_body = "<body>" in xml_text or "<body " in xml_text
 
-        return False
+        if has_body:
+            logger.debug("Valid <body> element found in PMC XML")
+            return True
+        else:
+            logger.debug("No <body> element found in XML")
+            return False
+
+        # Note: We explicitly DO NOT check content length or count characters.
+        # PMC's JATS XML uses structured elements (<sec>, <p>, <table-wrap>)
+        # and text may be minimal after whitespace stripping, but content is
+        # still valid and parseable. This matches pubmed_parser's approach.
 
     def parse_pmc_xml(self, xml_text: str) -> PMCFullText:
         """
@@ -768,7 +803,7 @@ class PMCProvider:
             # Re-raise availability errors
             raise
         except Exception as e:
-            logger.exception(f"Error extracting PMC full text for {identifier}: {e}")
+            logger.warning(f"PMC extraction failed for {identifier}: {str(e)}")
             raise PMCAPIError(
                 f"PMC extraction failed for {identifier}: {str(e)}. "
                 "Service may be temporarily unavailable."

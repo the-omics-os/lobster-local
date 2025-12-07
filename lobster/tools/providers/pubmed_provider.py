@@ -1998,6 +1998,168 @@ class PubMedProvider(BasePublicationProvider):
         github_matches = re.finditer(github_pattern, text, re.IGNORECASE)
         return [f"https://github.com/{m.group(1)}/{m.group(2)}" for m in github_matches]
 
+    def find_related_publications(
+        self, identifier: str, max_results: int = 5, **kwargs
+    ) -> str:
+        """
+        Find publications related to a given PMID or DOI using NCBI E-Link.
+
+        Uses NCBI E-Link API to discover papers that cite (citedin) or are cited by
+        (refs) the given publication. This is useful for literature discovery and
+        following citation chains.
+
+        Args:
+            identifier: DOI or PMID of the source publication
+            max_results: Maximum number of related publications to return (default: 5)
+            **kwargs: Additional parameters
+
+        Returns:
+            str: Formatted list of related publications with titles and abstracts
+
+        Examples:
+            >>> provider = PubMedProvider(data_manager)
+            >>> results = provider.find_related_publications("PMID:35042229", max_results=10)
+        """
+        logger.debug(f"Finding related publications for: {identifier}")
+
+        try:
+            # Determine identifier type and get PMID
+            if identifier.startswith("10."):
+                # DOI - need to convert to PMID first
+                query = f"{identifier}[DOI]"
+            elif identifier.isdigit() or identifier.upper().startswith("PMID:"):
+                pmid = identifier.replace("PMID:", "").strip()
+                query = f"{pmid}[PMID]"
+            else:
+                return f"Invalid identifier format: {identifier}. Please provide DOI or PMID."
+
+            # Get the source publication's PMID
+            results = list(self._load_with_params(query, 1))
+            if not results:
+                return f"Publication not found: {identifier}"
+
+            source_pmid = results[0].get("uid")
+            if not source_pmid:
+                return f"Could not retrieve PMID for: {identifier}"
+
+            # Use E-Link to find related publications (citedin + refs)
+            # citedin = papers that cite this paper
+            # refs = papers cited by this paper
+            related_pmids = self._find_related_pmids(source_pmid, max_results)
+
+            if not related_pmids:
+                return f"No related publications found for: {identifier}"
+
+            # Fetch metadata for related publications
+            related_publications = []
+            for pmid in related_pmids[:max_results]:
+                try:
+                    article = self.retrieve_article(pmid, webenv="")
+                    if article:
+                        related_publications.append(self._convert_to_metadata(article))
+                except Exception as e:
+                    logger.warning(f"Error fetching related publication {pmid}: {e}")
+                    continue
+
+            if not related_publications:
+                return f"Could not retrieve metadata for related publications of: {identifier}"
+
+            # Format results
+            response = f"## Related Publications for {identifier}\n\n"
+            response += f"**Source Publication**: {results[0].get('Title', 'N/A')}\n"
+            response += f"**Found {len(related_publications)} related publications**\n\n"
+
+            for idx, pub in enumerate(related_publications, 1):
+                response += f"### {idx}. {pub.title}\n\n"
+                response += f"**PMID**: {pub.pmid or 'N/A'}\n"
+                response += f"**DOI**: {pub.doi or 'N/A'}\n"
+                response += f"**Journal**: {pub.journal or 'N/A'} ({pub.published or 'N/A'})\n"
+
+                # Truncate abstract for readability
+                abstract = pub.abstract or "No abstract available"
+                if len(abstract) > 300:
+                    abstract = abstract[:300] + "..."
+                response += f"**Abstract**: {abstract}\n\n"
+
+            # Log the search
+            self.data_manager.log_tool_usage(
+                tool_name="find_related_publications",
+                parameters={
+                    "identifier": identifier,
+                    "max_results": max_results,
+                    "results_found": len(related_publications),
+                },
+                description="Related publication discovery via E-Link",
+            )
+
+            return response
+
+        except Exception as e:
+            logger.error(f"Error finding related publications: {e}")
+            return f"Error finding related publications: {str(e)}"
+
+    def _find_related_pmids(self, pmid: str, max_results: int) -> List[str]:
+        """
+        Find related PMIDs using NCBI E-Link API.
+
+        Uses two E-Link relationships:
+        - pubmed_pubmed_citedin: Papers that cite this paper
+        - pubmed_pubmed_refs: Papers cited by this paper
+
+        Args:
+            pmid: Source PMID
+            max_results: Maximum number of related PMIDs to return
+
+        Returns:
+            List of related PMIDs
+        """
+        related_pmids = []
+
+        # Try both directions: papers that cite this paper + papers it cites
+        link_names = ["pubmed_pubmed_citedin", "pubmed_pubmed_refs"]
+
+        for link_name in link_names:
+            try:
+                # E-Link with specific linkname
+                url = self.build_ncbi_url(
+                    "elink",
+                    {
+                        "dbfrom": "pubmed",
+                        "db": "pubmed",
+                        "id": pmid,
+                        "linkname": link_name,
+                        "retmode": "json",
+                    },
+                )
+
+                content = self._make_ncbi_request(url, f"find related via {link_name}")
+                text = content.decode("utf-8")
+                json_response = json.loads(text)
+
+                # Parse linksets
+                if "linksets" in json_response:
+                    for linkset in json_response["linksets"]:
+                        if "linksetdbs" not in linkset:
+                            continue
+
+                        for linksetdb in linkset["linksetdbs"]:
+                            links = linksetdb.get("links", [])
+                            related_pmids.extend(str(link_id) for link_id in links)
+
+                logger.debug(
+                    f"E-Link {link_name} found {len(related_pmids)} related PMIDs"
+                )
+
+            except Exception as e:
+                logger.warning(f"Error in E-Link {link_name}: {e}")
+                continue
+
+        # Remove duplicates and source PMID, limit results
+        related_pmids = [x for x in related_pmids if x != pmid]
+        related_pmids = list(dict.fromkeys(related_pmids))  # Preserve order, remove dups
+
+        return related_pmids[:max_results]
+
     def _get_pmc_full_text(self, identifier: str):
         """
         Get PMC full text for an identifier if available.

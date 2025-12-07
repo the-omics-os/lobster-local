@@ -33,7 +33,7 @@ from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import requests
 import requests.exceptions
@@ -312,6 +312,9 @@ class DoclingService:
 
         logger.info(f"Extracting Methods section from: {source[:80]}...")
 
+        # Normalize URL to remove CrossRef tracking parameters
+        source = self._normalize_publisher_url(source)
+
         # Check if Docling is available
         if not self.is_available():
             raise DoclingError(
@@ -487,11 +490,11 @@ class DoclingService:
                     )
 
             except Exception as e:
-                logger.exception(
-                    f"Unexpected error on attempt {attempt + 1}/{max_retries}: {e}"
+                logger.warning(
+                    f"Error on attempt {attempt + 1}/{max_retries}: {str(e)}"
                 )
                 if attempt < max_retries - 1:
-                    logger.info("Retrying after unexpected error...")
+                    logger.info("Retrying after error...")
                     continue
                 else:
                     raise PDFExtractionError(
@@ -1147,6 +1150,54 @@ class DoclingService:
         cache_key = hashlib.md5(source.encode()).hexdigest()
         return self.cache_dir / f"{cache_key}.json"
 
+    def _normalize_publisher_url(self, url: str) -> str:
+        """
+        Normalize publisher URLs by removing CrossRef tracking parameters.
+
+        CrossRef metadata URLs include tracking parameters (rfr_id, rfr_dat, url_ver)
+        that may trigger anti-scraping protection. Remove these for cleaner access.
+
+        Args:
+            url: Original URL with potential tracking parameters
+
+        Returns:
+            Normalized URL with tracking parameters removed
+
+        Example:
+            >>> service._normalize_publisher_url(
+            ...     "https://journals.sagepub.com/doi/10.1177/123?rfr_id=foo&rfr_dat=bar"
+            ... )
+            'https://journals.sagepub.com/doi/10.1177/123'
+        """
+        if not isinstance(url, str):
+            return url
+
+        try:
+            parsed = urlparse(url)
+
+            # Remove CrossRef tracking parameters
+            if parsed.query:
+                params = parse_qs(parsed.query)
+                tracking_params = {'url_ver', 'rfr_id', 'rfr_dat'}
+                cleaned_params = {k: v for k, v in params.items() if k not in tracking_params}
+
+                # Reconstruct URL
+                if cleaned_params:
+                    new_query = urlencode(cleaned_params, doseq=True)
+                    parsed = parsed._replace(query=new_query)
+                else:
+                    parsed = parsed._replace(query='')
+
+            normalized = urlunparse(parsed)
+            if normalized != url:
+                logger.debug(f"Normalized URL: {url[:80]}... → {normalized[:80]}...")
+
+            return normalized
+
+        except Exception as e:
+            logger.warning(f"Failed to normalize URL: {e}")
+            return url  # Return original on error
+
     def _purge_cached_document(self, source: str) -> None:
         """Remove cached document if it exists."""
         try:
@@ -1155,6 +1206,37 @@ class DoclingService:
             logger.info(f"Purged corrupted cache file: {cache_file.name}")
         except Exception as e:
             logger.debug(f"Failed to purge cache for {source}: {e}")
+
+    def purge_failed_cache(self, source: str) -> bool:
+        """
+        Manually purge cached failure for a source.
+
+        Use when header/strategy changes require retry despite cached 403.
+        This is an internal method for programmatic use, not exposed as agent tool.
+
+        Args:
+            source: PDF URL that was cached as failed
+
+        Returns:
+            True if cache file was deleted, False otherwise
+
+        Example:
+            >>> service = DoclingService()
+            >>> service.purge_failed_cache("https://journals.sagepub.com/doi/...")
+            True  # Cache file deleted, next request will retry
+        """
+        try:
+            cache_file = self._cache_path_for(source)
+            if cache_file.exists():
+                cache_file.unlink()
+                logger.info(f"Purged failure cache for: {source[:80]}...")
+                return True
+            else:
+                logger.debug(f"No cache found for: {source[:80]}...")
+                return False
+        except Exception as e:
+            logger.warning(f"Failed to purge cache: {e}")
+            return False
 
     def _json_default(self, obj):
         """Fallback serializer for non-JSON-compatible objects."""

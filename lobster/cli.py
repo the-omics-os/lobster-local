@@ -14,6 +14,7 @@ if sys.version_info >= (3, 13):
     except RuntimeError:
         pass  # Already set
 
+import html
 import os
 import random
 import threading
@@ -536,11 +537,18 @@ def extract_available_commands() -> Dict[str, str]:
         "/reset": "Reset conversation",
         "/mode": "Change operation mode",
         "/modes": "List available modes",
-        "/provider": "List available LLM providers",
-        "/provider list": "List available LLM providers with status",
-        "/provider anthropic": "Switch to Anthropic provider",
-        "/provider bedrock": "Switch to AWS Bedrock provider",
-        "/provider ollama": "Switch to Ollama (local) provider",
+        "/config": "Show current configuration (provider, profile, config files)",
+        "/config provider": "List available LLM providers",
+        "/config provider <name>": "Switch to specified provider (runtime only)",
+        "/config provider <name> --save": "Switch provider and persist to workspace",
+        "/config model": "List available Ollama models",
+        "/config model <name>": "Switch to specified Ollama model (runtime only)",
+        "/config model <name> --save": "Switch Ollama model and persist to workspace",
+        "/provider": "[DEPRECATED] Use /config provider instead",
+        "/provider list": "[DEPRECATED] Use /config provider instead",
+        "/provider anthropic": "[DEPRECATED] Use /config provider anthropic instead",
+        "/provider bedrock": "[DEPRECATED] Use /config provider bedrock instead",
+        "/provider ollama": "[DEPRECATED] Use /config provider ollama instead",
         "/clear": "Clear screen",
         "/exit": "Exit the chat",
         # Deprecated commands
@@ -611,11 +619,14 @@ if PROMPT_TOOLKIT_AVAILABLE:
             # Generate completions
             for cmd, description in commands.items():
                 if cmd.lower().startswith(command_part.lower()):
+                    # Escape HTML special characters to prevent XML parsing errors
+                    escaped_cmd = html.escape(cmd)
+                    escaped_desc = html.escape(description)
                     yield Completion(
                         text=cmd,
                         start_position=-len(command_part),
-                        display=HTML(f"<ansired>{cmd}</ansired>"),
-                        display_meta=HTML(f"<dim>{description}</dim>"),
+                        display=HTML(f"<ansired>{escaped_cmd}</ansired>"),
+                        display_meta=HTML(f"<dim>{escaped_desc}</dim>"),
                         style="class:completion.command",
                     )
 
@@ -834,6 +845,114 @@ if PROMPT_TOOLKIT_AVAILABLE:
                             display_meta=HTML(f"<dim>{meta}</dim>"),
                             style="class:completion.provider",
                         )
+
+            elif text == "/config" or text == "/config ":
+                # Show /config subcommands
+                subcommands = [
+                    ("provider", "Set/show LLM provider"),
+                    ("model", "Set/show model for current provider"),
+                    ("show", "Show current configuration"),
+                    ("profile", "Set/show agent profile"),
+                ]
+                prefix = "" if text == "/config" else ""
+                for subcmd, desc in subcommands:
+                    yield Completion(
+                        text=" " + subcmd if text == "/config" else subcmd,
+                        start_position=0,
+                        display=HTML(f"<ansicyan>{subcmd}</ansicyan>"),
+                        display_meta=HTML(f"<dim>{desc}</dim>"),
+                        style="class:completion.subcommand",
+                    )
+
+            elif text == "/config model" or text == "/config provider":
+                # User typed /config model or /config provider without trailing space
+                # Show available options
+                if text == "/config model":
+                    try:
+                        from lobster.config.model_service import ModelServiceFactory
+                        from lobster.config.llm_factory import LLMFactory
+
+                        # Get current provider (from client, not adapter)
+                        current_provider = getattr(self.client, 'provider_override', None) or LLMFactory.get_current_provider()
+
+                        # Get model service for current provider
+                        service = ModelServiceFactory.get_service(current_provider)
+                        models = service.list_models()
+
+                        for model in models:
+                            meta = f"{model.display_name}"
+                            if model.is_default:
+                                meta += " (default)"
+
+                            yield Completion(
+                                text=" " + model.name,  # Add space before model name
+                                start_position=0,
+                                display=HTML(f"<ansiyellow>{model.name}</ansiyellow>"),
+                                display_meta=HTML(f"<dim>{meta}</dim>"),
+                                style="class:completion.model",
+                            )
+                    except Exception:
+                        pass
+
+                elif text == "/config provider":
+                    providers = ["anthropic", "bedrock", "ollama"]
+                    for provider in providers:
+                        meta = f"Switch to {provider}"
+                        yield Completion(
+                            text=" " + provider,  # Add space before provider
+                            start_position=0,
+                            display=HTML(f"<ansiyellow>{provider}</ansiyellow>"),
+                            display_meta=HTML(f"<dim>{meta}</dim>"),
+                            style="class:completion.provider",
+                        )
+
+            elif text.startswith("/config model ") or text.startswith("/config provider "):
+                # Tab completion for model names and provider names
+                prefix = text.split(" ", 2)[-1]
+
+                if text.startswith("/config model "):
+                    # Provider-aware model completion
+                    try:
+                        from lobster.config.model_service import ModelServiceFactory
+                        from lobster.config.llm_factory import LLMFactory
+
+                        # Get current provider (from client, not adapter)
+                        current_provider = getattr(self.client, 'provider_override', None) or LLMFactory.get_current_provider()
+
+                        # Get model service for current provider
+                        service = ModelServiceFactory.get_service(current_provider)
+                        models = service.list_models()
+
+                        for model in models:
+                            if model.name.lower().startswith(prefix.lower()):
+                                meta = f"{model.display_name}"
+                                if model.is_default:
+                                    meta += " (default)"
+
+                                yield Completion(
+                                    text=model.name,
+                                    start_position=-len(prefix),
+                                    display=HTML(f"<ansiyellow>{model.name}</ansiyellow>"),
+                                    display_meta=HTML(f"<dim>{meta}</dim>"),
+                                    style="class:completion.model",
+                                )
+                    except Exception:
+                        # Silent fail for tab completion
+                        pass
+
+                elif text.startswith("/config provider "):
+                    # Provider completion (reuse existing logic from /provider)
+                    providers = ["anthropic", "bedrock", "ollama"]
+                    for provider in providers:
+                        if provider.lower().startswith(prefix.lower()):
+                            meta = f"Switch to {provider}"
+                            yield Completion(
+                                text=provider,
+                                start_position=-len(prefix),
+                                display=HTML(f"<ansiyellow>{provider}</ansiyellow>"),
+                                display_meta=HTML(f"<dim>{meta}</dim>"),
+                                style="class:completion.provider",
+                            )
 
             elif any(text.startswith(cmd + " ") for cmd in self.file_commands):
                 # File completion for file-accepting commands
@@ -3808,7 +3927,14 @@ def chat(
                 if token_usage and "error" not in token_usage:
                     cost = token_usage.get("total_cost_usd", 0.0)
                     tokens = token_usage.get("total_tokens", 0)
-                    token_prefix = f"[dim grey42]${cost:.4f} · {tokens:,}t[/dim grey42] "
+                    # Check if using Ollama (local = free)
+                    from lobster.config.llm_factory import LLMFactory
+                    current_provider = getattr(client, 'provider_override', None) or LLMFactory.get_current_provider()
+                    if current_provider == "ollama":
+                        # Ollama is free - show token count only
+                        token_prefix = f"[dim grey42]🦙 FREE · {tokens:,}t[/dim grey42] "
+                    else:
+                        token_prefix = f"[dim grey42]${cost:.4f} · {tokens:,}t[/dim grey42] "
             except Exception:
                 pass
 
@@ -4423,14 +4549,19 @@ def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
                 )
                 return
 
+            # Check if using Ollama (local = free)
+            from lobster.config.llm_factory import LLMFactory
+            current_provider = getattr(client, 'provider_override', None) or LLMFactory.get_current_provider()
+            is_ollama = current_provider == "ollama"
+
             # Create summary table
-            summary_table = Table(
-                title="💰 Session Token Usage & Cost", box=box.ROUNDED
-            )
+            title = "🦙 Session Token Usage (FREE - Local)" if is_ollama else "💰 Session Token Usage & Cost"
+            summary_table = Table(title=title, box=box.ROUNDED)
             summary_table.add_column("Metric", style="cyan", no_wrap=True)
             summary_table.add_column("Value", style="green")
 
             summary_table.add_row("Session ID", token_usage["session_id"])
+            summary_table.add_row("Provider", f"{'🦙 Ollama (Local)' if is_ollama else current_provider.capitalize()}")
             summary_table.add_row(
                 "Total Input Tokens", f"{token_usage['total_input_tokens']:,}"
             )
@@ -4438,32 +4569,46 @@ def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
                 "Total Output Tokens", f"{token_usage['total_output_tokens']:,}"
             )
             summary_table.add_row("Total Tokens", f"{token_usage['total_tokens']:,}")
-            summary_table.add_row(
-                "Total Cost (USD)", f"${token_usage['total_cost_usd']:.4f}"
-            )
+            if is_ollama:
+                summary_table.add_row("Total Cost", "[green]FREE[/green] (local model)")
+            else:
+                summary_table.add_row(
+                    "Total Cost (USD)", f"${token_usage['total_cost_usd']:.4f}"
+                )
 
             console_manager.print(summary_table)
 
             # Create per-agent breakdown table if agents have been used
             if token_usage.get("by_agent"):
-                agent_table = Table(title="📊 Cost by Agent", box=box.ROUNDED)
+                agent_title = "📊 Tokens by Agent" if is_ollama else "📊 Cost by Agent"
+                agent_table = Table(title=agent_title, box=box.ROUNDED)
                 agent_table.add_column("Agent", style="cyan")
                 agent_table.add_column("Input", style="blue", justify="right")
                 agent_table.add_column("Output", style="magenta", justify="right")
                 agent_table.add_column("Total", style="yellow", justify="right")
-                agent_table.add_column("Cost (USD)", style="green", justify="right")
+                if not is_ollama:
+                    agent_table.add_column("Cost (USD)", style="green", justify="right")
                 agent_table.add_column("Calls", style="grey50", justify="right")
 
                 for agent_name, stats in token_usage["by_agent"].items():
                     agent_display = agent_name.replace("_", " ").title()
-                    agent_table.add_row(
-                        agent_display,
-                        f"{stats['input_tokens']:,}",
-                        f"{stats['output_tokens']:,}",
-                        f"{stats['total_tokens']:,}",
-                        f"${stats['cost_usd']:.4f}",
-                        str(stats["invocation_count"]),
-                    )
+                    if is_ollama:
+                        agent_table.add_row(
+                            agent_display,
+                            f"{stats['input_tokens']:,}",
+                            f"{stats['output_tokens']:,}",
+                            f"{stats['total_tokens']:,}",
+                            str(stats["invocation_count"]),
+                        )
+                    else:
+                        agent_table.add_row(
+                            agent_display,
+                            f"{stats['input_tokens']:,}",
+                            f"{stats['output_tokens']:,}",
+                            f"{stats['total_tokens']:,}",
+                            f"${stats['cost_usd']:.4f}",
+                            str(stats["invocation_count"]),
+                        )
 
                 console_manager.print("\n")
                 console_manager.print(agent_table)
@@ -7291,6 +7436,385 @@ when they are started by agents or analysis workflows.
                 console_manager.print_error_panel(error_msg, hint)
         else:
             console_manager.print("[red]Invalid syntax. Use: /provider [list|<name>][/red]")
+
+    elif cmd.startswith("/config"):
+        # Handle unified configuration system
+        # Note: Path is imported at module level (line 21) - do NOT re-import here
+        # as it would shadow the global import for the entire function scope
+        parts = cmd.split()
+
+        if len(parts) == 1:
+            # /config (no args) - Show current configuration
+            from lobster.config.llm_factory import LLMFactory
+            from lobster.core.config_resolver import ConfigResolver
+            from lobster.core.global_config import CONFIG_DIR as GLOBAL_CONFIG_DIR
+            from lobster.core.workspace_config import WorkspaceProviderConfig
+
+            # Create resolver
+            resolver = ConfigResolver(workspace_path=Path(client.workspace_path))
+
+            # Resolve provider and profile
+            provider, p_source = resolver.resolve_provider(
+                runtime_override=client.provider_override
+            )
+            profile, pf_source = resolver.resolve_profile()
+
+            # Check if config files exist
+            workspace_config_exists = WorkspaceProviderConfig.exists(Path(client.workspace_path))
+            global_config_path = GLOBAL_CONFIG_DIR / "providers.json"
+            global_config_exists = global_config_path.exists()
+
+            # Display current configuration table
+            config_table = Table(title="⚙️  Current Configuration", box=box.ROUNDED)
+            config_table.add_column("Setting", style="cyan", width=20)
+            config_table.add_column("Value", style="white", width=30)
+            config_table.add_column("Source", style="yellow", width=40)
+
+            # Provider row
+            config_table.add_row(
+                "Provider",
+                f"[bold]{provider}[/bold]",
+                p_source
+            )
+
+            # Profile row
+            config_table.add_row(
+                "Profile",
+                f"[bold]{profile}[/bold]",
+                pf_source
+            )
+
+            console_manager.print(config_table)
+
+            # Config files status
+            status_table = Table(title="📁 Configuration Files", box=box.ROUNDED)
+            status_table.add_column("Location", style="cyan", width=30)
+            status_table.add_column("Status", style="white", width=20)
+            status_table.add_column("Path", style="dim", width=60)
+
+            # Workspace config
+            workspace_status = "[green]✓ Exists[/green]" if workspace_config_exists else "[grey50]✗ Not found[/grey50]"
+            workspace_path_str = str(Path(client.workspace_path) / "provider_config.json")
+            status_table.add_row("Workspace Config", workspace_status, workspace_path_str)
+
+            # Global config
+            global_status = "[green]✓ Exists[/green]" if global_config_exists else "[grey50]✗ Not found[/grey50]"
+            global_path_str = str(global_config_path)
+            status_table.add_row("Global Config", global_status, global_path_str)
+
+            console_manager.print(status_table)
+
+            # Usage hints
+            console_manager.print("\n[cyan]💡 Usage:[/cyan]")
+            console_manager.print("  • [white]/config provider[/white] - List available providers")
+            console_manager.print("  • [white]/config provider <name>[/white] - Switch provider (runtime only)")
+            console_manager.print("  • [white]/config provider <name> --save[/white] - Switch and persist to workspace")
+
+            # Deprecation note
+            console_manager.print(
+                "\n[yellow]Note:[/yellow] [dim]/provider command is deprecated. Use /config provider instead.[/dim]"
+            )
+
+        elif len(parts) >= 2 and parts[1] == "provider":
+            # /config provider - Provider subcommand
+            if len(parts) == 2:
+                # /config provider (list providers)
+                from lobster.config.llm_factory import LLMFactory
+
+                available_providers = LLMFactory.get_available_providers()
+                current_provider = client.provider_override or LLMFactory.get_current_provider()
+
+                provider_table = Table(title="🔌 LLM Providers", box=box.ROUNDED)
+                provider_table.add_column("Provider", style="cyan")
+                provider_table.add_column("Status", style="white")
+                provider_table.add_column("Active", style="green")
+
+                for provider in ["anthropic", "bedrock", "ollama"]:
+                    configured = "✓ Configured" if provider in available_providers else "✗ Not configured"
+                    active = "●" if provider == current_provider else ""
+
+                    status_style = "green" if provider in available_providers else "grey50"
+                    provider_table.add_row(
+                        provider.capitalize(),
+                        f"[{status_style}]{configured}[/{status_style}]",
+                        f"[bold green]{active}[/bold green]" if active else ""
+                    )
+
+                console_manager.print(provider_table)
+
+                console_manager.print(f"\n[cyan]💡 Usage:[/cyan]")
+                console_manager.print("  • [white]/config provider <name>[/white] - Switch to specified provider (runtime)")
+                console_manager.print("  • [white]/config provider <name> --save[/white] - Switch and persist to workspace")
+                console_manager.print("\n[cyan]Available providers:[/cyan] anthropic, bedrock, ollama")
+
+                if current_provider:
+                    console_manager.print(f"\n[green]✓ Current provider: {current_provider}[/green]")
+
+            elif len(parts) == 3:
+                # /config provider <name> - Switch provider (runtime only)
+                new_provider = parts[2].lower()
+
+                console_manager.print(f"[yellow]Switching to {new_provider} provider (runtime only)...[/yellow]")
+
+                result = client.switch_provider(new_provider)
+
+                if result["success"]:
+                    console_manager.print(
+                        f"[green]✓ Successfully switched to {result['provider']} provider[/green]"
+                    )
+                    console_manager.print(
+                        f"[dim]💡 Use [white]/config provider {new_provider} --save[/white] to persist this change[/dim]"
+                    )
+                else:
+                    error_msg = result.get("error", "Unknown error")
+                    hint = result.get("hint", "")
+                    console_manager.print_error_panel(error_msg, hint)
+
+            elif len(parts) == 4 and parts[3] == "--save":
+                # /config provider <name> --save - Switch + persist to workspace
+                new_provider = parts[2].lower()
+
+                console_manager.print(f"[yellow]Switching to {new_provider} provider and saving to workspace...[/yellow]")
+
+                # Switch runtime first
+                result = client.switch_provider(new_provider)
+
+                if not result["success"]:
+                    error_msg = result.get("error", "Unknown error")
+                    hint = result.get("hint", "")
+                    console_manager.print_error_panel(error_msg, hint)
+                else:
+                    # Persist to workspace config
+                    from lobster.core.workspace_config import WorkspaceProviderConfig
+
+                    try:
+                        workspace_path = Path(client.workspace_path)
+                        config = WorkspaceProviderConfig.load(workspace_path)
+                        config.global_provider = new_provider
+                        config.save(workspace_path)
+
+                        console_manager.print(
+                            f"[green]✓ Successfully switched to {result['provider']} provider[/green]"
+                        )
+                        console_manager.print(
+                            f"[green]✓ Saved to workspace config: {workspace_path / 'provider_config.json'}[/green]"
+                        )
+                        console_manager.print(
+                            f"[dim]This provider will be used for all future sessions in this workspace.[/dim]"
+                        )
+
+                    except Exception as e:
+                        console_manager.print_error_panel(
+                            f"Failed to save workspace config: {str(e)}",
+                            "Check workspace directory permissions"
+                        )
+            else:
+                console_manager.print("[red]Invalid syntax for /config provider[/red]")
+                console_manager.print("[white]Usage:[/white]")
+                console_manager.print("  • /config provider")
+                console_manager.print("  • /config provider <name>")
+                console_manager.print("  • /config provider <name> --save")
+
+        elif len(parts) >= 2 and parts[1] == "model":
+            # /config model - Provider-aware model subcommand
+            from lobster.config.llm_factory import LLMFactory
+            from lobster.config.model_service import ModelServiceFactory
+            from lobster.core.config_resolver import ConfigResolver
+            from lobster.core.workspace_config import WorkspaceProviderConfig
+
+            # Get current provider
+            workspace_path = Path(client.workspace_path)
+            resolver = ConfigResolver(workspace_path=workspace_path)
+            current_provider, provider_source = resolver.resolve_provider(
+                runtime_override=client.provider_override
+            )
+
+            if len(parts) == 2:
+                # /config model (list available models for current provider)
+                try:
+                    service = ModelServiceFactory.get_service(current_provider)
+
+                    # For Ollama, check if server is available
+                    if current_provider == "ollama":
+                        from lobster.config.ollama_service import OllamaService
+                        if not OllamaService.is_available():
+                            console_manager.print_error_panel(
+                                "Ollama server not accessible",
+                                "Make sure Ollama is running: 'ollama serve'"
+                            )
+                            return True  # Signal command was handled
+
+                    models = service.list_models()
+
+                    if not models:
+                        if current_provider == "ollama":
+                            console_manager.print("[yellow]No Ollama models installed[/yellow]")
+                            console_manager.print("\n[cyan]💡 Install a model:[/cyan]")
+                            console_manager.print("  ollama pull llama3:8b-instruct")
+                        else:
+                            console_manager.print(f"[yellow]No models available for {current_provider}[/yellow]")
+                    else:
+                        # Provider-specific table title
+                        provider_icons = {"anthropic": "🤖", "bedrock": "☁️", "ollama": "🦙"}
+                        icon = provider_icons.get(current_provider, "🤖")
+                        title = f"{icon} Available {current_provider.capitalize()} Models"
+
+                        model_table = Table(title=title, box=box.ROUNDED)
+                        model_table.add_column("Model", style="yellow")
+                        model_table.add_column("Display Name", style="cyan")
+                        model_table.add_column("Description", style="white", max_width=50)
+
+                        # Get current model from config
+                        config = WorkspaceProviderConfig.load(workspace_path)
+                        current_model = config.get_model_for_provider(current_provider) if WorkspaceProviderConfig.exists(workspace_path) else None
+
+                        for model in models:
+                            is_current = "[green]●[/green]" if model.name == current_model else ""
+                            is_default = "[dim](default)[/dim]" if model.is_default else ""
+                            model_table.add_row(
+                                f"[bold]{model.name}[/bold] {is_current}",
+                                f"{model.display_name} {is_default}",
+                                model.description
+                            )
+
+                        console_manager.print(model_table)
+                        console_manager.print(f"\n[cyan]Current provider:[/cyan] {current_provider} (from {provider_source})")
+                        console_manager.print(f"\n[cyan]💡 Usage:[/cyan]")
+                        console_manager.print("  • [white]/config model <name>[/white] - Switch model (runtime)")
+                        console_manager.print("  • [white]/config model <name> --save[/white] - Switch + persist")
+                        console_manager.print("  • [white]/config provider <name>[/white] - Change provider first")
+
+                        if current_model:
+                            console_manager.print(f"\n[green]✓ Current model: {current_model}[/green]")
+
+                except Exception as e:
+                    console_manager.print_error_panel(
+                        f"Failed to list models for {current_provider}: {str(e)}",
+                        "Check provider configuration"
+                    )
+
+            elif len(parts) == 3:
+                # /config model <name> - Switch model (runtime only)
+                model_name = parts[2]
+
+                try:
+                    service = ModelServiceFactory.get_service(current_provider)
+
+                    # For Ollama, check server availability
+                    if current_provider == "ollama":
+                        from lobster.config.ollama_service import OllamaService
+                        if not OllamaService.is_available():
+                            console_manager.print_error_panel(
+                                "Ollama server not accessible",
+                                "Make sure Ollama is running: 'ollama serve'"
+                            )
+                            return True  # Signal command was handled
+
+                    # Validate model
+                    if not service.validate_model(model_name):
+                        available = ", ".join(service.get_model_names()[:5])
+                        if len(service.get_model_names()) > 5:
+                            available += ", ..."
+                        hint = f"Available models: {available}"
+                        if current_provider == "ollama":
+                            hint += f"\nInstall with: ollama pull {model_name}"
+                        console_manager.print_error_panel(
+                            f"Model '{model_name}' not valid for {current_provider}",
+                            hint
+                        )
+                    else:
+                        # Store in environment for this session
+                        env_var_map = {
+                            "ollama": "OLLAMA_DEFAULT_MODEL",
+                            "anthropic": "ANTHROPIC_MODEL",
+                            "bedrock": "BEDROCK_MODEL",
+                        }
+                        env_var = env_var_map.get(current_provider)
+                        if env_var:
+                            os.environ[env_var] = model_name
+
+                        console_manager.print(f"[green]✓ Switched to model: {model_name}[/green]")
+                        console_manager.print(f"[dim]Provider: {current_provider}[/dim]")
+                        console_manager.print("[dim]This change is temporary (session only)[/dim]")
+                        console_manager.print(f"[dim]To persist: /config model {model_name} --save[/dim]")
+
+                except Exception as e:
+                    console_manager.print_error_panel(
+                        f"Failed to switch model: {str(e)}",
+                        "Check provider configuration"
+                    )
+
+            elif len(parts) == 4 and parts[3] == "--save":
+                # /config model <name> --save - Switch + persist
+                model_name = parts[2]
+
+                try:
+                    service = ModelServiceFactory.get_service(current_provider)
+
+                    # For Ollama, check server availability
+                    if current_provider == "ollama":
+                        from lobster.config.ollama_service import OllamaService
+                        if not OllamaService.is_available():
+                            console_manager.print_error_panel(
+                                "Ollama server not accessible",
+                                "Make sure Ollama is running: 'ollama serve'"
+                            )
+                            return True  # Signal command was handled
+
+                    # Validate model
+                    if not service.validate_model(model_name):
+                        available = ", ".join(service.get_model_names()[:5])
+                        if len(service.get_model_names()) > 5:
+                            available += ", ..."
+                        hint = f"Available models: {available}"
+                        if current_provider == "ollama":
+                            hint += f"\nInstall with: ollama pull {model_name}"
+                        console_manager.print_error_panel(
+                            f"Model '{model_name}' not valid for {current_provider}",
+                            hint
+                        )
+                    else:
+                        # Persist to workspace config using helper method
+                        config = WorkspaceProviderConfig.load(workspace_path)
+                        config.set_model_for_provider(current_provider, model_name)
+
+                        try:
+                            config.save(workspace_path)
+
+                            # Also set environment variable for current session
+                            env_var_map = {
+                                "ollama": "OLLAMA_DEFAULT_MODEL",
+                                "anthropic": "ANTHROPIC_MODEL",
+                                "bedrock": "BEDROCK_MODEL",
+                            }
+                            env_var = env_var_map.get(current_provider)
+                            if env_var:
+                                os.environ[env_var] = model_name
+
+                            console_manager.print(f"[green]✓ Switched to model: {model_name}[/green]")
+                            console_manager.print(f"[green]✓ Saved to workspace config ({current_provider}_model)[/green]")
+                            console_manager.print(f"[dim]Config file: {workspace_path}/provider_config.json[/dim]")
+                            console_manager.print(f"\n[dim]This model will be used for {current_provider} in this workspace[/dim]")
+                        except Exception as e:
+                            console_manager.print_error_panel(
+                                f"Failed to save configuration: {e}",
+                                "Check file permissions"
+                            )
+
+                except Exception as e:
+                    console_manager.print_error_panel(
+                        f"Failed to switch model: {str(e)}",
+                        "Check provider configuration"
+                    )
+            else:
+                console_manager.print("[red]Invalid syntax. Use: /config model [<name>] [--save][/red]")
+
+        else:
+            console_manager.print("[red]Invalid syntax. Use: /config [provider|model][/red]")
+            console_manager.print("[white]Available subcommands:[/white]")
+            console_manager.print("  • /config - Show current configuration")
+            console_manager.print("  • /config provider - Manage provider settings")
+            console_manager.print("  • /config model - Manage Ollama model settings")
 
     elif cmd == "/clear":
         console.clear()

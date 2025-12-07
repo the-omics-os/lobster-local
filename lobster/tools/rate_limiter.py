@@ -480,7 +480,7 @@ DOMAIN_CONFIG: Dict[str, DomainConfig] = {
     "biomedcentral.com": DomainConfig(5.0, HeaderStrategy.BROWSER, "BMC journals"),
     "journals.lww.com": DomainConfig(5.0, HeaderStrategy.BROWSER, "Wolters Kluwer"),
     "journals.sagepub.com": DomainConfig(
-        5.0, HeaderStrategy.BROWSER, "SAGE Publishing"
+        3, HeaderStrategy.STEALTH, "SAGE Publishing"
     ),
     "annualreviews.org": DomainConfig(5.0, HeaderStrategy.BROWSER, "Annual Reviews"),
     "jstage.jst.go.jp": DomainConfig(5.0, HeaderStrategy.BROWSER, "J-STAGE (Japan)"),

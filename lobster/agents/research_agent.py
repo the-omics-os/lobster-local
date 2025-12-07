@@ -1859,7 +1859,7 @@ Could not extract content for: {identifier}
         **Two modes of operation:**
 
         1. **Processing mode** (default): Full 7-step pipeline with NCBI enrichment
-        2. **Status override mode**: Manually update status without processing (admin tool)
+        2. **Status override mode**: Manually update status without processing
 
         **Processing Mode** - Flexible identifier handling:
         - Queue entry ID: "pub_queue_doi_10_1234..." (existing entry)
@@ -2011,6 +2011,7 @@ Could not extract content for: {identifier}
         max_entries: int = 0,
         extraction_tasks: str = "resolve_identifiers,ncbi_enrich,metadata,methods,identifiers,validate_provenance,fetch_sra_metadata",
         parallel_workers: int = 1,
+        force_reprocess: bool = False,
     ) -> str:
         """
         Batch process multiple publication queue entries.
@@ -2018,6 +2019,7 @@ Could not extract content for: {identifier}
         Args:
             status_filter: Queue status to target (default: "pending").
                           Options: pending, extracting, completed, handoff_ready, etc.
+                          Ignored if force_reprocess=True.
             max_entries: Maximum entries to process (default: 5, 0 = all matching).
             extraction_tasks: Comma-separated tasks (default: full 7-step pipeline).
                             Individual tasks:
@@ -2036,6 +2038,10 @@ Could not extract content for: {identifier}
             parallel_workers: Number of parallel workers (default: 1 = sequential).
                              Use 2-3 for faster processing of large queues.
                              Higher values (>3) risk NCBI API rate limit issues.
+            force_reprocess: Reprocess ALL entries regardless of current status (default: False).
+                            When True, ignores status_filter and processes all queue entries.
+                            Use for: batch re-enrichment with updated logic, comprehensive reprocessing.
+                            Combine with max_entries to limit scope (e.g., first 10 entries only).
 
         Returns:
             Processing report with per-entry status, identifiers found, and workspace keys.
@@ -2049,6 +2055,12 @@ Could not extract content for: {identifier}
 
             # Process all metadata_enriched entries (re-extraction)
             process_publication_queue(status_filter="metadata_enriched", max_entries=0)
+
+            # BATCH REPROCESSING: Reprocess first 10 entries regardless of status
+            process_publication_queue(force_reprocess=True, max_entries=10)
+
+            # BATCH REPROCESSING: Reprocess ALL entries (use with caution!)
+            process_publication_queue(force_reprocess=True, max_entries=0)
         """
         if not HAS_PUBLICATION_PROCESSING:
             return "Publication processing requires a premium subscription. Visit https://omics-os.com/pricing"
@@ -2062,7 +2074,11 @@ Could not extract content for: {identifier}
 
             queue = data_manager.publication_queue
             status_enum = None
-            if status_filter and status_filter.lower() not in {"any", "all"}:
+
+            # Force reprocess mode: ignore status filter, process all entries
+            if force_reprocess:
+                status_enum = None  # None = all entries
+            elif status_filter and status_filter.lower() not in {"any", "all"}:
                 try:
                     status_enum = PublicationStatus(status_filter.lower())
                 except ValueError:
@@ -2090,8 +2106,10 @@ Could not extract content for: {identifier}
             return result.to_summary_string()
         else:
             # Sequential processing
+            # Force reprocess mode: pass None to process all entries
+            final_status_filter = None if force_reprocess else status_filter
             return publication_processing_service.process_queue_entries(
-                status_filter=status_filter,
+                status_filter=final_status_filter,
                 max_entries=max_entries,
                 extraction_tasks=extraction_tasks,
             )
@@ -2618,6 +2636,7 @@ Tier Restriction (IMPORTANT):
 9. Reporting back to the supervisor and involving the data expert
 - Your responses to the supervisor must:
 - Lead with a short, clear summary of results.
+- Start with 'Dear Supervisor,' and avoid mentioning the supervisor in the third person.
 - Present candidate datasets with accessions, year, sample counts, key metadata availability, and data formats.
 - Explain metadata sufficiency and any major gaps.
 - Incorporate the metadata assistant's metrics and recommendations where relevant.

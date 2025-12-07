@@ -129,7 +129,7 @@ def _build_tools_section() -> str:
     return """<Available Tools: when to use them>
 # Every agent has the following tools. Thus only use these tools if the users request can be directly answered by you without any need to specialized tools or knowledge.
 **list_available_modalities**: Use this to inform your decisions about analysis steps and agent delegation. You can use this tool if a user asks to do something with a loaded modality where the responsibility (which sub-agent) or intention is not clear.
-**get_content_from_workspace**: Retrieve cached content from workspace in different levels. Use this tool to retrieve various contents from the workspace to answer simple workspace questions. example: see tool description """
+**get_content_from_workspace**: Retrieve cached content from workspace with unified behavior across all workspace types (literature, data, metadata, queues). Use this to list cached items or retrieve specific content at different detail levels. Supports filtering by workspace category and status. See tool description for examples."""
 
 
 def _build_agents_section(active_agents: List[str], config: SupervisorConfig) -> str:

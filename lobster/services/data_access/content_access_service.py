@@ -8,8 +8,8 @@ selection, fallback cascades, and comprehensive publication access.
 Phase 1: Provider registry infrastructure (complete)
 Phase 2: Capability-based routing and service consolidation (complete)
 
-Provides 10 core methods:
-- Discovery: search_literature, discover_datasets, find_linked_datasets
+Provides 11 core methods:
+- Discovery: search_literature, discover_datasets, find_linked_datasets, find_related_publications
 - Metadata: extract_metadata, validate_metadata
 - Content: get_abstract, get_full_content, extract_methods
 - System: query_capabilities
@@ -58,12 +58,13 @@ class ContentAccessService:
     a single interface with intelligent provider selection, fallback cascades,
     and comprehensive publication access.
 
-    **Core Methods** (10 total):
+    **Core Methods** (11 total):
 
-    Discovery (3):
+    Discovery (4):
     - search_literature: Search PubMed, bioRxiv, medRxiv
     - discover_datasets: Search GEO, SRA, PRIDE (with accession detection)
     - find_linked_datasets: Find datasets linked to publications
+    - find_related_publications: Find papers citing or cited by a given publication (E-Link)
 
     Metadata (2):
     - extract_metadata: Extract structured publication/dataset metadata
@@ -143,6 +144,14 @@ class ContentAccessService:
             f"{len(self.registry.get_all_providers())} providers "
             f"(10 methods, 3-tier cascade, session caching)"
         )
+
+    @property
+    def _header_provider(self):
+        """Lazy initialization of domain header provider for publisher-specific headers."""
+        if not hasattr(self, '_header_provider_instance'):
+            from lobster.tools.rate_limiter import DomainHeaderProvider
+            self._header_provider_instance = DomainHeaderProvider()
+        return self._header_provider_instance
 
     def _initialize_providers(self) -> None:
         """
@@ -820,6 +829,71 @@ class ContentAccessService:
         except Exception as e:
             logger.error(f"Linked dataset search error: {e}", exc_info=True)
             return f"Linked dataset search error: {str(e)}"
+
+    def find_related_publications(
+        self,
+        identifier: str,
+        max_results: int = 5,
+    ) -> str:
+        """
+        Find publications related to a given PMID or DOI using NCBI E-Link.
+
+        Routes to PubMedProvider to discover papers that cite (citedin) or are cited by
+        (refs) the given publication. This is useful for literature discovery and
+        following citation chains.
+
+        Args:
+            identifier: Publication identifier (PMID or DOI)
+            max_results: Maximum number of related publications to return (default: 5)
+
+        Returns:
+            str: Formatted list of related publications with titles and abstracts
+
+        Examples:
+            >>> service = ContentAccessService(data_manager)
+            >>> results = service.find_related_publications("PMID:35042229", max_results=10)
+            >>> results = service.find_related_publications("10.1038/s41586-025-09686-5")
+        """
+        logger.debug(f"Finding related publications for: {identifier}")
+
+        try:
+            # Get PubMed provider for E-Link functionality
+            from lobster.tools.providers.pubmed_provider import PubMedProvider
+
+            # Check if we have PubMedProvider in registry
+            pubmed_provider = None
+            for provider in self.registry.get_all_providers():
+                if isinstance(provider, PubMedProvider):
+                    pubmed_provider = provider
+                    break
+
+            if not pubmed_provider:
+                return "PubMed provider not available for related publication discovery."
+
+            logger.debug(f"Using PubMedProvider for related publications")
+
+            # Call provider's find related publications method
+            results = pubmed_provider.find_related_publications(
+                identifier=identifier,
+                max_results=max_results,
+            )
+
+            # Log to provenance
+            self.data_manager.log_tool_usage(
+                tool_name="find_related_publications",
+                parameters={
+                    "identifier": identifier,
+                    "max_results": max_results,
+                    "provider": "PubMedProvider",
+                },
+                description="Related publication discovery via ContentAccessService",
+            )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Related publication search error: {e}", exc_info=True)
+            return f"Related publication search error: {str(e)}"
 
     def extract_metadata(
         self,
@@ -1768,10 +1842,12 @@ class ContentAccessService:
 
         try:
             docling_service = self._get_docling_service()
+            headers = self._header_provider.get_headers(pdf_url)
             docling_result = docling_service.extract_methods_section(
                 source=pdf_url,
                 keywords=self._resolve_keywords_for_url(pdf_url, keywords),
                 max_paragraphs=max_paragraphs,
+                headers=headers,
             )
 
             docling_result["tier_used"] = "full_pdf"

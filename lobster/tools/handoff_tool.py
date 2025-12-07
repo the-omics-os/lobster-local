@@ -18,7 +18,7 @@ def create_custom_handoff_tool(
         # for example, you can ask the ***LLM to populate a task description*** for the next agent
         task_description: Annotated[
             str,
-            "Detailed description of what the next agent should do, including all of the relevant context. It must be in task format starting with: 'As the <your role>, Your task is to ...'",
+            "Detailed description of what the next agent should do, including all of the relevant context. It must be in task format starting with: 'I am the <your role>, Your task is to ...'",
         ],
         # you can inject the state of the agent that is calling the tool
         state: Annotated[dict, InjectedState],

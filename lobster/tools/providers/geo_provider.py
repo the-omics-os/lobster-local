@@ -603,13 +603,12 @@ class GEOProvider(BasePublicationProvider):
             "email": self.config.email,
         }
 
-        # Use WebEnv if available for efficiency
-        if search_result.web_env and search_result.query_key:
-            url_params["webenv"] = search_result.web_env
-            url_params["query_key"] = search_result.query_key
-        else:
-            # Fallback to ID list
-            url_params["id"] = ",".join(search_result.ids)
+        # We use an ID list for eSummary instead of webenv. The webenv refers to the
+        # complete result set from esearch (potentially thousands of UIDs) and causes
+        # an API error ("Too many UIDs") if used without pagination. The ID list is
+        # simpler and more reliable for the number of results we handle here.
+        # See: BUGFIX_REPORT_GDS_GSE.md for detailed analysis
+        url_params["id"] = ",".join(search_result.ids[:500])  # NCBI limit: 500 for JSON
 
         if self.config.api_key:
             url_params["api_key"] = self.config.api_key
@@ -622,6 +621,12 @@ class GEOProvider(BasePublicationProvider):
         # Parse eSummary response
         try:
             json_data = json.loads(response_data)
+
+            # Check for NCBI API errors (e.g., "Too many UIDs in request")
+            if "error" in json_data:
+                logger.error(f"NCBI eSummary API error: {json_data['error']}")
+                return []
+
             result = json_data.get("result", {})
 
             summaries = []
@@ -630,6 +635,11 @@ class GEOProvider(BasePublicationProvider):
                     summary = result[uid]
                     summary["uid"] = uid
                     summaries.append(summary)
+
+            if not summaries:
+                logger.warning(
+                    f"eSummary returned no summaries for {len(search_result.ids)} UIDs"
+                )
 
             return summaries
 
@@ -1068,13 +1078,23 @@ class GEOProvider(BasePublicationProvider):
         response += f"**Showing**: {len(search_result.ids)} datasets\n\n"
 
         if not search_result.summaries:
-            # Just show IDs if no summaries available
-            response += "### Dataset IDs Found\n"
-            for i, dataset_id in enumerate(search_result.ids[:10], 1):
-                response += f"{i}. **GDS{dataset_id}** - [View on GEO](https://www.ncbi.nlm.nih.gov/sites/GDSbrowser?acc=GDS{dataset_id})\n"
-
-            if len(search_result.ids) > 10:
-                response += f"\n... and {len(search_result.ids) - 10} more datasets.\n"
+            # ERROR: Cannot format results without summaries
+            # UIDs alone are insufficient - they are internal NCBI IDs, not accessions
+            # The previous fallback (prefixing UIDs with "GDS") created invalid accessions
+            response += "### ⚠️ Error: Could not retrieve dataset details\n\n"
+            response += (
+                f"Found {search_result.count:,} matching datasets, "
+                f"but could not retrieve their details from NCBI.\n\n"
+            )
+            response += "**Possible causes:**\n"
+            response += "- Temporary NCBI API issue\n"
+            response += "- Network connectivity problem\n"
+            response += "- Query returned too many results for detailed lookup\n\n"
+            response += "**Suggested actions:**\n"
+            response += "- Try again in a few moments\n"
+            response += "- Refine your search query to be more specific\n"
+            response += "- Use filters to narrow down results (organism, date range, etc.)\n"
+            return response
         else:
             # Show detailed summaries
             for i, summary in enumerate(search_result.summaries, 1):
