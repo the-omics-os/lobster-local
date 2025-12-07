@@ -1,3 +1,3 @@
-"""Lobster AI version information."""
+"""Lobster AI  version information."""
 
-__version__ = "0.3.4.1.1"
+__version__ = "0.3.4.1.3"
