@@ -55,21 +55,21 @@ def sanitize_value(
 
     Converts problematic types to H5AD-compatible equivalents:
     - OrderedDict → dict
-    - tuple → numpy string array
-    - numpy scalars → Python scalars → string (for nested dicts)
+    - tuple → list (preserving types)
+    - numpy scalars → Python scalars
     - pandas types → appropriate string representation
     - datetime types → ISO format strings
     - set/frozenset → numpy string array (via list)
     - bool → str (HDF5 requirement)
-    - int/float in nested dicts → str (HDF5 requirement for nested structures)
+    - int/float in nested dicts → str (HDF5 requirement for HDF5 groups)
+    - int/float in lists/tuples → preserved as numeric
     - None → "" (empty string)
     - Path → str
-    - list → recursively sanitized (lists in nested dicts must have string values)
+    - list → recursively sanitized list (preserving types when possible)
     - Non-serializable objects → str (as last resort)
 
-    CRITICAL FIX: HDF5 cannot handle scalar int/float values OR Python lists
-    in nested dictionary structures. All such values must be converted to strings
-    or numpy arrays.
+    CRITICAL: HDF5 groups (nested dicts) cannot handle scalar int/float values.
+    These must be converted to strings. However, lists/arrays CAN contain numeric values.
 
     Args:
         obj: Object to sanitize
@@ -88,13 +88,13 @@ def sanitize_value(
         '/tmp/data.csv'
 
         >>> sanitize_value({"a": (1, 2, 3)})
-        {'a': array(['1', '2', '3'], dtype='<U...')}
+        {'a': [1, 2, 3]}
 
         >>> sanitize_value(np.int64(42))
-        '42'
+        42
 
         >>> sanitize_value({"nested": {"int_val": 42}})
-        {'nested': {'int_val': '42'}}
+        {'nested': {'int_val': '42'}}  # int stringified in nested dict
     """
     # Handle None early
     if obj is None:
@@ -109,12 +109,11 @@ def sanitize_value(
             for k, v in obj.items()
         }
 
-    # tuple → numpy string array (with recursive sanitization)
-    # HDF5 cannot handle Python tuples in nested structures
+    # tuple → list (with recursive sanitization)
+    # HDF5 cannot handle Python tuples in nested structures, but CAN handle lists
     if isinstance(obj, tuple):
-        sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in obj]
-        # Convert to numpy string array for H5AD compatibility
-        return np.array([str(item) for item in sanitized_items], dtype=str)
+        # Convert to list, recursively sanitizing complex types but preserving primitives
+        return [sanitize_value(v, slash_replacement, strict) for v in obj]
 
     # numpy scalars → Python scalars (DON'T RETURN - let fall through!)
     # CRITICAL BUG FIX: Previously returned immediately, bypassing stringification
@@ -173,23 +172,26 @@ def sanitize_value(
     if isinstance(obj, bool):
         return str(obj)
 
-    # int/float → string (CRITICAL FIX for nested dicts)
-    # HDF5 cannot handle scalar int/float in nested dictionaries
-    # This MUST come before dict/list handling to ensure values are converted
-    if isinstance(obj, (int, float)):
-        return str(obj)
-
     # dict → dict (with recursive sanitization)
+    # CRITICAL: int/float values in dicts must be stringified for HDF5 compatibility
+    # (HDF5 groups cannot store scalar numeric values)
     if isinstance(obj, dict):
-        return {
-            sanitize_key(k, slash_replacement): sanitize_value(
-                v, slash_replacement, strict
-            )
-            for k, v in obj.items()
-        }
+        result = {}
+        for k, v in obj.items():
+            sanitized_key = sanitize_key(k, slash_replacement)
+            # Stringify int/float dict values for HDF5 compatibility
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                result[sanitized_key] = str(v)
+            else:
+                result[sanitized_key] = sanitize_value(v, slash_replacement, strict)
+        return result
 
-    # list → recursively sanitized list
-    # CRITICAL FIX: Lists in nested dicts must contain only strings
+    # int/float → preserve as-is (for tuple/list items)
+    # NOTE: int/float in dict values are already stringified above
+    if isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        return obj
+
+    # list → recursively sanitized list (preserve as list, not numpy array)
     if isinstance(obj, list):
         # Empty lists are OK
         if not obj:
@@ -211,14 +213,15 @@ def sanitize_value(
                     sanitized_items.append(
                         str(sanitize_value(item, slash_replacement, strict))
                     )
+            # Return as list of strings
+            return sanitized_items
         else:
-            # No dicts - recursively sanitize items
+            # No dicts - recursively sanitize items, preserving types
             sanitized_items = [
                 sanitize_value(v, slash_replacement, strict) for v in obj
             ]
-
-        # Convert to numpy string array for H5AD compatibility
-        return np.array([str(item) for item in sanitized_items], dtype=str)
+            # Return as list (H5AD will convert to appropriate array type)
+            return sanitized_items
 
     # numpy arrays
     if isinstance(obj, np.ndarray):
