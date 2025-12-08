@@ -77,74 +77,42 @@ lobster chat
 
 ---
 
-## 🤖 LLM Providers
+## 🏗️ Architecture Overview
 
-Lobster supports three LLM providers - choose based on your needs:
+Lobster is a **modular bioinformatics platform** with pluggable execution environments, LLM providers, and integrated data management:
 
-```mermaid
-flowchart LR
-    subgraph Providers
-        O[🦙 Ollama<br/>Local • Free]
-        A[🔷 Anthropic<br/>Cloud • Pay-per-use]
-        B[☁️ AWS Bedrock<br/>Enterprise • Scalable]
-    end
+<div align="center">
+<img src="docs/images/mermaid_overview_dark.svg" alt="Lobster Architecture" width="100%"/>
+</div>
 
-    L[Lobster AI] --> O
-    L --> A
-    L --> B
+### Component Matrix
 
-    O --> |Privacy<br/>Offline| Local[Local Analysis]
-    A --> |Quick Start<br/>Best Quality| Cloud[Cloud Analysis]
-    B --> |Production<br/>High Limits| Enterprise[Enterprise Scale]
-```
+| Layer | Component | Configuration | Use Case |
+|-------|-----------|---------------|----------|
+| **Execution** | Local | Default (no setup) | Privacy-first, offline, cost-sensitive |
+| | Cloud | `LOBSTER_CLOUD_KEY` | Team collaboration, scaling, managed infrastructure |
+| **LLM Provider** | Ollama | `ollama pull llama3:8b-instruct` | Local-only, unlimited usage, offline |
+| | Anthropic | `ANTHROPIC_API_KEY` | Best quality, quick start, cloud/local |
+| | AWS Bedrock | AWS credentials | Enterprise, compliance, high throughput |
+| **Data Sources** | GEO/SRA/ENA | Auto-configured | Transcriptomics datasets |
+| | PRIDE/MassIVE | Auto-configured | Proteomics datasets |
+| | PubMed/PMC | `NCBI_API_KEY` (optional) | Literature mining, metadata extraction |
+| **Data Management** | DataManagerV2 | Auto-configured | Multi-modal data orchestration, provenance tracking |
 
-### Provider Comparison
+### Configuration & Deployment
 
-| Provider | Type | Cost | Setup | Best For |
-|----------|------|------|-------|----------|
-| 🦙 **Ollama** | Local | Free | `ollama pull llama3:8b-instruct` | Privacy, offline, unlimited usage |
-| 🔷 **Anthropic** | Cloud | ~$0.50/analysis | API key from [console.anthropic.com](https://console.anthropic.com/) | Quick start, best quality |
-| ☁️ **AWS Bedrock** | Cloud | Enterprise pricing | AWS credentials | Production, high rate limits |
+Lobster supports three deployment patterns optimized for different use cases:
 
-### Quick Setup
+| Pattern | Best For | Key Features |
+|---------|----------|--------------|
+| **Local + Ollama** | Privacy, learning, zero cost | Offline, unlimited usage, 100% local |
+| **Local + Anthropic** | Quality, development | Best accuracy, quick setup, flexible |
+| **Cloud + Bedrock** | Production, teams | Enterprise SLA, high limits, scalable |
 
-**Ollama (Local - Recommended for Privacy)**
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3:8b-instruct
-export LOBSTER_LLM_PROVIDER=ollama
-lobster chat
-```
-
-**Anthropic (Cloud - Recommended for Quick Start)**
-```bash
-lobster init  # Interactive wizard
-# Or: export ANTHROPIC_API_KEY=sk-ant-api03-your-key
-```
-
-**AWS Bedrock (Enterprise)**
-```bash
-lobster init  # Interactive wizard
-# Or: Configure AWS credentials
-```
-
-**Switching Providers:**
-```bash
-# Via environment variable (persistent)
-export LOBSTER_LLM_PROVIDER=ollama
-
-# Via CLI flag (one-time)
-lobster chat --provider anthropic
-
-# In-session via command
-$0.0000 · 0t ❯ /config provider bedrock
-```
-
-Lobster automatically detects available providers when not explicitly set.
-
-> ⚠️ **Rate Limits**: Claude API has limits for new accounts (~50 requests/min). [Request increase](https://docs.anthropic.com/en/api/rate-limits) or use Bedrock for production. **Ollama has no limits.**
-
-[Full configuration guide →](https://github.com/the-omics-os/lobster-local/wiki/03-configuration)
+**Learn more:**
+- 📖 [Deployment Patterns Guide](https://github.com/the-omics-os/lobster-local/wiki/03-configuration#deployment-patterns) - Detailed setup for each pattern
+- 🔄 [Provider Auto-Detection](https://github.com/the-omics-os/lobster-local/wiki/03-configuration#provider-auto-detection) - How Lobster selects providers
+- ⚙️ [Complete Configuration Guide](https://github.com/the-omics-os/lobster-local/wiki/03-configuration) - All configuration options
 
 ---
 
@@ -171,6 +139,14 @@ Lobster automatically detects available providers when not explicitly set.
 <p><em>Real-time analysis monitoring with live updates and visualization</em></p>
 </div>
 
+Dashboard for deep-diving into omics anlaysis. 
+```bash
+#start with 
+lobster dashboard
+#or during CLI session with
+❯ /dashboard
+```
+
 ---
 
 ## 📘 Case Studies
@@ -179,7 +155,7 @@ Lobster automatically detects available providers when not explicitly set.
 Download → QC → Cluster → Annotate in one conversation
 
 ```bash
-$0.0000 · 0t ❯ Download GSE109564, perform QC, cluster cells, and find markers
+❯ Download GSE109564, perform QC, cluster cells, and find markers
 
 ✓ Downloaded 5,000 cells × 20,000 genes
 ✓ Quality control: filtered to 4,477 high-quality cells
@@ -191,7 +167,7 @@ $0.0000 · 0t ❯ Download GSE109564, perform QC, cluster cells, and find marker
 Find papers, extract methods, discover datasets
 
 ```bash
-$0.0000 · 0t ❯ Find papers about CRISPR screens in cancer and extract their GEO datasets
+❯ Find papers about CRISPR screens in cancer and extract their GEO datasets
 
 Found 47 papers with 23 associated GEO datasets
 Extracted methods from 12 papers with full-text access
@@ -202,7 +178,7 @@ Cached metadata for all datasets in workspace
 Publication-ready figures with natural language
 
 ```bash
-$0.0000 · 0t ❯ Create a UMAP colored by cell type with cluster labels
+❯ Create a UMAP colored by cell type with cluster labels
 
 Generated interactive UMAP visualization
 Saved as: geo_gse109564_umap_celltype.html
@@ -216,10 +192,11 @@ Also exported as PNG for publications
 ## 🗓️ Roadmap
 
 **2026 Development:**
-- Knowledge graph integration for multi-dataset analysis
-- Lobster Cloud compute infrastructure
-- Enhanced multi-omics workflows (MuData integration)
-- Community-contributed agent marketplace
+- [ ] Custom feature agent (bring your tools/best practices)
+- [ ] Knowledge graph integration for multi-dataset analysis
+- [ ] Lobster Cloud compute infrastructure
+- [ ] Enhanced multi-omics workflows (MuData integration)
+- [ ] Community-contributed agent marketplace
 
 **Submit feature ideas:** [GitHub Discussions](https://github.com/the-omics-os/lobster-local/discussions)
 
