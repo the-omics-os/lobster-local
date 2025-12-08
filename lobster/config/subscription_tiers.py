@@ -35,7 +35,7 @@ SUBSCRIPTION_TIERS: Dict[str, Dict[str, Any]] = {
         ],
         "restricted_handoffs": {
             # FREE tier: research_agent cannot handoff to metadata_assistant
-            # This is a key premium differentiator (DataBioMix paid for this)
+            # This is a key premium differentiator
             "research_agent": ["metadata_assistant"],
         },
         "features": [
