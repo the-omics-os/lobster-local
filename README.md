@@ -82,7 +82,7 @@ lobster chat
 Lobster is a **modular bioinformatics platform** with pluggable execution environments, LLM providers, and integrated data management:
 
 <div align="center">
-<img src="docs/images/mermaid_overview_dark.svg" alt="Lobster Architecture" width="100%"/>
+<img src="docs_p/images/mermaid_overview_dark.svg" alt="Lobster Architecture" width="100%"/>
 </div>
 
 ### Component Matrix
