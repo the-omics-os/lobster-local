@@ -1,11 +1,11 @@
-# 🦞 Lobster AI
+# 🦞 Lobster
 
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/License-AGPL%203.0--or--later-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Documentation: CC BY 4.0](https://img.shields.io/badge/Documentation-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI](https://img.shields.io/pypi/v/lobster-ai.svg)](https://pypi.org/project/lobster-ai/)
 
-**Bioinformatics co-pilot to automate redundant tasks so you can focus on science**
+**Bioinformatics co-pilot to automate redundant omics-related tasks so you can focus on science**
 
 ---
 
