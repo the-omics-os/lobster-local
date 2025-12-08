@@ -479,42 +479,39 @@ class ProvenanceTracker:
 
     def _get_software_versions(self) -> Dict[str, str]:
         """Get versions of key software packages."""
+        from importlib.metadata import version, PackageNotFoundError
+
         versions = {}
 
         try:
-            import scanpy
-
-            versions["scanpy"] = scanpy.__version__
-        except ImportError:
+            versions["scanpy"] = version("scanpy")
+        except PackageNotFoundError:
             pass
 
         try:
-            import anndata
-
-            versions["anndata"] = anndata.__version__
-        except ImportError:
+            versions["anndata"] = version("anndata")
+        except PackageNotFoundError:
             pass
 
         try:
-            import pandas
-
-            versions["pandas"] = pandas.__version__
-        except ImportError:
+            versions["pandas"] = version("pandas")
+        except PackageNotFoundError:
             pass
 
         try:
-            import numpy
-
-            versions["numpy"] = numpy.__version__
-        except ImportError:
+            versions["numpy"] = version("numpy")
+        except PackageNotFoundError:
             pass
 
         try:
-            # Try to get lobster version
-            from lobster.version import __version__
+            versions["lobster"] = version("lobster-ai")
+        except PackageNotFoundError:
+            # Fallback for development installs
+            try:
+                from lobster.version import __version__
 
-            versions["lobster"] = __version__
-        except ImportError:
-            versions["lobster"] = "unknown"
+                versions["lobster"] = __version__
+            except ImportError:
+                versions["lobster"] = "unknown"
 
         return versions

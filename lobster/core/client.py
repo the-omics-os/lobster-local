@@ -151,8 +151,9 @@ class AgentClient(BaseClient):
         # Add user message
         self.messages.append(HumanMessage(content=user_input))
 
-        # Prepare graph input
-        graph_input = {"messages": [HumanMessage(content=user_input)]}
+        # Prepare graph input with full conversation history
+        # This enables session continuity by providing all previous messages
+        graph_input = {"messages": self.messages}
 
         config = {
             "configurable": {"thread_id": self.session_id},
@@ -207,12 +208,16 @@ class AgentClient(BaseClient):
             # Get token usage information
             token_cost = self.token_tracker.get_latest_cost()
 
+            # Auto-save session for continuity (enables multi-turn lobster query)
+            session_path = self._save_session_json()
+
             return {
                 "success": True,
                 "response": final_response,
                 "duration": (datetime.now() - start_time).total_seconds(),
                 "events_count": len(events),
                 "session_id": self.session_id,
+                "session_path": str(session_path) if session_path else None,
                 "has_data": self.data_manager.has_data(),
                 "plots": (
                     self.data_manager.get_latest_plots(5)
@@ -2105,3 +2110,128 @@ class AgentClient(BaseClient):
             json.dump(session_data, f, indent=2, default=str)
 
         return export_path
+
+    def load_session(self, session_path: Path) -> Dict[str, Any]:
+        """
+        Load conversation history from an exported session file.
+
+        Restores the conversation messages to enable multi-turn conversations
+        across separate process invocations (e.g., for `lobster query` continuity).
+
+        Note: This only restores conversation messages, not LangGraph checkpointer
+        state. The LLM will have full conversational context but won't have
+        automatic access to prior tool execution state.
+
+        Args:
+            session_path: Path to session JSON file
+
+        Returns:
+            Dict with load status and metadata:
+                - success: bool
+                - messages_loaded: int
+                - original_session_id: str
+                - created_at: str (if available)
+
+        Raises:
+            FileNotFoundError: If session file doesn't exist
+            ValueError: If session file is corrupted or has invalid format
+        """
+        if not session_path.exists():
+            raise FileNotFoundError(f"Session file not found: {session_path}")
+
+        try:
+            with open(session_path) as f:
+                session_data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Corrupted session file: {e}")
+
+        # Validate session data structure
+        if not isinstance(session_data, dict):
+            raise ValueError("Invalid session file format: expected JSON object")
+
+        # Restore conversation history
+        conversation = session_data.get("conversation", [])
+        if not isinstance(conversation, list):
+            raise ValueError("Invalid session file format: conversation must be a list")
+
+        self.messages = []
+        for msg in conversation:
+            if not isinstance(msg, dict):
+                continue
+
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            if role == "user":
+                self.messages.append(HumanMessage(content=content))
+            elif role == "assistant":
+                self.messages.append(AIMessage(content=content))
+            # Skip system messages or unknown roles
+
+        # Update session_id to match loaded session for continuity
+        # This ensures subsequent saves use the same session file
+        loaded_session_id = session_data.get("session_id")
+        if loaded_session_id:
+            self.session_id = loaded_session_id
+
+        # Update metadata with load info
+        loaded_metadata = session_data.get("metadata", {})
+        self.metadata["loaded_from"] = str(session_path)
+        self.metadata["original_session_id"] = loaded_session_id
+        self.metadata["original_created_at"] = loaded_metadata.get("created_at")
+        self.metadata["message_count_loaded"] = len(self.messages)
+
+        logger.info(
+            f"Loaded session from {session_path} "
+            f"({len(self.messages)} messages restored, session_id={self.session_id})"
+        )
+
+        return {
+            "success": True,
+            "messages_loaded": len(self.messages),
+            "original_session_id": loaded_session_id,
+            "created_at": loaded_metadata.get("created_at"),
+        }
+
+    def _save_session_json(self) -> Optional[Path]:
+        """
+        Save session JSON for continuity (internal helper).
+
+        Always saves conversation state as JSON, regardless of whether
+        data packages exist. This enables session continuity for `lobster query`.
+
+        Returns:
+            Path to saved session file, or None if save failed
+        """
+        try:
+            session_path = self.workspace_path / f"session_{self.session_id}.json"
+
+            session_data = {
+                "session_id": self.session_id,
+                "metadata": self.metadata,
+                "conversation": self.get_conversation_history(),
+                "status": self.get_status(),
+                "workspace_status": self.data_manager.get_workspace_status(),
+                "token_usage": self.get_token_usage(),
+                "exported_at": datetime.now().isoformat(),
+                "lobster_version": self._get_version(),
+                "schema_version": "1.0",
+            }
+
+            with open(session_path, "w") as f:
+                json.dump(session_data, f, indent=2, default=str)
+
+            logger.debug(f"Session saved to {session_path}")
+            return session_path
+
+        except Exception as e:
+            logger.warning(f"Failed to save session JSON: {e}")
+            return None
+
+    def _get_version(self) -> str:
+        """Get lobster version string."""
+        try:
+            import lobster
+            return getattr(lobster, "__version__", "unknown")
+        except Exception:
+            return "unknown"

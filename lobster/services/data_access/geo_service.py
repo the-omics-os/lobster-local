@@ -58,7 +58,10 @@ from lobster.services.data_access.geo.constants import (
     GEOServiceError,
     PlatformCompatibility,
 )
-from lobster.services.data_access.geo.downloader import GEODownloadManager
+from lobster.services.data_access.geo.downloader import (
+    GEODownloadError,
+    GEODownloadManager,
+)
 from lobster.services.data_access.geo.loaders.tenx import TenXGenomicsLoader
 from lobster.services.data_access.geo.parser import GEOParser
 from lobster.services.data_access.geo.strategy import (
@@ -1084,7 +1087,10 @@ class GEOService:
             geo_result = self.download_with_strategy(geo_id=clean_geo_id, **kwargs)
 
             if not geo_result.success:
-                return f"Failed to download {clean_geo_id} using all available methods. Last error: {geo_result.error_message}"
+                raise GEOServiceError(
+                    f"Failed to download {clean_geo_id} using all available methods. "
+                    f"Last error: {geo_result.error_message}"
+                )
 
             # Store as modality in DataManagerV2
             enhanced_metadata = {
@@ -1340,9 +1346,16 @@ class GEOService:
 
             return success_msg
 
+        except GEOServiceError:
+            # Re-raise GEOServiceError as-is for proper error propagation
+            raise
+        except UnsupportedPlatformError:
+            # Re-raise platform errors as-is
+            raise
         except Exception as e:
+            # Wrap unexpected errors in GEOServiceError for consistent handling
             logger.exception(f"Error downloading dataset: {e}")
-            return f"Error downloading dataset: {str(e)}"
+            raise GEOServiceError(f"Error downloading dataset {geo_id}: {str(e)}") from e
 
     # ████████████████████████████████████████████████████████████████████████████████
     # ██                                                                            ██
@@ -3937,6 +3950,7 @@ The actual expression data download will be much faster now that metadata is pre
         Returns:
             DataFrame: Sample expression matrix or None
         """
+        gsm = None  # Initialize to avoid UnboundLocalError in exception handlers
         try:
             # PRE-DOWNLOAD SOFT FILE USING HTTPS TO BYPASS GEOparse's FTP DOWNLOADER
             # GEOparse internally uses FTP which lacks error detection and causes corruption.
@@ -4003,7 +4017,7 @@ The actual expression data download will be much faster now that metadata is pre
 
             # Only fall back to expression table for non-single-cell data
             if not is_single_cell:
-                if hasattr(gsm, "table") and gsm.table is not None:
+                if gsm is not None and hasattr(gsm, "table") and gsm.table is not None:
                     logger.info(
                         f"Using expression table for non-single-cell sample {gsm_id}"
                     )

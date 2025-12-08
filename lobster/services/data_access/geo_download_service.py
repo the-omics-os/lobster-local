@@ -35,6 +35,7 @@ from lobster.core.analysis_ir import AnalysisStep
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.core.interfaces.download_service import IDownloadService
 from lobster.core.schemas.download_queue import DownloadQueueEntry
+from lobster.services.data_access.geo.constants import GEOServiceError
 from lobster.services.data_access.geo_service import GEOService
 from lobster.utils.logger import get_logger
 
@@ -284,7 +285,7 @@ class GEODownloadService(IDownloadService):
             logger.info("No strategy specified - using GEOService auto-detection")
 
         # Step 3: Call GEOService.download_dataset()
-        # CRITICAL: This returns a STRING message, not a tuple
+        # GEOService raises GEOServiceError on failure, returns success message string
         try:
             logger.info(f"Calling GEOService.download_dataset for {geo_id}...")
             download_message = self.geo_service.download_dataset(
@@ -293,10 +294,15 @@ class GEODownloadService(IDownloadService):
                 use_intersecting_genes_only=use_intersecting_genes_only,
             )
             logger.info(f"GEOService completed: {download_message[:200]}...")
+        except GEOServiceError as e:
+            # GEOServiceError indicates download failed - propagate with context
+            logger.error(f"GEO download failed for {geo_id}: {e}")
+            raise RuntimeError(f"GEO download failed for {geo_id}: {str(e)}") from e
         except Exception as e:
-            logger.error(f"GEOService.download_dataset failed for {geo_id}: {e}")
+            # Unexpected errors - wrap with context
+            logger.error(f"Unexpected error downloading {geo_id}: {e}")
             raise RuntimeError(
-                f"Failed to download GEO dataset {geo_id}: {str(e)}"
+                f"Unexpected error downloading GEO dataset {geo_id}: {str(e)}"
             ) from e
 
         # Step 4: Retrieve stored modality from data_manager

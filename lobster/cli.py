@@ -1102,6 +1102,7 @@ def init_client(
     debug: bool = False,
     profile_timings: Optional[bool] = None,
     provider_override: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> "AgentClient":
     """Initialize either local or cloud client based on environment."""
     # Lazy imports for performance (saves ~5s startup time)
@@ -1291,6 +1292,7 @@ def init_client(
     client = AgentClient(
         data_manager=data_manager,  # Pass the configured data_manager
         workspace_path=workspace,
+        session_id=session_id,  # Pass custom session_id if provided
         enable_reasoning=reasoning,
         # enable_langfuse=debug,
         custom_callbacks=callbacks,  # Pass the proper callback
@@ -2572,171 +2574,261 @@ def init_client_with_animation(
 
 
 @app.command()
-def config_test():
+def config_test(
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output results as JSON (machine-readable)",
+    ),
+):
     """Test API connectivity and validate configuration."""
-    import datetime
+    import json as json_module
 
-    console.print()
-    console.print(
-        Panel.fit(
-            f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Configuration Test[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-            border_style=LobsterTheme.PRIMARY_ORANGE,
-            padding=(0, 2),
-        )
-    )
-    console.print()
+    from dotenv import load_dotenv
+
+    # Results structure for JSON output
+    test_results = {
+        "valid": False,
+        "env_file": None,
+        "checks": {
+            "llm_provider": {"status": "fail", "provider": None, "message": None, "hint": None},
+            "ncbi_api": {"status": "skip", "has_key": False, "message": None},
+            "workspace": {"status": "fail", "path": None, "message": None},
+        },
+    }
+
+    def log(msg: str, style: str = None):
+        """Print message only if not in JSON mode."""
+        if not output_json:
+            if style:
+                console.print(f"[{style}]{msg}[/{style}]")
+            else:
+                console.print(msg)
 
     # Check .env file exists
     env_file = Path.cwd() / ".env"
+    test_results["env_file"] = str(env_file) if env_file.exists() else None
+
     if not env_file.exists():
-        console.print(f"[red]❌ No .env file found in current directory[/red]")
-        console.print(f"[dim]Run 'lobster init' to create configuration[/dim]")
+        if output_json:
+            test_results["checks"]["llm_provider"]["message"] = "No .env file found"
+            print(json_module.dumps(test_results, indent=2))
+        else:
+            console.print(f"[red]❌ No .env file found in current directory[/red]")
+            console.print(f"[dim]Run 'lobster init' to create configuration[/dim]")
         raise typer.Exit(1)
-
-    console.print(f"[green]✅ Found .env file:[/green] {env_file}")
-    console.print()
-
-    # Load environment variables
-    from dotenv import load_dotenv
 
     load_dotenv()
 
-    # Test results
-    results = []
+    if not output_json:
+        console.print()
+        console.print(
+            Panel.fit(
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Configuration Test[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                border_style=LobsterTheme.PRIMARY_ORANGE,
+                padding=(0, 2),
+            )
+        )
+        console.print()
+        console.print(f"[green]✅ Found .env file:[/green] {env_file}")
+        console.print()
 
     # Test LLM Provider
-    console.print("[bold]Testing LLM Provider...[/bold]")
+    log("Testing LLM Provider...", "bold")
     try:
-        from lobster.config.llm_factory import LLMFactory
+        from lobster.config.llm_factory import LLMFactory, LLMProvider
 
         provider = LLMFactory.detect_provider()
         if provider is None:
-            results.append(("LLM Provider", "❌", "No API keys found"))
-            console.print("[red]❌ No LLM provider configured[/red]")
+            test_results["checks"]["llm_provider"]["message"] = "No API keys found"
+            test_results["checks"]["llm_provider"]["hint"] = "Set ANTHROPIC_API_KEY, AWS_BEDROCK_ACCESS_KEY, or run Ollama"
+            log("❌ No LLM provider configured", "red")
         else:
-            console.print(f"[yellow]  Detected provider: {provider.value}[/yellow]")
+            test_results["checks"]["llm_provider"]["provider"] = provider.value
+            log(f"  Detected provider: {provider.value}", "yellow")
 
-            # Try to create a test LLM instance
-            try:
-                test_config = {
-                    "model_id": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-                    "temperature": 1.0,
-                    "max_tokens": 100,
-                }
-                test_llm = LLMFactory.create_llm(test_config, "test")
+            # Provider-specific pre-checks for Ollama
+            if provider == LLMProvider.OLLAMA:
+                ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+                log(f"  Checking Ollama server at {ollama_url}...", "yellow")
+                try:
+                    import requests
+                    resp = requests.get(f"{ollama_url}/api/tags", timeout=5)
+                    if resp.status_code != 200:
+                        raise Exception(f"Ollama server returned status {resp.status_code}")
+                    models = resp.json().get("models", [])
+                    if not models:
+                        test_results["checks"]["llm_provider"]["message"] = "Ollama running but no models installed"
+                        test_results["checks"]["llm_provider"]["hint"] = "Run: ollama pull llama3.2:3b"
+                        log("❌ Ollama: No models installed", "red")
+                        provider = None
+                    else:
+                        model_names = [m.get("name", "unknown") for m in models[:3]]
+                        log(f"  Ollama server: Running ({len(models)} models)", "green")
+                except requests.exceptions.ConnectionError:
+                    test_results["checks"]["llm_provider"]["message"] = "Ollama server not running"
+                    test_results["checks"]["llm_provider"]["hint"] = "Start Ollama: ollama serve"
+                    log("❌ Ollama server not accessible", "red")
+                    provider = None
+                except Exception as e:
+                    test_results["checks"]["llm_provider"]["message"] = f"Ollama error: {str(e)[:60]}"
+                    log(f"❌ Ollama check failed: {e}", "red")
+                    provider = None
 
-                # Try a simple invoke to test connectivity
-                console.print("[yellow]  Testing API connectivity...[/yellow]")
-                response = test_llm.invoke("Hi")
+            # Test LLM connectivity
+            if provider is not None:
+                try:
+                    if provider == LLMProvider.OLLAMA:
+                        test_config = {"model_id": "", "temperature": 1.0, "max_tokens": 50}
+                    elif provider == LLMProvider.ANTHROPIC_DIRECT:
+                        test_config = {"model_id": "claude-3-5-haiku-20241022", "temperature": 1.0, "max_tokens": 50}
+                    else:  # Bedrock
+                        test_config = {"model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0", "temperature": 1.0, "max_tokens": 50}
 
-                results.append(("LLM Provider", "✅", f"{provider.value} (connected)"))
-                console.print(f"[green]✅ {provider.value} API: Connected[/green]")
-            except Exception as e:
-                error_msg = str(e)
-                if len(error_msg) > 60:
-                    error_msg = error_msg[:60] + "..."
-                results.append(("LLM Provider", "❌", f"{provider.value}: {error_msg}"))
-                console.print(f"[red]❌ {provider.value} API: {error_msg}[/red]")
+                    test_llm = LLMFactory.create_llm(test_config, "config_test")
+                    log("  Testing API connectivity...", "yellow")
+                    response = test_llm.invoke("Reply with just 'ok'")
+
+                    test_results["checks"]["llm_provider"]["status"] = "pass"
+                    test_results["checks"]["llm_provider"]["message"] = "Connected"
+                    log(f"✅ {provider.value} API: Connected", "green")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "invalid_api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                        hint = "Check your API key"
+                    elif "rate_limit" in error_msg.lower():
+                        hint = "Rate limited - wait and retry"
+                    elif "model" in error_msg.lower() and "not found" in error_msg.lower():
+                        hint = "Model not available in your region/plan"
+                    else:
+                        hint = None
+
+                    test_results["checks"]["llm_provider"]["message"] = error_msg[:100]
+                    test_results["checks"]["llm_provider"]["hint"] = hint
+                    log(f"❌ {provider.value} API: {error_msg[:60]}", "red")
     except Exception as e:
-        results.append(("LLM Provider", "❌", f"Error: {str(e)[:60]}"))
-        console.print(f"[red]❌ LLM Provider test failed: {e}[/red]")
+        test_results["checks"]["llm_provider"]["message"] = str(e)[:100]
+        log(f"❌ LLM Provider test failed: {e}", "red")
 
-    console.print()
+    if not output_json:
+        console.print()
 
-    # Test NCBI API (optional)
-    console.print("[bold]Testing NCBI API...[/bold]")
+    # Test NCBI API
+    log("Testing NCBI API...", "bold")
     ncbi_key = os.environ.get("NCBI_API_KEY")
-    ncbi_email = os.environ.get("NCBI_EMAIL")
+    test_results["checks"]["ncbi_api"]["has_key"] = bool(ncbi_key)
 
-    if ncbi_key or ncbi_email:
+    if ncbi_key or os.environ.get("NCBI_EMAIL"):
         try:
             import urllib.request
             import xml.etree.ElementTree as ET
 
-            # Test with a simple esearch query
             base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-            params = {"db": "pubmed", "term": "cancer", "retmax": "1", "retmode": "xml"}
-            if ncbi_email:
-                params["email"] = ncbi_email
+            params = {"db": "pubmed", "term": "test", "retmax": "1", "retmode": "xml"}
             if ncbi_key:
                 params["api_key"] = ncbi_key
 
-            query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-            url = f"{base_url}?{query_string}"
+            url = f"{base_url}?" + "&".join([f"{k}={v}" for k, v in params.items()])
+            log("  Testing NCBI E-utilities...", "yellow")
 
-            console.print("[yellow]  Testing NCBI E-utilities...[/yellow]")
             with urllib.request.urlopen(url, timeout=10) as response:
-                data = response.read()
-                root = ET.fromstring(data)
-
-                # Check for error
+                root = ET.fromstring(response.read())
                 error = root.find(".//ERROR")
                 if error is not None:
-                    results.append(("NCBI API", "❌", f"Error: {error.text}"))
-                    console.print(f"[red]❌ NCBI API Error: {error.text}[/red]")
+                    test_results["checks"]["ncbi_api"]["status"] = "fail"
+                    test_results["checks"]["ncbi_api"]["message"] = error.text
+                    log(f"❌ NCBI API Error: {error.text}", "red")
                 else:
-                    count = root.find(".//Count")
-                    status = "with API key" if ncbi_key else "without API key"
-                    results.append(("NCBI API", "✅", f"Connected ({status})"))
-                    console.print(f"[green]✅ NCBI API: Connected ({status})[/green]")
-                    if ncbi_key:
-                        console.print("[dim]  Rate limit: 10 requests/second[/dim]")
-                    else:
-                        console.print(
-                            "[dim]  Rate limit: 3 requests/second (add NCBI_API_KEY for higher limit)[/dim]"
-                        )
+                    test_results["checks"]["ncbi_api"]["status"] = "pass"
+                    test_results["checks"]["ncbi_api"]["message"] = "Connected"
+                    log(f"✅ NCBI API: Connected {'(with API key)' if ncbi_key else ''}", "green")
         except Exception as e:
-            error_msg = str(e)
-            if len(error_msg) > 60:
-                error_msg = error_msg[:60] + "..."
-            results.append(("NCBI API", "❌", error_msg))
-            console.print(f"[red]❌ NCBI API: {error_msg}[/red]")
+            test_results["checks"]["ncbi_api"]["status"] = "fail"
+            test_results["checks"]["ncbi_api"]["message"] = str(e)[:60]
+            log(f"❌ NCBI API: {str(e)[:60]}", "red")
     else:
-        results.append(("NCBI API", "⊘", "Not configured (optional)"))
-        console.print("[dim]⊘ NCBI API: Not configured (optional)[/dim]")
+        test_results["checks"]["ncbi_api"]["status"] = "skip"
+        test_results["checks"]["ncbi_api"]["message"] = "Not configured (optional)"
+        log("⊘ NCBI API: Not configured (optional)", "dim")
 
-    console.print()
+    if not output_json:
+        console.print()
 
-    # Summary table
-    table = Table(title="Configuration Test Summary", box=box.ROUNDED)
-    table.add_column("Service", style="cyan", no_wrap=True)
-    table.add_column("Status", style="bold", no_wrap=True)
-    table.add_column("Details", style="dim")
+    # Test Workspace
+    log("Testing Workspace...", "bold")
+    try:
+        from lobster.core.workspace import resolve_workspace
+        workspace_path = resolve_workspace(explicit_path=None, create=True)
+        test_results["checks"]["workspace"]["path"] = str(workspace_path)
 
-    for service, status, details in results:
-        status_style = (
-            "green" if status == "✅" else ("red" if status == "❌" else "dim")
-        )
-        table.add_row(service, f"[{status_style}]{status}[/{status_style}]", details)
+        test_file = workspace_path / ".config_test_write"
+        try:
+            test_file.write_text("test")
+            test_file.unlink()
+            test_results["checks"]["workspace"]["status"] = "pass"
+            test_results["checks"]["workspace"]["message"] = "Writable"
+            log("✅ Workspace: Writable", "green")
+            log(f"  Path: {workspace_path}", "dim")
+        except PermissionError:
+            test_results["checks"]["workspace"]["message"] = "Permission denied"
+            log("❌ Workspace: Permission denied", "red")
+        except Exception as e:
+            test_results["checks"]["workspace"]["message"] = str(e)[:60]
+            log(f"❌ Workspace: {e}", "red")
+    except Exception as e:
+        test_results["checks"]["workspace"]["message"] = str(e)[:60]
+        log(f"❌ Workspace setup failed: {e}", "red")
 
-    console.print(table)
-    console.print()
+    # Determine overall validity
+    test_results["valid"] = test_results["checks"]["llm_provider"]["status"] == "pass"
 
-    # Final verdict
-    all_required_ok = all(
-        status == "✅" for service, status, _ in results if service == "LLM Provider"
-    )
-
-    if all_required_ok:
-        console.print(
-            Panel.fit(
-                "[bold green]✅ Configuration Valid[/bold green]\n\n"
-                "All required services are accessible.\n"
-                f"You can now run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-                border_style="green",
-                padding=(1, 2),
-            )
-        )
+    # Output
+    if output_json:
+        print(json_module.dumps(test_results, indent=2))
     else:
-        console.print(
-            Panel.fit(
-                "[bold red]❌ Configuration Issues Detected[/bold red]\n\n"
-                "Please check your API keys in the .env file.\n"
-                f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
-                border_style="red",
-                padding=(1, 2),
+        console.print()
+
+        # Summary table
+        table = Table(title="Configuration Test Summary", box=box.ROUNDED)
+        table.add_column("Service", style="cyan", no_wrap=True)
+        table.add_column("Status", style="bold", no_wrap=True)
+        table.add_column("Details", style="dim")
+
+        for check_name, check_data in test_results["checks"].items():
+            status = check_data["status"]
+            icon = "✅" if status == "pass" else ("❌" if status == "fail" else "⊘")
+            style = "green" if status == "pass" else ("red" if status == "fail" else "dim")
+            details = check_data.get("message") or ""
+            if check_name == "llm_provider" and check_data.get("provider"):
+                details = f"{check_data['provider']}: {details}"
+            table.add_row(check_name.replace("_", " ").title(), f"[{style}]{icon}[/{style}]", details)
+
+        console.print(table)
+        console.print()
+
+        if test_results["valid"]:
+            console.print(
+                Panel.fit(
+                    "[bold green]✅ Configuration Valid[/bold green]\n\n"
+                    "All required services are accessible.\n"
+                    f"You can now run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                    border_style="green",
+                    padding=(1, 2),
+                )
             )
-        )
+        else:
+            console.print(
+                Panel.fit(
+                    "[bold red]❌ Configuration Issues Detected[/bold red]\n\n"
+                    "Please check your API keys in the .env file.\n"
+                    f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+
+    if not test_results["valid"]:
         raise typer.Exit(1)
 
 
@@ -7875,6 +7967,12 @@ def query(
         "-w",
         help="Workspace directory. Can also be set via LOBSTER_WORKSPACE env var. Default: ./.lobster_workspace",
     ),
+    session_id: Optional[str] = typer.Option(
+        None,
+        "--session-id",
+        "-s",
+        help="Session ID to continue (use 'latest' for most recent session in workspace)",
+    ),
     reasoning: bool = typer.Option(
         False,
         "--reasoning",
@@ -7903,6 +8001,10 @@ def query(
     """
     Send a single query to the agent system.
 
+    Use --session-id to continue a previous conversation:
+      lobster query "follow up question" --session-id latest
+      lobster query "follow up question" --session-id session_20241208_150000
+
     Agent reasoning is shown by default. Use --no-reasoning to disable.
     """
     # Check for configuration
@@ -7913,8 +8015,66 @@ def query(
         )
         raise typer.Exit(1)
 
-    # Initialize client
-    client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider)
+    # Handle session loading for continuity
+    # Determine session_id before client initialization
+    session_file_to_load = None
+    session_id_for_client = None
+
+    if session_id:
+        # Resolve workspace early to check for session files
+        from lobster.core.workspace import resolve_workspace
+        workspace_path = resolve_workspace(explicit_path=workspace, create=True)
+
+        if session_id == "latest":
+            # Find most recent session file
+            session_files = list(workspace_path.glob("session_*.json"))
+            if session_files:
+                # Sort by modification time (most recent first)
+                session_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                session_file_to_load = session_files[0]
+                console.print(
+                    f"[cyan]📂 Loading latest session: {session_file_to_load.name}[/cyan]"
+                )
+            else:
+                console.print(
+                    "[yellow]⚠️  No previous sessions found - creating new session[/yellow]"
+                )
+        else:
+            # Explicit session ID provided
+            # Try with session_ prefix first
+            session_file_candidate = workspace_path / f"session_{session_id}.json"
+            if not session_file_candidate.exists():
+                # Try exact filename
+                session_file_candidate = workspace_path / f"{session_id}.json"
+
+            if session_file_candidate.exists():
+                session_file_to_load = session_file_candidate
+            else:
+                # Session file doesn't exist - use this session_id for new session
+                session_id_for_client = session_id
+                console.print(
+                    f"[cyan]📂 Creating new session: {session_id}[/cyan]"
+                )
+
+    # Initialize client with custom session_id if new session
+    client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider, session_id_for_client)
+
+    # Load session if found
+    if session_file_to_load:
+        try:
+            load_result = client.load_session(session_file_to_load)
+            console.print(
+                f"[green]✓ Loaded {load_result['messages_loaded']} "
+                f"previous messages[/green]"
+            )
+            if load_result.get("original_session_id"):
+                console.print(
+                    f"[dim]  Original session: "
+                    f"{load_result['original_session_id']}[/dim]"
+                )
+        except Exception as e:
+            console.print(f"[red]❌ Failed to load session: {e}[/red]")
+            console.print("[yellow]   Creating new session instead[/yellow]")
 
     # Process query
     if should_show_progress(client):
@@ -7940,6 +8100,12 @@ def query(
                     box=box.DOUBLE,
                 )
             )
+
+        # Display session ID for continuity
+        console.print(
+            f"\n[dim]Session: {client.session_id} "
+            f"(use --session-id latest for follow-ups)[/dim]"
+        )
     else:
         console.print(
             f"[bold red on white] ⚠️  Error [/bold red on white] [red]{result['error']}[/red]"

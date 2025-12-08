@@ -525,7 +525,11 @@ class GEODownloadManager:
     ) -> bool:
         """
         Download file from URL to local path with progress tracking.
-        Supports both HTTP/HTTPS and FTP protocols.
+        Supports both HTTP/HTTPS and FTP protocols with intelligent fallback.
+
+        For FTP URLs to NCBI (ftp.ncbi.nlm.nih.gov), automatically tries HTTPS first
+        since it's more reliable than FTP (better error handling, proxy support,
+        no "550 Cannot allocate memory" server errors). Falls back to FTP if HTTPS fails.
 
         Args:
             url: URL to download from (HTTP/HTTPS/FTP)
@@ -548,11 +552,29 @@ class GEODownloadManager:
                     filename = filename[:37] + "..."
                 description = f"Downloading {filename}"
 
-            # Handle FTP URLs
-            if parsed_url.scheme.lower() == "ftp":
+            # For NCBI FTP URLs: Try HTTPS first (more reliable), fall back to FTP
+            if (
+                parsed_url.scheme.lower() == "ftp"
+                and "ftp.ncbi.nlm.nih.gov" in url
+            ):
+                https_url = url.replace("ftp://", "https://", 1)
+                logger.debug(f"Trying HTTPS first (more reliable): {https_url}")
+
+                success = self._download_http(https_url, local_path, description)
+                if success:
+                    return True
+
+                # HTTPS failed - fall back to FTP
+                logger.info(
+                    f"HTTPS download failed, falling back to FTP: {url}"
+                )
                 return self._download_ftp(url, local_path, description)
 
-            # Handle HTTP/HTTPS URLs (existing functionality)
+            # Handle other FTP URLs (non-NCBI)
+            elif parsed_url.scheme.lower() == "ftp":
+                return self._download_ftp(url, local_path, description)
+
+            # Handle HTTP/HTTPS URLs directly
             else:
                 return self._download_http(url, local_path, description)
 
