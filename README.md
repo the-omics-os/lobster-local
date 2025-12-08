@@ -7,6 +7,23 @@
 
 **Bioinformatics co-pilot to automate redundant tasks so you can focus on science**
 
+---
+
+## 📋 Table of Contents
+
+- [What is Lobster AI?](#-what-is-lobster-ai) - Overview and use cases
+- [Quick Start](#-quick-start) - Install in 3 commands
+- [LLM Providers](#-llm-providers) - Ollama, Anthropic, AWS Bedrock
+- [Features](#-features) - Single-cell, bulk RNA-seq, proteomics, visualization
+- [Case Studies](#-case-studies) - Real-world examples
+- [Roadmap](#-roadmap) - 2026 development plans
+- [Use with Claude Code](#-use-with-claude-code) - IDE integration
+- [Documentation](#-documentation) - Wiki and guides
+- [Community & Support](#-community--support) - Get help
+- [License](#-license) - AGPL-3.0-or-later
+
+---
+
 ## ✨ What is Lobster AI?
 
 Lobster AI combines specialized AI agents with open-source bioinformatics tools to analyze multi-omics data through natural language. Describe your analysis needs - no coding required.
@@ -36,7 +53,27 @@ lobster chat
 
 **Alternative installation methods:** See [Complete Installation Guide](README_FULL.md#installation-methods) or [Wiki](https://github.com/the-omics-os/lobster-local/wiki/02-installation)
 
-<!-- VIDEO: Quick Demo - Replace with embedded video -->
+---
+
+### 📺 Getting Started
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/lobster_installation.gif" alt="Installation" width="100%"/>
+<p align="center"><strong>1️⃣ Install in 30 seconds</strong><br/><code>uv pip install lobster-ai</code></p>
+</td>
+<td width="50%">
+<img src="docs/images/lobster_init.gif" alt="Configuration" width="100%"/>
+<p align="center"><strong>2️⃣ Configure in 1 minute</strong><br/><code>lobster init</code></p>
+</td>
+</tr>
+</table>
+
+<div align="center">
+<img src="docs/images/lobster_chat.gif" alt="Chat Demo" width="80%"/>
+<p><strong>3️⃣ Start analyzing with natural language</strong></p>
+</div>
 
 ---
 
@@ -125,7 +162,14 @@ Lobster automatically detects available providers when not explicitly set.
 
 [Full documentation →](https://github.com/the-omics-os/lobster-local/wiki)
 
-<!-- VIDEO: Feature Walkthrough - Replace with embedded video -->
+---
+
+### 📊 Interactive Dashboard (Alpha)
+
+<div align="center">
+<img src="docs/images/lobster_dashboard.gif" alt="Dashboard Demo" width="90%"/>
+<p><em>Real-time analysis monitoring with live updates and visualization</em></p>
+</div>
 
 ---
 
@@ -165,8 +209,6 @@ Saved as: geo_gse109564_umap_celltype.html
 Also exported as PNG for publications
 ```
 
-<!-- VIDEO: Analysis Demo - Replace with embedded video -->
-
 [More examples in our cookbook →](https://github.com/the-omics-os/lobster-local/wiki/27-examples-cookbook)
 
 ---
@@ -180,6 +222,54 @@ Also exported as PNG for publications
 - Community-contributed agent marketplace
 
 **Submit feature ideas:** [GitHub Discussions](https://github.com/the-omics-os/lobster-local/discussions)
+
+---
+
+## 🔧 Use with Claude Code
+
+Lobster integrates with [Claude Code](https://claude.com/claude-code) as an Agent Skill, allowing you to run bioinformatics analyses directly from your development environment.
+
+### Quick Setup
+
+```bash
+# 1. Install Lobster
+uv pip install lobster-ai
+lobster init
+
+# 2. Install Lobster Skill for Claude Code
+curl -fsSL https://raw.githubusercontent.com/the-omics-os/lobster-local/main/claude-skill/SKILL.md \
+  -o ~/.claude/skills/lobster/SKILL.md --create-dirs
+
+# 3. Start Claude Code
+claude
+```
+
+### Usage Examples
+
+Claude Code will automatically invoke Lobster when you mention bioinformatics tasks:
+
+```bash
+# In Claude Code, just ask naturally:
+You: "Analyze the single-cell dataset in data/counts.h5ad"
+Claude: I'll use Lobster to analyze this single-cell dataset...
+        [Invokes: lobster query "analyze data/counts.h5ad..."]
+
+You: "Download GSE109564 and run quality control"
+Claude: I'll use Lobster to download and analyze this dataset...
+        [Invokes: lobster query "download GSE109564 and run QC"]
+
+You: "Find papers about CRISPR screens in cancer"
+Claude: I'll use Lobster to search the literature...
+        [Invokes: lobster query "search pubmed for CRISPR screens cancer"]
+```
+
+**What this enables:**
+- 🧬 Run bioinformatics analyses without leaving your IDE
+- 📊 Extract data and generate reports programmatically
+- 🔄 Combine Lobster with your development workflow
+- 🤖 Let Claude handle the complexity of bioinformatics commands
+
+[Learn more about Agent Skills →](https://docs.claude.com/en/docs/agents-and-tools/agent-skills)
 
 ---
 
@@ -225,8 +315,8 @@ This license ensures all users receive the freedoms to use, study, share, and mo
 
 **Transform Your Bioinformatics Research Today**
 
-`uv tool install lobster-ai && lobster chat`
+`uv pip install lobster-ai && lobster chat`
 
-*Made with ❤️ by [Omics-OS](https://omics-os.com)*
+*Made with sleep deprivation ☕️ by [Omics-OS](https://omics-os.com)*
 
 </div>

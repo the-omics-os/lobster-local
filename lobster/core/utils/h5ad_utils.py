@@ -290,7 +290,7 @@ def sanitize_dict(
     }
 
 
-def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
+def validate_for_h5ad(obj: Any, path: str = "root", _skip_numeric_warnings: bool = False) -> List[str]:
     """
     Validate an object for H5AD serialization and return list of issues.
 
@@ -300,6 +300,8 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
     Args:
         obj: Object to validate
         path: Current path in object tree (for error messages)
+        _skip_numeric_warnings: Internal flag to suppress numeric value warnings
+                                for auto-sanitized contexts (e.g., provenance IR)
 
     Returns:
         List of validation warnings (empty if all OK)
@@ -311,7 +313,18 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
     """
     issues = []
 
-    # Check for Path objects
+    # Auto-enable numeric warning suppression for provenance metadata paths
+    # These paths contain IR metadata that's automatically sanitized
+    if not _skip_numeric_warnings:
+        provenance_paths = [
+            ".provenance.activities",  # IR parameters and schemas
+            ".parameter_schema",        # ParameterSpec fields (bool/int)
+            ".parameters",              # Execution parameters
+            ".execution_context",       # Runtime metadata
+        ]
+        _skip_numeric_warnings = any(pattern in path for pattern in provenance_paths)
+
+    # Check for Path objects (CRITICAL - must be sanitized)
     if isinstance(obj, Path):
         issues.append(f"Path object at {path}: {obj}")
         return issues
@@ -320,7 +333,7 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
     if isinstance(obj, tuple):
         issues.append(f"Tuple at {path} (should be numpy array or list): {obj[:3]}...")
         for i, item in enumerate(obj):
-            issues.extend(validate_for_h5ad(item, f"{path}[{i}]"))
+            issues.extend(validate_for_h5ad(item, f"{path}[{i}]", _skip_numeric_warnings))
         return issues
 
     # numpy arrays of strings are OK (used for sanitized lists)
@@ -340,10 +353,10 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
     # Recursively check dicts
     if isinstance(obj, dict):
         for key, value in obj.items():
-            # Check for slash in keys
+            # Check for slash in keys (CRITICAL - breaks HDF5 paths)
             if isinstance(key, str) and "/" in key:
                 issues.append(f"Key with '/' at {path}: {key}")
-            issues.extend(validate_for_h5ad(value, f"{path}.{key}"))
+            issues.extend(validate_for_h5ad(value, f"{path}.{key}", _skip_numeric_warnings))
         return issues
 
     # Recursively check lists (should be converted to numpy arrays)
@@ -353,16 +366,17 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
             return issues
         # Lists should ideally be numpy arrays for H5AD, but we'll check contents
         for i, item in enumerate(obj):
-            issues.extend(validate_for_h5ad(item, f"{path}[{i}]"))
+            issues.extend(validate_for_h5ad(item, f"{path}[{i}]", _skip_numeric_warnings))
         return issues
 
-    # Integers and floats in nested structures should be strings
-    if isinstance(obj, (int, float)):
-        # Note: This is context-dependent - top-level ints/floats are OK,
-        # but nested ones in dicts should be strings
-        # We'll report this as a warning
+    # Integers/floats/bools in nested dicts (context-dependent)
+    if isinstance(obj, (int, float, bool)):
+        # Skip warnings for auto-sanitized contexts (provenance, IR metadata)
+        if _skip_numeric_warnings:
+            return issues
+        # Warn for user-provided data that will be auto-converted
         issues.append(
-            f"Numeric value at {path}: {obj} (should be string in nested dicts)"
+            f"Numeric value at {path}: {obj} (will be auto-converted to string)"
         )
         return issues
 
@@ -370,7 +384,7 @@ def validate_for_h5ad(obj: Any, path: str = "root") -> List[str]:
     if isinstance(obj, str):
         return issues
 
-    # Test JSON serializability for other types
+    # Test JSON serializability for other types (CRITICAL - must be fixable)
     try:
         json.dumps(obj)
     except (TypeError, ValueError):
