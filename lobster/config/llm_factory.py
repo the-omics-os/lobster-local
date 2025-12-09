@@ -204,7 +204,7 @@ class LLMFactory:
         return best_model
 
     @classmethod
-    def create_llm(cls, model_config: Dict[str, Any], agent_name: str = None, provider_override: Optional[str] = None) -> Any:
+    def create_llm(cls, model_config: Dict[str, Any], agent_name: str = None, provider_override: Optional[str] = None, model_override: Optional[str] = None) -> Any:
         """
         Create an LLM instance based on configuration and detected provider.
 
@@ -212,6 +212,7 @@ class LLMFactory:
             model_config: Configuration dictionary with model parameters
             agent_name: Optional agent name for logging
             provider_override: Optional explicit provider name (e.g., from CLI flag)
+            model_override: Optional explicit model name (e.g., from CLI flag)
 
         Returns:
             LLM instance (ChatAnthropic, ChatBedrockConverse, etc.)
@@ -219,6 +220,16 @@ class LLMFactory:
         Raises:
             ValueError: If no provider credentials are found or provider not implemented
         """
+        # Apply model override if provided (highest priority - layer 1)
+        if model_override:
+            # Create copy to avoid mutating original config
+            model_config = model_config.copy()
+            model_config["model_id"] = model_override
+            if agent_name:
+                logging.info(
+                    f"Agent '{agent_name}': Using runtime model override '{model_override}'"
+                )
+
         # Detect provider (with optional explicit override)
         provider = cls.detect_provider(explicit_override=provider_override)
 
@@ -235,7 +246,7 @@ class LLMFactory:
                 f"Creating LLM for agent '{agent_name}' using provider: {provider.value}"
             )
 
-        # Get model ID from config
+        # Get model ID from config (potentially overridden above)
         model_id = model_config.get("model_id")
 
         # Create appropriate LLM instance based on provider
@@ -462,7 +473,7 @@ class LLMFactory:
 
 
 # Convenience function for backward compatibility
-def create_llm(agent_name: str, model_params: Dict[str, Any], provider_override: Optional[str] = None) -> Any:
+def create_llm(agent_name: str, model_params: Dict[str, Any], provider_override: Optional[str] = None, model_override: Optional[str] = None) -> Any:
     """
     Create an LLM instance for a specific agent.
 
@@ -473,8 +484,9 @@ def create_llm(agent_name: str, model_params: Dict[str, Any], provider_override:
         agent_name: Name of the agent requesting the LLM
         model_params: Model configuration parameters
         provider_override: Optional explicit provider name (e.g., from CLI flag)
+        model_override: Optional explicit model name (e.g., from CLI flag)
 
     Returns:
         LLM instance configured for the agent
     """
-    return LLMFactory.create_llm(model_params, agent_name, provider_override=provider_override)
+    return LLMFactory.create_llm(model_params, agent_name, provider_override=provider_override, model_override=model_override)

@@ -152,16 +152,44 @@ class Settings:
         """
         Validate that required configuration is present.
 
+        Checks for:
+        1. Ollama configuration (workspace config or environment)
+        2. Anthropic API key
+        3. AWS Bedrock credentials
+
         Returns:
             tuple: (is_valid: bool, error_message: str)
         """
+        # Check for workspace config with Ollama provider
+        try:
+            from pathlib import Path
+            from lobster.core.workspace_config import WorkspaceProviderConfig
+            from lobster.core.workspace import resolve_workspace
+
+            # Try to resolve workspace and check for Ollama config
+            workspace_path = resolve_workspace(explicit_path=None, create=False)
+            if workspace_path and WorkspaceProviderConfig.exists(workspace_path):
+                config = WorkspaceProviderConfig.load(workspace_path)
+                if config.global_provider == "ollama":
+                    # Ollama configured in workspace - validation passes
+                    return True, ""
+        except Exception:
+            # Workspace config not available - continue checking other providers
+            pass
+
+        # Check for Ollama environment variables
+        if os.environ.get("OLLAMA_BASE_URL") or os.environ.get("LOBSTER_LLM_PROVIDER") == "ollama":
+            # Ollama configured via environment - validation passes
+            return True, ""
+
+        # Check for API key-based providers
         if not self.ANTHROPIC_API_KEY and not (
             self.AWS_BEDROCK_ACCESS_KEY and self.AWS_BEDROCK_SECRET_ACCESS_KEY
         ):
             error_msg = """
 ❌ No LLM provider configured
 
-Lobster AI requires API credentials to function.
+Lobster AI requires API credentials or Ollama setup to function.
 
 Quick Setup:
 1. Create a .env file in your current directory
@@ -174,9 +202,13 @@ Quick Setup:
    AWS_BEDROCK_ACCESS_KEY=your-access-key
    AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
 
+   Option C - Ollama (Local, free):
+   Run: lobster init --non-interactive --use-ollama
+
 Get API Keys:
   • Claude API: https://console.anthropic.com/
   • AWS Bedrock: https://aws.amazon.com/bedrock/
+  • Ollama: https://ollama.com/
 
 For detailed setup instructions, see:
   https://github.com/the-omics-os/lobster-local/wiki/03-configuration

@@ -74,7 +74,7 @@ This command validates:
 |-------|----------|
 | No LLM provider configured | Run `lobster init` |
 | Ollama server not accessible | Start Ollama: `ollama serve` |
-| Ollama: No models installed | After asking user - Install a model: `ollama pull llama3:8b-instruct-q8_0` |
+| Ollama: No models installed | After asking user - Install a model: `ollama pull gpt-oss:20b` |
 | Anthropic/Bedrock API error | Check API key validity in `.env` |
 | NCBI API not configured | Add `NCBI_API_KEY` to `.env` (optional) |
 | Workspace not writable | Check directory permissions |

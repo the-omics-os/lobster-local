@@ -56,6 +56,7 @@ class AgentClient(BaseClient):
         custom_callbacks: Optional[List] = None,
         manual_model_params: Optional[Dict[str, Any]] = None,
         provider_override: Optional[str] = None,
+        model_override: Optional[str] = None,
     ):
         """
         Initialize the agent client with DataManagerV2.
@@ -70,6 +71,7 @@ class AgentClient(BaseClient):
             custom_callbacks: Additional callback handlers
             manual_model_params: Manual model parameter overrides
             provider_override: Optional explicit provider name (e.g., "bedrock", "anthropic", "ollama")
+            model_override: Optional explicit model name (e.g., "llama3:70b-instruct", "claude-4-sonnet")
         """
         # Set up session
         self.session_id = (
@@ -102,6 +104,7 @@ class AgentClient(BaseClient):
 
         # Store provider override for runtime switching
         self.provider_override = provider_override
+        self.model_override = model_override
 
         # Set up callbacks
         self.callbacks = []
@@ -127,6 +130,7 @@ class AgentClient(BaseClient):
             callback_handler=self.callbacks,  # Pass the list of callbacks
             manual_model_params=manual_model_params,  # Placeholder for future manual model params
             provider_override=provider_override,  # Pass provider override to graph
+            model_override=model_override,  # Pass model override to graph
         )
 
         # Conversation state

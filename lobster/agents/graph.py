@@ -64,6 +64,7 @@ def create_bioinformatics_graph(
     subscription_tier: str = None,
     agent_filter: callable = None,
     provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
 ):
     """Create the bioinformatics multi-agent graph using langgraph_supervisor.
 
@@ -80,6 +81,7 @@ def create_bioinformatics_graph(
         agent_filter: Optional callable(agent_name, agent_config) -> bool to filter
             which agents are included in the graph. Used for tier-based restrictions.
         provider_override: Optional explicit provider name (e.g., "bedrock", "anthropic", "ollama")
+        model_override: Optional explicit model name (e.g., "llama3:70b-instruct", "claude-4-sonnet")
 
     Note: When invoking this graph, set the recursion_limit in the config to prevent
     hitting the default limit of 25. Example:
@@ -113,7 +115,7 @@ def create_bioinformatics_graph(
     else:
         model_params = settings.get_agent_llm_params("supervisor")
 
-    supervisor_model = create_llm("supervisor", model_params, provider_override=provider_override)
+    supervisor_model = create_llm("supervisor", model_params, provider_override=provider_override, model_override=model_override)
 
     # Normalize callbacks to a flat list (fix double-nesting bug)
     # callback_handler may be a single callback, a list of callbacks, or None
@@ -173,6 +175,8 @@ def create_bioinformatics_graph(
             factory_kwargs["subscription_tier"] = subscription_tier
         if "provider_override" in sig.parameters:
             factory_kwargs["provider_override"] = provider_override
+        if "model_override" in sig.parameters:
+            factory_kwargs["model_override"] = model_override
 
         # Create agent WITHOUT delegation tools first
         agent = factory_function(**factory_kwargs)
@@ -253,6 +257,8 @@ def create_bioinformatics_graph(
                 factory_kwargs["subscription_tier"] = subscription_tier
             if "provider_override" in sig.parameters:
                 factory_kwargs["provider_override"] = provider_override
+            if "model_override" in sig.parameters:
+                factory_kwargs["model_override"] = model_override
 
             new_agent = factory_function(**factory_kwargs)
 
