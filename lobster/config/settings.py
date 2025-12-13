@@ -72,7 +72,7 @@ class Settings:
             "OLLAMA_BASE_URL", "http://localhost:11434"
         )
         self.OLLAMA_DEFAULT_MODEL = os.environ.get(
-            "OLLAMA_DEFAULT_MODEL", "llama3:8b-instruct"
+            "OLLAMA_DEFAULT_MODEL", "gpt-oss:20b"
         )
 
         # Logging settings

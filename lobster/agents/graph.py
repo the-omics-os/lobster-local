@@ -1,20 +1,22 @@
 """
 LangGraph multi-agent graph for bioinformatics analysis.
 
-Implementation using langgraph_supervisor package for hierarchical multi-agent coordination.
+Implementation using Tool Calling pattern: supervisor invokes sub-agents as tools.
+This is simpler and more appropriate for centralized orchestration where users
+only interact with the supervisor.
+
+See: https://docs.langchain.com/oss/langchain/multi-agent#tool-calling
 """
 
 import inspect
-from typing import Dict, Optional
+from typing import Optional
 
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.prebuilt import create_react_agent
 from langgraph.store.memory import InMemoryStore
 
-from lobster.agents.langgraph_supervisor import (
-    create_forward_message_tool,
-    create_supervisor,
-)
 from lobster.agents.state import OverallState
 from lobster.agents.supervisor import create_supervisor_prompt
 from lobster.config.agent_registry import get_worker_agents, import_agent_factory
@@ -22,7 +24,6 @@ from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.config.supervisor_config import SupervisorConfig
 from lobster.core.data_manager_v2 import DataManagerV2
-from lobster.tools.handoff_tool import create_custom_handoff_tool
 from lobster.tools.workspace_tool import (
     create_delete_from_workspace_tool,
     create_get_content_from_workspace_tool,
@@ -33,25 +34,71 @@ from lobster.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def _create_delegation_tool(agent_name: str, agent, description: str):
-    """Create a tool that delegates to a sub-agent.
+def _create_agent_tool(agent_name: str, agent, tool_name: str, description: str):
+    """Create a tool that invokes a sub-agent (Tool Calling pattern).
 
-    This follows the official LangGraph supervisor pattern where
-    sub-agents are wrapped as tools rather than passed as agents.
+    This follows the LangChain Tool Calling pattern where sub-agents are
+    invoked as tools and return their results directly. The supervisor
+    maintains centralized control - sub-agents never interact with users.
+
+    See: https://docs.langchain.com/oss/langchain/multi-agent#tool-calling
+
+    Args:
+        agent_name: Internal name of the agent (for logging)
+        agent: The compiled agent (Pregel) to invoke
+        tool_name: Name for the tool (e.g., "handoff_to_research_agent")
+        description: Description of when to use this tool
     """
 
-    @tool
-    def delegate(request: str) -> str:
-        """Delegate task to a sub-agent."""
-        result = agent.invoke({"messages": [{"role": "user", "content": request}]})
-        # Return only the final message content
-        final_msg = result["messages"][-1]
-        return final_msg.content if hasattr(final_msg, "content") else str(final_msg)
+    @tool(tool_name, description=description)
+    def invoke_agent(task_description: str) -> str:
+        """Invoke a sub-agent with a task description.
 
-    # Set proper name and docstring
-    delegate.__name__ = f"handoff_to_{agent_name}"
-    delegate.__doc__ = f"Delegate task to {agent_name}. {description}"
-    return delegate
+        Args:
+            task_description: Detailed description of what the agent should do,
+                including all relevant context. Should be in task format starting
+                with 'Your task is to ...'
+        """
+        logger.debug(f"Invoking {agent_name} with task: {task_description[:100]}...")
+
+        # Pass explicit agent name in config for proper callback attribution
+        # This ensures token tracking and logging correctly attributes sub-agent activity
+        config = {
+            "run_name": agent_name,  # LangChain uses run_name for agent identification
+            "tags": [agent_name],    # Additional tag for tracking
+        }
+
+        # Invoke the sub-agent with the task as a user message
+        result = agent.invoke(
+            {"messages": [{"role": "user", "content": task_description}]},
+            config=config
+        )
+
+        # Extract the final message content
+        final_msg = result.get("messages", [])[-1] if result.get("messages") else None
+        if final_msg is None:
+            return f"Agent {agent_name} returned no response."
+
+        content = final_msg.content if hasattr(final_msg, "content") else str(final_msg)
+        logger.debug(f"Agent {agent_name} completed. Response length: {len(content)}")
+
+        return content
+
+    return invoke_agent
+
+
+def _create_delegation_tool(agent_name: str, agent, description: str):
+    """Create a delegation tool for parent-child agent relationships.
+
+    This is a simplified version for hierarchical delegation within agent families
+    (e.g., transcriptomics_expert -> de_analysis_expert).
+    """
+    return _create_agent_tool(
+        agent_name=agent_name,
+        agent=agent,
+        tool_name=f"handoff_to_{agent_name}",
+        description=f"Delegate task to {agent_name}. {description}",
+    )
 
 
 def create_bioinformatics_graph(
@@ -123,13 +170,11 @@ def create_bioinformatics_graph(
         callbacks = callback_handler if isinstance(callback_handler, list) else [callback_handler]
         supervisor_model = supervisor_model.with_config(callbacks=callbacks)
 
-    # Phase 1: Create all agents (no ordering needed for tool-wrapping)
-    agents = []
-    handoff_tools = []
+    # ==========================================================================
+    # Phase 1: Create all sub-agents
+    # ==========================================================================
     created_agents = {}
-    supervisor_accessible_agents = (
-        []
-    )  # Track which agents should be passed to supervisor
+    agent_tools = []  # Tools for supervisor to invoke sub-agents
 
     worker_agents = get_worker_agents()
 
@@ -158,6 +203,7 @@ def create_bioinformatics_graph(
             f"Child agents (not supervisor-accessible by default): {child_agent_names}"
         )
 
+    # Create all agents first (without delegation tools)
     for agent_name, agent_config in worker_agents.items():
         factory_function = import_agent_factory(agent_config.factory_function)
 
@@ -169,7 +215,6 @@ def create_bioinformatics_graph(
         }
 
         # Pass optional parameters to factories that support them
-        # (determined by inspecting function signature)
         sig = inspect.signature(factory_function)
         if "subscription_tier" in sig.parameters:
             factory_kwargs["subscription_tier"] = subscription_tier
@@ -178,59 +223,15 @@ def create_bioinformatics_graph(
         if "model_override" in sig.parameters:
             factory_kwargs["model_override"] = model_override
 
-        # Create agent WITHOUT delegation tools first
         agent = factory_function(**factory_kwargs)
         created_agents[agent_name] = agent
+        logger.debug(f"Created agent: {agent_config.display_name} ({agent_config.name})")
 
-        # Create handoff tool if configured AND supervisor-accessible
-        if agent_config.handoff_tool_name and agent_config.handoff_tool_description:
-            # Determine supervisor accessibility (inference or explicit override)
-            if agent_config.supervisor_accessible is None:
-                # Infer: child agents are NOT supervisor-accessible by default
-                is_supervisor_accessible = agent_name not in child_agent_names
-            else:
-                # Explicit override from registry
-                is_supervisor_accessible = agent_config.supervisor_accessible
-
-            if is_supervisor_accessible:
-                handoff_tool = create_custom_handoff_tool(
-                    agent_name=agent_config.name,
-                    name=agent_config.handoff_tool_name,
-                    description=agent_config.handoff_tool_description,
-                )
-                handoff_tools.append(handoff_tool)
-                supervisor_accessible_agents.append(
-                    agent
-                )  # Only add to supervisor list if accessible
-                logger.debug(
-                    f"Created supervisor handoff tool for: {agent_config.display_name}"
-                )
-            else:
-                logger.debug(
-                    f"Skipped supervisor handoff for child agent: {agent_config.display_name}"
-                )
-        else:
-            # Only warn if the agent SHOULD be supervisor-accessible but lacks handoff config
-            # Sub-agents (supervisor_accessible=False or inferred as child) don't need handoff tools
-            is_child_agent = agent_name in child_agent_names
-            is_explicitly_not_accessible = agent_config.supervisor_accessible is False
-            if not is_child_agent and not is_explicitly_not_accessible:
-                logger.warning(
-                    f"Agent {agent_config.display_name} has no handoff tool configured"
-                )
-            else:
-                logger.debug(
-                    f"Sub-agent {agent_config.display_name} (no handoff tool needed)"
-                )
-
-        logger.debug(
-            f"Created agent: {agent_config.display_name} ({agent_config.name})"
-        )
-
-    # Phase 2: Re-create parent agents WITH delegation tools
+    # ==========================================================================
+    # Phase 2: Re-create parent agents WITH delegation tools (for child agents)
+    # ==========================================================================
     for agent_name, agent_config in worker_agents.items():
         if agent_config.child_agents:
-            # Create delegation tools for this parent agent
             delegation_tools = []
             for child_name in agent_config.child_agents:
                 if child_name in created_agents:
@@ -242,10 +243,8 @@ def create_bioinformatics_graph(
                         )
                         delegation_tools.append(delegation_tool)
 
-            # Re-create the parent agent WITH delegation tools
+            # Re-create parent with delegation tools
             factory_function = import_agent_factory(agent_config.factory_function)
-
-            # Build kwargs including optional parameters if supported
             factory_kwargs = {
                 "data_manager": data_manager,
                 "callback_handler": callback_handler,
@@ -260,72 +259,97 @@ def create_bioinformatics_graph(
             if "model_override" in sig.parameters:
                 factory_kwargs["model_override"] = model_override
 
-            new_agent = factory_function(**factory_kwargs)
-
-            # Replace in our tracking
-            old_agent = created_agents[agent_name]
-            created_agents[agent_name] = new_agent
-
-            # Also update in supervisor_accessible_agents if present
-            if old_agent in supervisor_accessible_agents:
-                idx = supervisor_accessible_agents.index(old_agent)
-                supervisor_accessible_agents[idx] = new_agent
-
+            created_agents[agent_name] = factory_function(**factory_kwargs)
             logger.debug(
                 f"Re-created {agent_name} with {len(delegation_tools)} delegation tool(s)"
             )
 
+    # ==========================================================================
+    # Phase 3: Create agent tools for supervisor (Tool Calling pattern)
+    # ==========================================================================
+    # Only create tools for supervisor-accessible agents (not child agents)
+    supervisor_accessible_names = []
+
+    for agent_name, agent_config in worker_agents.items():
+        if not agent_config.handoff_tool_name or not agent_config.handoff_tool_description:
+            continue
+
+        # Determine supervisor accessibility
+        if agent_config.supervisor_accessible is None:
+            is_supervisor_accessible = agent_name not in child_agent_names
+        else:
+            is_supervisor_accessible = agent_config.supervisor_accessible
+
+        if is_supervisor_accessible:
+            agent_tool = _create_agent_tool(
+                agent_name=agent_config.name,
+                agent=created_agents[agent_name],
+                tool_name=agent_config.handoff_tool_name,
+                description=agent_config.handoff_tool_description,
+            )
+            agent_tools.append(agent_tool)
+            supervisor_accessible_names.append(agent_config.name)
+            logger.debug(f"Created supervisor tool: {agent_config.handoff_tool_name}")
+
+    # ==========================================================================
+    # Phase 4: Create shared tools and supervisor
+    # ==========================================================================
     # Create shared tools with data_manager access
     list_available_modalities = create_list_modalities_tool(data_manager)
     get_content_from_workspace = create_get_content_from_workspace_tool(data_manager)
     delete_from_workspace = create_delete_from_workspace_tool(data_manager)
 
-    # Get list of supervisor-accessible agents (for prompt generation)
-    active_agent_names = [agent.name for agent in supervisor_accessible_agents]
-    logger.debug(f"Supervisor-accessible agents: {active_agent_names}")
+    logger.debug(f"Supervisor-accessible agents: {supervisor_accessible_names}")
     logger.debug(
-        f"Total agents created: {len(created_agents)}, Supervisor-accessible: {len(supervisor_accessible_agents)}"
+        f"Total agents created: {len(created_agents)}, "
+        f"Supervisor tools: {len(agent_tools)}"
     )
 
-    # Create supervisor prompt with configuration and active agents
+    # Create supervisor prompt with active agents list
     system_prompt = create_supervisor_prompt(
         data_manager=data_manager,
         config=supervisor_config,
-        active_agents=active_agent_names,
+        active_agents=supervisor_accessible_names,
     )
 
-    # add forwarding tool for supervisor. This is useful when the supervisor determines that the worker's response is sufficient and doesn't require further processing or summarization by the supervisor itself.
-    # create_forward_message_tool("supervisor")
-
-    # UPDATED CONFIGURATION - Changed output_mode
-    # Only pass supervisor-accessible agents (those with handoff tools)
-    workflow = create_supervisor(
-        agents=supervisor_accessible_agents,  # Only agents the supervisor can directly access
-        model=supervisor_model,
-        prompt=system_prompt,
-        supervisor_name="supervisor",
-        state_schema=OverallState,
-        add_handoff_messages=True,
-        add_handoff_back_messages=True,
-        include_agent_name="inline",
-        # Change from "full_history" to "messages" or "last_message"
-        # output_mode="full_history",  # This ensures the actual messages are returned
-        output_mode="last_message",  # This ensures the actual messages are returned
-        tools=handoff_tools
+    # Combine all tools for the supervisor
+    all_supervisor_tools = (
+        agent_tools  # Tools to invoke sub-agents
         + [
             list_available_modalities,
             get_content_from_workspace,
             delete_from_workspace,
-        ],
-        # + [forwarding_tool],  # Supervisor-only tools (handoff tools are auto-created)
+        ]
     )
 
-    # Compile the graph with the provided checkpointer
-    graph = workflow.compile(
-        checkpointer=checkpointer,
-        store=store,
-        # debug=True  # Enable debug mode for better visibility
+    # ==========================================================================
+    # Create supervisor using simple Tool Calling pattern
+    # ==========================================================================
+    # This is much simpler than the Handoffs pattern:
+    # - Supervisor is a ReAct agent with tools that invoke sub-agents
+    # - No graph-based routing, no Command/Send complexity
+    # - Sub-agents are invoked directly and return results
+    # - User only ever interacts with supervisor
+    #
+    # See: https://docs.langchain.com/oss/langchain/multi-agent#tool-calling
+
+    # Create the supervisor as a ReAct agent
+    supervisor_agent = create_react_agent(
+        model=supervisor_model,
+        tools=all_supervisor_tools,
+        prompt=system_prompt,
+        state_schema=OverallState,
     )
 
-    logger.debug("Bioinformatics multi-agent graph created successfully")
+    # Wrap in a StateGraph with explicit "supervisor" node name
+    # This ensures events are keyed by "supervisor" (backward compatible with client)
+    workflow = StateGraph(OverallState)
+    workflow.add_node("supervisor", supervisor_agent)
+    workflow.add_edge(START, "supervisor")
+    workflow.add_edge("supervisor", END)
+
+    # Compile with checkpointer and store
+    graph = workflow.compile(checkpointer=checkpointer, store=store)
+
+    logger.debug("Bioinformatics multi-agent graph created successfully (Tool Calling pattern)")
     return graph

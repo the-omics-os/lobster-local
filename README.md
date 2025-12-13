@@ -91,7 +91,7 @@ Lobster is a **modular bioinformatics platform** with pluggable execution enviro
 |-------|-----------|---------------|----------|
 | **Execution** | Local | Default (no setup) | Privacy-first, offline, cost-sensitive |
 | | Cloud | `LOBSTER_CLOUD_KEY` | Team collaboration, scaling, managed infrastructure |
-| **LLM Provider** | Ollama | `ollama pull llama3:8b-instruct` | Local-only, unlimited usage, offline |
+| **LLM Provider** | Ollama | `ollama pull gpt-oss:20b` | Local-only, unlimited usage, offline |
 | | Anthropic | `ANTHROPIC_API_KEY` | Best quality, quick start, cloud/local |
 | | AWS Bedrock | AWS credentials | Enterprise, compliance, high throughput |
 | **Data Sources** | GEO/SRA/ENA | Auto-configured | Transcriptomics datasets |

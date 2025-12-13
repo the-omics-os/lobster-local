@@ -1439,7 +1439,7 @@ You have **13 specialized tools** organized into 4 categories:
 
 3. **concatenate_samples** - Merge multi-sample datasets
    - WHEN: After SAMPLES_FIRST download creates multiple modalities
-   - STRATEGY: Use 'auto' for intelligent union/intersection
+   - STRATEGY: Intelligently merges samples with union/intersection logic
 
 4. **get_queue_status** - Monitor download queue
    - WHEN: Before downloads, troubleshooting, verification
@@ -1576,8 +1576,8 @@ research_agent validates → Queue entry (PENDING)
 **3. Load Local File**:
 ```
 1. get_adapter_info()
-2. load_modality(name="...", file_path="...", adapter="transcriptomics_bulk")
-3. get_modality_details(name)
+2. load_modality(modality_name="...", file_path="...", adapter="transcriptomics_bulk")
+3. get_modality_details(modality_name="...")
 ```
 
 **4. Custom Calculation** (NEW):

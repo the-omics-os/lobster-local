@@ -309,33 +309,30 @@ class AgentCapabilityExtractor:
 
     @classmethod
     def get_agent_capability_summary(cls, agent_name: str, max_tools: int = 5) -> str:
-        """Get a formatted summary of an agent's capabilities.
+        """Get a compressed summary of an agent's capabilities.
+
+        Optimized for token efficiency: lists tool names without verbose descriptions.
+        Tool descriptions are available in agent-specific prompts.
 
         Args:
             agent_name: Name of the agent
-            max_tools: Maximum number of tools to include in summary
+            max_tools: Maximum number of tools to include (kept for API compatibility)
 
         Returns:
-            Formatted string describing the agent's capabilities
+            Compressed string with agent description and tool names only
         """
         caps = cls.extract_capabilities(agent_name)
 
         if caps.error:
-            return f"**{caps.display_name}**: {caps.description}"
+            return f"- **{caps.display_name}** ({caps.agent_name}): {caps.description}"
 
-        summary = f"**{caps.display_name}**: {caps.description}"
+        # Compressed format: agent name, description, and tool names only
+        summary = f"- **{caps.display_name}** ({caps.agent_name}): {caps.description}"
 
         if caps.tools:
-            summary += "\n  Key capabilities:"
-            for tool in caps.tools[:max_tools]:
-                # Truncate long descriptions
-                desc = tool.description
-                if len(desc) > 120:
-                    desc = desc[:117] + "..."
-                summary += f"\n{tool.tool_name}: {desc}"
-
-            if len(caps.tools) > max_tools:
-                summary += f"\n...and {len(caps.tools) - max_tools} more tools"
+            # List tool names only (comma-separated) - descriptions in agent prompts
+            tool_names = [tool.tool_name for tool in caps.tools]
+            summary += f"\n  Tools: {', '.join(tool_names)}"
 
         return summary
 

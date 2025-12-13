@@ -9,7 +9,7 @@ architecture with DataManagerV2 integration.
 import json
 import uuid
 from datetime import datetime
-from typing import List
+from typing import Any, Dict, Union
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -203,7 +203,7 @@ def research_agent(
         query: str = "",
         max_results: int = 5,
         sources: str = "pubmed",
-        filters: str = None,
+        filters: Union[str, Dict[str, Any], None] = None,
         related_to: str = None,
     ) -> str:
         """
@@ -213,7 +213,11 @@ def research_agent(
             query: Search query string (optional if using related_to)
             max_results: Number of results to retrieve (default: 5, range: 1-20)
             sources: Publication sources to search (default: "pubmed", options: "pubmed,biorxiv,medrxiv")
-            filters: Optional search filters as JSON string (e.g., '{"date_range": {"start": "2020", "end": "2024"}}')
+            filters: Optional search filters as dict or JSON string. Available filters:
+                     - date_range: {"start": "YYYY", "end": "YYYY"}
+                     Can be passed as:
+                     - Python dict: {"date_range": {"start": "2020", "end": "2024"}}
+                     - JSON string: '{"date_range": {"start": "2020", "end": "2024"}}'
             related_to: Find papers related to this identifier (PMID or DOI). When provided, discovers
                         papers citing or cited by the given publication. Merges functionality from
                         the removed discover_related_studies tool.
@@ -256,15 +260,24 @@ def research_agent(
                     else:
                         logger.warning(f"Unsupported source '{source}' ignored")
 
-            # Parse filters if provided
+            # Parse filters with type coercion
             filter_dict = None
             if filters:
-                import json
+                if isinstance(filters, dict):
+                    # Already a dict, use directly
+                    filter_dict = filters
+                elif isinstance(filters, str):
+                    # JSON string, parse it
+                    import json
 
-                try:
-                    filter_dict = json.loads(filters)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid filters JSON: {filters}")
+                    try:
+                        filter_dict = json.loads(filters)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid filters JSON: {filters}, error: {e}")
+                        return f"Error: Invalid filters JSON format: {str(e)}"
+                else:
+                    logger.warning(f"Invalid filters type: {type(filters)}")
+                    return f"Error: filters must be dict or JSON string, got {type(filters)}"
 
             results, stats, ir = get_content_service().search_literature(
                 query=query,
@@ -360,7 +373,10 @@ def research_agent(
 
     @tool
     def fast_dataset_search(
-        query: str, data_type: str = "geo", max_results: int = 5, filters: str = None
+        query: str,
+        data_type: str = "geo",
+        max_results: int = 5,
+        filters: Union[str, Dict[str, Any], None] = None,
     ) -> str:
         """
         Search omics databases directly for datasets matching your query (GEO, SRA, PRIDE, MassIVE, etc.).
@@ -373,7 +389,10 @@ def research_agent(
             query: Search query for datasets (keywords, disease names, technology)
             data_type: Database to search (default: "geo", options: "geo,sra,bioproject,biosample,dbgap,pride,massive")
             max_results: Maximum results to return (default: 5)
-            filters: Optional filters as JSON string. Available filters vary by database:
+            filters: Optional filters as dict or JSON string. Available filters vary by database:
+                     Can be passed as:
+                     - Python dict: {"organism": "Homo sapiens", "strategy": "AMPLICON"}
+                     - JSON string: '{"organism": "Homo sapiens", "strategy": "AMPLICON"}'
 
                      **SRA filters** (metagenomics, RNA-seq, etc.):
                      - organism: str (e.g., "Homo sapiens", "Mus musculus") - use scientific names
@@ -425,15 +444,24 @@ def research_agent(
 
             dataset_type = type_mapping.get(data_type.lower(), DatasetType.GEO)
 
-            # Parse filters if provided
+            # Parse filters with type coercion
             filter_dict = None
             if filters:
-                import json
+                if isinstance(filters, dict):
+                    # Already a dict, use directly
+                    filter_dict = filters
+                elif isinstance(filters, str):
+                    # JSON string, parse it
+                    import json
 
-                try:
-                    filter_dict = json.loads(filters)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid filters JSON: {filters}")
+                    try:
+                        filter_dict = json.loads(filters)
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid filters JSON: {filters}, error: {e}")
+                        return f"Error: Invalid filters JSON format: {str(e)}"
+                else:
+                    logger.warning(f"Invalid filters type: {type(filters)}")
+                    return f"Error: filters must be dict or JSON string, got {type(filters)}"
 
             results, stats, ir = get_content_service().discover_datasets(
                 query=query,
@@ -787,7 +815,7 @@ def research_agent(
 
     @tool
     def validate_dataset_metadata(
-        accession: str,
+        identifier: str,
         required_fields: str,
         required_values: str = None,
         threshold: float = 0.8,
@@ -800,7 +828,7 @@ def research_agent(
         for supervisor → data_expert handoff.
 
         Args:
-            accession: Dataset ID (GSE, E-MTAB, etc.)
+            identifier: Dataset accession ID (GSE, E-MTAB, etc.) - external identifier
             required_fields: Comma-separated required fields (e.g., "smoking_status,treatment_response")
             required_values: Optional JSON of required values (e.g., '{{"smoking_status": ["smoker", "non-smoker"]}}')
             threshold: Minimum fraction of samples with required fields (default: 0.8)
@@ -831,25 +859,25 @@ def research_agent(
             # ------------------------------------------------
             # Check if metadata already in store
             # ------------------------------------------------
-            if accession in data_manager.metadata_store:
+            if identifier in data_manager.metadata_store:
                 logger.debug(
-                    f"Metadata already stored for: {accession}. returning summary"
+                    f"Metadata already stored for: {identifier}. returning summary"
                 )
-                cached_data = data_manager.metadata_store[accession]
+                cached_data = data_manager.metadata_store[identifier]
                 metadata = cached_data.get("metadata", {})
 
                 # Check if already in download queue
                 queue_entries = [
                     entry
                     for entry in data_manager.download_queue.list_entries()
-                    if entry.dataset_id == accession
+                    if entry.dataset_id == identifier
                 ]
 
                 # Add to queue if requested and not already present
                 if add_to_queue and not queue_entries:
                     try:
                         logger.info(
-                            f"Adding cached dataset {accession} to download queue"
+                            f"Adding cached dataset {identifier} to download queue"
                         )
 
                         # Import GEOProvider
@@ -858,11 +886,11 @@ def research_agent(
                         geo_provider = GEOProvider(data_manager)
 
                         # Extract URLs using cached metadata (returns DownloadUrlResult)
-                        url_data = geo_provider.get_download_urls(accession)
+                        url_data = geo_provider.get_download_urls(identifier)
 
                         if url_data.error:
                             logger.warning(
-                                f"URL extraction warning for {accession}: {url_data.error}"
+                                f"URL extraction warning for {identifier}: {url_data.error}"
                             )
 
                         # Extract strategy config for cached datasets
@@ -874,18 +902,18 @@ def research_agent(
                             # Extract it now and persist
                             try:
                                 logger.info(
-                                    f"Extracting strategy for cached dataset {accession}"
+                                    f"Extracting strategy for cached dataset {identifier}"
                                 )
                                 cached_strategy_config = (
                                     assistant.extract_strategy_config(
-                                        metadata, accession
+                                        metadata, identifier
                                     )
                                 )
 
                                 if cached_strategy_config:
                                     # Persist to metadata_store
                                     data_manager._store_geo_metadata(
-                                        geo_id=accession,
+                                        geo_id=identifier,
                                         metadata=metadata,
                                         stored_by="research_agent_cached",
                                         strategy_config=(
@@ -914,7 +942,7 @@ def research_agent(
                                     )
                             except Exception as e:
                                 logger.warning(
-                                    f"Strategy extraction failed for cached {accession}: {e}"
+                                    f"Strategy extraction failed for cached {identifier}: {e}"
                                 )
                                 recommended_strategy = _create_fallback_strategy(
                                     url_data, metadata
@@ -929,7 +957,7 @@ def research_agent(
                             )
 
                         # Create DownloadQueueEntry
-                        entry_id = f"queue_{accession}_{uuid.uuid4().hex[:8]}"
+                        entry_id = f"queue_{identifier}_{uuid.uuid4().hex[:8]}"
 
                         # Reconstruct validation result for cached datasets
                         # Cached = previously validated successfully
@@ -949,7 +977,7 @@ def research_agent(
 
                         queue_entry = DownloadQueueEntry(
                             entry_id=entry_id,
-                            dataset_id=accession,
+                            dataset_id=identifier,
                             database="geo",
                             priority=5,
                             status=DownloadStatus.PENDING,
@@ -971,7 +999,7 @@ def research_agent(
                         data_manager.download_queue.add_entry(queue_entry)
 
                         logger.info(
-                            f"Successfully added cached dataset {accession} to download queue with entry_id: {entry_id}"
+                            f"Successfully added cached dataset {identifier} to download queue with entry_id: {entry_id}"
                         )
 
                         # Update queue_entries list for response building
@@ -979,7 +1007,7 @@ def research_agent(
 
                     except Exception as e:
                         logger.error(
-                            f"Failed to add cached dataset {accession} to download queue: {e}"
+                            f"Failed to add cached dataset {identifier} to download queue: {e}"
                         )
                         # Continue with response - queue addition is optional
 
@@ -989,7 +1017,7 @@ def research_agent(
                     title = title[:100] + "..."
 
                 response_parts = [
-                    f"## Dataset Already Validated: {accession}",
+                    f"## Dataset Already Validated: {identifier}",
                     "",
                     "**Status**: ✅ Metadata cached in system",
                     f"**Title**: {title}",
@@ -1028,7 +1056,7 @@ def research_agent(
                                 "**Download Queue**: Not added (add_to_queue=False)",
                                 "",
                                 "**Next steps**:",
-                                f"1. Call `validate_dataset_metadata(accession='{accession}', add_to_queue=True)` to add to download queue",
+                                f"1. Call `validate_dataset_metadata(identifier='{identifier}', add_to_queue=True)` to add to download queue",
                                 "2. Then hand off to data_expert with the entry_id from the response",
                             ]
                         )
@@ -1040,7 +1068,7 @@ def research_agent(
                                 "",
                                 "**Next steps**:",
                                 "1. Check logs for queue addition error",
-                                f"2. Retry: `validate_dataset_metadata(accession='{accession}', add_to_queue=True)`",
+                                f"2. Retry: `validate_dataset_metadata(identifier='{identifier}', add_to_queue=True)`",
                             ]
                         )
 
@@ -1051,15 +1079,15 @@ def research_agent(
             # ------------------------------------------------
             # Fetch metadata only (no expression data download)
             try:
-                if accession.startswith("G"):
+                if identifier.startswith("G"):
                     metadata, validation_result = geo_service.fetch_metadata_only(
-                        accession
+                        identifier
                     )
 
                     # Use metadata validation service to validate metadata
                     validation_result = get_metadata_validator().validate_dataset_metadata(
                         metadata=metadata,
-                        geo_id=accession,
+                        geo_id=identifier,
                         required_fields=fields_list,
                         required_values=values_dict,
                         threshold=threshold,
@@ -1068,11 +1096,11 @@ def research_agent(
                     if validation_result:
                         # Format the validation report
                         report = get_metadata_validator().format_validation_report(
-                            validation_result, accession
+                            validation_result, identifier
                         )
 
                         logger.info(
-                            f"Metadata validation completed for {accession}: {validation_result.recommendation}"
+                            f"Metadata validation completed for {identifier}: {validation_result.recommendation}"
                         )
 
                         # NEW: Relax validation gate - only block CRITICAL severity
@@ -1100,34 +1128,34 @@ def research_agent(
                                 geo_provider = GEOProvider(data_manager)
 
                                 # Extract URLs (returns DownloadUrlResult)
-                                url_data = geo_provider.get_download_urls(accession)
+                                url_data = geo_provider.get_download_urls(identifier)
 
                                 # Check for URL extraction errors
                                 if url_data.error:
                                     logger.warning(
-                                        f"URL extraction warning for {accession}: {url_data.error}"
+                                        f"URL extraction warning for {identifier}: {url_data.error}"
                                     )
 
                                 # NEW: Extract strategy using data_expert_assistant
                                 logger.info(
-                                    f"Extracting download strategy for {accession}"
+                                    f"Extracting download strategy for {identifier}"
                                 )
                                 assistant = get_data_expert()
 
                                 # Extract file config using LLM (~2-5s)
                                 try:
                                     strategy_config = assistant.extract_strategy_config(
-                                        metadata, accession
+                                        metadata, identifier
                                     )
 
                                     if strategy_config:
                                         # CRITICAL FIX: Persist strategy_config to metadata_store
                                         # This enables geo_service.py to find file-level details
                                         logger.info(
-                                            f"Persisting strategy_config to metadata_store for {accession}"
+                                            f"Persisting strategy_config to metadata_store for {identifier}"
                                         )
                                         data_manager._store_geo_metadata(
-                                            geo_id=accession,
+                                            geo_id=identifier,
                                             metadata=metadata,
                                             stored_by="research_agent_validate",
                                             strategy_config=(
@@ -1154,13 +1182,13 @@ def research_agent(
                                             )
                                         )
                                         logger.info(
-                                            f"Strategy recommendation for {accession}: {recommended_strategy.strategy_name} "
+                                            f"Strategy recommendation for {identifier}: {recommended_strategy.strategy_name} "
                                             f"(confidence: {recommended_strategy.confidence:.2f})"
                                         )
                                     else:
                                         # Fallback: URL-based strategy
                                         logger.warning(
-                                            f"LLM strategy extraction failed for {accession}, using URL-based fallback"
+                                            f"LLM strategy extraction failed for {identifier}, using URL-based fallback"
                                         )
                                         recommended_strategy = (
                                             _create_fallback_strategy(
@@ -1170,18 +1198,18 @@ def research_agent(
                                 except Exception as e:
                                     # Graceful fallback on any error
                                     logger.warning(
-                                        f"Strategy extraction error for {accession}: {e}, using URL-based fallback"
+                                        f"Strategy extraction error for {identifier}: {e}, using URL-based fallback"
                                     )
                                     recommended_strategy = _create_fallback_strategy(
                                         url_data, metadata
                                     )
 
                                 # Create DownloadQueueEntry
-                                entry_id = f"queue_{accession}_{uuid.uuid4().hex[:8]}"
+                                entry_id = f"queue_{identifier}_{uuid.uuid4().hex[:8]}"
 
                                 queue_entry = DownloadQueueEntry(
                                     entry_id=entry_id,
-                                    dataset_id=accession,
+                                    dataset_id=identifier,
                                     database="geo",
                                     priority=5,  # Default priority
                                     status=DownloadStatus.PENDING,
@@ -1208,12 +1236,12 @@ def research_agent(
                                 data_manager.download_queue.add_entry(queue_entry)
 
                                 logger.info(
-                                    f"Added {accession} to download queue with entry_id: {entry_id}"
+                                    f"Added {identifier} to download queue with entry_id: {entry_id}"
                                 )
 
                                 # Enhanced response with strategy information
                                 report += "\n\n## Download Queue\n\n"
-                                report += f"✅ Dataset '{accession}' validated and added to queue\n"
+                                report += f"✅ Dataset '{identifier}' validated and added to queue\n"
                                 report += f"- **Entry ID**: `{entry_id}`\n"
                                 report += f"- **Validation status**: {validation_status.value}\n"
                                 report += f"- **Recommended strategy**: {recommended_strategy.strategy_name} (confidence: {recommended_strategy.confidence:.2f})\n"
@@ -1248,30 +1276,30 @@ def research_agent(
 
                             except Exception as e:
                                 logger.error(
-                                    f"Failed to add {accession} to download queue: {e}"
+                                    f"Failed to add {identifier} to download queue: {e}"
                                 )
                                 # Return validation result even if queue addition fails
                                 report += f"\n\n⚠️ Warning: Could not add to download queue: {str(e)}\n"
 
                         return report
                     else:
-                        return f"Error: Failed to validate metadata for {accession}"
+                        return f"Error: Failed to validate metadata for {identifier}"
                 else:
                     logger.info(
-                        f"Currently only GEO metadata can be retrieved. {accession} doesnt seem to be a GEO identifier"
+                        f"Currently only GEO metadata can be retrieved. {identifier} doesnt seem to be a GEO identifier"
                     )
-                    return f"Currently only GEO metadata can be retrieved. {accession} doesnt seem to be a GEO identifier"
+                    return f"Currently only GEO metadata can be retrieved. {identifier} doesnt seem to be a GEO identifier"
 
             except Exception as e:
-                logger.error(f"Error accessing dataset {accession}: {e}")
-                return f"Error accessing dataset {accession}: {str(e)}"
+                logger.error(f"Error accessing dataset {identifier}: {e}")
+                return f"Error accessing dataset {identifier}: {str(e)}"
 
         except Exception as e:
             logger.error(f"Error in metadata validation: {e}")
             return f"Error validating dataset metadata: {str(e)}"
 
     @tool
-    def extract_methods(url_or_pmid: str, focus: str = None) -> str:
+    def extract_methods(identifier: str, focus: str = None) -> str:
         """
         Extract computational methods from publication(s) - supports single or batch processing.
 
@@ -1295,7 +1323,7 @@ def research_agent(
         Extraction Strategy: PMC XML → Webpage → PDF (automatic cascade)
 
         Args:
-            url_or_pmid: Single identifier OR comma-separated identifiers for batch processing
+            identifier: Publication identifier - single or comma-separated for batch processing
             focus: Optional focus area (options: "software", "parameters", "statistics").
                    When specified, returns only the focused aspect from extraction results.
                    Useful for targeted analysis (e.g., "What software did competitors use?")
@@ -1322,7 +1350,7 @@ def research_agent(
         """
         try:
             # Check if batch processing (comma-separated identifiers)
-            identifiers = [id.strip() for id in url_or_pmid.split(",")]
+            identifiers = [id.strip() for id in identifier.split(",")]
 
             if len(identifiers) > 1:
                 # Batch processing mode
@@ -2460,10 +2488,37 @@ You are a langgraph agent in a supervisor-multi-agent architecture.
 </operating principles>
 
 <tool overview>
+<parameter naming convention>
+CRITICAL: Use consistent parameter naming to avoid validation errors.
+
+External identifiers (PMID, DOI, GSE, SRA, PRIDE, etc.):
+  - Always use `identifier` parameter
+  - Tools: find_related_entries, get_dataset_metadata, fast_abstract_search,
+           read_full_publication, validate_dataset_metadata, extract_methods
+
+Publication queue IDs (pub_queue_doi_..., pub_queue_pmid_...):
+  - Always use `entry_id` parameter
+  - Tool: process_publication_entry (YOU have this tool)
+  - These are for RIS file publications, NOT datasets
+
+Download queue IDs (queue_GSE123_abc, queue_SRP456_def):
+  - YOU DO NOT HAVE TOOLS for download queue IDs
+  - Handled by data_expert via execute_download_from_queue
+  - Created when you call validate_dataset_metadata with add_to_queue=True
+  - Hand off to supervisor → data_expert for actual downloads
+
+Common mistakes to avoid:
+  WRONG: find_related_entries(entry_id="12345678")
+  RIGHT: find_related_entries(identifier="PMID:12345678")
+
+  WRONG: process_publication_entry(entry_id="queue_GSE123_abc")
+  RIGHT: This is a download queue ID - you cannot process it. Tell supervisor to hand off to data_expert.
+</parameter naming convention>
+
 You have the following tools available:
 Discovery tools:
--	search_literature: multi-source literature search (PubMed, bioRxiv, medRxiv) with filters and “related_to” support.
--	fast_dataset_search: keyword search over omics repositories (GEO, SRA, PRIDE, etc.) with filters (organism, entry_types, date_range, file types).
+-	search_literature: multi-source literature search (PubMed, bioRxiv, medRxiv) with filters and "related_to" support.
+-	fast_dataset_search: keyword search over omics repositories (GEO, SRA, PRIDE, etc.) with data_type selection and filters (organism, strategy, source, layout, platform for SRA; organism, year for GEO).
 -	find_related_entries: discover connected publications, datasets, samples, and metadata (e.g. publication → dataset, dataset → publication).
 
 Content tools:
@@ -2533,14 +2588,14 @@ Tier Restriction (IMPORTANT):
 - For literature-first problems:
 - Use search_literature and/or fast_abstract_search to identify key papers.
 - For dataset-first problems:
-- Use fast_dataset_search or find_related_entries with appropriate entry_types (e.g. GSE for GEO series, GSM for samples, PRIDE accessions).
+- Use fast_dataset_search with appropriate data_type (e.g. "geo", "sra", "pride") or find_related_entries with dataset_types filter (e.g. "geo,sra").
 - Always keep track of how many discovery calls you have used.
 3. Discovery and recovery
 - Use search_literature, fast_dataset_search, and find_related_entries until you obtain at least one high-quality candidate dataset or publication.
 - Cap identical retries with the same tool and target at 2.
 - Cap total discovery tool calls around 10 per workflow, unless the supervisor’s instructions clearly justify more.
 - Discovery recovery for publication-to-dataset:
-- If find_related_entries(PMID, entry_type=“dataset”) returns no datasets:
+- If find_related_entries(PMID, dataset_types="geo,sra") returns no datasets:
     1. Use get_dataset_metadata or fast_abstract_search to extract title, MeSH terms, and key phrases; build a new keyword query.
     2. Run fast_dataset_search with those keywords, trying 2–3 variations (broader terms, synonyms).
     3. Use search_literature(related_to=PMID) to find related publications and call find_related_entries on up to three of them.

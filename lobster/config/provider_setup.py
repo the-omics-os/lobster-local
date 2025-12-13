@@ -192,7 +192,7 @@ def create_ollama_config(
     Create configuration for Ollama (local LLM).
 
     Args:
-        model_name: Optional model name (default: llama3:8b-instruct)
+        model_name: Optional model name (default: auto-selected from available models)
         custom_url: Optional custom Ollama server URL
 
     Returns:
@@ -237,9 +237,9 @@ def get_recommended_models() -> List[Dict[str, str]]:
     """
     return [
         {
-            "name": "llama3:8b-instruct",
-            "ram_required": "8-16GB",
-            "description": "Recommended for testing (fast, good baseline)",
+            "name": "gpt-oss:20b",
+            "ram_required": "16-24GB",
+            "description": "Recommended for Lobster (supports tools, good quality)",
         },
         {
             "name": "mixtral:8x7b-instruct",

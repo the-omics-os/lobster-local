@@ -177,6 +177,7 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
     Returns:
         LangChain tool for retrieving workspace content
     """
+    from datetime import datetime
 
     @tool
     def get_content_from_workspace(
@@ -1018,7 +1019,9 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
 
     from lobster.services.data_access.workspace_content_service import (
         ContentType,
+        DatasetContent,
         MetadataContent,
+        PublicationContent,
         WorkspaceContentService,
     )
 
@@ -1219,10 +1222,6 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                         df = pd.DataFrame(samples_list)
 
                     # Write to CSV
-                    from datetime import (  # Import at function level for timestamp
-                        datetime,
-                    )
-
                     content_dir = workspace_service._get_content_dir(
                         workspace_to_content_type[workspace]
                     )
@@ -1244,21 +1243,60 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                     # No samples list, fall through to normal handling
                     samples_count = None
 
-            # Normal path: use MetadataContent model
+            # Normal path: create correct model based on workspace type
             if samples_count is None:
-                content_model = MetadataContent(
-                    identifier=identifier,
-                    content_type=content_type or "unknown",
-                    description=f"Cached from {source_location}",
-                    data=content_data,
-                    related_datasets=[],
-                    source=f"DataManager.{source_location}",
-                    cached_at=datetime.now().isoformat(),
-                )
+                target_content_type = workspace_to_content_type[workspace]
+
+                # Create appropriate model based on workspace
+                if target_content_type == ContentType.PUBLICATION:
+                    content_model = PublicationContent(
+                        identifier=identifier,
+                        title=content_data.get("title"),
+                        authors=content_data.get("authors", []),
+                        journal=content_data.get("journal"),
+                        year=content_data.get("year"),
+                        abstract=content_data.get("abstract"),
+                        methods=content_data.get("methods"),
+                        full_text=content_data.get("full_text"),
+                        keywords=content_data.get("keywords", []),
+                        source=f"DataManager.{source_location}",
+                        cached_at=datetime.now().isoformat(),
+                        url=content_data.get("url"),
+                    )
+
+                elif target_content_type == ContentType.DATASET:
+                    # Handle nested metadata structure or flat structure
+                    metadata = content_data.get("metadata", content_data)
+                    content_model = DatasetContent(
+                        identifier=identifier,
+                        title=metadata.get("title"),
+                        platform=metadata.get("platform"),
+                        platform_id=metadata.get("platform_id"),
+                        organism=metadata.get("organism"),
+                        sample_count=metadata.get("n_samples", metadata.get("sample_count", 0)),
+                        samples=metadata.get("samples"),
+                        experimental_design=metadata.get("experimental_design"),
+                        summary=metadata.get("summary"),
+                        pubmed_ids=metadata.get("pubmed_ids", []),
+                        source=f"DataManager.{source_location}",
+                        cached_at=datetime.now().isoformat(),
+                        url=metadata.get("url"),
+                    )
+
+                else:  # ContentType.METADATA (existing behavior preserved)
+                    content_model = MetadataContent(
+                        identifier=identifier,
+                        content_type=content_type or "unknown",
+                        description=f"Cached from {source_location}",
+                        data=content_data,
+                        related_datasets=[],
+                        source=f"DataManager.{source_location}",
+                        cached_at=datetime.now().isoformat(),
+                    )
 
                 cache_file_path = workspace_service.write_content(
                     content=content_model,
-                    content_type=workspace_to_content_type[workspace],
+                    content_type=target_content_type,
                     output_format=output_format,
                 )
 

@@ -131,7 +131,9 @@ class DatasetContent(BaseModel):
     platform: Optional[str] = Field(
         None, description="Platform/technology (e.g., Illumina NovaSeq)"
     )
-    platform_id: Optional[str] = Field(None, description="Platform ID (e.g., GPL570)")
+    platform_id: Optional[Union[str, List[str]]] = Field(
+        None, description="Platform ID(s) - can be single string or list for multi-platform datasets (e.g., 'GPL570' or ['GPL570', 'GPL96'])"
+    )
     organism: Optional[str] = Field(None, description="Organism (e.g., Homo sapiens)")
     sample_count: int = Field(..., description="Number of samples in dataset")
     samples: Optional[Dict[str, Any]] = Field(

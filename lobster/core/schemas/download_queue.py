@@ -21,6 +21,37 @@ class DownloadStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+    @property
+    def display(self) -> tuple:
+        """
+        Get display (icon, style) tuple for this status.
+
+        Returns:
+            Tuple of (icon: str, style: str) for UI rendering.
+            Style uses Rich markup format.
+        """
+        return DOWNLOAD_STATUS_DISPLAY.get(self.value, ("?", "dim"))
+
+    @property
+    def icon(self) -> str:
+        """Get the display icon for this status."""
+        return self.display[0]
+
+    @property
+    def style(self) -> str:
+        """Get the Rich style for this status."""
+        return self.display[1]
+
+
+# Display configuration for DownloadStatus (Single Source of Truth)
+# Maps status value -> (icon, style) for consistent UI rendering
+DOWNLOAD_STATUS_DISPLAY: Dict[str, tuple] = {
+    "pending": ("○", "dim"),
+    "in_progress": ("●", "bold #CC2C18"),
+    "completed": ("✓", "green"),
+    "failed": ("✗", "red"),
+}
+
 
 class ValidationStatus(str, Enum):
     """Queue entry validation status."""

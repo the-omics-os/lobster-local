@@ -119,7 +119,7 @@ class LLMFactory:
         Get list of available models from running Ollama instance.
 
         Returns:
-            List of model names (e.g., ["llama3:8b-instruct", "gpt-oss:20b"])
+            List of model names (e.g., ["gpt-oss:20b", "mixtral:8x7b-instruct"])
             Empty list if Ollama is not accessible or no models found
         """
         try:
@@ -147,7 +147,7 @@ class LLMFactory:
         Selection strategy (in priority order):
         1. Environment variable OLLAMA_DEFAULT_MODEL if set
         2. Largest available model from Ollama (by size/quality heuristic)
-        3. Default fallback: "llama3:8b-instruct"
+        3. Default fallback: "gpt-oss:20b"
 
         Returns:
             Selected model name
@@ -161,8 +161,8 @@ class LLMFactory:
         available_models = cls._get_ollama_models()
 
         if not available_models:
-            logging.warning("No Ollama models detected, using default: llama3:8b-instruct")
-            return "llama3:8b-instruct"
+            logging.warning("No Ollama models detected, using default: gpt-oss:20b")
+            return "gpt-oss:20b"
 
         # Selection heuristics (prefer larger/better models)
         # Priority order: larger parameter counts, instruct/chat variants

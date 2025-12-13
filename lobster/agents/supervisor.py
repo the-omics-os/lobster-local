@@ -135,26 +135,30 @@ def _build_tools_section() -> str:
 def _build_agents_section(active_agents: List[str], config: SupervisorConfig) -> str:
     """Build dynamic agent descriptions from registry.
 
+    Uses compressed format: agent name, description, and tool names only.
+    Verbose tool descriptions are in agent-specific prompts (not duplicated here).
+
     Args:
         active_agents: List of active agent names
         config: Supervisor configuration
 
     Returns:
-        str: Formatted agent descriptions
+        str: Formatted agent descriptions (compressed for token efficiency)
     """
     section = "<Available Agents>\n"
 
     for agent_name in active_agents:
         agent_config = get_agent_registry_config(agent_name)
         if agent_config:
-            # Get capability summary if enabled
+            # Get compressed capability summary (tool names only, no descriptions)
             if config.show_agent_capabilities and config.include_agent_tools:
                 capability_summary = (
                     AgentCapabilityExtractor.get_agent_capability_summary(
                         agent_name, max_tools=config.max_tools_per_agent
                     )
                 )
-                section += f"- {capability_summary}\n"
+                # Summary already includes "- " prefix
+                section += f"{capability_summary}\n"
             else:
                 # Simple description without tool details
                 section += f"- **{agent_config.display_name}** ({agent_name}): {agent_config.description}\n"
@@ -475,61 +479,28 @@ def _build_context_section(
 
 
 def _build_examples_section() -> str:
-    """Build examples section for detailed mode.
+    """Build universal examples section (agent-agnostic patterns only).
+
+    Agent-specific workflows are in _build_workflow_section() with conditional logic.
+    This section contains only universal patterns that apply regardless of which agents are active.
 
     Returns:
-        str: Examples section
+        str: Universal delegation patterns (no hardcoded agent names except core agents)
     """
     return """<Example Delegation Patterns>
 
-**GEO Search Workflow:**
-- User: "Find recent single-cell datasets for pancreatic cancer"
-- You delegate to research_agent to search
-- Present results and ask user which datasets to download. Ensure to present at least 3 results in the same format to not remove too much information from the agent output
-- Upon confirmation, delegate to data_expert to download selected GEO IDs
+**Queue Download Pattern (v2.4+ - CRITICAL):**
+research_agent.validate_dataset_metadata(dataset_id, add_to_queue=True) → extract entry_id (format: "queue_GSEXXXXX_abc123") → confirm with user → data_expert.execute_download_from_queue(entry_id)
+- NEVER skip queue validation; ALWAYS extract entry_id before data_expert handoff
 
-**Dataset Download from Publication (Queue Workflow v2.4+):**
-- User: "Can you download the dataset from this publication <DOI>"
-- Step 1: You delegate to research_agent to find datasets associated with the DOI
-- Step 2: research_agent identifies GEO ID (e.g., GSE180759)
-- Step 3: You delegate to research_agent to validate and queue: validate_dataset_metadata(geo_id, add_to_queue=True)
-- Step 4: research_agent returns entry_id (e.g., "queue_GSE180759_abc123")
-- Step 5: IMPORTANT: Confirm with user before downloading
-- Step 6: You delegate to data_expert_agent with entry_id: execute_download_from_queue(entry_id="queue_GSE180759_abc123")
-- NOTE: Always extract entry_id from research_agent response before delegating to data_expert
+**Literature & Methods Pattern:**
+research_agent.search_literature() or .fast_dataset_search() → present results → research_agent.extract_methods(DOI) for parameters
+- Auto-resolves PMID/DOI; handles PDF extraction automatically
 
-**Parameter Extraction:**
-- User: "Extract parameters from this paper <DOI>"
-- You delegate to research_agent to extract computational parameters (Phase 1: auto PMID/DOI resolution)
-- Research agent handles all method extraction with automatic PDF resolution
-
-**Visualization Requests:**
-- User: "Create a UMAP plot" or "Show gene expression for CD3D, CD4, CD8A"
-- You delegate to the appropriate expert (transcriptomics_expert for RNA-seq data)
-- The expert will generate interactive plots and save them to the workspace
-
-**Analysis Workflows:**
- - For single-cell: data loading -> QC -> normalization -> clustering -> annotation
-**Multi-Resolution Clustering Example:**
-User: "Cluster my single-cell data at multiple resolutions to explore granularity"
-You delegate: transcriptomics_expert.cluster_modality(
-      modality_name="geo_gse12345_filtered",
-      resolutions=[0.25, 0.5, 1.0],
-      batch_correction=True
-)
-Result: Creates leiden_res0_25, leiden_res0_5, leiden_res1_0 columns
-Next: User visualizes UMAP colored by each resolution to compare
-**Single Resolution Clustering Example:**
-User: "Cluster my data with resolution 0.5"
-Result: Creates leiden column with clustering at resolution 0.5
-
-- For bulk RNA-seq: data loading -> QC -> normalization -> DE analysis -> enrichment
-- For proteomics: data loading -> QC -> normalization -> statistical testing -> visualization
-
-**Machine Learning workflos:**
-- For single-cell: data loading -> QC -> ask user for parameters -> embedding (scVI from machine learning expert) -> clustering -> annotation
-- For bulk RNA-seq: data loading -> QC -> normalization -> DE analysis -> enrichment
-- For proteomics: data loading -> QC -> normalization -> statistical testing -> visualization"""
+**General Delegation Pattern:**
+- Check <Available Agents> for capabilities and tool names
+- Delegate to the appropriate expert based on data type and task
+- Agent-specific workflows are listed in <Workflow Awareness> section"""
 
 
 def _build_response_quality_section() -> str:
