@@ -31,6 +31,7 @@ from lobster.tools.providers.base_provider import (
     PublicationMetadata,
     PublicationSource,
 )
+from lobster.tools.providers.pride_normalizer import PRIDENormalizer
 from lobster.utils.logger import get_logger
 from lobster.utils.ssl_utils import create_ssl_context, handle_ssl_error
 
@@ -199,29 +200,65 @@ class PRIDEProvider(BasePublicationProvider):
                     params["filter"] = filter_str
 
             # Execute request with retry
+            logger.debug("Making API request to PRIDE...")
             response_data = self._make_api_request(url, params)
+            logger.debug(f"API response type: {type(response_data)}")
 
-            # Parse results
-            projects = response_data.get("_embedded", {}).get("projects", [])
-            page_info = response_data.get("page", {})
+            # Parse results and normalize data types
+            logger.debug("Parsing _embedded.projects...")
+            # Handle both response formats: dict with _embedded wrapper OR direct list
+            if isinstance(response_data, list):
+                # API returned projects list directly (some API versions)
+                projects = response_data
+                logger.debug(f"API returned list directly: {len(projects)} projects")
+            elif isinstance(response_data, dict):
+                # Standard _embedded wrapper format
+                projects = response_data.get("_embedded", {}).get("projects", [])
+                logger.debug(f"API returned dict with _embedded: {len(projects)} projects")
+            else:
+                logger.error(f"Unexpected API response type: {type(response_data)}")
+                projects = []
+
+            logger.debug(f"Found {len(projects)} raw projects")
+
+            logger.debug("Normalizing projects...")
+            projects = PRIDENormalizer.normalize_search_results(projects)
+            logger.debug(f"Normalized to {len(projects)} projects")
+
+            logger.debug("Getting page info...")
+            # Handle page info extraction based on response format
+            if isinstance(response_data, dict):
+                page_info = response_data.get("page", {})
+                total_elements = page_info.get('totalElements', len(projects))
+            else:
+                # Direct list response has no page info
+                page_info = {}
+                total_elements = len(projects)
 
             # Format response
-            result = f"Found {page_info.get('totalElements', len(projects))} PRIDE projects for query: '{query}'\n\n"
+            logger.debug("Formatting response...")
+            result = f"Found {total_elements} PRIDE projects for query: '{query}'\n\n"
 
             if not projects:
                 return result + "No projects found. Try different keywords or filters."
 
             result += f"Showing {len(projects)} projects:\n\n"
 
+            logger.debug("Iterating through projects...")
             for i, project in enumerate(projects[:10], 1):
+                logger.debug(f"Processing project {i}: {type(project)}")
                 accession = project.get("accession", "Unknown")
+                logger.debug(f"  accession: {accession}")
                 title = project.get("title", "No title")
+                logger.debug(f"  title: {title[:30]}...")
                 organisms = project.get("organisms", [])
-                organism_str = (
-                    ", ".join([org.get("name", "") for org in organisms[:2]])
-                    if organisms
-                    else "Unknown"
-                )
+                logger.debug(f"  organisms type: {type(organisms)}, length: {len(organisms) if isinstance(organisms, list) else 'N/A'}")
+
+                # Extract organism names using safe helper (already normalized)
+                organism_names = [
+                    PRIDENormalizer.safe_get_organism_name(org) for org in organisms[:2]
+                ]
+                organism_str = ", ".join(organism_names) if organism_names else "Unknown"
 
                 result += f"{i}. **{accession}** - {title[:80]}\n"
                 result += f"   Organism: {organism_str}\n"
@@ -234,10 +271,13 @@ class PRIDEProvider(BasePublicationProvider):
             if len(projects) > 10:
                 result += f"... and {len(projects) - 10} more projects\n"
 
+            logger.debug("Search formatting complete")
             return result
 
         except Exception as e:
+            import traceback
             logger.error(f"Error searching PRIDE projects: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return f"Error searching PRIDE: {str(e)}"
 
     def find_datasets_from_publication(
@@ -277,8 +317,16 @@ class PRIDEProvider(BasePublicationProvider):
             for project in projects:
                 references = project.get("references", [])
                 for ref in references:
-                    ref_pubmed = ref.get("pubmedId", "")
-                    ref_doi = ref.get("doi", "")
+                    # Handle both dict and string reference formats
+                    if isinstance(ref, dict):
+                        ref_pubmed = ref.get("pubmedId", "")
+                        ref_doi = ref.get("doi", "")
+                    elif isinstance(ref, str):
+                        # Reference is a string (citation text)
+                        ref_pubmed = ref if ref.isdigit() else ""
+                        ref_doi = ref if ref.startswith("10.") else ""
+                    else:
+                        continue
 
                     if identifier in [ref_pubmed, ref_doi]:
                         linked_projects.append(project)
@@ -325,10 +373,21 @@ class PRIDEProvider(BasePublicationProvider):
             doi = None
 
             if references:
-                # Use first reference
+                # Use first reference (handle both dict and string formats)
                 ref = references[0]
-                pmid = ref.get("pubmedId")
-                doi = ref.get("doi")
+                if isinstance(ref, dict):
+                    pmid = ref.get("pubmedId")
+                    doi = ref.get("doi")
+                    journal = ref.get("referenceLine", "")
+                elif isinstance(ref, str):
+                    # Reference is a citation string
+                    pmid = None
+                    doi = None
+                    journal = ref
+                else:
+                    journal = None
+            else:
+                journal = None
 
             # Extract keywords
             keywords = project.get("keywords", [])
@@ -338,7 +397,7 @@ class PRIDEProvider(BasePublicationProvider):
             return PublicationMetadata(
                 uid=identifier,
                 title=project.get("title", ""),
-                journal=references[0].get("referenceLine", "") if references else None,
+                journal=journal,
                 published=project.get("publicationDate"),
                 doi=doi,
                 pmid=pmid,
@@ -453,12 +512,18 @@ class PRIDEProvider(BasePublicationProvider):
             filename = file_info.get("fileName", "")
             locations = file_info.get("publicFileLocations", [])
 
-            # Find FTP location
+            # Find FTP location (handle both dict and string formats)
             for location in locations:
-                if location.get("name") == "FTP Protocol":
-                    ftp_url = location.get("value", "")
-                    if ftp_url:
-                        ftp_urls.append((filename, ftp_url))
+                if isinstance(location, dict):
+                    if location.get("name") == "FTP Protocol":
+                        ftp_url = location.get("value", "")
+                        if ftp_url:
+                            ftp_urls.append((filename, ftp_url))
+                            break
+                elif isinstance(location, str):
+                    # Location is direct FTP URL string
+                    if location.startswith("ftp://"):
+                        ftp_urls.append((filename, location))
                         break
 
         return ftp_urls
@@ -499,12 +564,18 @@ class PRIDEProvider(BasePublicationProvider):
                 category = file_info.get("fileCategory", {}).get("value", "")
                 locations = file_info.get("publicFileLocations", [])
 
-                # Extract FTP URL
+                # Extract FTP URL (handle both dict and string formats)
                 ftp_url = None
                 for location in locations:
-                    if location.get("name") == "FTP Protocol":
-                        ftp_url = location.get("value", "")
-                        break
+                    if isinstance(location, dict):
+                        if location.get("name") == "FTP Protocol":
+                            ftp_url = location.get("value", "")
+                            break
+                    elif isinstance(location, str):
+                        # Location is direct FTP URL string
+                        if location.startswith("ftp://"):
+                            ftp_url = location
+                            break
 
                 if not ftp_url:
                     continue
@@ -654,15 +725,25 @@ class PRIDEProvider(BasePublicationProvider):
         # Extract from submitters
         submitters = project.get("submitters", [])
         for submitter in submitters:
-            name = f"{submitter.get('firstName', '')} {submitter.get('lastName', '')}".strip()
-            if name:
-                authors.append(name)
+            if isinstance(submitter, dict):
+                name = f"{submitter.get('firstName', '')} {submitter.get('lastName', '')}".strip()
+                if name:
+                    authors.append(name)
+            elif isinstance(submitter, str):
+                # Handle case where submitter is just a string name
+                if submitter.strip():
+                    authors.append(submitter.strip())
 
         # Extract from lab PIs
         lab_pis = project.get("labPIs", [])
         for pi in lab_pis:
-            name = f"{pi.get('firstName', '')} {pi.get('lastName', '')}".strip()
-            if name and name not in authors:
-                authors.append(name)
+            if isinstance(pi, dict):
+                name = f"{pi.get('firstName', '')} {pi.get('lastName', '')}".strip()
+                if name and name not in authors:
+                    authors.append(name)
+            elif isinstance(pi, str):
+                # Handle case where PI is just a string name
+                if pi.strip() and pi.strip() not in authors:
+                    authors.append(pi.strip())
 
         return authors

@@ -7,6 +7,8 @@ workspaces/
 workspaces/*
 cdk.out/
 cdk.out/*
+cache/
+cache/*
 
 #tests
 results/

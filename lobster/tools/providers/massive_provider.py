@@ -194,11 +194,20 @@ class MassIVEProvider(BasePublicationProvider):
             if query:
                 params["filter"] = query
 
-            # Execute request
-            response_data = self._make_api_request(url, params)
-
-            # PROXI returns array of dataset objects
-            datasets = response_data if isinstance(response_data, list) else []
+            # Execute request (MassIVE PROXI v0.1 may not support this endpoint)
+            try:
+                response_data = self._make_api_request(url, params)
+                # PROXI returns array of dataset objects
+                datasets = response_data if isinstance(response_data, list) else []
+            except Exception as e:
+                # MassIVE's PROXI implementation is incomplete - fallback message
+                logger.warning(f"MassIVE PROXI search not available: {e}")
+                return (
+                    "MassIVE dataset search via PROXI API is not currently supported.\n\n"
+                    "To use MassIVE datasets, please provide a direct MSV accession number:\n"
+                    "  Example: MSV000083067, MSV000085232\n\n"
+                    "You can search for datasets at: https://massive.ucsd.edu/ProteoSAFe/datasets.jsp"
+                )
 
             # Filter by keyword in title/description if API doesn't support it
             if query and not any("filter" in str(p) for p in params):

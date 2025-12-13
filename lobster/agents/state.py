@@ -5,9 +5,59 @@ Following the LangGraph 0.2.x multi-agent template pattern, but expanded to
 capture routing metadata, agent-specific working memory, and intermediate outputs.
 """
 
-from typing import Any, Dict, List
+from typing import Annotated, Any, Dict, List, Optional
+from typing_extensions import TypedDict
 
 from langgraph.prebuilt.chat_agent_executor import AgentState
+
+
+# =============================================================================
+# Todo List State (v3.5+)
+# =============================================================================
+
+
+class TodoItem(TypedDict):
+    """Individual todo item for planning multi-step tasks.
+
+    Used by supervisor to decompose complex requests into trackable subtasks.
+    Follows the DeepAgents/LangChain TodoListMiddleware pattern.
+
+    Attributes:
+        content: Task description in imperative form (e.g., "Download GSE12345")
+        status: Current state - "pending", "in_progress", or "completed"
+        activeForm: Present continuous form for UI display (e.g., "Downloading GSE12345")
+    """
+
+    content: str
+    status: str  # "pending" | "in_progress" | "completed"
+    activeForm: str
+
+
+def _todo_reducer(
+    left: Optional[List[TodoItem]], right: Optional[List[TodoItem]]
+) -> List[TodoItem]:
+    """Reducer for todos field - replaces entire list on update.
+
+    This is a replace reducer (not append) because:
+    1. Todos represent the CURRENT plan state, not history
+    2. Agent sends complete updated list on each write_todos call
+    3. Matches DeepAgents/LangChain TodoListMiddleware behavior
+
+    Args:
+        left: Previous todos list (or None)
+        right: New todos list from tool update (or None)
+
+    Returns:
+        The new todos list (right), or previous (left), or empty list
+    """
+    if right is not None:
+        return right
+    return left if left is not None else []
+
+
+# =============================================================================
+# Core Agent States
+# =============================================================================
 
 
 class OverallState(AgentState):
@@ -25,6 +75,10 @@ class OverallState(AgentState):
     # Optional: Task context for handoffs
     current_task: str = ""
     task_context: Dict[str, Any] = {}
+
+    # Todo list for planning multi-step tasks (v3.5+)
+    # Updated via write_todos tool using Command pattern
+    todos: Annotated[List[TodoItem], _todo_reducer] = []
 
 
 # class SupervisorState(AgentState):

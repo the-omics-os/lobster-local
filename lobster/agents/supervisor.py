@@ -55,6 +55,12 @@ def create_supervisor_prompt(
     if config.show_available_tools:
         sections.append(_build_tools_section())
 
+    # 2a. Planning section (todo tools usage)
+    sections.append(_build_planning_section())
+
+    # 2b. Workspace guardrails
+    sections.append(_build_workspace_guardrails_section())
+
     # 3. Dynamic agent descriptions
     sections.append(_build_agents_section(active_agents, config))
 
@@ -129,7 +135,9 @@ def _build_tools_section() -> str:
     return """<Available Tools: when to use them>
 # Every agent has the following tools. Thus only use these tools if the users request can be directly answered by you without any need to specialized tools or knowledge.
 **list_available_modalities**: Use this to inform your decisions about analysis steps and agent delegation. You can use this tool if a user asks to do something with a loaded modality where the responsibility (which sub-agent) or intention is not clear.
-**get_content_from_workspace**: Retrieve cached content from workspace with unified behavior across all workspace types (literature, data, metadata, queues). Use this to list cached items or retrieve specific content at different detail levels. Supports filtering by workspace category and status. See tool description for examples."""
+**get_content_from_workspace**: Retrieve cached content from workspace with unified behavior across all workspace types (literature, data, metadata, queues). Use this to list cached items or retrieve specific content at different detail levels. Supports filtering by workspace category and status. See tool description for examples.
+**write_todos**: Create and update task planning list for multi-step operations. Use BEFORE starting complex tasks (3+ steps, multi-agent coordination, publication queue processing). Maintains exactly ONE task "in_progress" at a time. Mark completed immediately after finishing each task. See <Planning & Task Decomposition> section for detailed usage.
+**read_todos**: Check current todo list status. Use when you need to review your plan or remind yourself of pending tasks. Current todos are visible in your state context."""
 
 
 def _build_agents_section(active_agents: List[str], config: SupervisorConfig) -> str:
@@ -514,3 +522,112 @@ def _build_response_quality_section() -> str:
     - Summarize and guide the next step if applicable.
     - Present expert outputs clearly and suggest logical next steps.
     - Maintain scientific rigor and accuracy in all responses."""
+
+
+def _build_planning_section() -> str:
+    """Build planning section explaining todo tool usage.
+
+    Returns:
+        str: Planning guidelines and todo tool usage
+    """
+    return """<Planning & Task Decomposition>
+
+You have access to `write_todos` and `read_todos` tools for planning multi-step tasks.
+
+**When to Use Todo Planning:**
+
+ALWAYS create a todo list for:
+1. Complex multi-step tasks (3+ distinct steps across multiple agents)
+2. Multi-agent coordination tasks (e.g., "Search PubMed, download datasets, cluster cells")
+3. Publication queue processing (large batch operations with filtering)
+4. Tasks where the user provides a numbered list or comma-separated list of requirements
+5. Tasks that require careful ordering (e.g., QC → normalization → clustering → annotation)
+
+SKIP todo planning for:
+1. Single, straightforward tasks (e.g., "list modalities", "show status")
+2. Simple lookups or information retrieval
+3. Tasks completable in 1-2 trivial steps
+
+**How to Use Todos:**
+
+1. **Create Plan First**: Before delegating to agents, call `write_todos` with a complete task breakdown
+2. **One Task In Progress**: Maintain exactly ONE task with status "in_progress" at a time
+3. **Update Immediately**: Mark tasks "completed" RIGHT AFTER finishing, don't batch updates
+4. **Never Mark Completed on Failure**: If errors occur, keep task "in_progress" or create a new troubleshooting task
+
+**Todo Structure:**
+```python
+write_todos(todos=[
+    {"content": "Search PubMed for papers", "status": "completed", "activeForm": "Searching PubMed"},
+    {"content": "Download GSE12345", "status": "in_progress", "activeForm": "Downloading GSE12345"},
+    {"content": "Perform QC analysis", "status": "pending", "activeForm": "Performing QC analysis"}
+])
+```
+
+**Example Workflow:**
+```
+User: "Search PubMed for CRISPR papers, download top dataset, and cluster cells"
+
+Step 1: Create todo list FIRST
+write_todos([
+    {"content": "Search PubMed for CRISPR papers", "status": "pending", ...},
+    {"content": "Download top dataset from search results", "status": "pending", ...},
+    {"content": "Perform single-cell clustering", "status": "pending", ...}
+])
+
+Step 2: Mark first task in_progress and delegate
+write_todos([...first task now "in_progress"...])
+handoff_to_research_agent("Search PubMed for CRISPR papers...")
+
+Step 3: Mark completed and move to next
+write_todos([...first "completed", second "in_progress"...])
+handoff_to_data_expert("Download GSE12345...")
+
+Step 4: Continue until all tasks completed
+```
+
+This planning approach prevents impulsive actions and helps track progress on complex requests."""
+
+
+def _build_workspace_guardrails_section() -> str:
+    """Build workspace guardrails section for safe workspace access.
+
+    Returns:
+        str: Workspace access guidelines
+    """
+    return """<Workspace Access Guardrails>
+
+You have access to `get_content_from_workspace` for retrieving cached data (literature, metadata, queues).
+
+**CRITICAL: Metadata Level Warning**
+
+When accessing publication queue entries with `level='metadata'`, you may retrieve 10,000-50,000 tokens of full-text content per entry.
+
+**Safe Usage Patterns:**
+
+1. **For Queue Overview**: Use `level='brief'` to see entry summaries
+   ```python
+   get_content_from_workspace(identifier="all", workspace="publication_queue", level="brief")
+   ```
+
+2. **For Single Entry Details**: Use specific identifier with `level='full'` or `level='metadata'`
+   ```python
+   get_content_from_workspace(identifier="PMID:12345", workspace="publication_queue", level="metadata")
+   ```
+
+3. **For Batch Processing**: DELEGATE to research_agent or metadata_assistant instead of fetching directly
+   ```python
+   # Good: Let specialist handle large batches
+   handoff_to_metadata_assistant("Process all HANDOFF_READY entries for filtering...")
+
+   # Bad: Fetching all metadata yourself
+   get_content_from_workspace(identifier="all", workspace="publication_queue", level="metadata")
+   ```
+
+**Delegation Strategy:**
+
+- **research_agent**: For literature search, publication queue processing, identifier extraction
+- **metadata_assistant**: For metadata filtering, sample selection, crosswalk table creation
+- **data_expert**: For dataset downloads, modality management
+
+When in doubt about workspace operations involving large volumes, delegate to the appropriate specialist rather than fetching everything yourself."""

@@ -119,6 +119,7 @@ class H5ADBackend(BaseBackend):
         - Handles mixed-type columns (converts to strings)
         - Converts None/NaN to "NA" for HDF5 compatibility
         - Recursively applies to .uns, .obsm, .varm, .layers
+        - CRITICAL FIX: Removes columns with None names (prevents PurePosixPath errors)
 
         Note: Uses centralized sanitization utilities from lobster.core.utils.h5ad_utils
         """
@@ -142,12 +143,65 @@ class H5ADBackend(BaseBackend):
             util_sanitize_key(k, slash_replacement): v for k, v in adata.layers.items()
         }
 
+        # CRITICAL FIX: Remove columns with None names BEFORE sanitization
+        # (Prevents TypeError: PurePosixPath() argument must be str, not 'NoneType')
+        # Check obs DataFrame
+        logger.debug(f"SANITIZE: Checking adata.obs columns for None values. Total columns: {len(adata.obs.columns)}")
+        none_columns_obs = [col for col in adata.obs.columns if col is None]
+        if none_columns_obs:
+            logger.warning(
+                f"❗ SANITIZE: Dropping {len(none_columns_obs)} column(s) with None names in adata.obs. "
+                f"This prevents H5AD serialization errors. "
+                f"Columns with None names are usually caused by malformed metadata or "
+                f"incorrect DataFrame construction during data loading."
+            )
+            adata.obs = adata.obs.drop(columns=none_columns_obs)
+        else:
+            logger.debug("SANITIZE: No None column names found in adata.obs")
+
+        # Check var DataFrame
+        logger.debug(f"SANITIZE: Checking adata.var columns for None values. Total columns: {len(adata.var.columns)}")
+        logger.debug(f"SANITIZE: First 10 var columns: {list(adata.var.columns[:10])}")
+
+        # CRITICAL FIX: Check and fix None/empty index names in obs and var
+        # Use falsy check to catch both None AND empty string ("") which also breaks H5AD
+        if not adata.obs.index.name:
+            logger.debug("SANITIZE: obs.index.name is None/empty, setting to 'index'")
+            adata.obs.index.name = "index"
+        if not adata.var.index.name:
+            logger.debug("SANITIZE: var.index.name is None/empty, setting to 'gene_id'")
+            adata.var.index.name = "gene_id"
+
+        none_columns_var = [col for col in adata.var.columns if col is None]
+        if none_columns_var:
+            logger.warning(
+                f"❗ SANITIZE: Dropping {len(none_columns_var)} column(s) with None names in adata.var. "
+                f"This prevents H5AD serialization errors. "
+                f"Columns with None names are usually caused by malformed metadata or "
+                f"incorrect DataFrame construction during data loading."
+            )
+            adata.var = adata.var.drop(columns=none_columns_var)
+        else:
+            logger.debug("SANITIZE: No None column names found in adata.var")
+
         # Sanitize DataFrame column names in obs and var
+        # DEFENSIVE: Handle edge case where util_sanitize_key might return None
+        def safe_sanitize_column_name(col, replacement):
+            """Sanitize column name with fallback for None/invalid names."""
+            sanitized = util_sanitize_key(col, replacement)
+            # If sanitization returns None or empty string, generate placeholder
+            if sanitized is None or sanitized == "":
+                logger.warning(
+                    f"Column name '{col}' sanitized to None/empty - using placeholder 'unnamed_column'"
+                )
+                return "unnamed_column"
+            return sanitized
+
         adata.obs.columns = [
-            util_sanitize_key(col, slash_replacement) for col in adata.obs.columns
+            safe_sanitize_column_name(col, slash_replacement) for col in adata.obs.columns
         ]
         adata.var.columns = [
-            util_sanitize_key(col, slash_replacement) for col in adata.var.columns
+            safe_sanitize_column_name(col, slash_replacement) for col in adata.var.columns
         ]
 
         # Sanitize DataFrame VALUES in obs and var (COMPREHENSIVE)
@@ -229,6 +283,18 @@ class H5ADBackend(BaseBackend):
                     f"Dropped {len(columns_to_drop)} empty columns: {columns_to_drop}"
                 )
 
+        # POST-SANITIZATION VALIDATION: Final check for None column names
+        # (Defense-in-depth safety check - should never trigger if above logic is correct)
+        for df_name, df in [("obs", adata.obs), ("var", adata.var)]:
+            remaining_none_columns = [col for col in df.columns if col is None or col == ""]
+            if remaining_none_columns:
+                logger.error(
+                    f"CRITICAL BUG: Post-sanitization check found {len(remaining_none_columns)} "
+                    f"None/empty column names in adata.{df_name}. This should never happen. "
+                    f"Dropping columns as emergency fallback."
+                )
+                df.drop(columns=remaining_none_columns, inplace=True)
+
         return adata
 
     @staticmethod
@@ -276,7 +342,10 @@ class H5ADBackend(BaseBackend):
             )
             # Use to_numpy() with explicit dtype to force conversion
             values = adata_copy.obs.index.to_numpy(dtype=str, na_value="")
-            adata_copy.obs.index = pd.Index(values, dtype=object)
+            # CRITICAL FIX: Preserve index.name during conversion, default to "index" if None/empty
+            # Use truthy check to catch both None AND empty string ("") which also breaks H5AD
+            original_name = adata_copy.obs.index.name if adata_copy.obs.index.name else "index"
+            adata_copy.obs.index = pd.Index(values, dtype=object, name=original_name)
 
         # Convert var.index
         if is_arrow_dtype(adata_copy.var.index):
@@ -284,7 +353,10 @@ class H5ADBackend(BaseBackend):
                 "Converting var.index from ArrowExtensionArray to object dtype"
             )
             values = adata_copy.var.index.to_numpy(dtype=str, na_value="")
-            adata_copy.var.index = pd.Index(values, dtype=object)
+            # CRITICAL FIX: Preserve index.name during conversion, default to "gene_id" if None/empty
+            # Use truthy check to catch both None AND empty string ("") which also breaks H5AD
+            original_name = adata_copy.var.index.name if adata_copy.var.index.name else "gene_id"
+            adata_copy.var.index = pd.Index(values, dtype=object, name=original_name)
 
         # Convert obs columns
         for col in adata_copy.obs.columns:
@@ -415,6 +487,22 @@ class H5ADBackend(BaseBackend):
             compression_opts = kwargs.get("compression_opts", self.compression_opts)
             as_dense = kwargs.get("as_dense", False)
 
+            # PRE-SAVE DIAGNOSTIC: Check for None column names BEFORE sanitization
+            # (Helps identify where None columns are being introduced)
+            for df_name, df in [("obs", adata.obs), ("var", adata.var)]:
+                none_cols = [col for col in df.columns if col is None]
+                if none_cols:
+                    logger.warning(
+                        f"PRE-SAVE DIAGNOSTIC: Found {len(none_cols)} column(s) with None names "
+                        f"in adata.{df_name} before sanitization. These will be removed. "
+                        f"This indicates a bug in data loading or processing. "
+                        f"Total columns in {df_name}: {len(df.columns)}"
+                    )
+                    # Log first few rows to help debug
+                    logger.debug(
+                        f"Sample column names in {df_name}: {list(df.columns[:20])}"
+                    )
+
             # Convert ArrowExtensionArray to standard types FIRST
             # (pandas >=2.2.0 uses PyArrow-backed strings by default)
             # Must be done before sanitization to ensure proper handling
@@ -453,6 +541,32 @@ class H5ADBackend(BaseBackend):
             if as_dense and hasattr(adata_to_save.X, "toarray"):
                 # Convert sparse to dense if requested
                 adata_to_save.X = adata_to_save.X.toarray()
+
+            # FINAL CHECK: Verify no None/empty index names or column names right before write
+            # CRITICAL: Check if index name is None/empty and fix it
+            # Use falsy check to catch both None AND empty string ("") which also breaks H5AD
+            if not adata_to_save.obs.index.name:
+                logger.debug("Pre-write fix: obs.index.name is None/empty, setting to 'index'")
+                adata_to_save.obs.index.name = "index"
+            if not adata_to_save.var.index.name:
+                logger.debug("Pre-write fix: var.index.name is None/empty, setting to 'index'")
+                adata_to_save.var.index.name = "index"
+
+            final_none_obs = [col for col in adata_to_save.obs.columns if col is None]
+            final_none_var = [col for col in adata_to_save.var.columns if col is None]
+
+            if final_none_obs or final_none_var:
+                logger.error(
+                    f"🚨 PRE-WRITE CHECK: Found None columns after sanitization! "
+                    f"obs: {len(final_none_obs)}, var: {len(final_none_var)}. "
+                    f"Removing them now as emergency fallback."
+                )
+                if final_none_obs:
+                    logger.error(f"🚨 Dropping None columns from obs: {final_none_obs}")
+                    adata_to_save.obs = adata_to_save.obs.drop(columns=final_none_obs)
+                if final_none_var:
+                    logger.error(f"🚨 Dropping None columns from var: {final_none_var}")
+                    adata_to_save.var = adata_to_save.var.drop(columns=final_none_var)
 
             # Save to H5AD format
             adata_to_save.write_h5ad(

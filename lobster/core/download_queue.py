@@ -368,14 +368,10 @@ class DownloadQueue:
         with self._lock:
             entries = self._load_entries()
 
+            # Initialize with ALL DownloadStatus values (ensures consistency)
             stats = {
                 "total_entries": len(entries),
-                "by_status": {
-                    "pending": 0,
-                    "in_progress": 0,
-                    "completed": 0,
-                    "failed": 0,
-                },
+                "by_status": {status.value: 0 for status in DownloadStatus},
                 "by_database": {},
                 "by_priority": {},
             }

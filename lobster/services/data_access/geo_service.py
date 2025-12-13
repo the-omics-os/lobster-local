@@ -2831,6 +2831,14 @@ class GEOService:
             # Basic metadata from GEOparse
             if hasattr(gse, "metadata"):
                 for key, value in gse.metadata.items():
+                    # VALIDATION: Skip None keys from malformed SOFT files
+                    if key is None:
+                        logger.warning(
+                            f"Skipping None metadata key in {gse_id} series metadata "
+                            f"(malformed SOFT file from GEO)"
+                        )
+                        continue
+
                     if isinstance(value, list):
                         # Keep file-related and ID fields as lists for downstream processing
                         if key in LIST_FIELDS:
@@ -2873,6 +2881,14 @@ class GEOService:
                     sample_meta = {}
                     if hasattr(gsm, "metadata"):
                         for key, value in gsm.metadata.items():
+                            # VALIDATION: Skip None keys from malformed SOFT files
+                            if key is None:
+                                logger.warning(
+                                    f"Skipping None metadata key for {gsm_id} "
+                                    f"(malformed SOFT file from GEO)"
+                                )
+                                continue
+
                             if isinstance(value, list):
                                 # For sample-level metadata, preserve lists for characteristics
                                 # but join others for display

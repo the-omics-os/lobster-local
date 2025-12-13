@@ -50,6 +50,15 @@ from rich.table import Table
 from lobster.cli_internal.utils.path_resolution import (  # BUG FIX #6: Secure path resolution
     PathResolver,
 )
+from lobster.cli_internal.commands import (
+    ConsoleOutputAdapter,
+    show_queue_status,
+    queue_load_file,
+    queue_list,
+    queue_clear,
+    queue_export,
+    QueueFileTypeNotSupported,
+)
 from lobster.config import provider_setup
 from lobster.config.agent_config import (
     LobsterAgentConfigurator,
@@ -109,18 +118,8 @@ _COMMAND_HISTORY_LOCK = threading.Lock()
 # ============================================================================
 # Queue Command Exceptions
 # ============================================================================
-
-
-class QueueFileTypeNotSupported(NotImplementedError):
-    """Raised when /queue load encounters an unsupported file type.
-
-    This exception provides helpful messaging for users about which file types
-    are currently supported and which are planned for future releases.
-    """
-
-    pass
-
-
+# Note: QueueFileTypeNotSupported exception now imported from shared module
+# (lobster.cli_internal.commands)
 # ============================================================================
 # Progress Management
 # ============================================================================
@@ -4189,7 +4188,14 @@ def chat(
         except KeyboardInterrupt:
             if Confirm.ask("\n[dim]exit?[/dim]"):
                 display_goodbye()
-                console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]\n")
+                console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]")
+
+                # Display session token usage summary
+                if hasattr(client, "token_tracker") and client.token_tracker:
+                    summary = client.token_tracker.get_minimal_summary()
+                    if summary:
+                        console.print(f"[dim]{summary}[/dim]")
+                console.print()  # Empty line before exit
                 break
             continue
         except Exception as e:
@@ -4266,369 +4272,22 @@ def handle_command(command: str, client: "AgentClient"):
 
 
 # ============================================================================
-# Queue Command Helpers
+# Queue Command Helpers (MOVED TO SHARED MODULE)
+# ============================================================================
+# The following functions have been extracted to lobster/cli_internal/commands/
+# for reuse across CLI and Dashboard interfaces:
+#
+# - show_queue_status()    (was _show_queue_status)
+# - queue_load_file()      (was _queue_load_file)
+# - queue_list()           (was _queue_list)
+# - queue_clear()          (was _queue_clear)
+# - queue_export()         (was _queue_export)
+#
+# Import these from lobster.cli_internal.commands instead of defining them here.
+# This ensures CLI and Dashboard use the same implementation (Single Source of Truth).
 # ============================================================================
 
 
-def _show_queue_status(client: "AgentClient", console: Console) -> Optional[str]:
-    """Display status of the publication queue.
-
-    Returns:
-        Summary string for conversation history, or None.
-    """
-    if client.publication_queue is None:
-        console.print("[yellow]Publication queue not initialized[/yellow]")
-        return None
-
-    stats = client.publication_queue.get_statistics()
-
-    console.print("\n[bold cyan]📋 Queue Status[/bold cyan]\n")
-
-    # Create status table
-    table = Table(box=box.ROUNDED)
-    table.add_column("Status", style="cyan")
-    table.add_column("Count", style="white", justify="right")
-
-    by_status = stats.get("by_status", {})
-    total_entries = stats.get("total_entries", 0)
-
-    table.add_row("Pending", str(by_status.get("pending", 0)))
-    table.add_row("Extracting", str(by_status.get("extracting", 0)))
-    table.add_row("Completed", str(by_status.get("completed", 0)))
-    table.add_row("Failed", str(by_status.get("failed", 0)))
-    table.add_row("[bold]Total[/bold]", f"[bold]{total_entries}[/bold]")
-
-    console.print(table)
-
-    console.print("\n[cyan]💡 Commands:[/cyan]")
-    console.print("  • [white]/queue load <file>[/white] - Load file into queue")
-    console.print("  • [white]/queue list[/white] - List queued items")
-    console.print("  • [white]/queue clear[/white] - Clear publication queue")
-    console.print("  • [white]/queue clear download[/white] - Clear download queue")
-    console.print("  • [white]/queue clear all[/white] - Clear all queues")
-
-    return f"Queue status: {total_entries} total items"
-
-
-def _queue_load_file(
-    client: "AgentClient",
-    filename: str,
-    console: Console,
-    current_directory: Path,
-) -> Optional[str]:
-    """Load file into queue - type determines handler, user determines intent.
-
-    Args:
-        client: The AgentClient instance
-        filename: File path to load
-        console: Rich console for output
-        current_directory: Current working directory
-
-    Returns:
-        Summary string for conversation history, or None
-
-    Raises:
-        QueueFileTypeNotSupported: For unsupported file types
-    """
-    if not filename:
-        console.print("[yellow]Usage: /queue load <file>[/yellow]")
-        return None
-
-    # BUG FIX #6: Use PathResolver for secure path resolution
-    resolver = PathResolver(
-        current_directory=current_directory,
-        workspace_path=(
-            client.data_manager.workspace_path
-            if hasattr(client, "data_manager")
-            else None
-        ),
-    )
-    resolved = resolver.resolve(filename, search_workspace=True, must_exist=True)
-
-    if not resolved.is_safe:
-        console.print(f"[red]❌ Security error: {resolved.error}[/red]")
-        return None
-
-    if not resolved.exists:
-        console.print(f"[red]❌ File not found: {filename}[/red]")
-        return None
-
-    file_path = resolved.path
-
-    ext = file_path.suffix.lower()
-
-    # Supported: .ris files
-    if ext in [".ris", ".txt"]:
-        console.print(f"[cyan]📚 Loading into queue: {file_path.name}[/cyan]\n")
-
-        try:
-            result = client.load_publication_list(
-                file_path=str(file_path),
-                priority=5,
-                schema_type="general",
-                extraction_level="methods",
-            )
-
-            if result["added_count"] > 0:
-                console.print(
-                    f"[green]✅ Loaded {result['added_count']} items into queue[/green]\n"
-                )
-
-                if result["skipped_count"] > 0:
-                    console.print(
-                        f"[yellow]⚠️  Skipped {result['skipped_count']} malformed entries[/yellow]"
-                    )
-
-                console.print(
-                    "\n[bold cyan]What would you like to do with these publications?[/bold cyan]"
-                )
-                console.print("  • Extract methods and parameters")
-                console.print("  • Search for related datasets (GEO)")
-                console.print("  • Build citation network")
-                console.print("  • Custom analysis (describe your intent)\n")
-
-                return f"Loaded {result['added_count']} publications into queue from {file_path.name}. Awaiting user intent."
-            else:
-                console.print("[red]❌ No items could be loaded from file[/red]")
-                if result.get("errors"):
-                    for error in result["errors"][:3]:
-                        console.print(f"  • {error}")
-                return None
-
-        except Exception as e:
-            console.print(f"[red]❌ Failed to load file: {str(e)}[/red]")
-            return None
-
-    # Placeholder: .bib files (BibTeX)
-    elif ext == ".bib":
-        raise QueueFileTypeNotSupported(
-            "BibTeX (.bib) support coming soon. "
-            "Convert to .ris format or wait for future release."
-        )
-
-    # Placeholder: .csv files (custom lists)
-    elif ext == ".csv":
-        raise QueueFileTypeNotSupported(
-            "CSV queue loading coming soon. "
-            "Expected format: columns for DOI, PMID, or title."
-        )
-
-    # Placeholder: .json files (API exports)
-    elif ext == ".json":
-        raise QueueFileTypeNotSupported(
-            "JSON queue loading coming soon. " "Planned support for PubMed API exports."
-        )
-
-    # Unknown type
-    else:
-        raise QueueFileTypeNotSupported(
-            f"Unsupported file type: {ext}. "
-            f"Currently supported: .ris. Coming soon: .bib, .csv, .json"
-        )
-
-
-def _queue_list(client: "AgentClient", console: Console) -> Optional[str]:
-    """List items in the publication queue.
-
-    Returns:
-        Summary string for conversation history, or None.
-    """
-    if client.publication_queue is None:
-        console.print("[yellow]Publication queue not initialized[/yellow]")
-        return None
-
-    entries = client.publication_queue.list_entries()
-
-    if not entries:
-        console.print("[yellow]Queue is empty[/yellow]")
-        return "Queue is empty"
-
-    # Limit display to first 20 entries
-    display_entries = entries[:20]
-    total_count = len(entries)
-
-    console.print(
-        f"\n[bold cyan]📋 Queue Items ({len(display_entries)} of {total_count} shown)[/bold cyan]\n"
-    )
-
-    table = Table(box=box.ROUNDED, show_lines=True)
-    table.add_column("#", style="dim", width=4)
-    table.add_column("Title", style="white", max_width=50, overflow="ellipsis")
-    table.add_column("Year", style="cyan", width=6)
-    table.add_column("Status", style="yellow", width=12)
-    table.add_column("PMID/DOI", style="dim", width=20)
-
-    for i, entry in enumerate(display_entries, 1):
-        title = (
-            entry.title[:47] + "..."
-            if entry.title and len(entry.title) > 50
-            else (entry.title or "N/A")
-        )
-        year = str(entry.year) if entry.year else "N/A"
-        status = (
-            entry.status.value if hasattr(entry.status, "value") else str(entry.status)
-        )
-        identifier = entry.pmid or entry.doi or "N/A"
-
-        table.add_row(str(i), title, year, status, identifier)
-
-    console.print(table)
-
-    if total_count > 20:
-        console.print(f"\n[dim]... and {total_count - 20} more items[/dim]")
-
-    return f"Listed {len(display_entries)} of {total_count} items from queue"
-
-
-def _queue_clear(client: "AgentClient", console: Console, queue_type: str = "publication") -> Optional[str]:
-    """Clear items from specified queue(s).
-
-    Args:
-        client: "AgentClient" instance
-        console: Rich console for output
-        queue_type: "publication", "download", or "all"
-
-    Returns:
-        Summary string for conversation history, or None.
-    """
-    if queue_type == "all":
-        # Clear both queues
-        pub_total = 0
-        dl_total = 0
-
-        # Get publication queue stats
-        if client.publication_queue is not None:
-            pub_stats = client.publication_queue.get_statistics()
-            pub_total = pub_stats.get("total_entries", 0)
-
-        # Get download queue stats
-        if hasattr(client, "data_manager") and client.data_manager:
-            dl_stats = client.data_manager.download_queue.get_statistics()
-            dl_total = dl_stats.get("total_entries", 0)
-
-        grand_total = pub_total + dl_total
-
-        if grand_total == 0:
-            console.print("[yellow]All queues are already empty[/yellow]")
-            return "All queues were already empty"
-
-        # Confirm with user
-        console.print(f"[yellow]About to clear:[/yellow]")
-        console.print(f"  • Publication queue: {pub_total} items")
-        console.print(f"  • Download queue: {dl_total} items")
-        console.print(f"  • Total: {grand_total} items\n")
-        confirm = Confirm.ask(f"[yellow]Clear all {grand_total} items from both queues?[/yellow]")
-
-        if confirm:
-            cleared = []
-            if pub_total > 0:
-                client.publication_queue.clear_queue()
-                cleared.append(f"publication ({pub_total})")
-            if dl_total > 0:
-                client.data_manager.download_queue.clear_queue()
-                cleared.append(f"download ({dl_total})")
-
-            console.print(f"[green]✅ Cleared {grand_total} items from {', '.join(cleared)} queues[/green]")
-            return f"Cleared {grand_total} items from all queues"
-        else:
-            console.print("[cyan]Operation cancelled[/cyan]")
-            return None
-
-    elif queue_type == "download":
-        # Clear download queue
-        if not hasattr(client, "data_manager") or not client.data_manager:
-            console.print("[yellow]Data manager not initialized[/yellow]")
-            return None
-
-        download_queue = client.data_manager.download_queue
-        stats = download_queue.get_statistics()
-        total = stats.get("total_entries", 0)
-
-        if total == 0:
-            console.print("[yellow]Download queue is already empty[/yellow]")
-            return "Download queue was already empty"
-
-        # Confirm with user
-        confirm = Confirm.ask(f"[yellow]Clear all {total} items from download queue?[/yellow]")
-
-        if confirm:
-            download_queue.clear_queue()
-            console.print(f"[green]✅ Cleared {total} items from download queue[/green]")
-            return f"Cleared {total} items from download queue"
-        else:
-            console.print("[cyan]Operation cancelled[/cyan]")
-            return None
-
-    else:  # publication (default)
-        if client.publication_queue is None:
-            console.print("[yellow]Publication queue not initialized[/yellow]")
-            return None
-
-        # Get count before clearing
-        stats = client.publication_queue.get_statistics()
-        total = stats.get("total_entries", 0)
-
-        if total == 0:
-            console.print("[yellow]Publication queue is already empty[/yellow]")
-            return "Publication queue was already empty"
-
-        # Confirm with user
-        confirm = Confirm.ask(f"[yellow]Clear all {total} items from publication queue?[/yellow]")
-
-        if confirm:
-            client.publication_queue.clear_queue()
-            console.print(f"[green]✅ Cleared {total} items from publication queue[/green]")
-            return f"Cleared {total} items from publication queue"
-        else:
-            console.print("[cyan]Operation cancelled[/cyan]")
-            return None
-
-
-def _queue_export(
-    client: "AgentClient", name: Optional[str], console: Console
-) -> Optional[str]:
-    """Export queue to workspace for persistence.
-
-    Args:
-        client: The AgentClient instance
-        name: Optional name for the exported dataset
-        console: Rich console for output
-
-    Returns:
-        Summary string for conversation history, or None.
-    """
-    if client.publication_queue is None:
-        console.print("[yellow]Publication queue not initialized[/yellow]")
-        return None
-
-    stats = client.publication_queue.get_statistics()
-    if stats.get("total_entries", 0) == 0:
-        console.print("[yellow]Queue is empty, nothing to export[/yellow]")
-        return None
-
-    # Generate export name if not provided
-    if not name:
-        from datetime import datetime
-
-        name = f"queue_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-
-    console.print(f"[cyan]📦 Exporting queue to workspace as '{name}'...[/cyan]")
-
-    try:
-        # Export queue data by copying the queue file to workspace
-        source_path = client.publication_queue.queue_file
-        export_path = client.data_manager.workspace_path / f"{name}.jsonl"
-
-        # Copy the queue file
-        shutil.copy2(source_path, export_path)
-
-        console.print(
-            f"[green]✅ Exported {stats.get('total', 0)} items to: {export_path}[/green]"
-        )
-        return f"Exported {stats.get('total', 0)} queue items to workspace as '{name}'"
-    except Exception as e:
-        console.print(f"[red]❌ Export failed: {str(e)}[/red]")
-        return None
 
 
 def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
@@ -5393,24 +5052,26 @@ when they are started by agents or analysis workflows.
     # /queue - Flexible Queue Operations (session-based, user determines intent)
     # =========================================================================
     elif cmd.startswith("/queue"):
+        # Use shared command implementation (unified with dashboard)
+        output = ConsoleOutputAdapter(console)
         parts = cmd.split()
 
         if len(parts) == 1:
             # Show queue status
-            return _show_queue_status(client, console)
+            return show_queue_status(client, output)
 
         subcommand = parts[1] if len(parts) > 1 else None
 
         if subcommand == "load":
             filename = parts[2] if len(parts) > 2 else None
             try:
-                return _queue_load_file(client, filename, console, current_directory)
+                return queue_load_file(client, filename, output, current_directory)
             except QueueFileTypeNotSupported as e:
                 console.print(f"[yellow]⚠️  {str(e)}[/yellow]")
                 return None
 
         elif subcommand == "list":
-            return _queue_list(client, console)
+            return queue_list(client, output)
 
         elif subcommand == "clear":
             # Determine queue type from additional parameters
@@ -5424,11 +5085,11 @@ when they are started by agents or analysis workflows.
                     console.print(f"[yellow]Unknown queue type: {parts[2]}[/yellow]")
                     console.print("[cyan]Usage: /queue clear [download|all][/cyan]")
                     return None
-            return _queue_clear(client, console, queue_type=queue_type)
+            return queue_clear(client, output, queue_type=queue_type)
 
         elif subcommand == "export":
             name = parts[2] if len(parts) > 2 else None
-            return _queue_export(client, name, console)
+            return queue_export(client, name, output)
 
         else:
             console.print(f"[yellow]Unknown queue subcommand: {subcommand}[/yellow]")
@@ -8007,7 +7668,14 @@ when they are started by agents or analysis workflows.
     elif cmd == "/exit":
         if Confirm.ask("[dim]exit?[/dim]"):
             display_goodbye()
-            console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]\n")
+            console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]")
+
+            # Display session token usage summary
+            if hasattr(client, "token_tracker") and client.token_tracker:
+                summary = client.token_tracker.get_minimal_summary()
+                if summary:
+                    console.print(f"[dim]{summary}[/dim]")
+            console.print()  # Empty line before exit
             raise KeyboardInterrupt
 
     else:
@@ -8205,6 +7873,12 @@ def query(
             f"\n[dim]Session: {client.session_id} "
             f"(use --session-id latest for follow-ups)[/dim]"
         )
+
+        # Display minimal token usage summary
+        if hasattr(client, "token_tracker") and client.token_tracker:
+            summary = client.token_tracker.get_minimal_summary()
+            if summary:
+                console.print(f"[dim]{summary}[/dim]")
     else:
         console.print(
             f"[bold red on white] ⚠️  Error [/bold red on white] [red]{result['error']}[/red]"

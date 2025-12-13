@@ -24,6 +24,7 @@ from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.config.supervisor_config import SupervisorConfig
 from lobster.core.data_manager_v2 import DataManagerV2
+from lobster.tools.todo_tools import create_todo_tools
 from lobster.tools.workspace_tool import (
     create_delete_from_workspace_tool,
     create_get_content_from_workspace_tool,
@@ -312,6 +313,9 @@ def create_bioinformatics_graph(
         active_agents=supervisor_accessible_names,
     )
 
+    # Create todo tools for planning
+    write_todos, read_todos = create_todo_tools()
+
     # Combine all tools for the supervisor
     all_supervisor_tools = (
         agent_tools  # Tools to invoke sub-agents
@@ -319,6 +323,8 @@ def create_bioinformatics_graph(
             list_available_modalities,
             get_content_from_workspace,
             delete_from_workspace,
+            write_todos,  # Planning tools
+            read_todos,
         ]
     )
 

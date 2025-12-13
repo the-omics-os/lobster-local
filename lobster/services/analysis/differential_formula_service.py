@@ -542,6 +542,10 @@ class DifferentialFormulaService:
         formula_components = self.parse_formula(formula, metadata, reference_levels)
         design_result = self.construct_design_matrix(formula_components, metadata)
 
+        # Add top-level formula key for backward compatibility
+        design_result["formula"] = formula
+        design_result["reference_condition"] = reference_condition
+
         return design_result
 
     def validate_experimental_design(

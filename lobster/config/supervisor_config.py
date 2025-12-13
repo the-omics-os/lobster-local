@@ -51,6 +51,11 @@ class SupervisorConfig:
     delegation_strategy: str = "auto"  # auto, conservative, aggressive
     error_handling: str = "informative"  # silent, informative, verbose
 
+    # Planning settings
+    enable_todo_planning: bool = True  # Enable todo planning tools
+    require_planning_for_complex_tasks: bool = True  # Require planning for complex tasks
+    workspace_metadata_level_warning: bool = True  # Warn about large metadata fetches
+
     # Agent discovery settings
     auto_discover_agents: bool = True
     include_agent_tools: bool = True  # Whether to list individual agent tools
@@ -87,6 +92,9 @@ class SupervisorConfig:
             "SUPERVISOR_SHOW_CAPABILITIES": ("show_agent_capabilities", bool),
             "SUPERVISOR_DELEGATION_STRATEGY": ("delegation_strategy", str),
             "SUPERVISOR_ERROR_HANDLING": ("error_handling", str),
+            "SUPERVISOR_ENABLE_TODO_PLANNING": ("enable_todo_planning", bool),
+            "SUPERVISOR_REQUIRE_PLANNING": ("require_planning_for_complex_tasks", bool),
+            "SUPERVISOR_WORKSPACE_WARNING": ("workspace_metadata_level_warning", bool),
             "SUPERVISOR_AUTO_DISCOVER": ("auto_discover_agents", bool),
             "SUPERVISOR_INCLUDE_AGENT_TOOLS": ("include_agent_tools", bool),
             "SUPERVISOR_MAX_TOOLS_PER_AGENT": ("max_tools_per_agent", int),
@@ -176,6 +184,9 @@ class SupervisorConfig:
             "show_agent_capabilities": self.show_agent_capabilities,
             "delegation_strategy": self.delegation_strategy,
             "error_handling": self.error_handling,
+            "enable_todo_planning": self.enable_todo_planning,
+            "require_planning_for_complex_tasks": self.require_planning_for_complex_tasks,
+            "workspace_metadata_level_warning": self.workspace_metadata_level_warning,
             "auto_discover_agents": self.auto_discover_agents,
             "include_agent_tools": self.include_agent_tools,
             "max_tools_per_agent": self.max_tools_per_agent,
