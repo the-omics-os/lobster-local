@@ -16,6 +16,10 @@ import scanpy as sc
 from scipy.stats import pearsonr
 
 from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
+from lobster.services.analysis.pathway_enrichment_service import (
+    PathwayEnrichmentService,
+    PathwayEnrichmentError,
+)
 
 try:
     import scrublet as scr
@@ -1174,17 +1178,114 @@ sc.tl.filter_rank_genes_groups(
 
         return fig
 
-    def _run_mock_pathway_analysis(self, gene_list: List[str]) -> List[Dict[str, Any]]:
-        """Run mock pathway analysis for demonstration."""
-        pathways = [
-            {"pathway": "T cell activation", "p_value": 0.001, "genes": 15},
-            {"pathway": "Immune response", "p_value": 0.003, "genes": 22},
-            {"pathway": "Cell cycle", "p_value": 0.01, "genes": 8},
-            {"pathway": "Apoptosis", "p_value": 0.02, "genes": 12},
-            {"pathway": "Metabolic process", "p_value": 0.05, "genes": 18},
-        ]
+    def run_pathway_enrichment(
+        self,
+        adata: anndata.AnnData,
+        marker_genes: Optional[List[str]] = None,
+        cluster_key: str = "leiden",
+        databases: Optional[List[str]] = None,
+        p_value_threshold: float = 0.05,
+    ) -> Tuple[anndata.AnnData, Dict[str, Any], AnalysisStep]:
+        """
+        Run pathway enrichment on marker genes or DE results using gseapy.
 
-        return pathways
+        Uses real GO, KEGG, and Reactome databases via PathwayEnrichmentService.
+
+        Args:
+            adata: AnnData object with single-cell data
+            marker_genes: List of marker genes (auto-extracts from adata if None)
+            cluster_key: Cluster label key in adata.obs (for auto-extraction)
+            databases: List of databases to query (defaults to GO + KEGG)
+            p_value_threshold: Significance threshold for adjusted p-value
+
+        Returns:
+            Tuple of (adata_with_results, stats_dict, analysis_ir)
+
+        Raises:
+            SingleCellError: If pathway enrichment fails
+        """
+        try:
+            logger.info("Running pathway enrichment on marker genes")
+
+            # Auto-extract marker genes if not provided
+            if marker_genes is None:
+                marker_genes = self._extract_marker_genes(adata, cluster_key)
+                logger.info(f"Auto-extracted {len(marker_genes)} marker genes")
+
+            # Delegate to PathwayEnrichmentService
+            pathway_service = PathwayEnrichmentService()
+
+            # Default to GO + KEGG if no databases specified
+            if databases is None:
+                databases = ["GO_Biological_Process_2023", "KEGG_2021_Human"]
+
+            # Perform enrichment
+            adata_enriched, enrichment_stats, ir = pathway_service.over_representation_analysis(
+                adata=adata,
+                gene_list=marker_genes,
+                databases=databases,
+                organism="human",
+                p_value_threshold=p_value_threshold,
+                store_in_uns=True,
+            )
+
+            logger.info(
+                f"Pathway enrichment completed: {enrichment_stats['n_significant_pathways']} significant pathways"
+            )
+
+            return adata_enriched, enrichment_stats, ir
+
+        except PathwayEnrichmentError as e:
+            logger.exception(f"Pathway enrichment error: {e}")
+            raise SingleCellError(f"Pathway enrichment failed: {str(e)}")
+        except Exception as e:
+            logger.exception(f"Unexpected error in pathway enrichment: {e}")
+            raise SingleCellError(f"Pathway enrichment failed: {str(e)}")
+
+    def _extract_marker_genes(
+        self, adata: anndata.AnnData, cluster_key: str, top_n: int = 50
+    ) -> List[str]:
+        """
+        Extract top marker genes from Scanpy's rank_genes_groups results.
+
+        Args:
+            adata: AnnData with rank_genes_groups results
+            cluster_key: Cluster label key
+            top_n: Number of top genes per cluster
+
+        Returns:
+            List of unique marker gene symbols
+        """
+        marker_genes = []
+
+        # Check if rank_genes_groups was run
+        if "rank_genes_groups" in adata.uns:
+            # Extract top genes per cluster
+            result = adata.uns["rank_genes_groups"]
+            groups = result["names"].dtype.names  # Cluster names
+
+            for group in groups:
+                # Get top N genes for this cluster
+                genes = result["names"][group][:top_n]
+                marker_genes.extend(genes)
+
+            # Deduplicate
+            marker_genes = list(set(marker_genes))
+            logger.info(f"Extracted {len(marker_genes)} unique markers from {len(groups)} clusters")
+
+        else:
+            # Fallback: use highly variable genes
+            logger.warning(
+                "No rank_genes_groups found. Using highly_variable_genes as fallback."
+            )
+            if "highly_variable" in adata.var.columns:
+                marker_genes = adata.var_names[adata.var["highly_variable"]].tolist()[:500]
+            else:
+                # Last resort: use all genes (not recommended)
+                logger.warning("No highly variable genes found. Using all genes (not optimal).")
+                marker_genes = adata.var_names.tolist()[:500]
+
+        return marker_genes
 
     def _create_pathway_plot(self, pathway_results: List[Dict[str, Any]]) -> go.Figure:
         """Create pathway enrichment plot."""

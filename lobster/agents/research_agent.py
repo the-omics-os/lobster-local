@@ -9,7 +9,8 @@ architecture with DataManagerV2 integration.
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Union
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
@@ -109,6 +110,7 @@ def research_agent(
     agent_name: str = "research_agent",
     delegation_tools: list = None,
     subscription_tier: str = "free",
+    workspace_path: Optional[Path] = None,
 ):
     """Create research agent using DataManagerV2 and modular publication service.
 
@@ -119,6 +121,7 @@ def research_agent(
         delegation_tools: List of tools for delegating to sub-agents
         subscription_tier: Subscription tier for feature gating (free/premium/enterprise).
             In FREE tier, handoff to metadata_assistant is restricted.
+        workspace_path: Optional workspace path for config resolution
     """
     # Import tier restrictions
     from lobster.config.subscription_tiers import get_restricted_handoffs
@@ -148,7 +151,7 @@ def research_agent(
 
     settings = get_settings()
     model_params = settings.get_agent_llm_params("research_agent")
-    llm = create_llm("research_agent", model_params)
+    llm = create_llm("research_agent", model_params, workspace_path=workspace_path)
 
     # Normalize callbacks to a flat list (fix double-nesting bug)
     if callback_handler and hasattr(llm, "with_config"):

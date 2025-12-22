@@ -7,6 +7,7 @@ through supervisor-mediated workflows. No direct agent handoffs.
 
 import uuid
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
@@ -31,6 +32,7 @@ def visualization_expert(
     callback_handler=None,
     agent_name: str = "visualization_expert_agent",
     handoff_tools: List = None,
+    workspace_path: Optional[Path] = None,
 ):
     """
     Create visualization expert agent with supervisor-mediated flow.
@@ -44,7 +46,7 @@ def visualization_expert(
 
     settings = get_settings()
     model_params = settings.get_agent_llm_params("visualization_expert_agent")
-    llm = create_llm("visualization_expert_agent", model_params)
+    llm = create_llm("visualization_expert_agent", model_params, workspace_path=workspace_path)
 
     # Normalize callbacks to a flat list (fix double-nesting bug)
     if callback_handler and hasattr(llm, "with_config"):

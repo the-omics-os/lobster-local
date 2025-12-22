@@ -544,6 +544,109 @@ class DomainStrategy:
     retry_on: List[int] = field(default_factory=lambda: [429, 503, 502])
 
 
+class RateLimiter:
+    """
+    Generic rate limiter for any API using Redis sliding window.
+
+    Simple wrapper around the Redis rate limiting infrastructure for
+    non-NCBI APIs (e.g., Enrichr, other services).
+
+    Usage:
+        limiter = RateLimiter("enrichr", max_requests_per_second=3)
+
+        # Method 1: Context manager (recommended)
+        with limiter:
+            # API call here
+            pass
+
+        # Method 2: Explicit wait
+        limiter.wait()
+    """
+
+    def __init__(self, api_name: str, max_requests_per_second: float):
+        """
+        Initialize rate limiter for a specific API.
+
+        Args:
+            api_name: Name of the API (e.g., "enrichr")
+            max_requests_per_second: Maximum requests per second
+        """
+        self.api_name = api_name
+        self.rate_limit = int(max_requests_per_second)
+        self.window_seconds = 1
+        self.redis_client = get_redis_client()
+
+    def __enter__(self):
+        """Context manager entry - wait for rate limit slot."""
+        self.wait()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit - no cleanup needed."""
+        return False
+
+    def check_rate_limit(self, user_id: str = "default") -> bool:
+        """
+        Check if request is within rate limit.
+
+        Args:
+            user_id: User identifier for per-user rate limiting
+
+        Returns:
+            True if request allowed, False if rate limit exceeded
+        """
+        if self.redis_client is None:
+            return True  # Fail open if Redis unavailable
+
+        try:
+            key = f"ratelimit:{self.api_name}:{user_id}"
+            current = self.redis_client.get(key)
+
+            if current is None:
+                self.redis_client.setex(key, self.window_seconds, 1)
+                return True
+
+            current_count = int(current)
+            if current_count >= self.rate_limit:
+                return False
+
+            self.redis_client.incr(key)
+            # Safeguard: ensure key has proper TTL
+            ttl = self.redis_client.ttl(key)
+            if ttl == -1:
+                self.redis_client.expire(key, self.window_seconds)
+            return True
+
+        except Exception as e:
+            logger.error(f"Rate limiter error for {self.api_name}: {e}")
+            return True  # Fail open
+
+    def wait(self, user_id: str = "default", max_wait: float = 10.0) -> bool:
+        """
+        Block until rate limit slot available.
+
+        Args:
+            user_id: User identifier
+            max_wait: Maximum wait time in seconds
+
+        Returns:
+            True if slot acquired, False if timeout
+        """
+        start_time = time.time()
+
+        while not self.check_rate_limit(user_id):
+            elapsed = time.time() - start_time
+            if elapsed >= max_wait:
+                logger.warning(f"Rate limit timeout for {self.api_name} after {elapsed:.1f}s")
+                return False
+
+            # Sleep for 1/rate_limit seconds
+            sleep_time = 1.0 / self.rate_limit
+            time.sleep(sleep_time)
+
+        return True
+
+
 class MultiDomainRateLimiter:
     """
     Multi-domain rate limiter with exponential backoff.

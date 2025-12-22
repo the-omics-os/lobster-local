@@ -17,8 +17,8 @@ from lobster.core.exceptions import (
 
 # Import configuration classes
 from lobster.core.config_resolver import ConfigResolver
-from lobster.core.global_config import GlobalProviderConfig
-from lobster.core.workspace_config import WorkspaceProviderConfig
+from lobster.config.global_config import GlobalProviderConfig
+from lobster.config.workspace_config import WorkspaceProviderConfig
 
 
 class DataManagerError(LobsterCoreError):

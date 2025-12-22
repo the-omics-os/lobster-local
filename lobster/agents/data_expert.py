@@ -8,6 +8,7 @@ schema validation.
 """
 
 from datetime import date
+from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
@@ -40,6 +41,7 @@ def data_expert(
     callback_handler=None,
     agent_name: str = "data_expert_agent",
     delegation_tools: list = None,
+    workspace_path: Optional[Path] = None,
 ):
     """
     Create a multi-omics data acquisition, processing, and workspace management specialist agent.
@@ -60,6 +62,8 @@ def data_expert(
         data_manager: DataManagerV2 instance for modular data operations
         callback_handler: Optional callback handler for LLM interactions
         agent_name: Name identifier for the agent instance
+        delegation_tools: Optional delegation tools for sub-agent handoffs
+        workspace_path: Optional workspace path for config resolution
 
     Returns:
         Configured ReAct agent with comprehensive data management capabilities
@@ -67,7 +71,7 @@ def data_expert(
 
     settings = get_settings()
     model_params = settings.get_agent_llm_params("data_expert_agent")
-    llm = create_llm("data_expert_agent", model_params)
+    llm = create_llm("data_expert_agent", model_params, workspace_path=workspace_path)
 
     # Normalize callbacks to a flat list (fix double-nesting bug)
     if callback_handler and hasattr(llm, "with_config"):

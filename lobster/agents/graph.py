@@ -9,6 +9,7 @@ See: https://docs.langchain.com/oss/langchain/multi-agent#tool-calling
 """
 
 import inspect
+from pathlib import Path
 from typing import Optional
 
 from langchain_core.tools import tool
@@ -113,6 +114,7 @@ def create_bioinformatics_graph(
     agent_filter: callable = None,
     provider_override: Optional[str] = None,
     model_override: Optional[str] = None,
+    workspace_path: Optional[Path] = None,
 ):
     """Create the bioinformatics multi-agent graph using langgraph_supervisor.
 
@@ -163,7 +165,7 @@ def create_bioinformatics_graph(
     else:
         model_params = settings.get_agent_llm_params("supervisor")
 
-    supervisor_model = create_llm("supervisor", model_params, provider_override=provider_override, model_override=model_override)
+    supervisor_model = create_llm("supervisor", model_params, provider_override=provider_override, model_override=model_override, workspace_path=workspace_path)
 
     # Normalize callbacks to a flat list (fix double-nesting bug)
     # callback_handler may be a single callback, a list of callbacks, or None
@@ -223,6 +225,8 @@ def create_bioinformatics_graph(
             factory_kwargs["provider_override"] = provider_override
         if "model_override" in sig.parameters:
             factory_kwargs["model_override"] = model_override
+        if "workspace_path" in sig.parameters:
+            factory_kwargs["workspace_path"] = workspace_path
 
         agent = factory_function(**factory_kwargs)
         created_agents[agent_name] = agent
@@ -259,6 +263,8 @@ def create_bioinformatics_graph(
                 factory_kwargs["provider_override"] = provider_override
             if "model_override" in sig.parameters:
                 factory_kwargs["model_override"] = model_override
+            if "workspace_path" in sig.parameters:
+                factory_kwargs["workspace_path"] = workspace_path
 
             created_agents[agent_name] = factory_function(**factory_kwargs)
             logger.debug(
@@ -351,7 +357,28 @@ def create_bioinformatics_graph(
     # This ensures events are keyed by "supervisor" (backward compatible with client)
     workflow = StateGraph(OverallState)
     workflow.add_node("supervisor", supervisor_agent)
+
+    # Add all agents as nodes for visualization
+    # Execution uses tool calling, but visualization shows full architecture
+    for agent_name, agent_instance in created_agents.items():
+        workflow.add_node(agent_name, agent_instance)
+
+    # Add edges for visualization
     workflow.add_edge(START, "supervisor")
+
+    # Supervisor can handoff to any supervisor-accessible agent
+    for agent_name in supervisor_accessible_names:
+        workflow.add_edge("supervisor", agent_name)
+        workflow.add_edge(agent_name, "supervisor")
+
+    # Child agents can be delegated to by parents
+    for agent_name, agent_config in worker_agents.items():
+        if agent_config.child_agents:
+            for child_name in agent_config.child_agents:
+                if child_name in created_agents:
+                    workflow.add_edge(agent_name, child_name)
+                    workflow.add_edge(child_name, agent_name)
+
     workflow.add_edge("supervisor", END)
 
     # Compile with checkpointer and store

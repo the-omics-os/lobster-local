@@ -100,28 +100,6 @@ class Settings:
         self.SSL_VERIFY = os.environ.get("LOBSTER_SSL_VERIFY", "true").lower() == "true"
         self.SSL_CERT_PATH = os.environ.get("LOBSTER_SSL_CERT_PATH", None)
 
-        # Validate configuration and store error for later check in CLI
-        is_valid, error_msg = self.validate_configuration()
-        if not is_valid:
-            # Don't raise here - let CLI handle it gracefully
-            self._config_error = error_msg
-        else:
-            self._config_error = None
-
-    @property
-    def llm_provider(self) -> str:
-        """Detect which LLM provider to use based on available credentials."""
-        if os.environ.get("LOBSTER_LLM_PROVIDER"):
-            return os.environ.get("LOBSTER_LLM_PROVIDER")
-        elif os.environ.get("OLLAMA_BASE_URL"):
-            return "ollama"
-        elif self.ANTHROPIC_API_KEY:
-            return "anthropic"
-        elif self.AWS_BEDROCK_ACCESS_KEY and self.AWS_BEDROCK_SECRET_ACCESS_KEY:
-            return "bedrock"
-        else:
-            return "bedrock"  # Default for backward compatibility
-
     def get_all_settings(self) -> Dict[str, Any]:
         """
         Get all settings as a dictionary.
@@ -147,75 +125,6 @@ class Settings:
             Value of the setting or default
         """
         return getattr(self, name, default)
-
-    def validate_configuration(self) -> tuple:
-        """
-        Validate that required configuration is present.
-
-        Checks for:
-        1. Ollama configuration (workspace config or environment)
-        2. Anthropic API key
-        3. AWS Bedrock credentials
-
-        Returns:
-            tuple: (is_valid: bool, error_message: str)
-        """
-        # Check for workspace config with Ollama provider
-        try:
-            from pathlib import Path
-            from lobster.core.workspace_config import WorkspaceProviderConfig
-            from lobster.core.workspace import resolve_workspace
-
-            # Try to resolve workspace and check for Ollama config
-            workspace_path = resolve_workspace(explicit_path=None, create=False)
-            if workspace_path and WorkspaceProviderConfig.exists(workspace_path):
-                config = WorkspaceProviderConfig.load(workspace_path)
-                if config.global_provider == "ollama":
-                    # Ollama configured in workspace - validation passes
-                    return True, ""
-        except Exception:
-            # Workspace config not available - continue checking other providers
-            pass
-
-        # Check for Ollama environment variables
-        if os.environ.get("OLLAMA_BASE_URL") or os.environ.get("LOBSTER_LLM_PROVIDER") == "ollama":
-            # Ollama configured via environment - validation passes
-            return True, ""
-
-        # Check for API key-based providers
-        if not self.ANTHROPIC_API_KEY and not (
-            self.AWS_BEDROCK_ACCESS_KEY and self.AWS_BEDROCK_SECRET_ACCESS_KEY
-        ):
-            error_msg = """
-❌ No LLM provider configured
-
-Lobster AI requires API credentials or Ollama setup to function.
-
-Quick Setup:
-1. Create a .env file in your current directory
-2. Add ONE of the following:
-
-   Option A - Claude API (Recommended for testing):
-   ANTHROPIC_API_KEY=sk-ant-api03-your-key-here
-
-   Option B - AWS Bedrock (Recommended for production):
-   AWS_BEDROCK_ACCESS_KEY=your-access-key
-   AWS_BEDROCK_SECRET_ACCESS_KEY=your-secret-key
-
-   Option C - Ollama (Local, free):
-   Run: lobster init --non-interactive --use-ollama
-
-Get API Keys:
-  • Claude API: https://console.anthropic.com/
-  • AWS Bedrock: https://aws.amazon.com/bedrock/
-  • Ollama: https://ollama.com/
-
-For detailed setup instructions, see:
-  https://github.com/the-omics-os/lobster-local/wiki/03-configuration
-"""
-            return False, error_msg
-
-        return True, ""
 
     def _load_ncbi_api_keys(self) -> List[str]:
         """
@@ -283,11 +192,12 @@ For detailed setup instructions, see:
 
         Returns:
             Dictionary of LLM initialization parameters
+
+        Note:
+            Provider information is resolved by ConfigResolver, not Settings.
         """
         try:
             params = self.agent_configurator.get_llm_params(agent_name)
-            # Add provider information
-            params["provider"] = self.llm_provider
             return params
         except KeyError as k:
             # Fallback to data_expert settings with warning
@@ -298,7 +208,6 @@ For detailed setup instructions, see:
             try:
                 # Use data_expert as fallback
                 params = self.agent_configurator.get_llm_params("data_expert_agent")
-                params["provider"] = self.llm_provider
                 return params
             except KeyError:
                 # If data_expert doesn't exist either, raise original error

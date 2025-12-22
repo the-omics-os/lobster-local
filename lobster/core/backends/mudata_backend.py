@@ -147,6 +147,27 @@ class MuDataBackend(BaseBackend):
             compression = kwargs.get("compression", self.compression)
             compression_opts = kwargs.get("compression_opts", self.compression_opts)
 
+            # FIX: Sanitize index names in all modalities AND global obs/var to prevent empty string bug
+            # MuData internally uses AnnData serialization which fails on empty string index names
+            # Use falsy check to catch both None AND empty string ("")
+
+            # Fix global MuData obs/var index names
+            if not mdata.obs.index.name:
+                logger.debug("MuData global obs.index.name is None/empty, setting to 'index'")
+                mdata.obs.index.name = "index"
+            if not mdata.var.index.name:
+                logger.debug("MuData global var.index.name is None/empty, setting to 'gene_id'")
+                mdata.var.index.name = "gene_id"
+
+            # Fix each modality's obs/var index names
+            for mod_name, mod_data in mdata.mod.items():
+                if not mod_data.obs.index.name:
+                    logger.debug(f"MuData modality '{mod_name}': obs.index.name is None/empty, setting to 'index'")
+                    mod_data.obs.index.name = "index"
+                if not mod_data.var.index.name:
+                    logger.debug(f"MuData modality '{mod_name}': var.index.name is None/empty, setting to 'gene_id'")
+                    mod_data.var.index.name = "gene_id"
+
             # Save to MuData format
             mudata.write_h5mu(
                 resolved_path,

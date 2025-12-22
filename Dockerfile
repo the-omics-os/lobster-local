@@ -27,6 +27,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblapack-dev \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Install Rust compiler (required for gseapy >=1.1.0 pathway enrichment)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 # ==============================================================================
 # Stage 2: Builder stage for Python dependencies
 # ==============================================================================

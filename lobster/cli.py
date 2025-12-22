@@ -543,11 +543,6 @@ def extract_available_commands() -> Dict[str, str]:
         "/config model": "List available Ollama models",
         "/config model <name>": "Switch to specified Ollama model (runtime only)",
         "/config model <name> --save": "Switch Ollama model and persist to workspace",
-        "/provider": "[DEPRECATED] Use /config provider instead",
-        "/provider list": "[DEPRECATED] Use /config provider instead",
-        "/provider anthropic": "[DEPRECATED] Use /config provider anthropic instead",
-        "/provider bedrock": "[DEPRECATED] Use /config provider bedrock instead",
-        "/provider ollama": "[DEPRECATED] Use /config provider ollama instead",
         "/clear": "Clear screen",
         "/exit": "Exit the chat",
         # Deprecated commands
@@ -820,31 +815,6 @@ if PROMPT_TOOLKIT_AVAILABLE:
                 except Exception:
                     pass
 
-            elif text.startswith("/provider "):
-                # Suggest provider options (anthropic, bedrock, ollama, list)
-                prefix = text.replace("/provider ", "")
-                providers = ["anthropic", "bedrock", "ollama", "list"]
-
-                for provider in providers:
-                    if provider.lower().startswith(prefix.lower()):
-                        # Get provider status using LLMFactory
-                        from lobster.config.llm_factory import LLMFactory
-
-                        if provider == "list":
-                            meta = "Show providers with status"
-                        else:
-                            available = LLMFactory.get_available_providers()
-                            status = "✓ configured" if provider in available else "✗ not configured"
-                            meta = status
-
-                        yield Completion(
-                            text=provider,
-                            start_position=-len(prefix),
-                            display=HTML(f"<ansiyellow>{provider}</ansiyellow>"),
-                            display_meta=HTML(f"<dim>{meta}</dim>"),
-                            style="class:completion.provider",
-                        )
-
             elif text == "/config" or text == "/config ":
                 # Show /config subcommands
                 subcommands = [
@@ -1111,16 +1081,20 @@ def init_client(
 
     global client
 
-    # Check for configuration errors
+    # Check for provider configuration using ConfigResolver
+    from lobster.core.config_resolver import ConfigResolver, ConfigurationError
+    from lobster.core.workspace import resolve_workspace
 
-    if hasattr(settings, "_config_error") and settings._config_error:
-        console.print(settings._config_error)
-        console.print(
-            "\n[yellow]Tip:[/yellow] If you installed via pip, make sure to create a .env file in your current directory."
-        )
-        console.print(
-            "[yellow]Tip:[/yellow] See README for installation instructions: https://github.com/the-omics-os/lobster-local"
-        )
+    # Resolve workspace (create if needed for proper config loading)
+    workspace_path = resolve_workspace(explicit_path=workspace, create=True)
+    resolver = ConfigResolver.get_instance(workspace_path)
+
+    try:
+        # This will raise ConfigurationError if provider not configured
+        resolver.resolve_provider()
+    except ConfigurationError as e:
+        console.print(f"[red]❌ {str(e)}[/red]")
+        console.print(f"\n[yellow]{e.help_text}[/yellow]")
         raise typer.Exit(code=1)
 
     # Check for cloud API key
@@ -3334,7 +3308,7 @@ def _create_workspace_config(config_dict: Dict[str, Any], workspace_path: Path) 
     Raises:
         IOError: If workspace config creation fails (non-fatal - logged as warning)
     """
-    from lobster.core.workspace_config import WorkspaceProviderConfig
+    from lobster.config.workspace_config import WorkspaceProviderConfig
 
     try:
         # Create workspace config from structured dict
@@ -7227,62 +7201,6 @@ when they are started by agents or analysis workflows.
                     console.print(f"  • {profile}")
             return f"Invalid mode '{new_mode}' - available modes: {', '.join(sorted(available_profiles.keys()))}"
 
-    elif cmd.startswith("/provider"):
-        # Handle provider switching and listing
-        parts = cmd.split()
-
-        if len(parts) == 1 or (len(parts) == 2 and parts[1] == "list"):
-            # /provider or /provider list - Show available providers
-            from lobster.config.llm_factory import LLMFactory
-
-            available_providers = LLMFactory.get_available_providers()
-            current_provider = client.provider_override or LLMFactory.get_current_provider()
-
-            provider_table = Table(title="🔌 LLM Providers", box=box.ROUNDED)
-            provider_table.add_column("Provider", style="cyan")
-            provider_table.add_column("Status", style="white")
-            provider_table.add_column("Active", style="green")
-
-            for provider in ["anthropic", "bedrock", "ollama"]:
-                configured = "✓ Configured" if provider in available_providers else "✗ Not configured"
-                active = "●" if provider == current_provider else ""
-
-                status_style = "green" if provider in available_providers else "grey50"
-                provider_table.add_row(
-                    provider.capitalize(),
-                    f"[{status_style}]{configured}[/{status_style}]",
-                    f"[bold green]{active}[/bold green]" if active else ""
-                )
-
-            console_manager.print(provider_table)
-
-            console_manager.print(f"\n[cyan]💡 Usage:[/cyan]")
-            console_manager.print("  • [white]/provider <name>[/white] - Switch to specified provider")
-            console_manager.print("  • [white]/provider list[/white] - Show this list")
-            console_manager.print("\n[cyan]Available providers:[/cyan] anthropic, bedrock, ollama")
-
-            if current_provider:
-                console_manager.print(f"\n[green]✓ Current provider: {current_provider}[/green]")
-
-        elif len(parts) == 2:
-            # /provider <name> - Switch provider
-            new_provider = parts[1].lower()
-
-            console_manager.print(f"[yellow]Switching to {new_provider} provider...[/yellow]")
-
-            result = client.switch_provider(new_provider)
-
-            if result["success"]:
-                console_manager.print(
-                    f"[green]✓ Successfully switched to {result['provider']} provider[/green]"
-                )
-            else:
-                error_msg = result.get("error", "Unknown error")
-                hint = result.get("hint", "")
-                console_manager.print_error_panel(error_msg, hint)
-        else:
-            console_manager.print("[red]Invalid syntax. Use: /provider [list|<name>][/red]")
-
     elif cmd.startswith("/config"):
         # Handle unified configuration system
         # Note: Path is imported at module level (line 21) - do NOT re-import here
@@ -7293,8 +7211,8 @@ when they are started by agents or analysis workflows.
             # /config (no args) - Show current configuration
             from lobster.config.llm_factory import LLMFactory
             from lobster.core.config_resolver import ConfigResolver
-            from lobster.core.global_config import CONFIG_DIR as GLOBAL_CONFIG_DIR
-            from lobster.core.workspace_config import WorkspaceProviderConfig
+            from lobster.config.global_config import CONFIG_DIR as GLOBAL_CONFIG_DIR
+            from lobster.config.workspace_config import WorkspaceProviderConfig
 
             # Create resolver
             resolver = ConfigResolver(workspace_path=Path(client.workspace_path))
@@ -7431,7 +7349,7 @@ when they are started by agents or analysis workflows.
                     console_manager.print_error_panel(error_msg, hint)
                 else:
                     # Persist to workspace config
-                    from lobster.core.workspace_config import WorkspaceProviderConfig
+                    from lobster.config.workspace_config import WorkspaceProviderConfig
 
                     try:
                         workspace_path = Path(client.workspace_path)
@@ -7466,7 +7384,7 @@ when they are started by agents or analysis workflows.
             from lobster.config.llm_factory import LLMFactory
             from lobster.config.model_service import ModelServiceFactory
             from lobster.core.config_resolver import ConfigResolver
-            from lobster.core.workspace_config import WorkspaceProviderConfig
+            from lobster.config.workspace_config import WorkspaceProviderConfig
 
             # Get current provider
             workspace_path = Path(client.workspace_path)

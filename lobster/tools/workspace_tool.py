@@ -209,8 +209,10 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
         ## Detail Levels
         - "summary": Key-value pairs, high-level overview (default)
         - "methods": Methods section only (for publications)
-        - "metadata": Full metadata JSON including COMPLETE PUBLICATION TEXT (for publications),
-                     full entry details (for queues), or complete metadata (for datasets)
+        - "metadata": **Smart hybrid view for queues** (Statistics + Head 10 entries + Guidance).
+                     For single items: Full JSON including COMPLETE PUBLICATION TEXT (for pubs),
+                     full entry details (for queue entries), or complete metadata (for datasets).
+                     NOTE: Queue listing uses smart truncation to prevent context overflow.
         - "samples": Sample IDs list (for datasets)
         - "platform": Platform information (for datasets)
         - "github": GitHub repositories (for publications)
@@ -222,13 +224,15 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
         - identifier=None: List all entries (filtered by status_filter if provided)
         - identifier=<entry_id>: Retrieve specific entry
         - status_filter: "PENDING" | "IN_PROGRESS" | "COMPLETED" | "FAILED"
-        - level: "summary" (basic info) | "metadata" (full entry details)
+        - level="summary": Stats + top 5 recent entries
+        - level="metadata": **Smart hybrid** (Stats + head 10 entries + guidance)
 
         For publication_queue workspace:
         - identifier=None: List all entries (filtered by status_filter if provided)
         - identifier=<entry_id>: Retrieve specific entry
         - status_filter: "pending" | "extracting" | "metadata_extracted" | "metadata_enriched" | "handoff_ready" | "completed" | "failed"
-        - level: "summary" (basic info) | "metadata" (full entry details)
+        - level="summary": Stats + top 5 recent entries
+        - level="metadata": **Smart hybrid** (Stats + head 10 entries + guidance)
 
         **Unified Behavior**: All workspaces now support consistent operations:
         - List mode (identifier=None): Always returns formatted markdown list
@@ -531,6 +535,72 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
 
                 return output
 
+            def _render_queue_metadata_hybrid(
+                entries: List[Dict[str, Any]],
+                queue_type: str,
+                entry_formatter: Callable[[Dict[str, Any]], str],
+                head_size: int = 10
+            ) -> str:
+                """
+                Render smart hybrid view for queue metadata (statistics + head + guidance).
+
+                This pattern prevents context overflow by showing:
+                1. Statistics overview (status distribution, priority for publication queue)
+                2. Head of N most recent entries with full details
+                3. Guidance message if more entries available
+
+                Args:
+                    entries: Queue entries to render
+                    queue_type: "publication" or "download" (for display titles and hints)
+                    entry_formatter: Function to format individual entries (e.g., _format_pub_queue_entry_full)
+                    head_size: Number of head entries to show (default: 10)
+
+                Returns:
+                    Formatted markdown response with statistics, head entries, and guidance
+                """
+                total = len(entries)
+                response = f"## {queue_type.title()} Queue Metadata ({total} total)\n\n"
+
+                # 1. Statistics Overview
+                status_counts: Dict[str, int] = {}
+                for entry in entries:
+                    status = entry.get("status", "unknown")
+                    status_counts[status] = status_counts.get(status, 0) + 1
+
+                response += "### Statistics Overview\n"
+                response += "**Status Distribution**:\n"
+                for status, count in sorted(status_counts.items()):
+                    response += f"- {status}: {count}\n"
+
+                # Add priority stats for publication queue only
+                if queue_type == "publication":
+                    priority_high = sum(1 for e in entries if e.get("priority", 5) <= 3)
+                    priority_medium = sum(1 for e in entries if 4 <= e.get("priority", 5) <= 7)
+                    priority_low = sum(1 for e in entries if e.get("priority", 5) >= 8)
+                    response += f"\n**Priority**: High: {priority_high}, Medium: {priority_medium}, Low: {priority_low}\n\n"
+                else:
+                    response += "\n"
+
+                # 2. Head: Show most recent entries with full details
+                sorted_entries = sorted(
+                    entries, key=lambda e: e.get("updated_at", ""), reverse=True
+                )[:head_size]
+
+                response += f"### Recent Entries (head {len(sorted_entries)})\n\n"
+                for entry in sorted_entries:
+                    response += entry_formatter(entry) + "\n\n"
+
+                # 3. Guidance if more available
+                remaining = total - head_size
+                if remaining > 0:
+                    response += f"---\n**Tip**: {remaining} more entries available. "
+                    if queue_type == "publication":
+                        response += "Use `status_filter` to narrow scope (e.g., `status_filter='handoff_ready'`).\n"
+                    else:
+                        response += "Use `status_filter` to narrow scope (e.g., `status_filter='PENDING'`).\n"
+
+                return response
+
             # Workspace adapter dispatcher
             WORKSPACE_ADAPTERS: Dict[str, Callable[[Optional[str]], List[WorkspaceItem]]] = {
                 "literature": lambda s: _adapt_general_content("literature", s),
@@ -684,19 +754,22 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
 
                 # Format based on level
                 if level == "metadata":
-                    # Full details mode (for queues) - delegate to existing formatters
+                    # Smart hybrid mode using helper (Statistics + Head + Guidance)
                     if workspace == "publication_queue":
                         entries = workspace_service.list_publication_queue_entries(status_filter)
-                        response = f"## Publication Queue Entries ({len(entries)})\n\n"
-                        for entry in entries:
-                            response += _format_pub_queue_entry_full(entry) + "\n\n"
-                        return response
+                        return _render_queue_metadata_hybrid(
+                            entries=entries,
+                            queue_type="publication",
+                            entry_formatter=_format_pub_queue_entry_full,
+                        )
+
                     elif workspace == "download_queue":
                         entries = workspace_service.list_download_queue_entries(status_filter)
-                        response = f"## Download Queue Entries ({len(entries)})\n\n"
-                        for entry in entries:
-                            response += _format_queue_entry_full(entry) + "\n\n"
-                        return response
+                        return _render_queue_metadata_hybrid(
+                            entries=entries,
+                            queue_type="download",
+                            entry_formatter=_format_queue_entry_full,
+                        )
 
                 # Summary mode (default) - unified formatting
                 ws_display = workspace.title() if workspace else "All"
@@ -764,7 +837,14 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
                     workspace_filter = (
                         f" in workspace '{workspace}'" if workspace else ""
                     )
-                    return f"Error: Identifier '{identifier}' not found{workspace_filter}. Available content:\n{get_content_from_workspace(workspace=workspace)}"
+                    # Contextual hint instead of recursive call (prevents LangChain deprecation warning)
+                    if workspace == "publication_queue":
+                        hint = "Use `get_content_from_workspace(workspace='publication_queue')` to list entries."
+                    elif workspace == "literature":
+                        hint = "Publication identifiers follow pattern: `publication_<PMID>` or `pub_queue_doi_<doi>`."
+                    else:
+                        hint = f"Use `get_content_from_workspace(workspace='{workspace or 'literature'}')` to list available items."
+                    return f"Error: Identifier '{identifier}' not found{workspace_filter}.\n\n**Suggestion**: {hint}"
 
                 # Extract GitHub repos from data
                 data = cached_content.get("data", {})
@@ -805,7 +885,20 @@ def create_get_content_from_workspace_tool(data_manager: DataManagerV2):
 
             if not cached_content:
                 workspace_filter = f" in workspace '{workspace}'" if workspace else ""
-                return f"Error: Identifier '{identifier}' not found{workspace_filter}. Available content:\n{get_content_from_workspace(workspace=workspace)}"
+                # Contextual hint instead of recursive call (prevents LangChain deprecation warning)
+                if workspace == "publication_queue":
+                    hint = "Use `get_content_from_workspace(workspace='publication_queue')` to list entries by status."
+                elif workspace == "download_queue":
+                    hint = "Use `get_content_from_workspace(workspace='download_queue')` to list pending downloads."
+                elif workspace == "metadata":
+                    hint = "Metadata identifiers follow pattern: `sra_<PRJNA>_samples` or `pub_queue_<doi>_metadata`."
+                elif workspace == "literature":
+                    hint = "Publication identifiers follow pattern: `publication_<PMID>` or `pub_queue_doi_<doi>`."
+                elif workspace == "data":
+                    hint = "Dataset identifiers follow pattern: `dataset_<GSE>` or `geo_<GSE>`."
+                else:
+                    hint = f"Use `get_content_from_workspace(workspace='{workspace or 'all'}')` to list available items."
+                return f"Error: Identifier '{identifier}' not found{workspace_filter}.\n\n**Suggestion**: {hint}"
 
             # Format response based on level (service already filtered content)
             if level == "summary":
@@ -1116,7 +1209,11 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                 logger.info(f"Found '{identifier}' in modalities")
 
             if not exists:
-                return f"Error: Identifier '{identifier}' not found in current session."
+                return (
+                    f"Error: Identifier '{identifier}' not found in current session.\n\n"
+                    f"**Suggestion**: Use `get_content_from_workspace()` to list available items, "
+                    f"or check if data is loaded in modalities with `list_available_modalities()`."
+                )
 
             # Helper function to detect publication queue SRA data
             def _is_publication_queue_sra_data(data: dict) -> bool:
@@ -1354,6 +1451,7 @@ def create_export_publication_queue_tool(data_manager: DataManagerV2):
         entry_ids: str,
         output_filename: str,
         filter_criteria: str = None,
+        max_entries: int = 100,
     ) -> str:
         """
         Export samples from multiple publication queue entries to a single aggregated CSV.
@@ -1370,6 +1468,8 @@ def create_export_publication_queue_tool(data_manager: DataManagerV2):
                            in exports/ directory)
             filter_criteria: Optional filter string for sample selection (e.g., "16S human")
                            Applied to organism_name, host, library_strategy fields
+            max_entries: Maximum number of entries to process for "all" or "handoff_ready"
+                        modes (default: 100). Use specific entry_ids for larger exports.
 
         Returns:
             Summary of export with file location and sample counts per publication
@@ -1384,26 +1484,46 @@ def create_export_publication_queue_tool(data_manager: DataManagerV2):
             exports_dir = content_dir / "exports"
             exports_dir.mkdir(parents=True, exist_ok=True)
 
-            # Parse entry_ids
+            # Parse entry_ids with bounded iteration
+            truncated_warning = ""
             if entry_ids.lower() == "all":
-                # Find all entries with samples in metadata_store
-                target_entries = [
-                    k.rsplit("_samples", 1)[0]
-                    for k in data_manager.metadata_store.keys()
+                # Find all entries with samples in metadata_store (bounded)
+                all_sample_keys = [
+                    k for k in data_manager.metadata_store.keys()
                     if k.endswith("_samples")
                 ]
+                total_available = len(all_sample_keys)
+
+                # Apply limit and sort by key (most recent first if keys have timestamps)
+                limited_keys = sorted(all_sample_keys, reverse=True)[:max_entries]
+                target_entries = [k.rsplit("_samples", 1)[0] for k in limited_keys]
+
+                if total_available > max_entries:
+                    truncated_warning = (
+                        f"\n**Note**: Limited to {max_entries} of {total_available} available entries. "
+                        f"Use specific entry_ids or increase max_entries for more."
+                    )
+
             elif entry_ids.lower() == "handoff_ready":
-                # Find entries with HANDOFF_READY status
-                # Look for entries that have samples AND filter criteria applied
-                target_entries = []
+                # Find entries with HANDOFF_READY status (bounded)
+                all_handoff_entries = []
                 for k in data_manager.metadata_store.keys():
                     if k.endswith("_samples"):
                         entry_id = k.rsplit("_samples", 1)[0]
                         # Check if entry has been processed (has samples)
                         if data_manager.metadata_store.get(k, {}).get("samples"):
-                            target_entries.append(entry_id)
+                            all_handoff_entries.append(entry_id)
+
+                total_available = len(all_handoff_entries)
+                target_entries = sorted(all_handoff_entries, reverse=True)[:max_entries]
+
+                if total_available > max_entries:
+                    truncated_warning = (
+                        f"\n**Note**: Limited to {max_entries} of {total_available} handoff_ready entries. "
+                        f"Use specific entry_ids or increase max_entries for more."
+                    )
             else:
-                # Parse comma-separated list
+                # Parse comma-separated list (no limit for explicit IDs)
                 target_entries = [e.strip() for e in entry_ids.split(",") if e.strip()]
 
             if not target_entries:
@@ -1515,6 +1635,10 @@ def create_export_publication_queue_tool(data_manager: DataManagerV2):
 
             if entries_missing:
                 response += f"\n**Entries Without Samples**: {len(entries_missing)}\n"
+
+            # Add truncation warning if applicable
+            if truncated_warning:
+                response += truncated_warning
 
             return response
 
@@ -1725,7 +1849,13 @@ def create_delete_from_workspace_tool(data_manager: DataManagerV2):
                     })
                     deletion_summary["items_found"] = 1
                 else:
-                    return f"Error: Modality '{identifier}' not found in memory.\n\nAvailable modalities: {', '.join(data_manager.list_modalities())}"
+                    available = data_manager.list_modalities()
+                    available_str = ", ".join(available) if available else "none loaded"
+                    return (
+                        f"Error: Modality '{identifier}' not found in memory.\n\n"
+                        f"**Available modalities**: {available_str}\n\n"
+                        f"**Suggestion**: Use `list_available_modalities()` to see all loaded datasets."
+                    )
 
             # Handle download_queue deletion
             elif workspace == "download_queue":
@@ -1739,7 +1869,11 @@ def create_delete_from_workspace_tool(data_manager: DataManagerV2):
                     })
                     deletion_summary["items_found"] = 1
                 except FileNotFoundError:
-                    return f"Error: Download queue entry '{identifier}' not found."
+                    return (
+                        f"Error: Download queue entry '{identifier}' not found.\n\n"
+                        f"**Suggestion**: Use `get_content_from_workspace(workspace='download_queue')` "
+                        f"to list available entries."
+                    )
 
             # Handle publication_queue deletion
             elif workspace == "publication_queue":
@@ -1754,7 +1888,11 @@ def create_delete_from_workspace_tool(data_manager: DataManagerV2):
                     })
                     deletion_summary["items_found"] = 1
                 except FileNotFoundError:
-                    return f"Error: Publication queue entry '{identifier}' not found."
+                    return (
+                        f"Error: Publication queue entry '{identifier}' not found.\n\n"
+                        f"**Suggestion**: Use `get_content_from_workspace(workspace='publication_queue')` "
+                        f"to list available entries."
+                    )
 
             # Handle cached workspace files (literature, data, metadata)
             else:

@@ -11,7 +11,7 @@ Entitlement File Structure:
     "customer_id": "cust_abc123",
     "issued_at": "2024-12-01T00:00:00Z",
     "expires_at": "2025-12-01T00:00:00Z",
-    "custom_packages": ["lobster-custom-databiomix"],
+    "custom_packages": ["lobster-custom-customer"],
     "features": ["cloud_compute", "priority_support"],
     "signature": "base64_encoded_signature..."
 }

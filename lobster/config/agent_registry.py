@@ -65,7 +65,7 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         description="Unified expert for single-cell AND bulk RNA-seq analysis. Handles QC, clustering, and orchestrates annotation and DE analysis via specialized sub-agents.",
         factory_function="lobster.agents.transcriptomics.transcriptomics_expert.transcriptomics_expert",
         handoff_tool_name="handoff_to_transcriptomics_expert",
-        handoff_tool_description="Assign ALL transcriptomics analysis tasks (single-cell OR bulk RNA-seq): QC, clustering, cell type annotation, differential expression, pseudobulk, pathway analysis",
+        handoff_tool_description="Assign ALL transcriptomics analysis tasks (single-cell OR bulk RNA-seq): QC, clustering, cell type annotation, differential expression, pseudobulk, pathway enrichment/functional analysis (GO/KEGG/Reactome gene set enrichment)",
         child_agents=["annotation_expert", "de_analysis_expert"],
     ),
     # === NEW: Annotation Expert (sub-agent, not supervisor-accessible) ===
@@ -88,30 +88,13 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         handoff_tool_description=None,
         supervisor_accessible=False,  # Only via transcriptomics_expert
     ),
-    "metadata_assistant": AgentRegistryConfig(
-        name="metadata_assistant",
-        display_name="Metadata Assistant",
-        description="Handles cross-dataset metadata operations including sample ID mapping (exact/fuzzy/pattern/metadata strategies), metadata standardization using Pydantic schemas (transcriptomics/proteomics), dataset completeness validation (samples, conditions, controls, duplicates, platform), and sample metadata reading in multiple formats. Specialized in metadata harmonization for multi-omics integration.",
-        factory_function="lobster.agents.metadata_assistant.metadata_assistant",
-        handoff_tool_name="handoff_to_metadata_assistant",
-        handoff_tool_description="Assign metadata operations (cross-dataset sample mapping, metadata standardization to Pydantic schemas, dataset validation before download, metadata reading/formatting) to the metadata assistant",
-    ),
-    "machine_learning_expert_agent": AgentRegistryConfig(
-        name="machine_learning_expert_agent",
-        display_name="ML Expert",
-        description="Handles Machine Learning related tasks like transforming the data in the desired format for downstream tasks",
-        factory_function="lobster.agents.machine_learning_expert.machine_learning_expert",
-        handoff_tool_name="handoff_to_machine_learning_expert_agent",
-        handoff_tool_description="Assign all machine learning related tasks (scVI, classification etc) to the machine learning expert agent",
-    ),
-    "custom_feature_agent": AgentRegistryConfig(
-        name="custom_feature_agent",
-        display_name="Custom Feature Agent",
-        description="Creates new Lobster agents, services, tools, tests, and documentation using Claude Code SDK",
-        factory_function="lobster.agents.custom_feature_agent.custom_feature_agent",
-        handoff_tool_name="handoff_to_custom_feature_agent",
-        handoff_tool_description="Hand off to the custom feature agent when the user wants to create new agents, services, or extend Lobster with new capabilities. Use when user requests feature development, new analysis types, or custom tools.",
-    ),
+    # =========================================================================
+    # FREE TIER AGENTS ONLY (visualization + protein structure)
+    # =========================================================================
+    # Premium agents (metadata_assistant, machine_learning_expert, proteomics_expert)
+    # are loaded via plugin_loader from:
+    # - lobster-premium: Shared premium features (future)
+    # - lobster-custom-*: Customer-specific packages
     "visualization_expert_agent": AgentRegistryConfig(
         name="visualization_expert_agent",
         display_name="Visualization Expert",
@@ -119,23 +102,6 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         factory_function="lobster.agents.visualization_expert.visualization_expert",
         handoff_tool_name="handoff_to_visualization_expert_agent",
         handoff_tool_description="Delegate visualization tasks to the visualization expert agent",
-    ),
-    "protein_structure_visualization_expert_agent": AgentRegistryConfig(
-        name="protein_structure_visualization_expert_agent",
-        display_name="Protein Structure Visualization Expert",
-        description="Handles 3D protein structure visualization (PDB structure fetching, ChimeraX visualization, RMSD calculation, secondary structure analysis) and structural analysis using PDB and pymol",
-        factory_function="lobster.agents.protein_structure_visualization_expert.protein_structure_visualization_expert",
-        handoff_tool_name="handoff_to_protein_structure_visualization_expert_agent",
-        handoff_tool_description="Assign protein structure visualization tasks to the protein structure visualization expert agent",
-    ),
-    # === NEW: Unified Proteomics Expert ===
-    "proteomics_expert": AgentRegistryConfig(
-        name="proteomics_expert",
-        display_name="Proteomics Expert",
-        description="Unified expert for mass spectrometry AND affinity proteomics. Auto-detects platform type. Handles QC, normalization, batch correction, differential protein expression, peptide mapping (MS), antibody validation (affinity).",
-        factory_function="lobster.agents.proteomics.proteomics_expert.proteomics_expert",
-        handoff_tool_name="handoff_to_proteomics_expert",
-        handoff_tool_description="Assign ALL proteomics analysis tasks (mass spectrometry OR affinity platforms): QC, normalization, batch correction, differential protein expression, peptide mapping, antibody validation",
     ),
 }
 
