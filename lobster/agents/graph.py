@@ -357,28 +357,7 @@ def create_bioinformatics_graph(
     # This ensures events are keyed by "supervisor" (backward compatible with client)
     workflow = StateGraph(OverallState)
     workflow.add_node("supervisor", supervisor_agent)
-
-    # Add all agents as nodes for visualization
-    # Execution uses tool calling, but visualization shows full architecture
-    for agent_name, agent_instance in created_agents.items():
-        workflow.add_node(agent_name, agent_instance)
-
-    # Add edges for visualization
     workflow.add_edge(START, "supervisor")
-
-    # Supervisor can handoff to any supervisor-accessible agent
-    for agent_name in supervisor_accessible_names:
-        workflow.add_edge("supervisor", agent_name)
-        workflow.add_edge(agent_name, "supervisor")
-
-    # Child agents can be delegated to by parents
-    for agent_name, agent_config in worker_agents.items():
-        if agent_config.child_agents:
-            for child_name in agent_config.child_agents:
-                if child_name in created_agents:
-                    workflow.add_edge(agent_name, child_name)
-                    workflow.add_edge(child_name, agent_name)
-
     workflow.add_edge("supervisor", END)
 
     # Compile with checkpointer and store
