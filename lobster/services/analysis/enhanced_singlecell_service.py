@@ -16,10 +16,23 @@ import scanpy as sc
 from scipy.stats import pearsonr
 
 from lobster.core.analysis_ir import AnalysisStep, ParameterSpec
-from lobster.services.analysis.pathway_enrichment_service import (
-    PathwayEnrichmentService,
-    PathwayEnrichmentError,
-)
+
+# Pathway enrichment is a PREMIUM feature - lazy import to avoid breaking FREE tier
+# The service is imported inside run_pathway_enrichment() method
+PATHWAY_ENRICHMENT_AVAILABLE = False
+PathwayEnrichmentService = None
+PathwayEnrichmentError = None
+
+try:
+    from lobster.services.analysis.pathway_enrichment_service import (
+        PathwayEnrichmentService as _PathwayEnrichmentService,
+        PathwayEnrichmentError as _PathwayEnrichmentError,
+    )
+    PathwayEnrichmentService = _PathwayEnrichmentService
+    PathwayEnrichmentError = _PathwayEnrichmentError
+    PATHWAY_ENRICHMENT_AVAILABLE = True
+except ImportError:
+    pass  # Premium feature not available in FREE tier
 
 try:
     import scrublet as scr
@@ -1202,8 +1215,23 @@ sc.tl.filter_rank_genes_groups(
             Tuple of (adata_with_results, stats_dict, analysis_ir)
 
         Raises:
-            SingleCellError: If pathway enrichment fails
+            SingleCellError: If pathway enrichment fails or feature not available
+
+        Note:
+            Pathway enrichment is a PREMIUM feature requiring the full Lobster package.
+            In the FREE tier (lobster-local), this method will raise an error with upgrade instructions.
         """
+        # Check if pathway enrichment is available (PREMIUM feature)
+        if not PATHWAY_ENRICHMENT_AVAILABLE:
+            raise SingleCellError(
+                "Pathway enrichment is a PREMIUM feature.\n\n"
+                "This feature requires the full Lobster package with pathway analysis support.\n"
+                "To use pathway enrichment:\n"
+                "  1. Upgrade to Lobster Premium: pip install lobster-ai[premium]\n"
+                "  2. Or contact sales@omics-os.com for enterprise options\n\n"
+                "Alternative: Use external tools like gseapy directly on your marker genes."
+            )
+
         try:
             logger.info("Running pathway enrichment on marker genes")
 
@@ -1235,10 +1263,11 @@ sc.tl.filter_rank_genes_groups(
 
             return adata_enriched, enrichment_stats, ir
 
-        except PathwayEnrichmentError as e:
-            logger.exception(f"Pathway enrichment error: {e}")
-            raise SingleCellError(f"Pathway enrichment failed: {str(e)}")
         except Exception as e:
+            # Handle PathwayEnrichmentError specifically if available
+            if PathwayEnrichmentError is not None and isinstance(e, PathwayEnrichmentError):
+                logger.exception(f"Pathway enrichment error: {e}")
+                raise SingleCellError(f"Pathway enrichment failed: {str(e)}")
             logger.exception(f"Unexpected error in pathway enrichment: {e}")
             raise SingleCellError(f"Pathway enrichment failed: {str(e)}")
 
