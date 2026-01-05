@@ -238,7 +238,7 @@ class AgentClient(BaseClient):
                     "session_path": str(session_path) if session_path else None,
                     "has_data": self.data_manager.has_data(),
                     "plots": (
-                        self.data_manager.get_latest_plots(5)
+                        self.data_manager.plot_manager.get_latest_plots(5)[0]
                         if self.data_manager.has_data()
                         else []
                     ),
@@ -256,7 +256,7 @@ class AgentClient(BaseClient):
                     "session_path": str(session_path) if session_path else None,
                     "has_data": self.data_manager.has_data(),
                     "plots": (
-                        self.data_manager.get_latest_plots(5)
+                        self.data_manager.plot_manager.get_latest_plots(5)[0]
                         if self.data_manager.has_data()
                         else []
                     ),
