@@ -185,6 +185,11 @@ class ProviderRegistry:
         except ImportError:
             logger.debug("OllamaProvider not available")
 
+        try:
+            from lobster.config.providers import gemini_provider  # noqa: F401
+        except ImportError:
+            logger.debug("GeminiProvider not available")
+
         cls._initialized = True
 
     @classmethod

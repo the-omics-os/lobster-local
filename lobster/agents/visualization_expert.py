@@ -134,8 +134,8 @@ def visualization_expert(
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"UMAP - {color_by}",
                 source="visualization_expert",
@@ -147,10 +147,12 @@ def visualization_expert(
                     "n_cells": adata.n_obs,
                     "parameters": {"point_size": point_size, "title": title},
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "umap",
@@ -163,7 +165,7 @@ def visualization_expert(
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -263,8 +265,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"QC Plots - {modality_name}",
                 source="visualization_expert",
@@ -275,10 +277,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                     "metrics": metrics,
                     "n_cells": adata.n_obs,
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "qc_plots",
@@ -291,7 +295,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -352,8 +356,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"Violin Plot - {', '.join(available_genes[:3])}{'...' if len(available_genes) > 3 else ''}",
                 source="visualization_expert",
@@ -365,10 +369,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                     "groupby": groupby,
                     "n_cells": adata.n_obs,
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "violin_plot",
@@ -382,7 +388,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -451,8 +457,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"Feature Plot - {', '.join(available_genes[:3])}{'...' if len(available_genes) > 3 else ''}",
                 source="visualization_expert",
@@ -468,10 +474,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                         "point_size": point_size,
                     },
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "feature_plot",
@@ -484,7 +492,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -553,8 +561,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"Dot Plot - {groupby}",
                 source="visualization_expert",
@@ -570,10 +578,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                         "standard_scale": standard_scale,
                     },
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "dot_plot",
@@ -587,7 +597,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -656,8 +666,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"Heatmap - {groupby}",
                 source="visualization_expert",
@@ -673,10 +683,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                         "standard_scale": standard_scale,
                     },
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "heatmap",
@@ -690,7 +702,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -741,8 +753,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title="PCA Elbow Plot",
                 source="visualization_expert",
@@ -753,10 +765,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                     "n_pcs": n_pcs,
                     "parameters": {"n_pcs": n_pcs},
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "elbow_plot",
@@ -769,7 +783,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -831,8 +845,8 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Generate unique plot ID
             plot_id = str(uuid.uuid4())
 
-            # Add to data manager with metadata
-            data_manager.add_plot(
+            # Add to plot manager with metadata
+            data_manager.plot_manager.add_plot(
                 plot=fig,
                 title=f"Cluster Composition - {cluster_col}",
                 source="visualization_expert",
@@ -848,10 +862,12 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
                         "normalize": normalize,
                     },
                 },
+                modalities=data_manager.modalities,
+                current_dataset=data_manager.current_dataset,
             )
 
             # Track in visualization state
-            data_manager.add_visualization_record(
+            data_manager.plot_manager.add_visualization_record(
                 plot_id,
                 {
                     "type": "cluster_composition",
@@ -865,7 +881,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
             # Save if requested
             saved_files = []
             if save_plot:
-                saved_files = data_manager.save_plots_to_workspace()
+                saved_files, _, _ = data_manager.plot_manager.save_plots_to_workspace()
 
             # Log operation
             data_manager.log_tool_usage(
@@ -902,7 +918,7 @@ For DE results, use volcano plots, MA plots, or heatmaps instead.
     def get_visualization_history() -> str:
         """Review visualization history from DataManagerV2."""
         try:
-            history = data_manager.get_visualization_history(limit=10)
+            history, _, _ = data_manager.plot_manager.get_visualization_history(limit=10)
 
             if not history:
                 return "No visualizations created yet in this session"

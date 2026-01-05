@@ -37,6 +37,7 @@ class LLMProvider(Enum):
     ANTHROPIC_DIRECT = "anthropic"
     BEDROCK_ANTHROPIC = "bedrock"
     OLLAMA = "ollama"
+    GEMINI = "gemini"
 
 
 class LLMFactory:
@@ -147,11 +148,18 @@ class LLMFactory:
         temperature = model_config.get("temperature", 1.0)
         max_tokens = model_config.get("max_tokens", 4096)
 
+        # Extract additional model request fields (thinking config, etc.)
+        additional_fields = model_config.get("additional_model_request_fields", {})
+
         # Create model via provider
+        # Pass additional_fields as kwargs to support provider-specific features:
+        # - Bedrock: thinking config via additional_model_request_fields
+        # - Anthropic: extended thinking via additional_model_request_fields
         return provider.create_chat_model(
             model_id=model_id,
             temperature=temperature,
             max_tokens=max_tokens,
+            **additional_fields,  # Pass thinking config and other provider-specific params
         )
 
     @classmethod

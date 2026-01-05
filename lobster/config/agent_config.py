@@ -430,32 +430,27 @@ class LobsterAgentConfigurator:
         """
         Get LLM initialization parameters for a specific agent.
 
+        Returns tier-related parameters only (temperature, thinking config).
+        Model selection is handled by the provider-aware system:
+        1. CLI --model flag
+        2. workspace_config.{provider}_model
+        3. Provider.get_default_model()
+
         Args:
             agent_name: Name of the agent
 
         Returns:
-            Dictionary of parameters for LLM initialization
+            Dictionary of parameters for LLM initialization (excludes model_id)
         """
         agent_config = self.get_agent_model_config(agent_name)
         model_config = agent_config.model_config
 
-        # Base parameters
+        # Return tier parameters only - model_id is handled by provider system
+        # This enables provider-agnostic model selection (Gemini, Anthropic, Bedrock, Ollama)
         params = {
-            "model_id": model_config.model_id,
             "temperature": model_config.temperature,
-            "region_name": model_config.region,
         }
 
-        # Add provider-specific parameters
-        if model_config.provider == ModelProvider.BEDROCK_ANTHROPIC:
-            params.update(
-                {
-                    "aws_access_key_id": os.environ.get("AWS_BEDROCK_ACCESS_KEY"),
-                    "aws_secret_access_key": os.environ.get(
-                        "AWS_BEDROCK_SECRET_ACCESS_KEY"
-                    ),
-                }
-            )
         # Add thinking configuration if enabled
         if agent_config.thinking_config and agent_config.thinking_config.enabled:
             thinking_params = agent_config.thinking_config.to_dict()

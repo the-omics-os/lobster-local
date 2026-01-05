@@ -29,6 +29,7 @@ from lobster.services.execution import (
     SDKDelegationError,
     SDKDelegationService,
 )
+from lobster.tools.custom_code_tool import create_execute_custom_code_tool
 from lobster.tools.download_orchestrator import DownloadOrchestrator
 from lobster.tools.workspace_tool import create_list_modalities_tool
 from lobster.utils.logger import get_logger
@@ -90,6 +91,14 @@ def data_expert(
 
     # Initialize execution services
     custom_code_service = CustomCodeExecutionService(data_manager)
+
+    # Create shared execute_custom_code tool via factory (v2.7+: unified tool)
+    execute_custom_code = create_execute_custom_code_tool(
+        data_manager=data_manager,
+        custom_code_service=custom_code_service,
+        agent_name="data_expert",
+        post_processor=None,  # data_expert has no special post-processing
+    )
 
     # Try to initialize SDK delegation service (may fail if SDK not available)
     # SDKDelegationService may be None in open-core distribution
@@ -1142,136 +1151,8 @@ To save, run again with save_to_file=True"""
             logger.error(f"Error getting queue status: {e}")
             return f"Error getting queue status: {str(e)}"
 
-    @tool
-    def execute_custom_code(
-        python_code: str,
-        modality_name: Optional[str] = None,
-        load_workspace_files: bool = True,
-        persist: bool = False,
-        description: str = "Custom code execution",
-    ) -> str:
-        """
-        Execute custom Python code with access to workspace data.
-
-        **Use this tool ONLY when existing specialized tools don't cover your specific need.**
-        This tool provides a fallback for edge cases and custom calculations.
-
-        ============================================================================
-        SECURITY NOTICE
-        ============================================================================
-
-        Code runs in a subprocess with the following security model:
-
-        PROTECTED:
-        - Environment variables are FILTERED (API keys, AWS credentials NOT accessible)
-        - AST validation blocks eval/exec/compile/__import__ calls
-        - Dangerous modules blocked (subprocess, multiprocessing, pickle, ctypes, etc.)
-        - Module shadowing prevented (workspace cannot override stdlib)
-        - 300-second timeout enforced
-
-        NOT PROTECTED (local CLI limitations):
-        - Network access is ALLOWED (can make HTTP requests)
-        - File access: Code has YOUR user permissions (can read/write any file)
-        - Resource limits: No memory/CPU limits beyond timeout
-
-        For untrusted code or multi-tenant deployments, use cloud deployment
-        with Docker isolation (--network=none, memory limits, read-only mounts).
-
-        This feature prioritizes scientific flexibility over strict sandboxing.
-        ============================================================================
-
-        AVAILABLE IN NAMESPACE:
-        - workspace_path: Path to workspace directory
-        - adata: Loaded modality (if modality_name provided)
-        - Auto-loaded CSV files (as pandas DataFrames)
-        - Auto-loaded JSON files (as Python dicts)
-        - download_queue, publication_queue (if exist)
-
-        RETURN VALUE:
-        - Assign result to 'result' variable: result = my_computation()
-        - Or the code will attempt to capture the last expression value
-
-        Args:
-            python_code: Python code to execute (can be multi-line)
-            modality_name: Optional specific modality to load as 'adata'
-            load_workspace_files: Auto-inject CSV/JSON files from workspace
-            persist: If True, save this execution to provenance/notebook export
-            description: Human-readable description of what this code does
-
-        Returns:
-            Formatted string with execution results, warnings, and any outputs
-
-        Example:
-            >>> execute_custom_code(
-            ...     python_code=\"\"\"
-            ...     import numpy as np
-            ...     result = np.percentile(adata.obs['n_genes'], 95)
-            ...     print(f"95th percentile: {result}")
-            ...     \"\"\",
-            ...     modality_name="geo_gse12345_quality_assessed",
-            ...     persist=False,
-            ...     description="Calculate 95th percentile of gene counts"
-            ... )
-        """
-        try:
-            result, stats, ir = custom_code_service.execute(
-                code=python_code,
-                modality_name=modality_name,
-                load_workspace_files=load_workspace_files,
-                persist=persist,
-                description=description,
-            )
-
-            # Log to data manager
-            data_manager.log_tool_usage(
-                tool_name="execute_custom_code",
-                parameters={
-                    "description": description,
-                    "modality_name": modality_name,
-                    "persist": persist,
-                    "duration_seconds": stats["duration_seconds"],
-                    "success": stats["success"],
-                },
-                description=f"{description} ({'success' if stats['success'] else 'failed'})",
-                ir=ir,
-            )
-
-            # Format response
-            response = "✓ Custom code executed successfully\n\n"
-            response += f"**Description**: {description}\n"
-            response += f"**Duration**: {stats.get('duration_seconds', 0):.2f}s\n"
-
-            if stats.get("warnings"):
-                response += f"\n**Warnings ({len(stats['warnings'])}):**\n"
-                for warning in stats["warnings"]:
-                    response += f"  - {str(warning)}\n"
-
-            if result is not None:
-                result_preview = str(result)[:500]  # Limit preview length
-                result_type = stats.get("result_type", "unknown")
-                response += f"\n**Result** ({result_type}):\n{result_preview}\n"
-
-            if stats.get("stdout_lines", 0) > 0:
-                response += f"\n**Output**: {stats['stdout_lines']} lines printed\n"
-                if stats.get("stdout_preview"):
-                    response += f"```\n{stats['stdout_preview']}\n```\n"
-
-            if persist:
-                response += "\n📝 This execution was saved to provenance and will be included in notebook export.\n"
-            else:
-                response += "\n💨 This execution was ephemeral (not saved to notebook export).\n"
-
-            return response
-
-        except CodeValidationError as e:
-            return f"❌ Code validation failed: {str(e)}\n\nPlease fix syntax errors or remove forbidden imports."
-
-        except CodeExecutionError as e:
-            return f"❌ Code execution failed: {str(e)}\n\nCheck your code for runtime errors."
-
-        except Exception as e:
-            logger.error(f"Unexpected error in execute_custom_code: {e}")
-            return f"❌ Unexpected error: {str(e)}"
+    # execute_custom_code is created via factory at line ~96 (v2.7+: unified tool)
+    # See create_execute_custom_code_tool() in lobster/tools/custom_code_tool.py
 
     # @tool
     # def delegate_complex_reasoning( #TODO DEACTIVATED FOR NOW

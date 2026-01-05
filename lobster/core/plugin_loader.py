@@ -1,22 +1,26 @@
 """
-Plugin discovery for premium and custom packages.
+Plugin discovery utilities for premium and custom packages.
 
-This module discovers and loads agent registries from:
-- lobster_premium: Shared premium features for paying customers
-- lobster_custom_*: Customer-specific agent packages
+This module provides diagnostic and compatibility utilities for plugin packages.
+The actual plugin discovery is handled by ComponentRegistry (component_registry.py).
 
-The plugin system follows Python's entry point pattern, allowing
-external packages to register agents that get merged into the
-main AGENT_REGISTRY at runtime.
+Plugin packages (lobster-premium, lobster-custom-*) register components via entry points:
+- [project.entry-points."lobster.services"] - Premium service classes
+- [project.entry-points."lobster.agents"] - Custom agent configurations
 
 Usage:
     from lobster.core.plugin_loader import discover_plugins, get_installed_packages
 
-    # Discover all plugin agents
+    # Discover all agents (delegates to ComponentRegistry)
     plugin_agents = discover_plugins()
 
     # Check installed packages
     packages = get_installed_packages()
+
+Note: For direct component access, use ComponentRegistry:
+    from lobster.core.component_registry import component_registry
+    component_registry.get_service('publication_processing')
+    component_registry.list_agents()
 """
 
 import importlib
@@ -59,73 +63,38 @@ def discover_plugins() -> Dict[str, Any]:
     """
     Discover all lobster plugin packages and load their registries.
 
-    Discovers packages by naming convention:
-    - lobster_premium: shared premium features
-    - lobster_custom_*: customer-specific features
-
-    The function checks the entitlement to determine which custom
-    packages are authorized for the current installation.
+    Now uses unified ComponentRegistry for both services and agents.
 
     Returns:
         Dict of agent configurations to merge into AGENT_REGISTRY.
         Keys are agent names, values are AgentRegistryConfig instances.
     """
-    discovered_agents: Dict[str, Any] = {}
+    from lobster.core.component_registry import component_registry
 
-    # 1. Try to load lobster-premium package
-    try:
-        from lobster_premium import PREMIUM_REGISTRY
+    # Single call loads BOTH services and agents
+    component_registry.load_components()
 
-        discovered_agents.update(PREMIUM_REGISTRY)
-        logger.info(
-            f"Loaded {len(PREMIUM_REGISTRY)} premium agents from lobster-premium"
-        )
-    except ImportError:
-        logger.debug("lobster-premium not installed (expected for free tier)")
-    except Exception as e:
-        logger.warning(f"Failed to load lobster-premium: {e}")
-
-    # 2. Discover lobster-custom-* packages based on entitlement
-    entitlement = _load_entitlement()
-    custom_packages = entitlement.get("custom_packages", [])
-
-    for pkg_name in custom_packages:
-        try:
-            # Convert package name to module name (dashes to underscores)
-            module_name = pkg_name.replace("-", "_")
-            module = importlib.import_module(module_name)
-
-            if hasattr(module, "CUSTOM_REGISTRY"):
-                registry = getattr(module, "CUSTOM_REGISTRY")
-                discovered_agents.update(registry)
-                logger.info(f"Loaded {len(registry)} custom agents from {pkg_name}")
-            else:
-                logger.debug(f"Package {pkg_name} has no CUSTOM_REGISTRY export")
-
-        except ImportError as e:
-            logger.warning(f"Custom package {pkg_name} not installed: {e}")
-        except Exception as e:
-            logger.warning(f"Failed to load custom package {pkg_name}: {e}")
-
-    # 3. Also discover any packages via entry points (future-proof)
-    discovered_agents.update(_discover_via_entry_points())
-
-    return discovered_agents
+    # Return all agents (core + custom) for backward compatibility with graph.py
+    return component_registry.list_agents()
 
 
 def _discover_via_entry_points() -> Dict[str, Any]:
     """
-    Discover plugins via Python entry points.
+    DEPRECATED: This function is no longer used.
 
-    This allows third-party packages to register agents by declaring
-    entry points in their pyproject.toml:
+    Use ComponentRegistry instead, which discovers both services and agents
+    via the new entry point groups:
+        - [project.entry-points."lobster.services"]
+        - [project.entry-points."lobster.agents"]
 
-        [project.entry-points."lobster.plugins"]
-        my_agent = "my_package:AGENT_REGISTRY"
+    This old function discovered agents via the deprecated "lobster.plugins"
+    entry point group. It's kept for backward compatibility but is not
+    called by the new system.
 
     Returns:
-        Dict of agent configurations from entry point packages.
+        Dict of agent configurations from entry point packages (empty).
     """
+    # DEPRECATED: No longer used, component_registry handles discovery
     discovered: Dict[str, Any] = {}
 
     try:
@@ -284,13 +253,31 @@ def validate_plugin_compatibility(package_name: str) -> Dict[str, Any]:
             except Exception:
                 result["warnings"].append("Could not verify version compatibility")
 
-        # Check for required exports
-        if not hasattr(module, "CUSTOM_REGISTRY") and not hasattr(
-            module, "PREMIUM_REGISTRY"
-        ):
-            result["warnings"].append(
-                "Package has no CUSTOM_REGISTRY or PREMIUM_REGISTRY export"
-            )
+        # Check for entry points (new pattern)
+        try:
+            eps = importlib.metadata.entry_points()
+            if hasattr(eps, "select"):
+                # Python 3.10+
+                services = list(eps.select(group="lobster.services"))
+                agents = list(eps.select(group="lobster.agents"))
+            else:
+                # Python 3.9
+                services = list(eps.get("lobster.services", []))
+                agents = list(eps.get("lobster.agents", []))
+
+            if not services and not agents:
+                # Check for old CUSTOM_REGISTRY pattern (deprecated)
+                if hasattr(module, "CUSTOM_REGISTRY") or hasattr(module, "PREMIUM_REGISTRY"):
+                    result["warnings"].append(
+                        "Package uses deprecated CUSTOM_REGISTRY pattern. "
+                        "Please migrate to entry points (lobster.services, lobster.agents)"
+                    )
+                else:
+                    result["warnings"].append(
+                        "Package has no 'lobster.services' or 'lobster.agents' entry points"
+                    )
+        except Exception:
+            result["warnings"].append("Could not verify entry point registration")
 
     except ImportError as e:
         result["compatible"] = False

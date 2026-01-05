@@ -41,7 +41,8 @@ dependencies = [
     "langchain>=0.1.0",
     "langchain-community>=0.0.10",
     "langchain-aws>=0.1.0",
-    "langgraph==0.6.7",
+    "langgraph>=1.0.5",
+    "langchain-google-genai>=4.1.2",
     # Bioinformatics (bumped versions for Python 3.12 support)
     "llvmlite==0.44.0", # explicit to avoid old version being pulled
     "scipy>=1.10.0",
@@ -203,10 +204,24 @@ all = [
 [project.scripts]
 lobster = "lobster.cli:app"
 
+# =============================================================================
+# Entry Points - Service Discovery (PEP 420 compliant)
+# =============================================================================
+# IMPORTANT: Only register services that are PUBLIC (in allowlist without '!')
+# Premium services (sdk_delegation, extraction_cache, metadata services) should
+# be registered in their respective custom package's pyproject.toml
+[project.entry-points."lobster.services"]
+# Core orchestration services (public as of v2.x - see allowlist line 420)
+publication_processing = "lobster.services.orchestration.publication_processing_service:PublicationProcessingService"
+
+# Core queue data structures (public as of v2.x - see allowlist lines 427-429)
+publication_queue = "lobster.core.publication_queue:PublicationQueue"
+
 [tool.setuptools]
 # Automatically discover all packages under lobster/
 # This ensures all lobster.* subpackages are included in the distribution
-packages.find = {where = ["."], include = ["lobster*"]}
+# namespaces = true enables PEP 420 namespace packages for premium/custom extensions
+packages.find = {where = ["."], include = ["lobster*"], namespaces = true}
 
 [tool.setuptools.dynamic]
 version = {attr = "lobster.version.__version__"}

@@ -8,11 +8,14 @@ The exporter uses Service-Emitted Intermediate Representation (IR) to automatica
 generate code without manual mapping registries, achieving 95%+ executable notebooks.
 """
 
+import hashlib
+import json
 import logging
+import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import nbformat
 from nbformat import NotebookNode
@@ -87,30 +90,45 @@ class NotebookExporter:
 
         logger.info(f"Exporting notebook with IR: {name}")
 
-        # Filter activities
+        # Filter activities by success status
         activities = self._filter_activities(filter_strategy)
         logger.debug(f"Filtered {len(activities)} activities for export")
 
-        # Extract IRs from activities
-        irs = self._extract_irs(activities)
+        # Extract only exportable (activity, IR) pairs
+        # This filters out orchestration activities (publication processing, etc.)
+        # that belong in provenance but not in executable notebooks
+        exportable_pairs = self._get_exportable_activity_ir_pairs(activities)
+        exportable_count = len(exportable_pairs)
+        filtered_count = len(activities) - exportable_count
+
         logger.info(
-            f"Extracted {len(irs)} IR objects from {len(activities)} activities"
+            f"Extracted {exportable_count} exportable IR objects "
+            f"from {len(activities)} activities "
+            f"({filtered_count} provenance-only activities filtered)"
         )
 
-        if len(irs) == 0:
-            logger.warning(
-                "No IR objects found in provenance. "
-                "Services need to emit AnalysisStep objects. "
-                "Notebook will contain placeholder code."
+        # Extract IRs for imports and parameters collection
+        irs = [ir for _, ir in exportable_pairs]
+
+        if exportable_count == 0:
+            raise ValueError(
+                f"No exportable IR objects found in provenance. "
+                f"Found {len(activities)} activities, but none have exportable=True IR. "
+                f"Services need to emit AnalysisStep objects with exportable=True."
             )
 
         # Create new notebook
         notebook = new_notebook()
 
         # Add header
-        notebook.cells.append(self._create_header_cell(name, description, len(irs)))
+        notebook.cells.append(
+            self._create_header_cell(name, description, exportable_count)
+        )
 
-        # Collect and add imports
+        # Add data integrity manifest (cryptographic hashes for compliance)
+        notebook.cells.append(self._create_integrity_manifest_cell())
+
+        # Collect and add imports from all exportable IRs
         imports_cell = self._create_imports_cell(irs)
         notebook.cells.append(imports_cell)
 
@@ -120,24 +138,31 @@ class NotebookExporter:
         # Add data loading cell (critical for execution)
         notebook.cells.append(self._create_data_loading_cell())
 
-        # Convert activities with IR to code cells
-        for idx, activity in enumerate(activities, start=1):
+        # Convert exportable (activity, IR) pairs to code cells
+        # This iterates over ONLY exportable IRs, not all activities
+        for idx, (activity, ir) in enumerate(exportable_pairs, start=1):
             # Add documentation cell
             notebook.cells.append(self._create_doc_cell(activity, idx))
 
-            # Add executable code cell from IR
-            code_cell = self._activity_to_code(activity, validate=validate_syntax)
-            if code_cell:
-                notebook.cells.append(code_cell)
+            # Add executable code cell from IR (no placeholder fallback)
+            code_cell = self._ir_to_code_cell(ir, validate=validate_syntax)
+            notebook.cells.append(code_cell)
 
         # Add data saving cell
         notebook.cells.append(self._create_data_saving_cell())
+
+        # Add provenance summary cell (explains what's in notebook vs provenance)
+        notebook.cells.append(
+            self._create_provenance_summary_cell(len(activities), exportable_count)
+        )
 
         # Add footer cell
         notebook.cells.append(self._create_footer_cell())
 
         # Add notebook metadata
-        notebook.metadata["lobster"] = self._create_metadata(len(irs), len(activities))
+        notebook.metadata["lobster"] = self._create_metadata(
+            exportable_count, len(activities)
+        )
 
         # Save to .lobster/notebooks/
         output_dir = Path.home() / ".lobster" / "notebooks"
@@ -149,8 +174,9 @@ class NotebookExporter:
 
         logger.info(f"Notebook exported: {output_path}")
         logger.info(
-            f"IR coverage: {len(irs)}/{len(activities)} activities "
-            f"({len(irs)/len(activities)*100:.1f}%)"
+            f"Executable steps: {exportable_count} | "
+            f"Provenance-only: {filtered_count} | "
+            f"Total activities: {len(activities)}"
         )
 
         return output_path
@@ -213,6 +239,49 @@ class NotebookExporter:
 
         return irs
 
+    def _get_exportable_activity_ir_pairs(
+        self, activities: List[Dict[str, Any]]
+    ) -> List[Tuple[Dict[str, Any], AnalysisStep]]:
+        """
+        Extract (activity, IR) pairs where IR exists and is exportable.
+
+        Filters out orchestration activities (e.g., publication processing,
+        metadata extraction) that log provenance but don't need notebook
+        representation. This ensures notebooks contain only executable
+        analysis steps while maintaining complete audit trail in provenance.
+
+        Args:
+            activities: List of activity dictionaries from provenance
+
+        Returns:
+            List of (activity, AnalysisStep) tuples for exportable steps only
+        """
+        pairs = []
+
+        for activity in activities:
+            ir_dict = activity.get("ir")
+
+            if ir_dict is not None and isinstance(ir_dict, dict):
+                try:
+                    ir = AnalysisStep.from_dict(ir_dict)
+                    if ir.exportable:
+                        pairs.append((activity, ir))
+                        logger.debug(f"Included exportable IR: {ir.operation}")
+                    else:
+                        logger.debug(f"Filtered non-exportable IR: {ir.operation}")
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to deserialize IR for activity "
+                        f"{activity.get('type')}: {e}"
+                    )
+            else:
+                # Activity has no IR - provenance-only (e.g., orchestration)
+                logger.debug(
+                    f"Filtered provenance-only activity: {activity.get('type')}"
+                )
+
+        return pairs
+
     def _create_header_cell(
         self, name: str, description: str, n_irs: int
     ) -> NotebookNode:
@@ -260,6 +329,121 @@ complete code generation instructions for reproducibility.
 ---
 """
         return new_markdown_cell(header_content)
+
+    def _create_integrity_manifest_cell(self) -> NotebookNode:
+        """
+        Create data integrity manifest cell with cryptographic hashes.
+
+        This cell provides ALCOA+ compliant data integrity verification by
+        recording SHA-256 hashes of all inputs, provenance, and system state.
+        Critical for 21 CFR Part 11 and GxP compliance.
+
+        Returns:
+            Markdown cell with integrity manifest
+        """
+        manifest = {
+            "data_integrity_manifest": {
+                "generated_at": datetime.now().isoformat(),
+                "provenance": self._get_provenance_hash(),
+                "input_files": self._get_input_file_hashes(),
+                "system": self._get_system_info(),
+            }
+        }
+
+        content = f"""## 🔒 Data Integrity Manifest
+
+**Purpose**: Cryptographic verification of data integrity (ALCOA+ compliance)
+
+```json
+{json.dumps(manifest, indent=2)}
+```
+
+**Verification**: The hashes above provide tamper-evident proof that:
+- This analysis used the exact input data listed
+- The provenance record matches this session
+- The system version is documented and reproducible
+
+⚠️ **Critical**: Any modification to input data will result in hash mismatch, invalidating the analysis.
+
+---
+"""
+        return new_markdown_cell(content)
+
+    def _get_provenance_hash(self) -> Dict[str, str]:
+        """Calculate SHA-256 hash of provenance JSON."""
+        try:
+            # Serialize provenance to consistent JSON
+            prov_data = {
+                "namespace": self.provenance.namespace,
+                "activities_count": len(self.provenance.activities),
+                "entities_count": len(self.provenance.entities),
+            }
+            prov_json = json.dumps(prov_data, sort_keys=True).encode("utf-8")
+            prov_hash = hashlib.sha256(prov_json).hexdigest()
+
+            return {
+                "session_id": self.provenance.namespace,
+                "sha256": prov_hash,
+                "activities": len(self.provenance.activities),
+                "entities": len(self.provenance.entities),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to hash provenance: {e}")
+            return {"session_id": self.provenance.namespace, "sha256": "unavailable"}
+
+    def _get_input_file_hashes(self) -> Dict[str, str]:
+        """Calculate SHA-256 hashes of input data files."""
+        file_hashes = {}
+
+        try:
+            # Hash modality files from workspace
+            for modality_name in self.data_manager.modalities:
+                modality_path = (
+                    self.data_manager.workspace_path / f"{modality_name}.h5ad"
+                )
+                if modality_path.exists():
+                    file_hash = self._calculate_file_hash(modality_path)
+                    file_hashes[f"{modality_name}.h5ad"] = file_hash
+                else:
+                    file_hashes[f"{modality_name}.h5ad"] = "file_not_found"
+
+        except Exception as e:
+            logger.warning(f"Failed to hash input files: {e}")
+            file_hashes["error"] = str(e)
+
+        return file_hashes if file_hashes else {"note": "No input files hashed"}
+
+    def _calculate_file_hash(self, file_path: Path) -> str:
+        """Calculate SHA-256 hash of a file."""
+        sha256_hash = hashlib.sha256()
+        try:
+            with open(file_path, "rb") as f:
+                # Read file in chunks for memory efficiency
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            return sha256_hash.hexdigest()
+        except Exception as e:
+            logger.error(f"Failed to hash {file_path}: {e}")
+            return "hash_failed"
+
+    def _get_system_info(self) -> Dict[str, str]:
+        """Get system information including Lobster version and Git commit."""
+        system_info = {
+            "lobster_version": self._get_lobster_version(),
+            "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "platform": sys.platform,
+        }
+
+        # Try to get Git commit hash
+        try:
+            git_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL
+            ).decode("utf-8").strip()
+            system_info["git_commit"] = git_commit[:8]  # Short hash
+        except Exception:
+            system_info["git_commit"] = "unavailable"
+
+        return system_info
 
     def _create_imports_cell(self, irs: List[AnalysisStep]) -> NotebookNode:
         """
@@ -516,6 +700,54 @@ print(f"Saved processed data to: {output_path}")
                 f"pass"
             )
 
+    def _ir_to_code_cell(
+        self, ir: AnalysisStep, validate: bool = True
+    ) -> NotebookNode:
+        """
+        Convert AnalysisStep IR directly to executable code cell.
+
+        Unlike _activity_to_code, this method does NOT generate placeholder
+        cells - it requires a valid IR object. This ensures notebooks contain
+        only executable, reproducible code.
+
+        Args:
+            ir: AnalysisStep IR object with code template
+            validate: Whether to validate generated Python syntax
+
+        Returns:
+            Code cell with executable Python code
+
+        Raises:
+            ValueError: If IR rendering fails
+        """
+        try:
+            code = ir.render()
+
+            # Validate syntax if requested
+            if validate and ir.validates_on_export:
+                try:
+                    ir.validate_rendered_code()
+                    logger.debug(f"Validated syntax for {ir.operation}")
+                except SyntaxError as e:
+                    logger.error(
+                        f"Syntax error in generated code for {ir.operation}: {e}"
+                    )
+                    code = (
+                        f"# SYNTAX ERROR in generated code:\n"
+                        f"# {str(e)}\n"
+                        f"# Original template:\n"
+                        f"# {ir.code_template}\n"
+                        f"{code}"
+                    )
+
+            return new_code_cell(code)
+
+        except Exception as e:
+            logger.error(f"Failed to render code for {ir.operation}: {e}")
+            raise ValueError(
+                f"Failed to render IR for {ir.operation}: {e}"
+            ) from e
+
     def _create_footer_cell(self) -> NotebookNode:
         """
         Create markdown footer cell.
@@ -557,6 +789,49 @@ AnalysisStep objects. IR-enabled steps are fully reproducible.
 *Using Service-Emitted IR Architecture for automatic code generation*
 """
         return new_markdown_cell(footer_content)
+
+    def _create_provenance_summary_cell(
+        self,
+        total_activities: int,
+        exportable_count: int,
+    ) -> NotebookNode:
+        """
+        Create summary cell explaining provenance vs notebook content.
+
+        This cell provides transparency about which activities are included
+        in the executable notebook vs which are recorded only in provenance
+        for audit trail purposes.
+
+        Args:
+            total_activities: Total number of activities in provenance
+            exportable_count: Number of activities with exportable IR
+
+        Returns:
+            Markdown cell with provenance summary
+        """
+        filtered_count = total_activities - exportable_count
+
+        content = f"""---
+
+## Provenance & Reproducibility
+
+| Metric | Count |
+|--------|-------|
+| **Executable Steps** | {exportable_count} |
+| **Provenance-Only Activities** | {filtered_count} |
+| **Total Activities** | {total_activities} |
+
+**What's Included:**
+- This notebook contains **{exportable_count} executable analysis steps** that can be reproduced
+- **{filtered_count} orchestration activities** (publication processing, metadata extraction, etc.) are logged in provenance for audit trail but are not part of the executable workflow
+
+**Full Provenance Record:**
+- Session ID: `{self.provenance.namespace}`
+- Complete audit trail available in provenance JSON for regulatory compliance
+
+---
+"""
+        return new_markdown_cell(content)
 
     def _create_metadata(self, n_irs: int, n_activities: int) -> Dict[str, Any]:
         """

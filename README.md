@@ -13,7 +13,7 @@
 
 - [What is Lobster AI?](#-what-is-lobster-ai) - Overview and use cases
 - [Quick Start](#-quick-start) - Install in 3 commands
-- [LLM Providers](#-llm-providers) - Ollama, Anthropic, AWS Bedrock
+- [LLM Providers](#-llm-providers) - Ollama, Anthropic, AWS Bedrock, Google Gemini
 - [Features](#-features) - Single-cell, bulk RNA-seq, proteomics, visualization
 - [Case Studies](#-case-studies) - Real-world examples
 - [Roadmap](#-roadmap) - 2026 development plans
@@ -94,6 +94,7 @@ Lobster is a **modular bioinformatics platform** with pluggable execution enviro
 | **LLM Provider** | Ollama | `ollama pull gpt-oss:20b` | Local-only, unlimited usage, offline |
 | | Anthropic | `ANTHROPIC_API_KEY` | Best quality, quick start, cloud/local |
 | | AWS Bedrock | AWS credentials | Enterprise, compliance, high throughput |
+| | Google Gemini | `GOOGLE_API_KEY` | Long context, multimodal, free tier available |
 | **Data Sources** | GEO/SRA/ENA | Auto-configured | Transcriptomics datasets |
 | | PRIDE/MassIVE | Auto-configured | Proteomics datasets |
 | | PubMed/PMC | `NCBI_API_KEY` (optional) | Literature mining, metadata extraction |
@@ -101,12 +102,13 @@ Lobster is a **modular bioinformatics platform** with pluggable execution enviro
 
 ### Configuration & Deployment
 
-Lobster supports three deployment patterns optimized for different use cases:
+Lobster supports four deployment patterns optimized for different use cases:
 
 | Pattern | Best For | Key Features |
 |---------|----------|--------------|
 | **Local + Ollama** | Privacy, learning, zero cost | Offline, unlimited usage, 100% local |
 | **Local + Anthropic** | Quality, development | Best accuracy, quick setup, flexible |
+| **Local + Gemini** | Cost optimization, free tier | Long context, multimodal, free tier available |
 | **Cloud + Bedrock** | Production, teams | Enterprise SLA, high limits, scalable |
 
 **Learn more:**

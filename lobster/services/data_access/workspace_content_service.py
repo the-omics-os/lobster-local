@@ -40,6 +40,7 @@ class ContentType(str, Enum):
     METADATA = "metadata"
     DOWNLOAD_QUEUE = "download_queue"
     PUBLICATION_QUEUE = "publication_queue"
+    EXPORTS = "exports"
 
 
 class RetrievalLevel(str, Enum):
@@ -595,6 +596,18 @@ class WorkspaceContentService:
         with open(file_path, "r") as f:
             content_dict = json.load(f)
 
+        # OPTION C FIX: Unwrap "data" field for metadata content type
+        # WorkspaceContentService stores metadata as {"identifier": "...", "data": {...}}
+        # But consumers expect the normalized structure directly
+        if content_type == ContentType.METADATA and "data" in content_dict:
+            # Unwrap: return the inner "data" dict + preserve top-level metadata
+            unwrapped = content_dict["data"].copy()
+            # Preserve metadata fields from wrapper (identifier, cached_at, source, etc.)
+            for key in ["identifier", "cached_at", "source", "content_type", "description"]:
+                if key in content_dict and key not in unwrapped:
+                    unwrapped[key] = content_dict[key]
+            content_dict = unwrapped
+
         # Apply level-based filtering if specified
         if level is None or level == RetrievalLevel.FULL:
             return content_dict
@@ -839,29 +852,39 @@ class WorkspaceContentService:
             >>> print(len(pending))
             2
         """
-        if not self.data_manager or not hasattr(self.data_manager, "download_queue"):
-            return []
-
-        if self.data_manager.download_queue is None:
-            return []
-
-        from lobster.core.schemas.download_queue import DownloadStatus
-
-        # Convert string to enum if provided
-        status_enum = None
-        if status_filter:
-            try:
-                # DownloadStatus enum values are lowercase ("pending", "completed")
-                status_enum = DownloadStatus(status_filter.lower())
-            except ValueError:
-                # Invalid status, return empty list
-                logger.warning(
-                    f"Invalid status filter '{status_filter}', returning empty list"
-                )
+        try:
+            if not self.data_manager or not hasattr(self.data_manager, "download_queue"):
                 return []
 
-        entries = self.data_manager.download_queue.list_entries(status=status_enum)
-        return [entry.model_dump(mode="json") for entry in entries]
+            if self.data_manager.download_queue is None:
+                return []
+
+            from lobster.core.schemas.download_queue import DownloadStatus
+
+            # Convert string to enum if provided
+            status_enum = None
+            if status_filter:
+                try:
+                    # DownloadStatus enum values are lowercase ("pending", "completed")
+                    status_enum = DownloadStatus(status_filter.lower())
+                except ValueError:
+                    # Invalid status, return empty list
+                    logger.warning(
+                        f"Invalid status filter '{status_filter}', returning empty list"
+                    )
+                    return []
+
+            entries = self.data_manager.download_queue.list_entries(status=status_enum)
+
+            # BUGFIX: Handle None return from list_entries()
+            if entries is None:
+                logger.warning("download_queue.list_entries() returned None (expected list)")
+                return []
+
+            return [entry.model_dump(mode="json") for entry in entries]
+        except Exception as e:
+            logger.error(f"Failed to list download queue entries: {e}", exc_info=True)
+            return []  # Graceful degradation
 
     def get_workspace_stats(self) -> Dict[str, Any]:
         """
@@ -969,30 +992,169 @@ class WorkspaceContentService:
             >>> print(len(pending))
             2
         """
-        if not self.data_manager or not hasattr(self.data_manager, "publication_queue"):
-            return []
-
-        if self.data_manager.publication_queue is None:
-            return []
-
         try:
-            from lobster.core.schemas.publication_queue import PublicationStatus
-        except ImportError:
-            logger.warning("Publication queue schema not available (premium feature)")
-            return []
-
-        # Convert string to enum if provided
-        status_enum = None
-        if status_filter:
-            try:
-                # PublicationStatus enum values are lowercase ("pending", "completed", etc.)
-                status_enum = PublicationStatus(status_filter.lower())
-            except ValueError:
-                # Invalid status, return empty list
-                logger.warning(
-                    f"Invalid status filter '{status_filter}', returning empty list"
-                )
+            if not self.data_manager or not hasattr(self.data_manager, "publication_queue"):
                 return []
 
-        entries = self.data_manager.publication_queue.list_entries(status=status_enum)
-        return [entry.to_dict() for entry in entries]
+            if self.data_manager.publication_queue is None:
+                return []
+
+            try:
+                from lobster.core.schemas.publication_queue import PublicationStatus
+            except ImportError:
+                logger.warning("Publication queue schema not available (premium feature)")
+                return []
+
+            # Convert string to enum if provided
+            status_enum = None
+            if status_filter:
+                try:
+                    # PublicationStatus enum values are lowercase ("pending", "completed", etc.)
+                    status_enum = PublicationStatus(status_filter.lower())
+                except ValueError:
+                    # Invalid status, return empty list
+                    logger.warning(
+                        f"Invalid status filter '{status_filter}', returning empty list"
+                    )
+                    return []
+
+            entries = self.data_manager.publication_queue.list_entries(status=status_enum)
+
+            # BUGFIX: Handle None return from list_entries()
+            if entries is None:
+                logger.warning("publication_queue.list_entries() returned None (expected list)")
+                return []
+
+            return [entry.to_dict() for entry in entries]
+        except Exception as e:
+            logger.error(f"Failed to list publication queue entries: {e}", exc_info=True)
+            return []  # Graceful degradation
+
+    # =========================================================================
+    # Export File Discovery Methods (v1.0+ - Centralized Exports)
+    # =========================================================================
+
+    def list_export_files(
+        self,
+        pattern: str = "*",
+        category: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        List files in centralized exports directory.
+
+        Args:
+            pattern: Glob pattern (e.g., "*.csv", "samples_*.tsv")
+            category: Optional filter - 'metadata', 'results', 'plots', 'custom'
+
+        Returns:
+            List of file metadata dicts with keys: name, path, size, modified, category
+        """
+        exports_dir = self.workspace_base / "exports"
+        if not exports_dir.exists():
+            return []
+
+        files = []
+        for file_path in exports_dir.glob(pattern):
+            if file_path.is_file():
+                file_category = self._categorize_export_file(file_path)
+                if category and file_category != category:
+                    continue
+
+                files.append({
+                    'name': file_path.name,
+                    'path': str(file_path),
+                    'size': file_path.stat().st_size,
+                    'modified': file_path.stat().st_mtime,
+                    'category': file_category
+                })
+
+        return sorted(files, key=lambda x: x['modified'], reverse=True)
+
+    def _categorize_export_file(self, file_path: Path) -> str:
+        """Categorize export file by naming convention."""
+        name_lower = file_path.name.lower()
+        if any(k in name_lower for k in ['sample', 'metadata', 'filtered']):
+            return 'metadata'
+        elif any(k in name_lower for k in ['result', 'analysis', 'de_genes', 'differential']):
+            return 'results'
+        elif any(k in name_lower for k in ['plot', 'figure', 'visualization', 'umap', 'pca']):
+            return 'plots'
+        else:
+            return 'custom'
+
+    def get_all_metadata_sources(self) -> Dict[str, List[Dict]]:
+        """
+        Get metadata from all sources: memory, workspace files, exports.
+
+        Returns:
+            Dict with keys: 'in_memory', 'workspace_files', 'exports', 'deprecated'
+        """
+        sources: Dict[str, List[Dict]] = {
+            'in_memory': [],
+            'workspace_files': [],
+            'exports': [],
+            'deprecated': []  # Old metadata/exports/ location
+        }
+
+        # 1. In-memory metadata_store
+        metadata_store = self.data_manager.metadata_store
+        for key, value in metadata_store.items():
+            sources['in_memory'].append({
+                'identifier': key,
+                'type': 'memory',
+                'data': value
+            })
+
+        # 2. Workspace metadata files
+        if self.metadata_dir.exists():
+            for json_file in self.metadata_dir.glob("*.json"):
+                if json_file.parent.name != "exports":  # Skip old exports subdir
+                    sources['workspace_files'].append({
+                        'identifier': json_file.stem,
+                        'type': 'file',
+                        'path': str(json_file),
+                        'size': json_file.stat().st_size
+                    })
+
+        # 3. New exports directory
+        exports_dir = self.workspace_base / "exports"
+        if exports_dir.exists():
+            for export_file in exports_dir.iterdir():
+                if export_file.is_file() and export_file.suffix in {'.csv', '.tsv', '.xlsx'}:
+                    sources['exports'].append({
+                        'identifier': export_file.stem,
+                        'type': 'export',
+                        'path': str(export_file),
+                        'size': export_file.stat().st_size,
+                        'category': self._categorize_export_file(export_file)
+                    })
+
+        # 4. Deprecated location
+        old_exports_dir = self.metadata_dir / "exports"
+        if old_exports_dir.exists():
+            for old_file in old_exports_dir.glob("*"):
+                if old_file.is_file():
+                    sources['deprecated'].append({
+                        'identifier': old_file.stem,
+                        'type': 'deprecated_export',
+                        'path': str(old_file),
+                        'size': old_file.stat().st_size
+                    })
+
+        return sources
+
+    def get_exports_directory(self, create: bool = True) -> Path:
+        """
+        Get the centralized exports directory path.
+
+        Args:
+            create: Whether to create directory if it doesn't exist (default: True)
+
+        Returns:
+            Path to exports directory (workspace/exports/)
+        """
+        exports_dir = self.workspace_base / "exports"
+        if create and not exports_dir.exists():
+            exports_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Created exports directory: {exports_dir}")
+        return exports_dir

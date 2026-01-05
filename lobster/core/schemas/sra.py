@@ -221,7 +221,7 @@ class SRASampleSchema(BaseModel):
     library_strategy: str = Field(..., description="Sequencing strategy")
     library_source: str = Field(..., description="Library source")
     library_selection: str = Field(..., description="Library selection method")
-    library_layout: str = Field(..., description="SINGLE or PAIRED")
+    library_layout: Optional[str] = Field(None, description="SINGLE or PAIRED")
 
     # Organism (REQUIRED)
     organism_name: str = Field(..., description="Organism name")
@@ -346,11 +346,13 @@ class SRASampleSchema(BaseModel):
         Logs a warning for uncommon strategies but allows them.
         """
         # Common strategies - not exhaustive
+        # Reference: https://www.ncbi.nlm.nih.gov/sra/docs/submitmeta/
         known_strategies = {
             "AMPLICON",
             "RNA-Seq",
             "WGS",
             "WXS",
+            "WGA",  # Whole Genome Amplification (low-input DNA, single-cell)
             "ChIP-Seq",
             "ATAC-seq",
             "Bisulfite-Seq",
@@ -361,6 +363,7 @@ class SRASampleSchema(BaseModel):
             "MeDIP-Seq",
             "DNase-Hypersensitivity",
             "Tn-Seq",
+            "Targeted-Capture",  # Target enrichment (exome, panels)
             "VALIDATION",
             "OTHER",
         }
@@ -370,16 +373,23 @@ class SRASampleSchema(BaseModel):
 
     @field_validator("library_layout")
     @classmethod
-    def validate_library_layout(cls, v: str) -> str:
+    def validate_library_layout(cls, v: Optional[str]) -> Optional[str]:
         """
         Validate library layout is SINGLE or PAIRED.
 
-        Raises:
-            ValueError: If layout is not SINGLE or PAIRED
+        Args:
+            v: Library layout value (may be None for some SRA records)
+
+        Returns:
+            Normalized layout (SINGLE/PAIRED/UNKNOWN) or None if not provided
         """
-        if v.upper() not in {"SINGLE", "PAIRED"}:
-            raise ValueError(f"library_layout must be 'SINGLE' or 'PAIRED', got '{v}'")
-        return v.upper()
+        if v is None:
+            return None
+        v_upper = v.upper()
+        if v_upper not in {"SINGLE", "PAIRED"}:
+            logger.warning(f"Unexpected library_layout: '{v}', defaulting to 'UNKNOWN'")
+            return "UNKNOWN"
+        return v_upper
 
     @field_validator("run_accession")
     @classmethod

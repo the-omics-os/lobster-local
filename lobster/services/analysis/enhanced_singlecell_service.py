@@ -1237,7 +1237,7 @@ sc.tl.filter_rank_genes_groups(
 
             # Auto-extract marker genes if not provided
             if marker_genes is None:
-                marker_genes = self._extract_marker_genes(adata, cluster_key)
+                marker_genes = self._extract_marker_gene_list(adata, cluster_key)
                 logger.info(f"Auto-extracted {len(marker_genes)} marker genes")
 
             # Delegate to PathwayEnrichmentService
@@ -1271,11 +1271,11 @@ sc.tl.filter_rank_genes_groups(
             logger.exception(f"Unexpected error in pathway enrichment: {e}")
             raise SingleCellError(f"Pathway enrichment failed: {str(e)}")
 
-    def _extract_marker_genes(
+    def _extract_marker_gene_list(
         self, adata: anndata.AnnData, cluster_key: str, top_n: int = 50
     ) -> List[str]:
         """
-        Extract top marker genes from Scanpy's rank_genes_groups results.
+        Extract top marker genes from Scanpy's rank_genes_groups results as a list.
 
         Args:
             adata: AnnData with rank_genes_groups results

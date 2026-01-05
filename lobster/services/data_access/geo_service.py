@@ -3345,7 +3345,7 @@ The actual expression data download will be much faster now that metadata is pre
             )
 
             # Step 1: Use bulk_rnaseq_service to merge quantification files
-            bulk_service = BulkRNASeqService()
+            bulk_service = BulkRNASeqService(data_manager=self.data_manager)
 
             try:
                 df, metadata = bulk_service.load_from_quantification_files(

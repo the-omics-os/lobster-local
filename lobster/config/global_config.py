@@ -31,7 +31,9 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field
+
+from lobster.config.base_config import ProviderConfigBase
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +42,7 @@ CONFIG_DIR = Path.home() / ".config" / "lobster"
 CONFIG_FILE_NAME = "providers.json"
 
 
-class GlobalProviderConfig(BaseModel):
+class GlobalProviderConfig(ProviderConfigBase):
     """
     Global user-level defaults for LLM providers and models.
 
@@ -48,7 +50,7 @@ class GlobalProviderConfig(BaseModel):
     by workspace-specific configurations.
 
     Attributes:
-        default_provider: Default LLM provider (bedrock | anthropic | ollama)
+        default_provider: Default LLM provider (bedrock | anthropic | ollama | gemini)
         default_profile: Default agent configuration profile
         anthropic_default_model: Default Anthropic model for all projects
         bedrock_default_model: Default Bedrock model for all projects
@@ -64,9 +66,17 @@ class GlobalProviderConfig(BaseModel):
         >>> config.save()
     """
 
+    @property
+    def provider_field_name(self) -> str:
+        return "default_provider"
+
+    @property
+    def model_field_suffix(self) -> str:
+        return "_default_model"
+
     default_provider: Optional[str] = Field(
         None,
-        description="Default LLM provider (bedrock | anthropic | ollama)"
+        description="Default LLM provider (bedrock | anthropic | ollama | gemini)"
     )
 
     default_profile: str = Field(
@@ -90,31 +100,15 @@ class GlobalProviderConfig(BaseModel):
         description="Default Ollama model (e.g., 'llama3:70b-instruct')"
     )
 
+    gemini_default_model: Optional[str] = Field(
+        None,
+        description="Default Gemini model (e.g., 'gemini-3-pro-preview')"
+    )
+
     ollama_default_host: str = Field(
         "http://localhost:11434",
         description="Default Ollama server URL"
     )
-
-    @field_validator("default_provider")
-    @classmethod
-    def validate_provider(cls, v):
-        """Validate provider is one of the supported types."""
-        if v and v not in ["bedrock", "anthropic", "ollama"]:
-            raise ValueError(
-                f"Invalid provider: '{v}'. Must be one of: bedrock, anthropic, ollama"
-            )
-        return v
-
-    @field_validator("default_profile")
-    @classmethod
-    def validate_profile(cls, v):
-        """Validate profile is one of the defined profiles."""
-        valid_profiles = ["development", "production", "ultra", "godmode", "hybrid"]
-        if v not in valid_profiles:
-            raise ValueError(
-                f"Invalid profile: '{v}'. Must be one of: {', '.join(valid_profiles)}"
-            )
-        return v
 
     def save(self) -> None:
         """
@@ -221,42 +215,9 @@ class GlobalProviderConfig(BaseModel):
         self.anthropic_default_model = None
         self.bedrock_default_model = None
         self.ollama_default_model = None
+        self.gemini_default_model = None
         self.ollama_default_host = "http://localhost:11434"
         logger.info("Reset global config to defaults")
-
-    def get_model_for_provider(self, provider: str) -> Optional[str]:
-        """
-        Get the default model for a specific provider.
-
-        Args:
-            provider: Provider name (anthropic | bedrock | ollama)
-
-        Returns:
-            Default model name/ID if configured, None otherwise
-        """
-        model_map = {
-            "anthropic": self.anthropic_default_model,
-            "bedrock": self.bedrock_default_model,
-            "ollama": self.ollama_default_model,
-        }
-        return model_map.get(provider)
-
-    def set_model_for_provider(self, provider: str, model: str) -> None:
-        """
-        Set the default model for a specific provider.
-
-        Args:
-            provider: Provider name (anthropic | bedrock | ollama)
-            model: Model name/ID to set
-        """
-        if provider == "anthropic":
-            self.anthropic_default_model = model
-        elif provider == "bedrock":
-            self.bedrock_default_model = model
-        elif provider == "ollama":
-            self.ollama_default_model = model
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
 
     @classmethod
     def get_config_path(cls) -> Path:

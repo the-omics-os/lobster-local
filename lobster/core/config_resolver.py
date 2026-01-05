@@ -30,6 +30,7 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
+from lobster.config.constants import VALID_PROVIDERS, VALID_PROFILES
 from lobster.config.global_config import GlobalProviderConfig
 from lobster.config.workspace_config import WorkspaceProviderConfig
 
@@ -76,12 +77,6 @@ class ConfigResolver:
 
     _instance: Optional["ConfigResolver"] = None
     _instance_workspace: Optional[Path] = None
-
-    # Valid providers (extensible via ProviderRegistry)
-    VALID_PROVIDERS = ["anthropic", "bedrock", "ollama"]
-
-    # Valid profiles (kept as-is per user decision)
-    VALID_PROFILES = ["development", "production", "ultra", "godmode", "hybrid"]
 
     def __init__(self, workspace_path: Optional[Path] = None):
         """
@@ -167,12 +162,12 @@ class ConfigResolver:
         """
         # Layer 1: Runtime override (highest priority)
         if runtime_override:
-            if runtime_override in self.VALID_PROVIDERS:
+            if runtime_override in VALID_PROVIDERS:
                 return (runtime_override, "runtime flag --provider")
             else:
                 raise ConfigurationError(
                     f"Invalid provider '{runtime_override}'. "
-                    f"Valid providers: {', '.join(self.VALID_PROVIDERS)}"
+                    f"Valid providers: {', '.join(VALID_PROVIDERS)}"
                 )
 
         # Layer 2: Workspace config
@@ -282,12 +277,12 @@ class ConfigResolver:
         """
         # Layer 1: Runtime override
         if runtime_override:
-            if runtime_override in self.VALID_PROFILES:
+            if runtime_override in VALID_PROFILES:
                 return (runtime_override, "runtime flag --profile")
             else:
                 logger.warning(
                     f"Invalid runtime profile '{runtime_override}', "
-                    f"valid profiles: {', '.join(self.VALID_PROFILES)}"
+                    f"valid profiles: {', '.join(VALID_PROFILES)}"
                 )
 
         # Layer 2: Workspace config

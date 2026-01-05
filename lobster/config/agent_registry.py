@@ -103,6 +103,14 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         handoff_tool_name="handoff_to_visualization_expert_agent",
         handoff_tool_description="Delegate visualization tasks to the visualization expert agent",
     ),
+    "protein_structure_visualization_expert_agent": AgentRegistryConfig(
+        name="protein_structure_visualization_expert_agent",
+        display_name="Protein Structure Visualization Expert",
+        description="Specialized agent for protein structure visualization using PyMOL and ChimeraX",
+        factory_function="lobster.agents.protein_structure_visualization_expert.protein_structure_visualization_expert",
+        handoff_tool_name="handoff_to_protein_structure_visualization_expert_agent",
+        handoff_tool_description="Delegate protein structure visualization tasks to the protein structure visualization expert agent",
+    ),
 }
 
 
@@ -146,6 +154,70 @@ def get_agent_registry_config(agent_name: str) -> Optional[AgentRegistryConfig]:
     return AGENT_REGISTRY.get(agent_name)
 
 
+def get_valid_handoffs() -> Dict[str, set]:
+    """
+    Build a map of valid agent handoffs from the registry.
+
+    Returns a dict mapping agent_name -> set of agents it can hand off to.
+    Used to validate/correct handoff display during parallel tool calls.
+
+    Example:
+        {
+            "supervisor": {"data_expert_agent", "research_agent", ...},
+            "data_expert_agent": {"metadata_assistant"},
+            "research_agent": {"metadata_assistant"},
+            "transcriptomics_expert": {"annotation_expert", "de_analysis_expert"},
+        }
+    """
+    _ensure_plugins_loaded()
+
+    valid_handoffs: Dict[str, set] = {}
+
+    # Build supervisor's valid targets (all supervisor-accessible agents)
+    supervisor_targets = set()
+    for name, config in AGENT_REGISTRY.items():
+        # Check explicit supervisor_accessible flag first
+        if config.supervisor_accessible is True:
+            supervisor_targets.add(name)
+        elif config.supervisor_accessible is False:
+            continue  # Explicitly not accessible
+        else:
+            # Infer: accessible if NOT a child of any other agent
+            is_child = False
+            for other_config in AGENT_REGISTRY.values():
+                if other_config.child_agents and name in other_config.child_agents:
+                    is_child = True
+                    break
+            if not is_child:
+                supervisor_targets.add(name)
+
+    valid_handoffs["supervisor"] = supervisor_targets
+
+    # Build each agent's valid targets from child_agents
+    for name, config in AGENT_REGISTRY.items():
+        if config.child_agents:
+            valid_handoffs[name] = set(config.child_agents)
+        else:
+            valid_handoffs[name] = set()
+
+    return valid_handoffs
+
+
+def is_valid_handoff(from_agent: str, to_agent: str) -> bool:
+    """
+    Check if a handoff from one agent to another is valid.
+
+    Args:
+        from_agent: The agent initiating the handoff
+        to_agent: The agent being handed off to
+
+    Returns:
+        True if the handoff is valid according to the agent hierarchy
+    """
+    valid_handoffs = get_valid_handoffs()
+    return to_agent in valid_handoffs.get(from_agent, set())
+
+
 def import_agent_factory(factory_path: str) -> Callable:
     """Dynamically import an agent factory function."""
     module_path, function_name = factory_path.rsplit(".", 1)
@@ -165,33 +237,36 @@ def _merge_plugin_agents() -> None:
     """
     Discover and merge plugin agents into the registry.
 
-    Called at module load time to incorporate agents from:
-    - lobster-premium: Shared premium features
-    - lobster-custom-*: Customer-specific packages
+    Now delegates to the unified ComponentRegistry which discovers both
+    services and agents via entry points (lobster.services, lobster.agents).
 
-    Plugin agents are only discovered if the corresponding packages
-    are installed and authorized in the user's entitlement.
+    Custom agents from lobster-premium and lobster-custom-* packages are
+    discovered automatically and merged with core agents.
     """
     try:
-        from lobster.core.plugin_loader import discover_plugins
+        from lobster.core.component_registry import component_registry
 
-        plugin_agents = discover_plugins()
-        if plugin_agents:
-            AGENT_REGISTRY.update(plugin_agents)
+        # Trigger component discovery (services + custom agents)
+        component_registry.load_components()
+
+        # Merge custom agents into AGENT_REGISTRY for backward compatibility
+        custom_agents = component_registry.list_custom_agents()
+        if custom_agents:
+            AGENT_REGISTRY.update(custom_agents)
             # Log at debug level to avoid noise during imports
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.debug(f"Merged {len(plugin_agents)} plugin agents into registry")
+            logger.debug(f"Merged {len(custom_agents)} custom agents into registry")
     except ImportError:
-        # plugin_loader not available (shouldn't happen in normal installs)
+        # component_registry not available (shouldn't happen in normal installs)
         pass
     except Exception as e:
-        # Don't let plugin discovery failures break the core system
+        # Don't let component discovery failures break the core system
         import logging
 
         logger = logging.getLogger(__name__)
-        logger.warning(f"Plugin discovery failed: {e}")
+        logger.warning(f"Component registry loading failed: {e}")
 
 
 # Plugin merging is now lazy-loaded via _ensure_plugins_loaded()

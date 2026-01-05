@@ -256,6 +256,7 @@ class BedrockProvider(ILLMProvider):
                 - region_name: AWS region (default: us-east-1)
                 - aws_access_key_id: Override AWS access key
                 - aws_secret_access_key: Override AWS secret key
+                - additional_model_request_fields: Extended thinking config (passed to ChatBedrockConverse)
 
         Returns:
             ChatBedrockConverse: LangChain chat model instance
@@ -271,6 +272,15 @@ class BedrockProvider(ILLMProvider):
             ...     temperature=0.7,
             ...     max_tokens=8192,
             ...     region_name="us-west-2"
+            ... )
+
+            >>> # With extended thinking (AWS Bedrock feature)
+            >>> llm = provider.create_chat_model(
+            ...     "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            ...     temperature=1.0,
+            ...     additional_model_request_fields={
+            ...         "thinking": {"type": "enabled", "budget_tokens": 5000}
+            ...     }
             ... )
         """
         # Import check

@@ -49,21 +49,24 @@ def sanitize_key(key: Any, slash_replacement: str = "__") -> str:
 
 
 def sanitize_value(
-    obj: Any, slash_replacement: str = "__", strict: bool = False
+    obj: Any,
+    slash_replacement: str = "__",
+    strict: bool = False,
+    preserve_numeric_tuples: bool = True
 ) -> Any:
     """
     Sanitize a value for H5AD/HDF5 serialization.
 
     Converts problematic types to H5AD-compatible equivalents:
     - OrderedDict → dict
-    - tuple → list (preserving types)
+    - tuple → numpy array (stringified or numeric based on preserve_numeric_tuples)
     - numpy scalars → Python scalars
     - pandas types → appropriate string representation
     - datetime types → ISO format strings
     - set/frozenset → numpy string array (via list)
     - bool → str (HDF5 requirement)
     - int/float in nested dicts → str (HDF5 requirement for HDF5 groups)
-    - int/float in lists/tuples → preserved as numeric
+    - int/float in lists → preserved as numeric when all items are numeric
     - None → "" (empty string)
     - Path → str
     - list → recursively sanitized list (preserving types when possible)
@@ -77,6 +80,9 @@ def sanitize_value(
         slash_replacement: String to replace '/' in dict keys (default: '__')
         strict: If True, raise ValueError for non-serializable types instead
                 of converting to string (default: False)
+        preserve_numeric_tuples: If True, numeric tuples are preserved as numeric arrays.
+                                 If False, ALL tuples are stringified for maximum H5AD safety.
+                                 (default: True for backward compatibility)
 
     Returns:
         Sanitized object safe for H5AD serialization
@@ -89,10 +95,10 @@ def sanitize_value(
         '/tmp/data.csv'
 
         >>> sanitize_value({"a": (1, 2, 3)})
-        {'a': [1, 2, 3]}
+        {'a': array(['1', '2', '3'], dtype='<U1')}  # tuple → string array
 
         >>> sanitize_value(np.int64(42))
-        42
+        '42'  # numpy scalar → string
 
         >>> sanitize_value({"nested": {"int_val": 42}})
         {'nested': {'int_val': '42'}}  # int stringified in nested dict
@@ -110,19 +116,21 @@ def sanitize_value(
             if isinstance(v, (int, float)) and not isinstance(v, bool):
                 result[sanitized_key] = str(v)
             else:
-                result[sanitized_key] = sanitize_value(v, slash_replacement, strict)
+                result[sanitized_key] = sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples)
         return result
 
-    # tuple → list or numpy array (preserving numeric types when possible)
+    # tuple → numpy array (stringified or numeric based on preserve_numeric_tuples)
     if isinstance(obj, tuple):
-        # Check if all items are numeric (int or float, not bool)
-        all_numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in obj)
-        if all_numeric and len(obj) > 0:
-            # Preserve as numeric numpy array
-            return np.array(obj)
+        if preserve_numeric_tuples:
+            # Preserve numeric tuples as numeric arrays (legacy behavior)
+            if all(isinstance(v, (int, float, np.number)) and not isinstance(v, bool) for v in obj):
+                return np.array(obj)
+            # Mixed or non-numeric tuples → string array
+            sanitized_items = [sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples) for v in obj]
+            return np.array([str(item) for item in sanitized_items], dtype=str)
         else:
-            # Convert to numpy string array for HDF5 compatibility
-            sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in obj]
+            # ALWAYS stringify for maximum H5AD safety
+            sanitized_items = [sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples) for v in obj]
             return np.array([str(item) for item in sanitized_items], dtype=str)
 
     # numpy scalars → strings (CRITICAL for HDF5 compatibility)
@@ -172,7 +180,7 @@ def sanitize_value(
     # HDF5 cannot handle Python sets
     if isinstance(obj, (set, frozenset)):
         sanitized_items = [
-            sanitize_value(v, slash_replacement, strict) for v in sorted(obj, key=str)
+            sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples) for v in sorted(obj, key=str)
         ]
         return np.array([str(item) for item in sanitized_items], dtype=str)
 
@@ -203,7 +211,7 @@ def sanitize_value(
             elif isinstance(v, (int, float)) and not isinstance(v, bool):
                 result[sanitized_key] = str(v)
             else:
-                result[sanitized_key] = sanitize_value(v, slash_replacement, strict)
+                result[sanitized_key] = sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples)
         return result
 
     # int → convert to strings (HDF5 requirement for scalar values)
@@ -223,7 +231,7 @@ def sanitize_value(
             return np.array(obj)
         else:
             # Recursively sanitize all items
-            sanitized_items = [sanitize_value(v, slash_replacement, strict) for v in obj]
+            sanitized_items = [sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples) for v in obj]
             # Convert to numpy string array for HDF5 compatibility
             return np.array([str(item) for item in sanitized_items], dtype=str)
 
@@ -264,7 +272,10 @@ def sanitize_value(
 
 
 def sanitize_dict(
-    data: Dict[str, Any], slash_replacement: str = "__", strict: bool = False
+    data: Dict[str, Any],
+    slash_replacement: str = "__",
+    strict: bool = False,
+    preserve_numeric_tuples: bool = True
 ) -> Dict[str, Any]:
     """
     Sanitize all keys and values in a dictionary for H5AD serialization.
@@ -276,16 +287,19 @@ def sanitize_dict(
         data: Dictionary to sanitize
         slash_replacement: String to replace '/' in keys (default: '__')
         strict: If True, raise errors for non-serializable types
+        preserve_numeric_tuples: If True, numeric tuples are preserved as numeric arrays.
+                                 If False, ALL tuples are stringified for maximum H5AD safety.
+                                 (default: True for backward compatibility)
 
     Returns:
         Sanitized dictionary
 
     Examples:
         >>> sanitize_dict({"file/path": Path("/tmp/data.csv"), "count": (1, 2, 3)})
-        {'file__path': '/tmp/data.csv', 'count': [1, 2, 3]}
+        {'file__path': '/tmp/data.csv', 'count': array([1, 2, 3])}
     """
     return {
-        sanitize_key(k, slash_replacement): sanitize_value(v, slash_replacement, strict)
+        sanitize_key(k, slash_replacement): sanitize_value(v, slash_replacement, strict, preserve_numeric_tuples)
         for k, v in data.items()
     }
 

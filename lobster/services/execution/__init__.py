@@ -16,17 +16,12 @@ from lobster.services.execution.execution_context_builder import (
 )
 
 # SDK Delegation Service (premium feature - graceful fallback if unavailable)
-try:
-    from lobster.services.execution.sdk_delegation_service import (
-        SDKDelegationError,
-        SDKDelegationService,
-    )
-    HAS_SDK_DELEGATION = True
-except ImportError:
-    # Premium feature not available in open-core distribution
-    SDKDelegationService = None
-    SDKDelegationError = Exception  # Fallback base class
-    HAS_SDK_DELEGATION = False
+from lobster.core.component_registry import component_registry
+
+SDKDelegationService = component_registry.get_service('sdk_delegation')
+HAS_SDK_DELEGATION = SDKDelegationService is not None
+# For the exception class, use registry or fallback to base Exception
+SDKDelegationError = component_registry.get_service('sdk_delegation_error') or Exception
 
 __all__ = [
     "CustomCodeExecutionService",

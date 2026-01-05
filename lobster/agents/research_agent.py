@@ -35,14 +35,10 @@ from lobster.services.metadata.metadata_validation_service import (
 )
 
 # Premium feature - graceful fallback if unavailable
-try:
-    from lobster.services.orchestration.publication_processing_service import (
-        PublicationProcessingService,
-    )
-    HAS_PUBLICATION_PROCESSING = True
-except ImportError:
-    PublicationProcessingService = None
-    HAS_PUBLICATION_PROCESSING = False
+from lobster.core.component_registry import component_registry
+
+PublicationProcessingService = component_registry.get_service('publication_processing')
+HAS_PUBLICATION_PROCESSING = PublicationProcessingService is not None
 
 # Phase 1: New providers for two-tier access
 from lobster.tools.providers.abstract_provider import AbstractProvider
@@ -1950,8 +1946,8 @@ Could not extract content for: {identifier}
             process_publication_entry("pub_queue_abc123", status_override="failed",
                                     error_message="Content not accessible")
 
-            # STATUS OVERRIDE MODE: Administrative correction
-            process_publication_entry("pub_queue_abc123", status_override="completed")
+            # STATUS OVERRIDE MODE: Mark as paywalled (when extraction is blocked)
+            process_publication_entry("pub_queue_abc123", status_override="paywalled")
         """
         if not HAS_PUBLICATION_PROCESSING:
             return "Publication processing requires a premium subscription. Visit https://omics-os.com/pricing"
@@ -1966,7 +1962,9 @@ Could not extract content for: {identifier}
                     "metadata_extracted",
                     "metadata_enriched",
                     "handoff_ready",
-                    "completed",
+                    # NOTE: "completed" is intentionally excluded
+                    # ONLY metadata_assistant can set COMPLETED status after harmonization
+                    # research_agent should NEVER mark entries as complete
                     "failed",
                     "paywalled",
                 ]
@@ -2051,7 +2049,7 @@ Could not extract content for: {identifier}
             status_filter: Queue status to target (default: "pending").
                           Options: pending, extracting, completed, handoff_ready, etc.
                           Ignored if force_reprocess=True.
-            max_entries: Maximum entries to process (default: 5, 0 = all matching).
+            max_entries: Maximum entries to process (0 = all matching).
             extraction_tasks: Comma-separated tasks (default: full 7-step pipeline).
                             Individual tasks:
                             - "resolve_identifiers": DOI → PMID resolution via NCBI ID Converter
@@ -2067,8 +2065,8 @@ Could not extract content for: {identifier}
                             - "metadata,identifiers": Quick text mining only
                             - "ncbi_enrich,fetch_sra_metadata": NCBI-only enrichment
             parallel_workers: Number of parallel workers (default: 1 = sequential).
-                             Use 2-3 for faster processing of large queues.
-                             Higher values (>3) risk NCBI API rate limit issues.
+                             Use 2-8 for faster processing of large queues.
+                             Higher values (>5) risk NCBI API rate limit issues.
             force_reprocess: Reprocess ALL entries regardless of current status (default: False).
                             When True, ignores status_filter and processes all queue entries.
                             Use for: batch re-enrichment with updated logic, comprehensive reprocessing.
@@ -2153,10 +2151,6 @@ Could not extract content for: {identifier}
     # Create workspace tools using shared factories (Phase 7+: deduplication complete)
     write_to_workspace = create_write_to_workspace_tool(data_manager)
     get_content_from_workspace = create_get_content_from_workspace_tool(data_manager)
-
-    # NOTE: The inline write_to_workspace definition has been moved to
-    # lobster/tools/workspace_tool.py as create_write_to_workspace_tool()
-    # for sharing between research_agent and metadata_assistant.
 
     # ============================================================
     # Helper Methods: Strategy Mapping

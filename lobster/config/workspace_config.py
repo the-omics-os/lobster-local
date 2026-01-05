@@ -32,7 +32,9 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field
+
+from lobster.config.base_config import ProviderConfigBase
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +42,12 @@ logger = logging.getLogger(__name__)
 CONFIG_FILE_NAME = "provider_config.json"
 
 
-class WorkspaceProviderConfig(BaseModel):
+class WorkspaceProviderConfig(ProviderConfigBase):
     """
     Workspace-scoped provider and model configuration.
 
     Attributes:
-        global_provider: LLM provider for all agents (bedrock | anthropic | ollama)
+        global_provider: LLM provider for all agents (bedrock | anthropic | ollama | gemini)
         anthropic_model: Anthropic model to use (e.g., "claude-sonnet-4-20250514")
         bedrock_model: Bedrock model ID to use (e.g., "anthropic.claude-3-5-sonnet-20241022-v2:0")
         ollama_model: Ollama model to use (e.g., "llama3:70b-instruct")
@@ -65,9 +67,17 @@ class WorkspaceProviderConfig(BaseModel):
         >>> config.ollama_model = "llama3:70b-instruct"
     """
 
+    @property
+    def provider_field_name(self) -> str:
+        return "global_provider"
+
+    @property
+    def model_field_suffix(self) -> str:
+        return "_model"
+
     global_provider: Optional[str] = Field(
         None,
-        description="Global LLM provider (bedrock | anthropic | ollama)"
+        description="Global LLM provider (bedrock | anthropic | ollama | gemini)"
     )
 
     # Per-provider model settings
@@ -84,6 +94,11 @@ class WorkspaceProviderConfig(BaseModel):
     ollama_model: Optional[str] = Field(
         None,
         description="Ollama model (e.g., 'llama3:70b-instruct', 'mixtral:8x7b')"
+    )
+
+    gemini_model: Optional[str] = Field(
+        None,
+        description="Gemini model (e.g., 'gemini-3-pro-preview', 'gemini-3-flash-preview')"
     )
 
     ollama_host: str = Field(
@@ -105,40 +120,6 @@ class WorkspaceProviderConfig(BaseModel):
         "production",
         description="Agent configuration profile (development | production | ultra | godmode | hybrid)"
     )
-
-    @field_validator("global_provider")
-    @classmethod
-    def validate_provider(cls, v):
-        """Validate provider is one of the supported types."""
-        if v and v not in ["bedrock", "anthropic", "ollama"]:
-            raise ValueError(
-                f"Invalid provider: '{v}'. Must be one of: bedrock, anthropic, ollama"
-            )
-        return v
-
-    @field_validator("profile")
-    @classmethod
-    def validate_profile(cls, v):
-        """Validate profile is one of the defined profiles."""
-        valid_profiles = ["development", "production", "ultra", "godmode", "hybrid"]
-        if v not in valid_profiles:
-            raise ValueError(
-                f"Invalid profile: '{v}'. Must be one of: {', '.join(valid_profiles)}"
-            )
-        return v
-
-    @field_validator("per_agent_providers")
-    @classmethod
-    def validate_agent_providers(cls, v):
-        """Validate per-agent provider overrides."""
-        valid_providers = ["bedrock", "anthropic", "ollama"]
-        for agent, provider in v.items():
-            if provider not in valid_providers:
-                raise ValueError(
-                    f"Invalid provider '{provider}' for agent '{agent}'. "
-                    f"Must be one of: {', '.join(valid_providers)}"
-                )
-        return v
 
     def save(self, workspace_path: Path) -> None:
         """
@@ -248,51 +229,9 @@ class WorkspaceProviderConfig(BaseModel):
         self.anthropic_model = None
         self.bedrock_model = None
         self.ollama_model = None
+        self.gemini_model = None
         self.ollama_host = "http://localhost:11434"
         self.per_agent_providers = {}
         self.per_agent_models = {}
         self.profile = "production"
         logger.info("Reset workspace config to defaults")
-
-    def get_model_for_provider(self, provider: str) -> Optional[str]:
-        """
-        Get the configured model for a specific provider.
-
-        Args:
-            provider: Provider name (anthropic | bedrock | ollama)
-
-        Returns:
-            Model name/ID if configured, None otherwise
-
-        Example:
-            >>> config = WorkspaceProviderConfig(anthropic_model="claude-sonnet-4-20250514")
-            >>> config.get_model_for_provider("anthropic")
-            'claude-sonnet-4-20250514'
-        """
-        model_map = {
-            "anthropic": self.anthropic_model,
-            "bedrock": self.bedrock_model,
-            "ollama": self.ollama_model,
-        }
-        return model_map.get(provider)
-
-    def set_model_for_provider(self, provider: str, model: str) -> None:
-        """
-        Set the model for a specific provider.
-
-        Args:
-            provider: Provider name (anthropic | bedrock | ollama)
-            model: Model name/ID to set
-
-        Example:
-            >>> config = WorkspaceProviderConfig()
-            >>> config.set_model_for_provider("anthropic", "claude-sonnet-4-20250514")
-        """
-        if provider == "anthropic":
-            self.anthropic_model = model
-        elif provider == "bedrock":
-            self.bedrock_model = model
-        elif provider == "ollama":
-            self.ollama_model = model
-        else:
-            raise ValueError(f"Unknown provider: {provider}")
