@@ -142,7 +142,10 @@ class LobsterAgentConfigurator:
         ),
     }
 
-    # Default agents configuration - modify this to add/remove agents dynamically
+    # Default agents configuration (FREE tier only)
+    # Premium agents (metadata_assistant, proteomics_expert, machine_learning_expert_agent,
+    # protein_structure_visualization_expert_agent, custom_feature_agent) are loaded via
+    # component_registry from lobster-premium or lobster-custom-* packages.
     DEFAULT_AGENTS = [
         "assistant",
         "supervisor",
@@ -150,16 +153,9 @@ class LobsterAgentConfigurator:
         "transcriptomics_expert",  # Parent: handles QC, clustering, orchestrates sub-agents
         "annotation_expert",  # Sub-agent: cell type annotation
         "de_analysis_expert",  # Sub-agent: differential expression
-        # "method_expert_agent",  # DEPRECATED v2.2+: merged into research_agent
         "research_agent",
-        "metadata_assistant",  # Metadata operations and cross-dataset mapping
         "data_expert_agent",
-        "machine_learning_expert_agent",
         "visualization_expert_agent",
-        # Unified proteomics agent (v2.6+)
-        "proteomics_expert",  # Parent: handles MS and affinity proteomics
-        "custom_feature_agent",  # META-AGENT for code generation
-        "protein_structure_visualization_expert_agent",  # Protein structure visualization
     ]
 
     # Thinking configuration presets
@@ -171,88 +167,55 @@ class LobsterAgentConfigurator:
         "deep": ThinkingConfig(enabled=True, budget_tokens=10000),
     }
 
-    # Pre-defined testing profiles - 3 profiles
+    # Pre-defined testing profiles (FREE tier agents only)
+    # Premium agents get their model configs from custom packages via component_registry.
     TESTING_PROFILES = {
         "development": {
-            # Supervisor and expert agents use Claude 4 Sonnet
             "supervisor": "claude-4-5-haiku",
-            # Assistant uses Claude 3.7 Sonnet
             "assistant": "claude-4-5-haiku",
             # Unified transcriptomics agents (v2.5+)
             "transcriptomics_expert": "claude-4-5-haiku",
             "annotation_expert": "claude-4-5-haiku",
             "de_analysis_expert": "claude-4-5-haiku",
-            # "method_expert_agent": "claude-4-sonnet",  # DEPRECATED v2.2+
             "data_expert_agent": "claude-4-5-haiku",
-            "machine_learning_expert_agent": "claude-4-5-haiku",
             "research_agent": "claude-4-5-haiku",
-            "metadata_assistant": "claude-4-5-haiku",
-            # Unified proteomics agent (v2.6+)
-            "proteomics_expert": "claude-4-5-haiku",
             "visualization_expert_agent": "claude-4-5-haiku",
-            "protein_structure_visualization_expert_agent": "claude-4-5-haiku",
-            "custom_feature_agent": "claude-4-5-sonnet",  # Use Sonnet for code generation
             "thinking": {},  # No thinking in development mode for faster testing
         },
         "production": {
-            # Supervisor uses Claude 4.5 Sonnet
             "supervisor": "claude-4-5-sonnet",
-            # Assistant uses Claude 3.7 Sonnet
             "assistant": "claude-4-sonnet",
             # Unified transcriptomics agents (v2.5+)
             "transcriptomics_expert": "claude-4-sonnet",
             "annotation_expert": "claude-4-sonnet",
             "de_analysis_expert": "claude-4-sonnet",
-            # "method_expert_agent": "claude-4-sonnet",  # DEPRECATED v2.2+
             "data_expert_agent": "claude-4-sonnet",
-            "machine_learning_expert_agent": "claude-4-sonnet",
             "research_agent": "claude-4-sonnet",
-            "metadata_assistant": "claude-4-sonnet",
-            # Unified proteomics agent (v2.6+)
-            "proteomics_expert": "claude-4-sonnet",
             "visualization_expert_agent": "claude-4-sonnet",
-            "protein_structure_visualization_expert_agent": "claude-4-sonnet",
-            "custom_feature_agent": "claude-4-5-sonnet",  # Use Sonnet 4.5 for code generation
             "thinking": {},  # No thinking configured for production
         },
         "ultra": {
-            # All agents including supervisor and assistant use Claude 4.5 Sonnet
             "supervisor": "claude-4-5-sonnet",
             "assistant": "claude-4-5-sonnet",
             # Unified transcriptomics agents (v2.5+)
             "transcriptomics_expert": "claude-4-5-sonnet",
             "annotation_expert": "claude-4-5-sonnet",
             "de_analysis_expert": "claude-4-5-sonnet",
-            # "method_expert_agent": "claude-4-5-sonnet",  # DEPRECATED v2.2+
             "data_expert_agent": "claude-4-5-sonnet",
-            "machine_learning_expert_agent": "claude-4-5-sonnet",
             "research_agent": "claude-4-5-sonnet",
-            "metadata_assistant": "claude-4-5-sonnet",
-            # Unified proteomics agent (v2.6+)
-            "proteomics_expert": "claude-4-5-sonnet",
             "visualization_expert_agent": "claude-4-5-sonnet",
-            "protein_structure_visualization_expert_agent": "claude-4-5-sonnet",
-            "custom_feature_agent": "claude-4-5-sonnet",  # Use Sonnet 4.5 for code generation
             "thinking": {},  # No thinking configured for ultra
         },
         "godmode": {
-            # All agents including supervisor and assistant use Claude 4.5 Sonnet
             "supervisor": "claude-4-1-opus",
             "assistant": "claude-4-5-sonnet",
             # Unified transcriptomics agents (v2.5+)
             "transcriptomics_expert": "claude-4-5-sonnet",
             "annotation_expert": "claude-4-5-sonnet",
             "de_analysis_expert": "claude-4-5-sonnet",
-            # "method_expert_agent": "claude-4-5-sonnet",  # DEPRECATED v2.2+
             "data_expert_agent": "claude-4-5-sonnet",
-            "machine_learning_expert_agent": "claude-4-5-sonnet",
             "research_agent": "claude-4-5-sonnet",
-            "metadata_assistant": "claude-4-5-sonnet",
-            # Unified proteomics agent (v2.6+)
-            "proteomics_expert": "claude-4-5-sonnet",
             "visualization_expert_agent": "claude-4-5-sonnet",
-            "protein_structure_visualization_expert_agent": "claude-4-5-sonnet",
-            "custom_feature_agent": "claude-4-1-opus",  # Use Opus 4.1 for best code generation
             "thinking": {},  # No thinking configured for godmode
         },
     }

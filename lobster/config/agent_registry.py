@@ -89,12 +89,16 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         supervisor_accessible=False,  # Only via transcriptomics_expert
     ),
     # =========================================================================
-    # FREE TIER AGENTS ONLY (visualization + protein structure)
+    # VISUALIZATION AGENTS
     # =========================================================================
-    # Premium agents (metadata_assistant, machine_learning_expert, proteomics_expert)
-    # are loaded via plugin_loader from:
+    # visualization_expert_agent: FREE tier (synced to lobster-local)
+    #
+    # Premium agents are loaded via plugin_loader (component_registry) from:
     # - lobster-premium: Shared premium features (future)
     # - lobster-custom-*: Customer-specific packages
+    #
+    # Premium visualization agents (NOT in this registry):
+    # - protein_structure_visualization_expert_agent
     "visualization_expert_agent": AgentRegistryConfig(
         name="visualization_expert_agent",
         display_name="Visualization Expert",
@@ -103,20 +107,7 @@ AGENT_REGISTRY: Dict[str, AgentRegistryConfig] = {
         handoff_tool_name="handoff_to_visualization_expert_agent",
         handoff_tool_description="Delegate visualization tasks to the visualization expert agent",
     ),
-    "protein_structure_visualization_expert_agent": AgentRegistryConfig(
-        name="protein_structure_visualization_expert_agent",
-        display_name="Protein Structure Visualization Expert",
-        description="Specialized agent for protein structure visualization using PyMOL and ChimeraX",
-        factory_function="lobster.agents.protein_structure_visualization_expert.protein_structure_visualization_expert",
-        handoff_tool_name="handoff_to_protein_structure_visualization_expert_agent",
-        handoff_tool_description="Delegate protein structure visualization tasks to the protein structure visualization expert agent",
-    ),
 }
-
-
-# Additional agent names that might appear in chains but aren't worker agents
-# SYSTEM_AGENTS = ['supervisor', 'transcriptomics_expert', 'method_agent', 'clarify_with_user']
-
 
 def _ensure_plugins_loaded() -> None:
     """
