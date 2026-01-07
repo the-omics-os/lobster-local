@@ -178,6 +178,7 @@ class LobsterAgentConfigurator:
             "annotation_expert": "claude-4-5-haiku",
             "de_analysis_expert": "claude-4-5-haiku",
             "data_expert_agent": "claude-4-5-haiku",
+            "data_expert_assistant": "claude-4-5-haiku",  # LLM-based helper for data_expert
             "research_agent": "claude-4-5-haiku",
             "visualization_expert_agent": "claude-4-5-haiku",
             "thinking": {},  # No thinking in development mode for faster testing
@@ -190,6 +191,7 @@ class LobsterAgentConfigurator:
             "annotation_expert": "claude-4-sonnet",
             "de_analysis_expert": "claude-4-sonnet",
             "data_expert_agent": "claude-4-sonnet",
+            "data_expert_assistant": "claude-4-sonnet",  # LLM-based helper for data_expert
             "research_agent": "claude-4-sonnet",
             "visualization_expert_agent": "claude-4-sonnet",
             "thinking": {},  # No thinking configured for production
@@ -202,6 +204,7 @@ class LobsterAgentConfigurator:
             "annotation_expert": "claude-4-5-sonnet",
             "de_analysis_expert": "claude-4-5-sonnet",
             "data_expert_agent": "claude-4-5-sonnet",
+            "data_expert_assistant": "claude-4-5-sonnet",  # LLM-based helper for data_expert
             "research_agent": "claude-4-5-sonnet",
             "visualization_expert_agent": "claude-4-5-sonnet",
             "thinking": {},  # No thinking configured for ultra
@@ -214,6 +217,7 @@ class LobsterAgentConfigurator:
             "annotation_expert": "claude-4-5-sonnet",
             "de_analysis_expert": "claude-4-5-sonnet",
             "data_expert_agent": "claude-4-5-sonnet",
+            "data_expert_assistant": "claude-4-5-sonnet",  # LLM-based helper for data_expert
             "research_agent": "claude-4-5-sonnet",
             "visualization_expert_agent": "claude-4-5-sonnet",
             "thinking": {},  # No thinking configured for godmode

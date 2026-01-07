@@ -129,7 +129,7 @@ class AgentClient(BaseClient):
             manual_model_params=manual_model_params,  # Placeholder for future manual model params
             provider_override=provider_override,  # Pass provider override to graph
             model_override=model_override,  # Pass model override to graph
-            workspace_path=PathLib(workspace_path) if workspace_path else None,  # Pass workspace for config resolution
+            workspace_path=self.workspace_path,  # Use resolved workspace path (always set)
         )
 
         # Conversation state
@@ -2138,14 +2138,13 @@ class AgentClient(BaseClient):
 
             # Recreate graph with new provider
             try:
-                from pathlib import Path as PathLib
                 self.graph = create_bioinformatics_graph(
                     data_manager=self.data_manager,
                     checkpointer=self.checkpointer,
                     store=self.store,
                     callback_handler=self.callbacks,
                     provider_override=provider_name,
-                    workspace_path=PathLib(self.workspace_path) if self.workspace_path else None,
+                    workspace_path=self.workspace_path,  # Use resolved workspace path (always set)
                 )
 
                 logger.info(f"Successfully switched to provider: {provider_name}")
@@ -2156,7 +2155,6 @@ class AgentClient(BaseClient):
                 }
             except Exception as e:
                 # Rollback on failure
-                from pathlib import Path as PathLib
                 self.provider_override = old_provider
                 self.graph = create_bioinformatics_graph(
                     data_manager=self.data_manager,
@@ -2164,7 +2162,7 @@ class AgentClient(BaseClient):
                     store=self.store,
                     callback_handler=self.callbacks,
                     provider_override=old_provider,
-                    workspace_path=PathLib(self.workspace_path) if self.workspace_path else None,
+                    workspace_path=self.workspace_path,  # Use resolved workspace path (always set)
                 )
                 return {
                     "success": False,

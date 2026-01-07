@@ -3413,6 +3413,21 @@ def init(
         "--cloud-endpoint",
         help="Custom cloud endpoint URL (optional)",
     ),
+    skip_ssl_test: bool = typer.Option(
+        False,
+        "--skip-ssl-test",
+        help="Skip SSL connectivity test during init",
+    ),
+    ssl_verify: Optional[bool] = typer.Option(
+        None,
+        "--ssl-verify/--no-ssl-verify",
+        help="Enable/disable SSL verification (non-interactive mode)",
+    ),
+    ssl_cert_path: Optional[str] = typer.Option(
+        None,
+        "--ssl-cert-path",
+        help="Path to custom CA certificate bundle",
+    ),
 ):
     """
     Initialize Lobster AI configuration by creating a .env file with API keys.
@@ -3599,6 +3614,46 @@ def init(
             console.print(
                 "[green]✓ Cloud API key configured (premium tier enabled)[/green]"
             )
+
+        # Handle SSL configuration from flags
+        if ssl_verify is not None or ssl_cert_path:
+            env_lines.append(f"\n# SSL/HTTPS configuration")
+            if ssl_verify is False:
+                env_lines.append(f"LOBSTER_SSL_VERIFY=false")
+                console.print(
+                    "[yellow]⚠️  SSL verification disabled (--no-ssl-verify)[/yellow]"
+                )
+            if ssl_cert_path:
+                env_lines.append(f"LOBSTER_SSL_CERT_PATH={ssl_cert_path}")
+                console.print(f"[green]✓ SSL cert path: {ssl_cert_path}[/green]")
+
+        # Test SSL connectivity (non-interactive)
+        if not skip_ssl_test and ssl_verify is not False:
+            from lobster.config.ssl_setup import test_ssl_connectivity
+
+            console.print("\n[dim]Testing connectivity to NCBI databases...[/dim]")
+            success, is_ssl_error, error_msg = test_ssl_connectivity(timeout=10)
+
+            if is_ssl_error:
+                console.print(
+                    f"\n[yellow]⚠️  SSL Certificate Issue Detected[/yellow]"
+                )
+                console.print(f"[dim]Error: {error_msg[:80]}...[/dim]\n")
+                console.print(
+                    "[yellow]To fix this in non-interactive mode, use one of:[/yellow]"
+                )
+                console.print("  --no-ssl-verify           # Disable SSL (testing only)")
+                console.print("  --ssl-cert-path=/path/to/ca.pem  # Use corporate CA")
+                console.print()
+                console.print(
+                    "[dim]Continuing with setup - you may encounter errors later.[/dim]"
+                )
+            elif success:
+                console.print("[green]✓ NCBI connectivity: OK[/green]")
+            else:
+                # Non-SSL network error
+                console.print(f"[yellow]⚠️  Network test failed: {error_msg[:60]}[/yellow]")
+                console.print("[dim]You can still continue (may work later)[/dim]")
 
         # Write .env file
         try:
@@ -4050,6 +4105,32 @@ def init(
                         default="https://api.lobster.omics-os.com",
                     )
                     env_lines.append(f"LOBSTER_ENDPOINT={endpoint.strip()}")
+
+        # Test SSL connectivity (interactive mode)
+        if not skip_ssl_test:
+            from lobster.config.ssl_setup import (
+                test_ssl_connectivity,
+                prompt_ssl_fix,
+            )
+
+            console.print()
+            console.print("[dim]Testing connectivity to NCBI databases...[/dim]")
+            success, is_ssl_error, error_msg = test_ssl_connectivity(timeout=10)
+
+            if is_ssl_error:
+                # Prompt user for SSL fix
+                ssl_env_line = prompt_ssl_fix(console, error_msg)
+                if ssl_env_line:
+                    env_lines.append(f"\n# SSL/HTTPS configuration")
+                    env_lines.append(ssl_env_line)
+            elif success:
+                console.print("[green]✓ NCBI connectivity: OK[/green]")
+            else:
+                # Non-SSL network error
+                console.print(
+                    f"[yellow]⚠️  Network test failed (non-SSL): {error_msg[:60]}[/yellow]"
+                )
+                console.print("[dim]You can still continue (may work later)[/dim]")
 
         # Write .env file
         with open(env_path, "w") as f:
@@ -4995,7 +5076,18 @@ when they are started by agents or analysis workflows.
                 return None
 
         elif subcommand == "list":
-            return queue_list(client, output)
+            # Determine queue type from additional parameters
+            queue_type = "publication"  # default
+            if len(parts) > 2:
+                if parts[2] == "download":
+                    queue_type = "download"
+                elif parts[2] == "publication":
+                    queue_type = "publication"
+                else:
+                    console.print(f"[yellow]Unknown queue type: {parts[2]}[/yellow]")
+                    console.print("[cyan]Usage: /queue list [download|publication][/cyan]")
+                    return None
+            return queue_list(client, output, queue_type=queue_type)
 
         elif subcommand == "clear":
             # Determine queue type from additional parameters

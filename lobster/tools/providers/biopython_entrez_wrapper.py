@@ -15,23 +15,105 @@ Key differences from raw urllib + xmltodict:
 ✅ Bio.Entrez parses XML to dicts natively
 ✅ Bio.Entrez respects NCBI API keys
 ✅ Bio.Entrez has built-in retry logic
+
+SSL Configuration:
+- Respects LOBSTER_SSL_VERIFY environment variable
+- Supports custom certificate bundles via LOBSTER_SSL_CERT_PATH
+- For corporate proxies with SSL inspection, set LOBSTER_SSL_VERIFY=false
 """
 
 import logging
+import ssl
 from typing import Any, Dict, List, Optional
 
 from lobster.config.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Track if SSL context has been configured globally
+_ssl_context_configured = False
+
 # Lazy import Bio.Entrez (only when needed)
 _Bio_Entrez = None
 
 
+def _configure_ssl_context() -> None:
+    """
+    Configure global SSL context for Bio.Entrez (urllib) based on settings.
+
+    Bio.Entrez uses urllib internally which doesn't accept custom SSL contexts.
+    This function configures the global SSL defaults to respect LOBSTER_SSL_VERIFY
+    and LOBSTER_SSL_CERT_PATH settings.
+
+    Note: This is a global change affecting all urllib HTTPS connections.
+    It's done once per process and is idempotent.
+    """
+    global _ssl_context_configured
+
+    if _ssl_context_configured:
+        return
+
+    settings = get_settings()
+
+    # If SSL verification is disabled, configure unverified context
+    if not settings.SSL_VERIFY:
+        logger.warning(
+            "SSL certificate verification DISABLED for NCBI requests. "
+            "Set LOBSTER_SSL_VERIFY=true to re-enable (recommended)."
+        )
+        # Store original for potential restoration
+        ssl._create_default_https_context = ssl._create_unverified_context
+        _ssl_context_configured = True
+        return
+
+    # If custom cert path is specified, configure it
+    if settings.SSL_CERT_PATH:
+        import os
+
+        if os.path.exists(settings.SSL_CERT_PATH):
+            logger.info(f"Using custom SSL certificate bundle: {settings.SSL_CERT_PATH}")
+            # Create a custom context factory that uses the cert file
+            original_context = ssl._create_default_https_context
+
+            def _create_custom_context():
+                ctx = original_context()
+                ctx.load_verify_locations(cafile=settings.SSL_CERT_PATH)
+                return ctx
+
+            ssl._create_default_https_context = _create_custom_context
+            _ssl_context_configured = True
+            return
+        else:
+            logger.warning(
+                f"Custom SSL cert path not found: {settings.SSL_CERT_PATH}. "
+                "Using default certificates."
+            )
+
+    # Try to use certifi for better certificate handling
+    try:
+        import certifi
+
+        original_context = ssl._create_default_https_context
+
+        def _create_certifi_context():
+            ctx = ssl.create_default_context(cafile=certifi.where())
+            return ctx
+
+        ssl._create_default_https_context = _create_certifi_context
+        logger.debug("Configured SSL context with certifi certificate bundle")
+    except ImportError:
+        logger.debug("certifi not available, using system certificates")
+
+    _ssl_context_configured = True
+
+
 def _get_bio_entrez():
-    """Lazy import of Bio.Entrez."""
+    """Lazy import of Bio.Entrez with SSL context configuration."""
     global _Bio_Entrez
     if _Bio_Entrez is None:
+        # Configure SSL before loading Bio.Entrez
+        _configure_ssl_context()
+
         try:
             from Bio import Entrez
 
@@ -42,6 +124,41 @@ def _get_bio_entrez():
                 "Biopython not installed. Install with: pip install biopython"
             ) from e
     return _Bio_Entrez
+
+
+def _is_ssl_error(error: Exception) -> bool:
+    """Check if an exception is an SSL certificate verification error."""
+    error_str = str(error).lower()
+    return (
+        "certificate_verify_failed" in error_str
+        or "ssl: certificate_verify_failed" in error_str
+        or "self-signed certificate" in error_str
+        or "certificate verify failed" in error_str
+    )
+
+
+def _get_ssl_error_guidance() -> str:
+    """Get helpful guidance for SSL certificate errors."""
+    return (
+        "\n\n"
+        "╔══════════════════════════════════════════════════════════════╗\n"
+        "║     SSL CERTIFICATE ERROR - TROUBLESHOOTING OPTIONS         ║\n"
+        "╠══════════════════════════════════════════════════════════════╣\n"
+        "║ This error typically occurs with corporate proxies or       ║\n"
+        "║ network security appliances that inspect HTTPS traffic.     ║\n"
+        "║                                                              ║\n"
+        "║ SOLUTIONS (in order of preference):                         ║\n"
+        "║                                                              ║\n"
+        "║ 1. Install certifi (recommended):                           ║\n"
+        "║    pip install --upgrade certifi                            ║\n"
+        "║                                                              ║\n"
+        "║ 2. Use your corporate CA certificate:                       ║\n"
+        "║    export LOBSTER_SSL_CERT_PATH=/path/to/corporate-ca.pem   ║\n"
+        "║                                                              ║\n"
+        "║ 3. Disable SSL verification (TESTING ONLY - NOT SECURE):    ║\n"
+        "║    export LOBSTER_SSL_VERIFY=false                          ║\n"
+        "╚══════════════════════════════════════════════════════════════╝"
+    )
 
 
 class BioPythonEntrezWrapper:
@@ -146,7 +263,10 @@ class BioPythonEntrezWrapper:
             return result
 
         except Exception as e:
-            logger.error(f"Bio.Entrez.esearch error: {e}")
+            if _is_ssl_error(e):
+                logger.error(f"Bio.Entrez.esearch SSL error: {e}{_get_ssl_error_guidance()}")
+            else:
+                logger.error(f"Bio.Entrez.esearch error: {e}")
             raise
 
     def esummary(self, db: str, id: str, **kwargs) -> List[Dict[str, Any]]:
@@ -190,7 +310,10 @@ class BioPythonEntrezWrapper:
             return result
 
         except Exception as e:
-            logger.error(f"Bio.Entrez.esummary error: {e}")
+            if _is_ssl_error(e):
+                logger.error(f"Bio.Entrez.esummary SSL error: {e}{_get_ssl_error_guidance()}")
+            else:
+                logger.error(f"Bio.Entrez.esummary error: {e}")
             raise
 
     def efetch(
@@ -235,7 +358,10 @@ class BioPythonEntrezWrapper:
             return content
 
         except Exception as e:
-            logger.error(f"Bio.Entrez.efetch error: {e}")
+            if _is_ssl_error(e):
+                logger.error(f"Bio.Entrez.efetch SSL error: {e}{_get_ssl_error_guidance()}")
+            else:
+                logger.error(f"Bio.Entrez.efetch error: {e}")
             raise
 
     def elink(self, dbfrom: str, db: str, id: str, **kwargs) -> List[Dict[str, Any]]:
@@ -277,7 +403,10 @@ class BioPythonEntrezWrapper:
             return result
 
         except Exception as e:
-            logger.error(f"Bio.Entrez.elink error: {e}")
+            if _is_ssl_error(e):
+                logger.error(f"Bio.Entrez.elink SSL error: {e}{_get_ssl_error_guidance()}")
+            else:
+                logger.error(f"Bio.Entrez.elink error: {e}")
             raise
 
 

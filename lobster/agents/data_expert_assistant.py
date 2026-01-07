@@ -195,8 +195,11 @@ class DataExpertAssistant:
     def llm(self):
         """Lazy initialization of LLM using provider-agnostic factory."""
         if self._llm is None:
+            from lobster.core.workspace import resolve_workspace
+
             llm_params = self.settings.get_agent_llm_params("data_expert_assistant")
-            self._llm = create_llm("data_expert_assistant", llm_params)
+            workspace_path = resolve_workspace(explicit_path=None, create=False)
+            self._llm = create_llm("data_expert_assistant", llm_params, workspace_path=workspace_path)
         return self._llm
 
     def _format_supplementary_files_for_llm(

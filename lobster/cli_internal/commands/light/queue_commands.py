@@ -6,7 +6,7 @@ All commands accept OutputAdapter for UI-agnostic rendering.
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 import shutil
 
 if TYPE_CHECKING:
@@ -14,10 +14,92 @@ if TYPE_CHECKING:
 
 from lobster.cli_internal.commands.output_adapter import OutputAdapter
 
+# Import status display configurations (single source of truth)
+from lobster.core.schemas.download_queue import DOWNLOAD_STATUS_DISPLAY
+from lobster.core.schemas.publication_queue import PUBLICATION_STATUS_DISPLAY
+
 
 class QueueFileTypeNotSupported(Exception):
     """Raised when unsupported file type is provided to queue load."""
     pass
+
+
+def _get_download_queue_stats(client: "AgentClient") -> Tuple[Dict, int]:
+    """
+    Get download queue statistics.
+
+    Args:
+        client: AgentClient instance
+
+    Returns:
+        Tuple of (stats dict, total count)
+    """
+    if not hasattr(client, "data_manager") or client.data_manager is None:
+        return {}, 0
+
+    queue = client.data_manager.download_queue
+    if queue is None:
+        return {}, 0
+
+    stats = queue.get_statistics()
+    return stats, stats.get("total_entries", 0)
+
+
+def _get_publication_queue_stats(client: "AgentClient") -> Tuple[Dict, int]:
+    """
+    Get publication queue statistics.
+
+    Args:
+        client: AgentClient instance
+
+    Returns:
+        Tuple of (stats dict, total count)
+    """
+    if client.publication_queue is None:
+        return {}, 0
+
+    stats = client.publication_queue.get_statistics()
+    return stats, stats.get("total_entries", 0)
+
+
+def _build_status_table(
+    by_status: Dict[str, int],
+    display_config: Dict[str, tuple],
+    total: int,
+) -> Dict:
+    """
+    Build table data for queue status display.
+
+    Args:
+        by_status: Status -> count mapping
+        display_config: Status -> (icon, style) mapping
+        total: Total entry count
+
+    Returns:
+        Table data dict for OutputAdapter.print_table()
+    """
+    table_data = {
+        "title": None,
+        "columns": [
+            {"name": "", "style": "white", "width": 3},
+            {"name": "Status", "style": "cyan"},
+            {"name": "Count", "style": "white", "justify": "right"},
+        ],
+        "rows": [],
+    }
+
+    rows = []
+    for status_name, count in by_status.items():
+        # Get display icon from config
+        icon, style = display_config.get(status_name, ("?", "dim"))
+        display_name = status_name.replace("_", " ").title()
+        rows.append([f"[{style}]{icon}[/{style}]", display_name, str(count)])
+
+    # Add total row
+    rows.append(["", "[bold]Total[/bold]", f"[bold]{total}[/bold]"])
+    table_data["rows"] = rows
+
+    return table_data
 
 
 def show_queue_status(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
@@ -31,50 +113,74 @@ def show_queue_status(client: "AgentClient", output: OutputAdapter) -> Optional[
     Returns:
         Summary string for conversation history, or None
     """
-    if client.publication_queue is None:
-        output.print("[yellow]Publication queue not initialized[/yellow]", style="warning")
+    # Get statistics from both queues
+    dl_stats, dl_total = _get_download_queue_stats(client)
+    pub_stats, pub_total = _get_publication_queue_stats(client)
+
+    # Check if any queue is available
+    has_download_queue = bool(dl_stats)
+    has_publication_queue = bool(pub_stats)
+
+    if not has_download_queue and not has_publication_queue:
+        output.print("[yellow]No queues initialized[/yellow]", style="warning")
         return None
 
-    stats = client.publication_queue.get_statistics()
+    output.print("\n[bold cyan]📋 Queue Status[/bold cyan]", style="info")
 
-    output.print("\n[bold cyan]📋 Queue Status[/bold cyan]\n", style="info")
+    # === Download Queue Section ===
+    output.print("\n[bold white]⬇️  Download Queue[/bold white]", style="info")
 
-    # Create status table
-    table_data = {
-        "title": None,
-        "columns": [
-            {"name": "Status", "style": "cyan"},
-            {"name": "Count", "style": "white", "justify": "right"},
-        ],
-        "rows": [],
-    }
+    if has_download_queue:
+        dl_by_status = dl_stats.get("by_status", {})
+        dl_table = _build_status_table(dl_by_status, DOWNLOAD_STATUS_DISPLAY, dl_total)
+        output.print_table(dl_table)
 
-    by_status = stats.get("by_status", {})
-    total_entries = stats.get("total_entries", 0)
+        # Show database breakdown if available
+        by_database = dl_stats.get("by_database", {})
+        if by_database:
+            db_items = [f"{db}: {cnt}" for db, cnt in by_database.items() if cnt > 0]
+            if db_items:
+                output.print(f"  [dim]Databases: {', '.join(db_items)}[/dim]")
+    else:
+        output.print("  [dim]Not initialized[/dim]")
 
-    # Build rows dynamically from all statuses (shows all 8 PublicationStatus values)
-    rows = []
-    for status_name, count in by_status.items():
-        # Capitalize for display
-        display_name = status_name.replace("_", " ").title()
-        rows.append([display_name, str(count)])
+    # === Publication Queue Section ===
+    output.print("\n[bold white]📚 Publication Queue[/bold white]", style="info")
 
-    # Add total row
-    rows.append(["[bold]Total[/bold]", f"[bold]{total_entries}[/bold]"])
+    if has_publication_queue:
+        pub_by_status = pub_stats.get("by_status", {})
+        pub_table = _build_status_table(
+            pub_by_status, PUBLICATION_STATUS_DISPLAY, pub_total
+        )
+        output.print_table(pub_table)
 
-    table_data["rows"] = rows
+        # Show extraction level breakdown if available
+        by_level = pub_stats.get("by_extraction_level", {})
+        if by_level:
+            level_items = [f"{lvl}: {cnt}" for lvl, cnt in by_level.items() if cnt > 0]
+            if level_items:
+                output.print(f"  [dim]Extraction levels: {', '.join(level_items)}[/dim]")
 
-    output.print_table(table_data)
+        # Show identifiers extracted count
+        ids_extracted = pub_stats.get("identifiers_extracted", 0)
+        if ids_extracted > 0:
+            output.print(f"  [dim]Identifiers extracted: {ids_extracted}[/dim]")
+    else:
+        output.print("  [dim]Not initialized[/dim]")
 
+    # === Commands Help ===
     output.print("\n[cyan]💡 Commands:[/cyan]", style="info")
-    output.print("  • [white]/queue load <file>[/white] - Load file into queue")
-    output.print("  • [white]/queue list[/white] - List queued items")
+    output.print("  • [white]/queue load <file>[/white] - Load .ris file into publication queue")
+    output.print("  • [white]/queue list[/white] - List publication queue items")
+    output.print("  • [white]/queue list download[/white] - List download queue items")
     output.print("  • [white]/queue clear[/white] - Clear publication queue")
     output.print("  • [white]/queue clear download[/white] - Clear download queue")
     output.print("  • [white]/queue clear all[/white] - Clear all queues")
-    output.print("  • [white]/queue export[/white] - Export queue to workspace")
+    output.print("  • [white]/queue export[/white] - Export publication queue to workspace")
 
-    return f"Queue status: {total_entries} total items"
+    # Build summary
+    grand_total = dl_total + pub_total
+    return f"Queue status: {dl_total} downloads, {pub_total} publications ({grand_total} total)"
 
 
 def queue_load_file(
@@ -210,7 +316,29 @@ def queue_load_file(
         )
 
 
-def queue_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
+def queue_list(
+    client: "AgentClient", output: OutputAdapter, queue_type: str = "publication"
+) -> Optional[str]:
+    """
+    List items in the specified queue.
+
+    Args:
+        client: AgentClient instance
+        output: OutputAdapter for rendering
+        queue_type: "publication" or "download"
+
+    Returns:
+        Summary string for conversation history, or None
+    """
+    if queue_type == "download":
+        return _queue_list_download(client, output)
+    else:
+        return _queue_list_publication(client, output)
+
+
+def _queue_list_publication(
+    client: "AgentClient", output: OutputAdapter
+) -> Optional[str]:
     """
     List items in the publication queue.
 
@@ -222,21 +350,23 @@ def queue_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
         Summary string for conversation history, or None
     """
     if client.publication_queue is None:
-        output.print("[yellow]Publication queue not initialized[/yellow]", style="warning")
+        output.print(
+            "[yellow]Publication queue not initialized[/yellow]", style="warning"
+        )
         return None
 
     entries = client.publication_queue.list_entries()
 
     if not entries:
-        output.print("[yellow]Queue is empty[/yellow]", style="warning")
-        return "Queue is empty"
+        output.print("[yellow]📚 Publication queue is empty[/yellow]", style="warning")
+        return "Publication queue is empty"
 
     # Limit display to first 20 entries
     display_entries = entries[:20]
     total_count = len(entries)
 
     output.print(
-        f"\n[bold cyan]📋 Queue Items ({len(display_entries)} of {total_count} shown)[/bold cyan]\n",
+        f"\n[bold cyan]📚 Publication Queue ({len(display_entries)} of {total_count} shown)[/bold cyan]\n",
         style="info",
     )
 
@@ -262,16 +392,116 @@ def queue_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
         status = (
             entry.status.value if hasattr(entry.status, "value") else str(entry.status)
         )
+        # Get icon for status
+        icon, style = PUBLICATION_STATUS_DISPLAY.get(
+            status, ("?", "dim")
+        )
+        status_display = f"[{style}]{icon}[/{style}] {status}"
         identifier = entry.pmid or entry.doi or "N/A"
 
-        table_data["rows"].append([str(i), title, year, status, identifier])
+        table_data["rows"].append([str(i), title, year, status_display, identifier])
 
     output.print_table(table_data)
 
     if total_count > 20:
         output.print(f"\n[dim]... and {total_count - 20} more items[/dim]")
 
-    return f"Listed {len(display_entries)} of {total_count} items from queue"
+    return f"Listed {len(display_entries)} of {total_count} publication queue items"
+
+
+def _queue_list_download(
+    client: "AgentClient", output: OutputAdapter
+) -> Optional[str]:
+    """
+    List items in the download queue.
+
+    Args:
+        client: AgentClient instance
+        output: OutputAdapter for rendering
+
+    Returns:
+        Summary string for conversation history, or None
+    """
+    if not hasattr(client, "data_manager") or client.data_manager is None:
+        output.print(
+            "[yellow]Data manager not initialized[/yellow]", style="warning"
+        )
+        return None
+
+    download_queue = client.data_manager.download_queue
+    if download_queue is None:
+        output.print(
+            "[yellow]Download queue not initialized[/yellow]", style="warning"
+        )
+        return None
+
+    entries = download_queue.list_entries()
+
+    if not entries:
+        output.print("[yellow]⬇️  Download queue is empty[/yellow]", style="warning")
+        return "Download queue is empty"
+
+    # Limit display to first 20 entries
+    display_entries = entries[:20]
+    total_count = len(entries)
+
+    output.print(
+        f"\n[bold cyan]⬇️  Download Queue ({len(display_entries)} of {total_count} shown)[/bold cyan]\n",
+        style="info",
+    )
+
+    table_data = {
+        "title": None,
+        "columns": [
+            {"name": "#", "style": "dim", "width": 4},
+            {"name": "Accession", "style": "cyan", "width": 14},
+            {"name": "Database", "style": "white", "width": 10},
+            {"name": "Status", "style": "yellow", "width": 14},
+            {"name": "Strategy", "style": "dim", "width": 15},
+            {"name": "Priority", "style": "dim", "width": 8},
+        ],
+        "rows": [],
+    }
+
+    for i, entry in enumerate(display_entries, 1):
+        accession = entry.accession_id or "N/A"
+        database = entry.database or "N/A"
+        status = (
+            entry.status.value if hasattr(entry.status, "value") else str(entry.status)
+        )
+        # Get icon for status
+        icon, style = DOWNLOAD_STATUS_DISPLAY.get(status, ("?", "dim"))
+        status_display = f"[{style}]{icon}[/{style}] {status}"
+
+        # Get strategy info
+        strategy = "N/A"
+        if entry.strategy_config and entry.strategy_config.strategy_name:
+            strategy = entry.strategy_config.strategy_name
+
+        priority = str(entry.priority) if entry.priority else "5"
+
+        table_data["rows"].append(
+            [str(i), accession, database, status_display, strategy, priority]
+        )
+
+    output.print_table(table_data)
+
+    if total_count > 20:
+        output.print(f"\n[dim]... and {total_count - 20} more items[/dim]")
+
+    # Show summary by status
+    stats = download_queue.get_statistics()
+    by_status = stats.get("by_status", {})
+    status_summary = []
+    for status_name, count in by_status.items():
+        if count > 0:
+            icon, style = DOWNLOAD_STATUS_DISPLAY.get(status_name, ("?", "dim"))
+            status_summary.append(f"[{style}]{icon}[/{style}] {status_name}: {count}")
+
+    if status_summary:
+        output.print(f"\n[dim]Summary: {' | '.join(status_summary)}[/dim]")
+
+    return f"Listed {len(display_entries)} of {total_count} download queue items"
 
 
 def queue_clear(
