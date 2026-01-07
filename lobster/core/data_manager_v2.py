@@ -1052,6 +1052,10 @@ class DataManagerV2:
                 "data": str(self.data_dir),
                 "exports": str(self.exports_dir),
                 "cache": str(self.cache_dir),
+                "literature_cache": str(self.literature_cache_dir),
+                "metadata": str(self.workspace_path / "metadata"),
+                "notebooks": str(self.workspace_path / "notebooks"),
+                "queues": str(self._queues_dir),
             },
         }
 

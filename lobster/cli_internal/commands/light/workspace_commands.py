@@ -521,6 +521,40 @@ def workspace_remove(
         return None
 
 
+def _get_directory_stats(dir_path: str) -> tuple:
+    """
+    Get file count and total size for a directory.
+
+    Args:
+        dir_path: Path to directory
+
+    Returns:
+        Tuple of (file_count, total_size_str, exists)
+    """
+    path = Path(dir_path)
+    if not path.exists():
+        return 0, "-", False
+
+    try:
+        files = list(path.rglob("*"))
+        file_count = sum(1 for f in files if f.is_file())
+        total_size = sum(f.stat().st_size for f in files if f.is_file())
+
+        # Format size
+        if total_size < 1024:
+            size_str = f"{total_size} B"
+        elif total_size < 1024 * 1024:
+            size_str = f"{total_size / 1024:.1f} KB"
+        elif total_size < 1024 * 1024 * 1024:
+            size_str = f"{total_size / (1024 * 1024):.1f} MB"
+        else:
+            size_str = f"{total_size / (1024 * 1024 * 1024):.2f} GB"
+
+        return file_count, size_str, True
+    except Exception:
+        return 0, "-", True
+
+
 def workspace_status(
     client: "AgentClient",
     output: OutputAdapter
@@ -535,82 +569,131 @@ def workspace_status(
     Returns:
         Summary string for conversation history, or None
     """
-    output.print("[bold red]🏗️  Workspace Information[/bold red]\n", style="info")
-
     # Check if using DataManagerV2
     workspace_status_dict = {}
     if hasattr(client.data_manager, "get_workspace_status"):
         workspace_status_dict = client.data_manager.get_workspace_status()
 
-    # Main workspace info table
-    workspace_table_data = {
-        "title": "🏗️ Workspace Status",
-        "columns": [
-            {"name": "Property", "style": "bold grey93"},
-            {"name": "Value", "style": "white"},
-        ],
-        "border_style": "red",
-        "show_header": True,
-        "rows": [
-            ["Workspace Path", workspace_status_dict.get("workspace_path", "N/A")],
-            ["Modalities Loaded", str(workspace_status_dict.get("modalities_loaded", 0))],
-            ["Registered Backends", str(len(workspace_status_dict.get("registered_backends", [])))],
-            ["Registered Adapters", str(len(workspace_status_dict.get("registered_adapters", [])))],
-            ["Default Backend", workspace_status_dict.get("default_backend", "N/A")],
-            [
-                "Provenance Enabled",
-                "✓" if workspace_status_dict.get("provenance_enabled") else "✗"
-            ],
-            [
-                "MuData Available",
-                "✓" if workspace_status_dict.get("mudata_available") else "✗"
-            ],
-        ]
-    }
+    workspace_path = workspace_status_dict.get("workspace_path", "N/A")
 
-    output.print_table(workspace_table_data)
+    # Header with workspace path
+    output.print("\n[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]", style="info")
+    output.print("[bold white]                            🏗️  WORKSPACE STATUS[/bold white]", style="info")
+    output.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n", style="info")
 
-    # Show directories
+    # Workspace path prominently displayed
+    output.print(f"[bold white]📍 Location:[/bold white] [grey74]{workspace_path}[/grey74]\n", style="info")
+
+    # Quick stats row
+    modalities_count = workspace_status_dict.get("modalities_loaded", 0)
+    provenance = "✓ Enabled" if workspace_status_dict.get("provenance_enabled") else "✗ Disabled"
+    mudata = "✓ Available" if workspace_status_dict.get("mudata_available") else "✗ Not installed"
+
+    output.print(f"[bold white]📊 Quick Stats:[/bold white]  Modalities: [cyan]{modalities_count}[/cyan]  │  Provenance: [green]{provenance}[/green]  │  MuData: {mudata}", style="info")
+
+    # Directories section with enhanced display
     if workspace_status_dict.get("directories"):
         dirs = workspace_status_dict["directories"]
-        output.print("\n[bold white]📁 Directories:[/bold white]", style="info")
+
+        output.print("\n[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]", style="info")
+        output.print("[bold white]                              📁 DIRECTORIES[/bold white]", style="info")
+        output.print("[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]\n", style="info")
+
+        # Define icons for each directory type
+        dir_icons = {
+            "data": "💾",
+            "exports": "📤",
+            "cache": "🗄️",
+            "literature_cache": "📚",
+            "metadata": "🏷️",
+            "notebooks": "📓",
+            "queues": "📋",
+        }
+
+        # Create directory table with stats
+        dir_table_data = {
+            "title": "",
+            "columns": [
+                {"name": "Directory", "style": "bold white"},
+                {"name": "Files", "style": "cyan", "justify": "right"},
+                {"name": "Size", "style": "green", "justify": "right"},
+                {"name": "Path", "style": "grey70"},
+            ],
+            "border_style": "dim cyan",
+            "show_header": True,
+            "rows": []
+        }
+
         for dir_type, path in dirs.items():
-            output.print(f"  • {dir_type.title()}: [grey74]{path}[/grey74]", style="info")
+            file_count, size_str, exists = _get_directory_stats(path)
+            icon = dir_icons.get(dir_type, "📁")
 
-    # Show loaded modalities
-    if workspace_status_dict.get("modality_names"):
-        output.print("\n[bold white]🧬 Loaded Modalities:[/bold white]", style="info")
-        for modality in workspace_status_dict["modality_names"]:
-            output.print(f"  • {modality}", style="info")
+            # Format display name
+            display_name = dir_type.replace("_", " ").title()
 
-    # Show available backends and adapters
-    output.print("\n[bold white]🔧 Available Backends:[/bold white]", style="info")
-    for backend in workspace_status_dict.get("registered_backends", []):
-        output.print(f"  • {backend}", style="info")
+            # Truncate path for display
+            truncated_path = truncate_middle(path, 45)
 
-    output.print("\n[bold white]🔌 Available Adapters:[/bold white]", style="info")
-    for adapter in workspace_status_dict.get("registered_adapters", []):
-        output.print(f"  • {adapter}", style="info")
+            # Status indicator
+            if not exists:
+                status = "[dim red](not created)[/dim red]"
+                truncated_path = f"{truncated_path} {status}"
 
-    # Show detailed modality information (similar to /modalities command)
+            dir_table_data["rows"].append([
+                f"{icon} {display_name}",
+                str(file_count) if exists else "-",
+                size_str,
+                truncated_path
+            ])
+
+        output.print_table(dir_table_data)
+
+    # Loaded modalities section
+    modality_names = workspace_status_dict.get("modality_names", [])
+    if modality_names:
+        output.print("\n[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]", style="info")
+        output.print("[bold white]                           🧬 LOADED MODALITIES[/bold white]", style="info")
+        output.print("[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]\n", style="info")
+
+        for modality in modality_names:
+            output.print(f"  [green]●[/green] {modality}", style="info")
+    else:
+        output.print("\n[dim white]🧬 No modalities currently loaded[/dim white]", style="info")
+
+    # System capabilities (collapsed view)
+    output.print("\n[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]", style="info")
+    output.print("[bold white]                           🔧 SYSTEM CAPABILITIES[/bold white]", style="info")
+    output.print("[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]\n", style="info")
+
+    backends = workspace_status_dict.get("registered_backends", [])
+    adapters = workspace_status_dict.get("registered_adapters", [])
+
+    output.print(f"[bold white]Backends ({len(backends)}):[/bold white] {', '.join(backends) if backends else 'None'}", style="info")
+    output.print(f"[bold white]Adapters ({len(adapters)}):[/bold white] {', '.join(adapters[:5]) if adapters else 'None'}", style="info")
+    if len(adapters) > 5:
+        output.print(f"           [grey50]... and {len(adapters) - 5} more[/grey50]", style="info")
+
+    # Show detailed modality information if modalities are loaded
     if hasattr(client.data_manager, "list_modalities"):
         modalities = client.data_manager.list_modalities()
 
         if modalities:
-            output.print("\n[bold red]🧬 Modality Details[/bold red]\n", style="info")
+            output.print("\n[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]", style="info")
+            output.print("[bold white]                          🔬 MODALITY DETAILS[/bold white]", style="info")
+            output.print("[bold cyan]─────────────────────────────────────────────────────────────────────────────[/bold cyan]\n", style="info")
 
             for modality_name in modalities:
                 try:
                     adata = client.data_manager.get_modality(modality_name)
 
-                    # Create modality detail table
+                    # Create modality detail table with consistent styling
                     modality_table_data = {
                         "title": f"🧬 {modality_name}",
                         "columns": [
                             {"name": "Property", "style": "bold grey93"},
                             {"name": "Value", "style": "white"},
                         ],
-                        "border_style": "cyan",
+                        "border_style": "dim cyan",
                         "show_header": False,
                         "rows": []
                     }
@@ -618,7 +701,7 @@ def workspace_status(
                     # Shape
                     modality_table_data["rows"].append([
                         "Shape",
-                        f"{adata.n_obs} obs × {adata.n_vars} vars"
+                        f"[cyan]{adata.n_obs:,}[/cyan] obs × [cyan]{adata.n_vars:,}[/cyan] vars"
                     ])
 
                     # Show obs columns
@@ -626,7 +709,7 @@ def workspace_status(
                     if obs_cols:
                         cols_preview = ", ".join(obs_cols[:5])
                         if len(obs_cols) > 5:
-                            cols_preview += f" ... (+{len(obs_cols)-5} more)"
+                            cols_preview += f" [grey50]... (+{len(obs_cols)-5} more)[/grey50]"
                         modality_table_data["rows"].append(["Obs Columns", cols_preview])
 
                     # Show var columns
@@ -634,30 +717,30 @@ def workspace_status(
                     if var_cols:
                         var_preview = ", ".join(var_cols[:5])
                         if len(var_cols) > 5:
-                            var_preview += f" ... (+{len(var_cols)-5} more)"
+                            var_preview += f" [grey50]... (+{len(var_cols)-5} more)[/grey50]"
                         modality_table_data["rows"].append(["Var Columns", var_preview])
 
                     # Show layers
                     if adata.layers:
                         layers_str = ", ".join(list(adata.layers.keys()))
-                        modality_table_data["rows"].append(["Layers", layers_str])
+                        modality_table_data["rows"].append(["Layers", f"[green]{layers_str}[/green]"])
 
                     # Show obsm
                     if adata.obsm:
                         obsm_str = ", ".join(list(adata.obsm.keys()))
-                        modality_table_data["rows"].append(["Obsm", obsm_str])
+                        modality_table_data["rows"].append(["Obsm", f"[yellow]{obsm_str}[/yellow]"])
 
                     # Show varm
                     if hasattr(adata, 'varm') and adata.varm:
                         varm_str = ", ".join(list(adata.varm.keys()))
-                        modality_table_data["rows"].append(["Varm", varm_str])
+                        modality_table_data["rows"].append(["Varm", f"[yellow]{varm_str}[/yellow]"])
 
                     # Show some uns info
                     if adata.uns:
                         uns_keys = list(adata.uns.keys())[:5]
                         uns_str = ", ".join(uns_keys)
                         if len(adata.uns) > 5:
-                            uns_str += f" ... (+{len(adata.uns)-5} more)"
+                            uns_str += f" [grey50]... (+{len(adata.uns)-5} more)[/grey50]"
                         modality_table_data["rows"].append(["Uns Keys", uns_str])
 
                     output.print_table(modality_table_data)
@@ -665,15 +748,11 @@ def workspace_status(
 
                 except Exception as e:
                     output.print(
-                        f"[red]Error accessing modality {modality_name}: {e}[/red]",
+                        f"  [red]✗ Error accessing {modality_name}: {e}[/red]",
                         style="error"
                     )
-        else:
-            output.print("[grey50]No modalities loaded[/grey50]", style="info")
-    else:
-        output.print(
-            "[grey50]Modality information not available (using legacy DataManager)[/grey50]",
-            style="info"
-        )
+
+    # Footer
+    output.print("[bold cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold cyan]\n", style="info")
 
     return "Displayed workspace status and information"

@@ -616,11 +616,21 @@ class TranscriptomicsAdapter(BaseAdapter):
                 )
 
         # Gene-level metrics
+        # Note: Boolean columns may be stored as Categorical in H5AD files,
+        # so we convert to bool before summing to avoid "Categorical does not support sum" errors
         if "mt" in adata.var.columns:
-            metrics["mt_genes"] = int((adata.var["mt"]).sum())
+            mt_col = adata.var["mt"]
+            if hasattr(mt_col, "cat"):  # Categorical column
+                metrics["mt_genes"] = int((mt_col == True).sum())  # noqa: E712
+            else:
+                metrics["mt_genes"] = int(mt_col.astype(bool).sum())
 
         if "ribo" in adata.var.columns:
-            metrics["ribo_genes"] = int((adata.var["ribo"]).sum())
+            ribo_col = adata.var["ribo"]
+            if hasattr(ribo_col, "cat"):  # Categorical column
+                metrics["ribo_genes"] = int((ribo_col == True).sum())  # noqa: E712
+            else:
+                metrics["ribo_genes"] = int(ribo_col.astype(bool).sum())
 
         if "n_cells_by_counts" in adata.var.columns:
             metrics["mean_cells_per_gene"] = float(
