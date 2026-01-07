@@ -3359,10 +3359,65 @@ def _create_workspace_config(config_dict: Dict[str, Any], workspace_path: Path) 
         console.print(f"[dim yellow]⚠️  Note: Workspace config creation skipped ({e})[/dim yellow]")
 
 
+def _create_global_config(config_dict: Dict[str, Any]) -> Path:
+    """
+    Create global user-level provider configuration.
+
+    Saves to ~/.config/lobster/providers.json for use across all workspaces.
+
+    Args:
+        config_dict: Structured configuration dictionary with keys:
+            - provider: str - LLM provider ("anthropic", "bedrock", "ollama", "gemini")
+            - profile: Optional[str] - Agent profile (for Anthropic/Bedrock)
+            - ollama_model: Optional[str] - Ollama model name
+            - ollama_host: Optional[str] - Ollama server URL
+
+    Returns:
+        Path: Path to the created global config file
+
+    Raises:
+        IOError: If global config creation fails
+    """
+    from lobster.config.global_config import GlobalProviderConfig
+
+    try:
+        global_config = GlobalProviderConfig()
+
+        # Set provider (required)
+        if "provider" in config_dict:
+            global_config.default_provider = config_dict["provider"]
+
+        # Set profile (for Anthropic/Bedrock)
+        if "profile" in config_dict:
+            global_config.default_profile = config_dict["profile"]
+
+        # Set Ollama-specific settings
+        if "ollama_model" in config_dict:
+            global_config.ollama_default_model = config_dict["ollama_model"]
+
+        if "ollama_host" in config_dict:
+            global_config.ollama_default_host = config_dict["ollama_host"]
+
+        global_config.save()
+        config_path = GlobalProviderConfig.get_config_path()
+        logger.info(f"Created global config at {config_path}")
+        return config_path
+
+    except Exception as e:
+        logger.error(f"Failed to create global config: {e}")
+        raise
+
+
 @app.command()
 def init(
+    global_config: bool = typer.Option(
+        False,
+        "--global",
+        "-g",
+        help="Save configuration globally (~/.config/lobster/) for all workspaces",
+    ),
     force: bool = typer.Option(
-        False, "--force", "-f", help="Overwrite existing .env file"
+        False, "--force", "-f", help="Overwrite existing configuration"
     ),
     non_interactive: bool = typer.Option(
         False,
@@ -3430,7 +3485,10 @@ def init(
     ),
 ):
     """
-    Initialize Lobster AI configuration by creating a .env file with API keys.
+    Initialize Lobster AI configuration.
+
+    By default, creates workspace-specific configuration (.env + provider_config.json).
+    Use --global to set user-wide defaults that apply to all workspaces.
 
     Interactive mode (default):
       Guides you through provider selection and API key entry with masked input.
@@ -3438,11 +3496,20 @@ def init(
     Non-interactive mode (CI/CD):
       Provide API keys via command-line flags for automated deployment.
 
+    Global mode (--global):
+      Saves provider settings to ~/.config/lobster/providers.json.
+      External workspaces without their own config will use these defaults.
+      API keys should still be set via environment variables or workspace .env.
+
     Examples:
-      lobster init                                    # Interactive setup
+      lobster init                                    # Interactive setup (workspace)
+      lobster init --global                           # Interactive setup (global defaults)
       lobster init --force                            # Reconfigure (overwrite existing)
+      lobster init --global --force                   # Reconfigure global defaults
       lobster init --non-interactive \\
         --anthropic-key=sk-ant-xxx                   # CI/CD: Claude API (default: production)
+      lobster init --non-interactive --global \\
+        --use-ollama                                 # CI/CD: Set Ollama as global default
       lobster init --non-interactive \\
         --anthropic-key=sk-ant-xxx \\
         --profile=development                        # CI/CD: Claude with dev profile
@@ -3459,35 +3526,61 @@ def init(
         --cloud-key=cloud_xxx                        # CI/CD: With cloud access
     """
     import datetime
+    from lobster.config.global_config import GlobalProviderConfig
 
-    env_path = Path.cwd() / ".env"
+    # Determine paths based on global vs workspace mode
+    if global_config:
+        config_path = GlobalProviderConfig.get_config_path()
+        env_path = None  # Global mode doesn't create .env (use env vars for API keys)
+    else:
+        config_path = Path.cwd() / ".lobster_workspace" / "provider_config.json"
+        env_path = Path.cwd() / ".env"
 
-    # Check if .env already exists
-    if env_path.exists() and not force:
+    # Check if configuration already exists
+    config_exists = config_path.exists() if global_config else (env_path and env_path.exists())
+    if config_exists and not force:
         console.print()
-        console.print(
-            Panel.fit(
-                "[bold yellow]⚠️  Configuration Already Exists[/bold yellow]\n\n"
-                f"A .env file already exists at:\n[cyan]{env_path}[/cyan]\n\n"
-                "To reconfigure, use:\n"
-                f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
-                "Or edit the file manually.",
-                border_style="yellow",
-                padding=(1, 2),
+        if global_config:
+            console.print(
+                Panel.fit(
+                    "[bold yellow]⚠️  Global Configuration Already Exists[/bold yellow]\n\n"
+                    f"A global config already exists at:\n[cyan]{config_path}[/cyan]\n\n"
+                    "To reconfigure, use:\n"
+                    f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --global --force[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
+                    "Or edit the file manually.",
+                    border_style="yellow",
+                    padding=(1, 2),
+                )
             )
-        )
+        else:
+            console.print(
+                Panel.fit(
+                    "[bold yellow]⚠️  Configuration Already Exists[/bold yellow]\n\n"
+                    f"A .env file already exists at:\n[cyan]{env_path}[/cyan]\n\n"
+                    "To reconfigure, use:\n"
+                    f"[bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}]\n\n"
+                    "Or edit the file manually.",
+                    border_style="yellow",
+                    padding=(1, 2),
+                )
+            )
         console.print()
-        console.print(f"[dim]Configuration file: {env_path}[/dim]")
+        console.print(f"[dim]Configuration file: {config_path if global_config else env_path}[/dim]")
         raise typer.Exit(0)
 
-    # If force flag and file exists, create backup and confirm
+    # If force flag and config exists, create backup and confirm
     backup_path = None
-    if env_path.exists() and force:
+    if config_exists and force:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = Path.cwd() / f".env.backup.{timestamp}"
+        if global_config:
+            backup_path = config_path.parent / f"providers.json.backup.{timestamp}"
+            backup_source = config_path
+        else:
+            backup_path = Path.cwd() / f".env.backup.{timestamp}"
+            backup_source = env_path
 
         if not non_interactive:
-            console.print(f"[yellow]⚠️  Existing .env will be backed up to:[/yellow]")
+            console.print(f"[yellow]⚠️  Existing config will be backed up to:[/yellow]")
             console.print(f"[yellow]   {backup_path}[/yellow]")
             console.print()
             if not Confirm.ask("Continue with reconfiguration?", default=False):
@@ -3496,7 +3589,7 @@ def init(
 
         # Create backup
         try:
-            shutil.copy2(env_path, backup_path)
+            shutil.copy2(backup_source, backup_path)
         except Exception as e:
             console.print(f"[red]❌ Failed to create backup: {str(e)}[/red]")
             raise typer.Exit(1)
@@ -3655,38 +3748,67 @@ def init(
                 console.print(f"[yellow]⚠️  Network test failed: {error_msg[:60]}[/yellow]")
                 console.print("[dim]You can still continue (may work later)[/dim]")
 
-        # Write .env file
-        try:
-            with open(env_path, "w") as f:
-                f.write("\n".join(env_lines))
-                f.write("\n")
-        except Exception as e:
-            console.print(f"[red]❌ Failed to write .env file: {str(e)}[/red]")
-            raise typer.Exit(1)
+        # Save configuration based on mode
+        if global_config:
+            # Global mode: only save provider config, no .env
+            try:
+                global_config_path = _create_global_config(config_dict)
+                console.print(f"[green]✅ Global configuration saved:[/green]")
+                console.print(f"  • Config: {global_config_path}")
+                if backup_path:
+                    console.print(f"  • Backup: {backup_path}")
+                console.print()
+                console.print("[dim]Note: API keys should be set via environment variables[/dim]")
+                console.print("[dim]  export ANTHROPIC_API_KEY=sk-ant-xxx[/dim]")
+            except Exception as e:
+                console.print(f"[red]❌ Failed to write global config: {str(e)}[/red]")
+                raise typer.Exit(1)
+        else:
+            # Workspace mode: write both .env and workspace config
+            try:
+                with open(env_path, "w") as f:
+                    f.write("\n".join(env_lines))
+                    f.write("\n")
+            except Exception as e:
+                console.print(f"[red]❌ Failed to write .env file: {str(e)}[/red]")
+                raise typer.Exit(1)
 
-        # Create workspace config from structured config_dict
-        workspace_path = Path.cwd() / ".lobster_workspace"
-        _create_workspace_config(config_dict, workspace_path)
+            # Create workspace config from structured config_dict
+            workspace_path = Path.cwd() / ".lobster_workspace"
+            _create_workspace_config(config_dict, workspace_path)
 
-        # Success message for non-interactive
-        console.print(f"[green]✅ Configuration saved:[/green]")
-        console.print(f"  • Environment: {env_path}")
-        console.print(f"  • Workspace:   {workspace_path / 'provider_config.json'}")
-        if backup_path:
-            console.print(f"  • Backup:      {backup_path}")
+            # Success message for non-interactive
+            console.print(f"[green]✅ Configuration saved:[/green]")
+            console.print(f"  • Environment: {env_path}")
+            console.print(f"  • Workspace:   {workspace_path / 'provider_config.json'}")
+            if backup_path:
+                console.print(f"  • Backup:      {backup_path}")
         raise typer.Exit(0)
 
     # Interactive mode: run wizard
     console.print("\n")
-    console.print(
-        Panel.fit(
-            "[bold white]🦞 Welcome to Lobster AI![/bold white]\n\n"
-            "Let's set up your API keys.\n"
-            "This wizard will create a [cyan].env[/cyan] file in your current directory.",
-            border_style="bright_blue",
-            padding=(1, 2),
+    if global_config:
+        console.print(
+            Panel.fit(
+                "[bold white]🦞 Welcome to Lobster AI![/bold white]\n\n"
+                "Let's set up your [cyan]global[/cyan] provider defaults.\n"
+                f"This wizard will create [cyan]{config_path}[/cyan]\n\n"
+                "[dim]These defaults apply to all workspaces without their own config.[/dim]\n"
+                "[dim]API keys should be set via environment variables.[/dim]",
+                border_style="bright_blue",
+                padding=(1, 2),
+            )
         )
-    )
+    else:
+        console.print(
+            Panel.fit(
+                "[bold white]🦞 Welcome to Lobster AI![/bold white]\n\n"
+                "Let's set up your API keys.\n"
+                "This wizard will create a [cyan].env[/cyan] file in your current directory.",
+                border_style="bright_blue",
+                padding=(1, 2),
+            )
+        )
     console.print()
 
     try:
@@ -4132,24 +4254,40 @@ def init(
                 )
                 console.print("[dim]You can still continue (may work later)[/dim]")
 
-        # Write .env file
-        with open(env_path, "w") as f:
-            f.write("\n".join(env_lines))
-            f.write("\n")
-
-        # Create workspace config from structured config_dict
-        workspace_path = Path.cwd() / ".lobster_workspace"
-        _create_workspace_config(config_dict, workspace_path)
-
+        # Save configuration based on mode
         console.print()
-        success_message = f"[bold green]✅ Configuration saved![/bold green]\n\n"
-        success_message += f"Environment: [cyan]{env_path}[/cyan]\n"
-        success_message += f"Workspace:   [cyan]{workspace_path / 'provider_config.json'}[/cyan]\n"
-        if backup_path:
-            success_message += f"Backup: [cyan]{backup_path}[/cyan]\n\n"
+        if global_config:
+            # Global mode: only save provider config, no .env
+            try:
+                global_config_path = _create_global_config(config_dict)
+                success_message = f"[bold green]✅ Global configuration saved![/bold green]\n\n"
+                success_message += f"Config: [cyan]{global_config_path}[/cyan]\n"
+                if backup_path:
+                    success_message += f"Backup: [cyan]{backup_path}[/cyan]\n"
+                success_message += "\n[dim]API keys should be set via environment variables:[/dim]\n"
+                success_message += "[dim]  export ANTHROPIC_API_KEY=sk-ant-xxx[/dim]\n\n"
+                success_message += f"[bold white]Next step:[/bold white] Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!"
+            except Exception as e:
+                console.print(f"[red]❌ Failed to write global config: {str(e)}[/red]")
+                raise typer.Exit(1)
         else:
-            success_message += "\n"
-        success_message += f"[bold white]Next step:[/bold white] Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!"
+            # Workspace mode: write both .env and workspace config
+            with open(env_path, "w") as f:
+                f.write("\n".join(env_lines))
+                f.write("\n")
+
+            # Create workspace config from structured config_dict
+            workspace_path = Path.cwd() / ".lobster_workspace"
+            _create_workspace_config(config_dict, workspace_path)
+
+            success_message = f"[bold green]✅ Configuration saved![/bold green]\n\n"
+            success_message += f"Environment: [cyan]{env_path}[/cyan]\n"
+            success_message += f"Workspace:   [cyan]{workspace_path / 'provider_config.json'}[/cyan]\n"
+            if backup_path:
+                success_message += f"Backup: [cyan]{backup_path}[/cyan]\n\n"
+            else:
+                success_message += "\n"
+            success_message += f"[bold white]Next step:[/bold white] Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!"
 
         console.print(Panel.fit(success_message, border_style="green"))
         console.print()
@@ -5756,13 +5894,13 @@ def show_config(
         console.print(f"   [dim]○ Workspace: {workspace_config_path} (not found)[/dim]")
 
     # Global config
-    global_config_path = Path.home() / ".config" / "lobster" / "providers.json"
+    global_config_path = GlobalProviderConfig.get_config_path()
     if global_config_path.exists():
         console.print(f"   [green]✓[/green] Global: {global_config_path}")
         try:
             global_config = GlobalProviderConfig.load()
-            if global_config.global_default_provider:
-                console.print(f"      Provider: [yellow]{global_config.global_default_provider}[/yellow]")
+            if global_config.default_provider:
+                console.print(f"      Provider: [yellow]{global_config.default_provider}[/yellow]")
             if global_config.default_profile:
                 console.print(f"      Profile: [yellow]{global_config.default_profile}[/yellow]")
         except Exception as e:

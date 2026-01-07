@@ -1,18 +1,21 @@
 """
 Configuration resolver with transparent decision logging.
 
-This module implements a simplified 3-layer priority hierarchy for provider
+This module implements a 5-layer priority hierarchy for provider
 and model selection, with explicit failure when not configured.
 
 Priority Order (highest to lowest):
 1. Runtime overrides (CLI flags like --provider, --model)
 2. Workspace config (.lobster_workspace/provider_config.json)
-3. FAIL - require explicit configuration (no auto-detection, no defaults)
+3. Global user config (~/.config/lobster/providers.json)
+4. Environment variable (LOBSTER_LLM_PROVIDER)
+5. FAIL - require explicit configuration (no auto-detection, no defaults)
 
 This design ensures:
 - Users must explicitly configure their provider
 - No silent defaults that may incur unexpected costs
 - Clear error messages guide users to proper setup
+- External workspaces can inherit from global config
 
 Example:
     >>> from lobster.core.config_resolver import ConfigResolver
@@ -27,8 +30,12 @@ Example:
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Tuple
+
+# Environment variable for provider override
+LOBSTER_LLM_PROVIDER_ENV = "LOBSTER_LLM_PROVIDER"
 
 from lobster.config.constants import VALID_PROVIDERS, VALID_PROFILES
 from lobster.config.global_config import GlobalProviderConfig
@@ -57,10 +64,12 @@ class ConfigResolver:
     """
     Resolve configuration with transparent decision logging.
 
-    This class implements a simplified 3-layer priority hierarchy:
+    This class implements a 5-layer priority hierarchy:
     1. Runtime CLI flags (--provider, --model)
     2. Workspace JSON config (.lobster_workspace/provider_config.json)
-    3. FAIL with helpful error message
+    3. Global user config (~/.config/lobster/providers.json)
+    4. Environment variable (LOBSTER_LLM_PROVIDER)
+    5. FAIL with helpful error message
 
     Singleton Pattern:
         Use get_instance() to get the resolver with proper workspace context.
@@ -68,7 +77,7 @@ class ConfigResolver:
     Attributes:
         workspace_path: Path to workspace directory
         workspace_config: Loaded workspace configuration
-        global_config: Loaded global user configuration (kept for profile only)
+        global_config: Loaded global user configuration
 
     Example:
         >>> resolver = ConfigResolver.get_instance(Path(".lobster_workspace"))
@@ -139,12 +148,14 @@ class ConfigResolver:
         runtime_override: Optional[str] = None,
     ) -> Tuple[str, str]:
         """
-        Resolve LLM provider with 3-layer priority.
+        Resolve LLM provider with 5-layer priority.
 
         Priority:
         1. Runtime CLI flag (--provider)
         2. Workspace config (provider_config.json)
-        3. FAIL - configuration required
+        3. Global user config (~/.config/lobster/providers.json)
+        4. Environment variable (LOBSTER_LLM_PROVIDER)
+        5. FAIL - configuration required
 
         Args:
             runtime_override: Explicit provider from CLI flag (highest priority)
@@ -153,7 +164,7 @@ class ConfigResolver:
             Tuple[str, str]: (provider_name, decision_source)
 
         Raises:
-            ConfigurationError: If no provider is configured
+            ConfigurationError: If no provider is configured or invalid
 
         Example:
             >>> resolver = ConfigResolver.get_instance(workspace)
@@ -177,17 +188,56 @@ class ConfigResolver:
                     provider = self.workspace_config.global_provider
                     return (provider, "workspace config")
 
-        # Layer 3: FAIL - require explicit configuration
+        # Layer 3: Global user config
+        if self.global_config and GlobalProviderConfig.exists():
+            if self.global_config.default_provider:
+                provider = self.global_config.default_provider
+                return (provider, "global user config (~/.config/lobster/)")
+
+        # Layer 4: Environment variable
+        env_provider = os.environ.get(LOBSTER_LLM_PROVIDER_ENV)
+        if env_provider:
+            if env_provider in VALID_PROVIDERS:
+                return (env_provider, f"environment variable {LOBSTER_LLM_PROVIDER_ENV}")
+            else:
+                # Hard error for invalid env var (fail-fast)
+                raise ConfigurationError(
+                    f"Invalid provider '{env_provider}' in {LOBSTER_LLM_PROVIDER_ENV}. "
+                    f"Valid providers: {', '.join(VALID_PROVIDERS)}"
+                )
+
+        # Layer 5: FAIL - require explicit configuration with diagnostic
         raise ConfigurationError(
             "No provider configured.",
-            help_text=(
-                "Lobster requires explicit provider configuration.\n\n"
-                "Quick Setup:\n"
-                "  lobster init              # Interactive wizard\n\n"
-                "Or manually create .lobster_workspace/provider_config.json:\n"
-                '  {"global_provider": "anthropic", "anthropic_model": "claude-sonnet-4-20250514"}\n\n'
-                "Note: API keys should be in .env file (not in JSON config)."
-            ),
+            help_text=self._build_diagnostic_help_text(),
+        )
+
+    def _build_diagnostic_help_text(self) -> str:
+        """Build diagnostic help text showing what was checked."""
+        workspace_path_str = str(self.workspace_path) if self.workspace_path else "(not set)"
+        workspace_config_exists = (
+            WorkspaceProviderConfig.exists(self.workspace_path)
+            if self.workspace_path else False
+        )
+        global_config_exists = GlobalProviderConfig.exists()
+        env_var_set = os.environ.get(LOBSTER_LLM_PROVIDER_ENV)
+
+        return (
+            "Lobster requires explicit provider configuration.\n\n"
+            "Checked (in priority order):\n"
+            f"  ✗ Runtime flag: --provider not provided\n"
+            f"  ✗ Workspace config: {workspace_path_str}/provider_config.json "
+            f"{'(no provider set)' if workspace_config_exists else '(not found)'}\n"
+            f"  ✗ Global config: ~/.config/lobster/providers.json "
+            f"{'(no default_provider set)' if global_config_exists else '(not found)'}\n"
+            f"  ✗ Environment: {LOBSTER_LLM_PROVIDER_ENV} "
+            f"{'=' + env_var_set if env_var_set else '(not set)'}\n\n"
+            "Quick Setup:\n"
+            "  lobster init              # Configure this workspace\n"
+            "  lobster init --global     # Set global defaults for all workspaces\n\n"
+            "Or set environment variable:\n"
+            f"  export {LOBSTER_LLM_PROVIDER_ENV}=anthropic\n\n"
+            "Valid providers: " + ", ".join(VALID_PROVIDERS)
         )
 
     def resolve_model(
@@ -197,12 +247,13 @@ class ConfigResolver:
         provider: Optional[str] = None,
     ) -> Tuple[Optional[str], str]:
         """
-        Resolve model for a specific agent with 3-layer priority.
+        Resolve model for a specific agent with 4-layer priority.
 
         Priority:
         1. Runtime CLI flag (--model)
         2. Workspace config (per-agent or per-provider)
-        3. Provider default (from ProviderRegistry)
+        3. Global user config (~/.config/lobster/providers.json)
+        4. Provider default (from ProviderRegistry)
 
         Args:
             agent_name: Name of agent (e.g., "supervisor", "data_expert")
@@ -234,7 +285,13 @@ class ConfigResolver:
                 if model:
                     return (model, f"workspace config ({provider} model)")
 
-        # Layer 3: Provider default (delegated to provider)
+        # Layer 3: Global user config model for the current provider
+        if self.global_config and GlobalProviderConfig.exists() and provider:
+            model = self.global_config.get_model_for_provider(provider)
+            if model:
+                return (model, f"global user config ({provider} model)")
+
+        # Layer 4: Provider default (delegated to provider)
         if provider:
             try:
                 from lobster.config.providers import get_provider

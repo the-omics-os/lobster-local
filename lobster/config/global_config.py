@@ -4,12 +4,15 @@ Global user-level provider configuration (cross-project defaults).
 This module provides user-level configuration management that applies across
 all Lobster workspaces unless overridden by workspace-specific settings.
 
-Storage Location: ~/.config/lobster/providers.json
+Storage Location (platform-specific):
+- Linux:   ~/.config/lobster/providers.json
+- macOS:   ~/Library/Application Support/lobster/providers.json
+- Windows: %APPDATA%\\lobster\\providers.json
 
 Priority Hierarchy:
 1. Runtime overrides (CLI flags)
 2. Workspace config (.lobster_workspace/provider_config.json)
-3. Global user config (~/.config/lobster/providers.json) ← This module
+3. Global user config (platform-specific path) ← This module
 4. Environment variables (.env file)
 5. Auto-detection
 6. Defaults
@@ -28,6 +31,9 @@ Example:
 
 import json
 import logging
+import os
+import platform
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -37,9 +43,19 @@ from lobster.config.base_config import ProviderConfigBase
 
 logger = logging.getLogger(__name__)
 
-# Configuration file location
-CONFIG_DIR = Path.home() / ".config" / "lobster"
+# Configuration file location (cross-platform)
+# Unix (Linux/macOS): ~/.config/lobster/ (CLI convention - consistent across Unix)
+# Windows: %APPDATA%\lobster\ (Windows convention)
+if platform.system() == "Windows":
+    CONFIG_DIR = Path(os.environ.get("APPDATA", Path.home())) / "lobster"
+else:
+    # Unix: Use XDG_CONFIG_HOME or fallback to ~/.config (same for Linux and macOS)
+    CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "lobster"
+
 CONFIG_FILE_NAME = "providers.json"
+
+# Legacy config location - no longer used, kept for migration only
+LEGACY_CONFIG_DIR = None  # Migration removed since we're keeping ~/.config/ on Unix
 
 
 class GlobalProviderConfig(ProviderConfigBase):
