@@ -556,7 +556,7 @@ def extract_available_commands() -> Dict[str, str]:
         "/open": "Open file or folder in system default application",
         "/save": "Save current state to workspace (--force to re-save all)",
         "/read": "View file contents (inspection only)",
-        "/export": "Export session data",
+        "/export": "Export to ZIP (--no-png, --force to re-serialize all)",
         "/reset": "Reset conversation",
         "/mode": "Change operation mode",
         "/modes": "List available modes",
@@ -5169,10 +5169,20 @@ when they are started by agents or analysis workflows.
             console.print("[cyan]Available: export, list, run, info[/cyan]")
             return None
 
-    elif cmd == "/export":
+    elif cmd.startswith("/export"):
         # Use shared command implementation (unified with dashboard)
+        # Parse options: --no-png, --force
+        include_png = "--no-png" not in cmd
+        force_resave = "--force" in cmd
+
         output = ConsoleOutputAdapter(console)
-        return export_data(client, output)
+        return export_data(
+            client,
+            output,
+            include_png=include_png,
+            force_resave=force_resave,
+            console=console,
+        )
 
     elif cmd.startswith("/open "):
         # Handle /open command for files and folders

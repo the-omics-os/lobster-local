@@ -2283,6 +2283,7 @@ class DataManagerV2:
         include_png: bool = True,
         compression: str = "gzip",
         include_provenance: bool = True,
+        reuse_autosave: bool = True,
     ) -> str:
         """
         Create a comprehensive data package with modalities, plots, and analysis summary.
@@ -2293,6 +2294,7 @@ class DataManagerV2:
             include_png: Whether to generate PNG versions of plots (default: True)
             compression: H5AD compression method ('gzip', 'lzf', None) (default: 'gzip')
             include_provenance: Whether to include provenance information (default: True)
+            reuse_autosave: Whether to copy existing autosave files instead of re-serializing (default: True)
 
         Returns:
             str: Path to the created zip file
@@ -2334,15 +2336,61 @@ class DataManagerV2:
                 modalities_dir = temp_path / "modalities"
                 modalities_dir.mkdir()
 
+                # Get H5AD backend for proper sanitization
+                h5ad_backend = self.backends.get("h5ad")
+
                 for i, (name, adata) in enumerate(self.modalities.items(), 1):
                     if progress_callback:
                         progress_callback(
                             f"Saving modality {i}/{len(self.modalities)}: {name}"
                         )
                     try:
-                        # Save as H5AD with configurable compression (professional standard for bioinformatics)
                         h5ad_path = modalities_dir / f"{name}.h5ad"
-                        adata.write_h5ad(h5ad_path, compression=compression)
+                        reused = False
+
+                        # Optimization: Try to reuse existing autosave file if available
+                        if reuse_autosave:
+                            # Check for existing autosave file
+                            source_file = self._modality_sources.get(name)
+                            is_dirty = name in self._modality_dirty
+
+                            # Check autosave naming patterns
+                            autosave_candidates = [
+                                self.data_dir / f"{name}_autosave.h5ad",
+                                self.data_dir / f"{name}.h5ad",
+                            ]
+                            if source_file:
+                                autosave_candidates.insert(0, source_file)
+
+                            for autosave_path in autosave_candidates:
+                                if (
+                                    autosave_path.exists()
+                                    and not is_dirty
+                                    and autosave_path != h5ad_path
+                                ):
+                                    # Copy existing file instead of re-serializing
+                                    import shutil
+                                    shutil.copy2(autosave_path, h5ad_path)
+                                    reused = True
+                                    logger.debug(
+                                        f"Reused existing file for '{name}': {autosave_path.name}"
+                                    )
+                                    break
+
+                        # If not reused, save with proper H5AD backend sanitization
+                        if not reused:
+                            if h5ad_backend:
+                                # Use backend's save method for proper sanitization
+                                # (handles ArrowExtensionArray, None columns, mixed types, etc.)
+                                h5ad_backend.save(
+                                    adata, h5ad_path, compression=compression
+                                )
+                            else:
+                                # Fallback: direct save (should not happen in normal operation)
+                                logger.warning(
+                                    f"H5AD backend not available, using direct save for '{name}'"
+                                )
+                                adata.write_h5ad(h5ad_path, compression=compression)
 
                         # Save metadata (optimized to avoid unnecessary list conversions)
                         metadata_path = modalities_dir / f"{name}_metadata.json"
@@ -2361,6 +2409,7 @@ class DataManagerV2:
                                 if hasattr(adata.X, "dtype")
                                 else "unknown"
                             ),
+                            "reused_from_autosave": reused,
                         }
                         with open(metadata_path, "w") as f:
                             json.dump(modality_metadata, f, indent=2, default=str)
