@@ -37,7 +37,7 @@ def _build_agent_hierarchy(output: OutputAdapter, current_tier: str) -> None:
         return
 
     output.print("\n[bold cyan]🔀 Agent Hierarchy[/bold cyan]")
-    output.print("[dim]───────────────────────────────────────[/dim]")
+    output.print("[dim]" + "─" * 96 + "[/dim]")  # Match table width (100 - borders)
     output.print("[bold white]supervisor[/bold white] [dim](orchestrator)[/dim]")
 
     for i, agent_name in enumerate(available_agents):
@@ -106,13 +106,16 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     # ========================================================================
     # Table 1: Current Configuration
     # ========================================================================
-    # Standard widths: 25 + 35 + 40 = 100 (consistent across all tables)
+    # Fixed table width for visual consistency
+    TABLE_WIDTH = 100
+
     config_table_data = {
         "title": "⚙️  Current Configuration",
+        "width": TABLE_WIDTH,
         "columns": [
-            {"name": "Setting", "style": "cyan", "width": 25},
-            {"name": "Value", "style": "white", "width": 35},
-            {"name": "Source", "style": "yellow", "width": 40},
+            {"name": "Setting", "style": "cyan"},
+            {"name": "Value", "style": "white"},
+            {"name": "Source", "style": "yellow"},
         ],
         "rows": [
             ["Provider", f"[bold]{provider}[/bold]", p_source],
@@ -133,10 +136,11 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
 
     status_table_data = {
         "title": "📁 Configuration Files",
+        "width": TABLE_WIDTH,
         "columns": [
-            {"name": "Location", "style": "cyan", "width": 25},
-            {"name": "Status", "style": "white", "width": 15},
-            {"name": "Path", "style": "dim", "width": 60},
+            {"name": "Location", "style": "cyan"},
+            {"name": "Status", "style": "white"},
+            {"name": "Path", "style": "dim", "overflow": "ellipsis"},
         ],
         "rows": [
             ["Workspace Config", workspace_status, workspace_path_str],
@@ -155,10 +159,11 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
 
     agent_table_data = {
         "title": "🤖 Agent Models",
+        "width": TABLE_WIDTH,
         "columns": [
-            {"name": "Agent", "style": "cyan", "width": 25},
-            {"name": "Model", "style": "yellow", "width": 45},
-            {"name": "Source", "style": "dim", "width": 30},
+            {"name": "Agent", "style": "cyan"},
+            {"name": "Model", "style": "yellow"},
+            {"name": "Source", "style": "dim"},
         ],
         "rows": []
     }
