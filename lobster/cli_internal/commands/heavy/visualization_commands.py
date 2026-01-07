@@ -144,7 +144,7 @@ def plots_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
                 style="info"
             )
 
-            return f"Displayed {len(plots)} plot(s)"
+            return f"Displayed {len(history)} plot(s)"
         else:
             output.print("[grey50]No plots generated yet[/grey50]", style="info")
             return "No plots available"
