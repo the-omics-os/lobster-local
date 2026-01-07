@@ -554,7 +554,7 @@ def extract_available_commands() -> Dict[str, str]:
         "/plots": "List all generated plots",
         "/plot": "Open plots directory or specific plot",
         "/open": "Open file or folder in system default application",
-        "/save": "Save current state to workspace",
+        "/save": "Save current state to workspace (--force to re-save all)",
         "/read": "View file contents (inspection only)",
         "/export": "Export session data",
         "/reset": "Reset conversation",
@@ -5200,18 +5200,68 @@ when they are started by agents or analysis workflows.
         modality_name = parts[1] if len(parts) > 1 else None
         return modality_describe(client, output, modality_name)
 
-    elif cmd == "/save":
-        # Auto-save current state
-        saved_items = client.data_manager.auto_save_state()
+    elif cmd.startswith("/save"):
+        # Auto-save current state with progress display
+        # Support /save --force to force re-save all modalities
+        force_save = "--force" in cmd
+
+        modality_count = len(client.data_manager.modalities)
+        if modality_count == 0:
+            console.print("[grey50]Nothing to save (no data loaded)[/grey50]")
+            return "No data to save"
+
+        # Progress tracking state
+        save_status = {"current": 0, "total": modality_count, "current_name": ""}
+
+        def progress_callback(current: int, total: int, name: str, status: str):
+            save_status["current"] = current
+            save_status["total"] = total
+            save_status["current_name"] = name
+
+        # Show progress for multi-modality saves
+        if modality_count > 1:
+            with console.status(
+                f"[bold cyan]Saving {modality_count} modalities...[/bold cyan]",
+                spinner="dots",
+            ) as status:
+
+                def update_progress(current: int, total: int, name: str, state: str):
+                    status_icon = {
+                        "saving": "💾",
+                        "skipped": "⏭️",
+                        "done": "✓",
+                        "error": "❌",
+                    }.get(state, "•")
+                    status.update(
+                        f"[bold cyan]{status_icon} [{current}/{total}] {state}: {name}[/bold cyan]"
+                    )
+
+                saved_items = client.data_manager.auto_save_state(
+                    progress_callback=update_progress, force=force_save
+                )
+        else:
+            # Single modality - no progress needed
+            saved_items = client.data_manager.auto_save_state(force=force_save)
 
         if saved_items:
-            console.print("[bold red]✓[/bold red] [white]Saved to workspace:[/white]")
-            for item in saved_items:
-                console.print(f"  • {item}")
-            return f"Saved {len(saved_items)} items to workspace: {', '.join(saved_items[:3])}{'...' if len(saved_items) > 3 else ''}"
+            # Count actual saves vs skips
+            actual_saves = [
+                item for item in saved_items if "Skipped" not in item
+            ]
+            skipped_count = len(saved_items) - len(actual_saves)
+
+            console.print("[bold green]✓[/bold green] [white]Save complete:[/white]")
+            for item in actual_saves:
+                console.print(f"  [green]•[/green] {item}")
+            if skipped_count > 0:
+                console.print(
+                    f"  [dim]⏭️ Skipped {skipped_count} unchanged modalities[/dim]"
+                )
+
+            return f"Saved {len(actual_saves)} items, skipped {skipped_count} unchanged"
         else:
-            console.print("[grey50]Nothing to save (no data or plots loaded)[/grey50]")
-            return "No data or plots to save"
+            console.print("[grey50]Nothing to save (all modalities up-to-date)[/grey50]")
+            return "All modalities already up-to-date"
 
     elif cmd.startswith("/restore"):
         # Restore previous session

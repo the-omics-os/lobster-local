@@ -220,6 +220,10 @@ class DataManagerV2:
         self.adapters: Dict[str, IModalityAdapter] = {}
         self.modalities: Dict[str, "AnnData"] = {}
 
+        # Track modality sources and dirty state for efficient auto-save
+        self._modality_sources: Dict[str, Path] = {}  # modality_name -> source file path
+        self._modality_dirty: set = set()  # modalities modified since load
+
         # Workspace restoration attributes
         self.session_file = self.workspace_path / ".session.json"
         self._available_datasets: Dict[str, Dict] = {}
@@ -481,6 +485,9 @@ class DataManagerV2:
                 adata = anndata.read_h5ad(h5ad_file)
                 self.modalities[modality_name] = adata
 
+                # Track source for efficient auto-save (skip re-saving unchanged autosaves)
+                self._modality_sources[modality_name] = h5ad_file
+
                 loaded_count += 1
                 logger.debug(
                     f"Auto-loaded '{modality_name}': {adata.n_obs} obs × {adata.n_vars} vars"
@@ -663,6 +670,9 @@ class DataManagerV2:
 
         # Store modality
         self.modalities[name] = adata
+
+        # Mark as dirty - new data that needs to be saved
+        self._modality_dirty.add(name)
 
         # Log provenance
         if self.provenance:
@@ -1460,25 +1470,106 @@ class DataManagerV2:
 
         return files_by_category
 
-    def auto_save_state(self) -> List[str]:
+    def auto_save_state(
+        self,
+        progress_callback: Optional[callable] = None,
+        force: bool = False,
+    ) -> List[str]:
         """
         Automatically save current state including all modalities.
 
+        Optimized to skip modalities that:
+        - Were loaded from autosave files and haven't been modified
+        - Already have up-to-date autosave files on disk
+
+        Args:
+            progress_callback: Optional callback(current, total, modality_name, status)
+                for progress reporting. Status is one of: "saving", "skipped", "done", "error"
+            force: If True, save all modalities regardless of dirty state
+
         Returns:
-            List[str]: List of saved items
+            List[str]: List of saved items (includes skipped items with indication)
         """
         saved_items = []
+        skipped_items = []
 
-        # Save all modalities
-        for modality_name in self.modalities:
+        modality_names = list(self.modalities.keys())
+        total = len(modality_names)
+
+        # Save all modalities (with smart skip logic)
+        for idx, modality_name in enumerate(modality_names):
             try:
-                save_path = f"{modality_name}_autosave.h5ad"
+                # Determine the expected autosave path
+                # If modality name already ends with _autosave, don't double-suffix
+                if modality_name.endswith("_autosave"):
+                    save_path = f"{modality_name}.h5ad"
+                else:
+                    save_path = f"{modality_name}_autosave.h5ad"
+
+                full_save_path = self.data_dir / save_path
+
+                # Check if we can skip this save
+                should_skip = False
+                skip_reason = ""
+
+                if not force:
+                    # Case 1: Modality loaded from autosave file AND not dirty
+                    source_file = self._modality_sources.get(modality_name)
+                    is_from_autosave = (
+                        source_file is not None
+                        and str(source_file).endswith("_autosave.h5ad")
+                    )
+                    is_dirty = modality_name in self._modality_dirty
+
+                    if is_from_autosave and not is_dirty:
+                        # Check if source file still exists and matches target
+                        if source_file.exists() and source_file == full_save_path:
+                            should_skip = True
+                            skip_reason = "unchanged autosave"
+                        elif source_file.exists():
+                            # Source exists but at different path - modality name might have
+                            # _autosave suffix. Check if target already exists
+                            if full_save_path.exists():
+                                should_skip = True
+                                skip_reason = "already saved"
+
+                    # Case 2: Target autosave already exists and modality not dirty
+                    elif full_save_path.exists() and not is_dirty:
+                        # Check file modification time vs session start
+                        file_mtime = full_save_path.stat().st_mtime
+                        session_start = float(self.session_id)
+                        if file_mtime >= session_start:
+                            should_skip = True
+                            skip_reason = "up-to-date"
+
+                if should_skip:
+                    skipped_items.append(f"Modality '{modality_name}': {skip_reason}")
+                    if progress_callback:
+                        progress_callback(idx + 1, total, modality_name, "skipped")
+                    logger.debug(
+                        f"Skipped auto-save for '{modality_name}': {skip_reason}"
+                    )
+                    continue
+
+                # Report progress before saving
+                if progress_callback:
+                    progress_callback(idx + 1, total, modality_name, "saving")
+
                 saved_path = self.save_modality(modality_name, save_path)
                 saved_items.append(
                     f"Modality '{modality_name}': {Path(saved_path).name}"
                 )
+
+                # Clear dirty flag after successful save
+                self._modality_dirty.discard(modality_name)
+
+                if progress_callback:
+                    progress_callback(idx + 1, total, modality_name, "done")
+
             except Exception as e:
                 logger.error(f"Failed to auto-save modality {modality_name}: {e}")
+                if progress_callback:
+                    progress_callback(idx + 1, total, modality_name, "error")
 
         # Save processing log and provenance
         if self.processing_log or (self.provenance and self.provenance.activities):
@@ -1513,8 +1604,29 @@ class DataManagerV2:
 
         if saved_items:
             logger.info(f"Auto-saved: {', '.join(saved_items)}")
+        if skipped_items:
+            logger.info(f"Skipped (already up-to-date): {len(skipped_items)} modalities")
+            logger.debug(f"Skipped details: {', '.join(skipped_items)}")
 
-        return saved_items
+        # Return saved items plus skipped summary for CLI feedback
+        all_results = saved_items.copy()
+        if skipped_items:
+            all_results.append(f"Skipped {len(skipped_items)} unchanged modalities")
+
+        return all_results
+
+    def mark_modality_dirty(self, modality_name: str) -> None:
+        """
+        Mark a modality as modified, requiring save on next auto_save_state().
+
+        This should be called by agents/services after modifying modality data.
+
+        Args:
+            modality_name: Name of the modality that was modified
+        """
+        if modality_name in self.modalities:
+            self._modality_dirty.add(modality_name)
+            logger.debug(f"Marked modality '{modality_name}' as dirty")
 
     def save_session(self) -> List[str]:
         """

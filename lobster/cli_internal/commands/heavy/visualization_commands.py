@@ -228,30 +228,28 @@ def plot_show(
             if not plots_dir.exists():
                 plots_dir.mkdir(parents=True, exist_ok=True)
 
-            # Save plots if needed
+            # Save plots and get actual file paths
             if client.data_manager.latest_plots:
                 saved_files, _, _ = client.data_manager.plot_manager.save_plots_to_workspace()
+            else:
+                saved_files = []
 
-            # Construct the filename
+            # Find the saved file for this plot using actual paths from save operation
             plot_id = plot_info["id"]
-            plot_title = plot_info["title"]
+            matching_file = None
 
-            # Create sanitized filename (same logic as save_plots_to_workspace)
-            safe_title = "".join(
-                c for c in plot_title if c.isalnum() or c in [" ", "_", "-"]
-            ).rstrip()
-            safe_title = safe_title.replace(" ", "_")
-            filename_base = f"{plot_id}_{safe_title}" if safe_title else plot_id
+            for file_path in saved_files:
+                file_path_obj = Path(file_path)
+                # Check if filename starts with plot_id (handles both HTML and PNG)
+                if file_path_obj.parent == plots_dir and file_path_obj.stem.startswith(plot_id):
+                    matching_file = file_path_obj
+                    # Prefer HTML over PNG
+                    if file_path_obj.suffix == ".html":
+                        break
 
-            # Try to open HTML file first, then PNG
-            html_path = plots_dir / f"{filename_base}.html"
-            png_path = plots_dir / f"{filename_base}.png"
-
-            file_to_open = html_path if html_path.exists() else png_path
-
-            if file_to_open.exists():
+            if matching_file and matching_file.exists():
                 # Open plot using centralized system utility
-                success, message = open_path(file_to_open)
+                success, message = open_path(matching_file)
 
                 if success:
                     output.print(
@@ -265,7 +263,7 @@ def plot_show(
                         style="error"
                     )
                     output.print(
-                        f"[grey50]Plot file: {file_to_open}[/grey50]",
+                        f"[grey50]Plot file: {matching_file}[/grey50]",
                         style="info"
                     )
                     return f"Failed to open plot: {message}"
