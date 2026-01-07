@@ -17,9 +17,9 @@ import re
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from langchain_aws import ChatBedrockConverse
 from pydantic import BaseModel, Field, validator
 
+from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.utils.logger import get_logger
 
@@ -206,10 +206,10 @@ class MetadataValidationService:
 
     @property
     def llm(self):
-        """Lazy initialization of LLM."""
+        """Lazy initialization of LLM using provider-agnostic factory."""
         if self._llm is None:
-            llm_params = self.settings.get_agent_llm_params("assistant")
-            self._llm = ChatBedrockConverse(**llm_params)
+            llm_params = self.settings.get_agent_llm_params("metadata_validation_service")
+            self._llm = create_llm("metadata_validation_service", llm_params)
         return self._llm
 
     def normalize_field_name(self, field: str) -> str:

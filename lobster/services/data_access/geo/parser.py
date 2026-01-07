@@ -460,11 +460,12 @@ class GEOParser:
 
                 # STEP 3: Handle insufficient memory
                 if not mem_check["can_load"]:
-                    logger.error(mem_check["recommendation"])
-
-                    # Try chunked reading as fallback
+                    # WARNING, not ERROR - we have a fallback to try first
                     logger.warning(
-                        "Attempting memory-efficient chunked reading as fallback..."
+                        f"Memory tight for dataset ({n_cells:,} cells). "
+                        f"Need: {mem_check['required_gb']} GB, "
+                        f"Have: {mem_check['available_gb']} GB. "
+                        "Attempting memory-efficient chunked reading..."
                     )
                     delimiter = self.sniff_delimiter(file_path)
                     compression = "gzip" if file_path.name.endswith(".gz") else None
@@ -481,7 +482,13 @@ class GEOParser:
                                 + mem_check["recommendation"]
                             )
 
+                        logger.info(
+                            f"Chunked reading successful for {n_cells:,} cells"
+                        )
                         return result
+                    except InsufficientMemoryError:
+                        # Re-raise our own exception without wrapping
+                        raise
                     except Exception as e:
                         raise InsufficientMemoryError(
                             f"Dataset loading failed: {e}\n"

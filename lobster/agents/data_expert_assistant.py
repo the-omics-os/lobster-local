@@ -10,9 +10,9 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from langchain_aws import ChatBedrockConverse
 from pydantic import BaseModel, Field
 
+from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
 from lobster.utils.logger import get_logger
 
@@ -193,10 +193,10 @@ class DataExpertAssistant:
 
     @property
     def llm(self):
-        """Lazy initialization of LLM."""
+        """Lazy initialization of LLM using provider-agnostic factory."""
         if self._llm is None:
-            llm_params = self.settings.get_agent_llm_params("assistant")
-            self._llm = ChatBedrockConverse(**llm_params)
+            llm_params = self.settings.get_agent_llm_params("data_expert_assistant")
+            self._llm = create_llm("data_expert_assistant", llm_params)
         return self._llm
 
     def _format_supplementary_files_for_llm(
