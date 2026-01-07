@@ -83,7 +83,11 @@ class ConsoleOutputAdapter(OutputAdapter):
 
     def print_table(self, table_data: Dict[str, Any]) -> None:
         """Render Rich Table."""
-        table = Table(box=box.ROUNDED, title=table_data.get("title"))
+        table = Table(
+            box=box.ROUNDED,
+            title=table_data.get("title"),
+            width=table_data.get("width"),  # Optional fixed table width
+        )
 
         # Add columns
         for col in table_data.get("columns", []):

@@ -464,7 +464,7 @@ def _queue_list_download(
     }
 
     for i, entry in enumerate(display_entries, 1):
-        accession = entry.accession_id or "N/A"
+        accession = entry.dataset_id or "N/A"
         database = entry.database or "N/A"
         status = (
             entry.status.value if hasattr(entry.status, "value") else str(entry.status)
@@ -475,8 +475,8 @@ def _queue_list_download(
 
         # Get strategy info
         strategy = "N/A"
-        if entry.strategy_config and entry.strategy_config.strategy_name:
-            strategy = entry.strategy_config.strategy_name
+        if entry.recommended_strategy and entry.recommended_strategy.strategy_name:
+            strategy = entry.recommended_strategy.strategy_name
 
         priority = str(entry.priority) if entry.priority else "5"
 

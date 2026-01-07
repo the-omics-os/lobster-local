@@ -15,6 +15,54 @@ if TYPE_CHECKING:
 from lobster.cli_internal.commands.output_adapter import OutputAdapter
 
 
+def _build_agent_hierarchy(output: OutputAdapter, current_tier: str) -> None:
+    """
+    Display ASCII hierarchy of agent relationships.
+
+    Shows supervisor at top, then worker agents with their child agents indented.
+    """
+    from lobster.config.agent_registry import AGENT_REGISTRY, get_valid_handoffs
+    from lobster.config.subscription_tiers import is_agent_available
+
+    valid_handoffs = get_valid_handoffs()
+    supervisor_targets = valid_handoffs.get("supervisor", set())
+
+    # Filter to available agents first
+    available_agents = [
+        name for name in sorted(supervisor_targets)
+        if is_agent_available(name, current_tier) and AGENT_REGISTRY.get(name)
+    ]
+
+    if not available_agents:
+        return
+
+    output.print("\n[bold cyan]🔀 Agent Hierarchy[/bold cyan]")
+    output.print("[dim]───────────────────────────────────────[/dim]")
+    output.print("[bold white]supervisor[/bold white] [dim](orchestrator)[/dim]")
+
+    for i, agent_name in enumerate(available_agents):
+        config = AGENT_REGISTRY[agent_name]
+        is_last = (i == len(available_agents) - 1)
+        branch = "└── " if is_last else "├── "
+
+        output.print(f"  {branch}[yellow]{config.display_name}[/yellow]")
+
+        # Show child agents if any
+        if config.child_agents:
+            available_children = [
+                c for c in config.child_agents
+                if is_agent_available(c, current_tier) and AGENT_REGISTRY.get(c)
+            ]
+            child_prefix = "      " if is_last else "  │   "
+            for j, child_name in enumerate(available_children):
+                child_config = AGENT_REGISTRY[child_name]
+                child_is_last = (j == len(available_children) - 1)
+                child_branch = "└── " if child_is_last else "├── "
+                output.print(f"{child_prefix}{child_branch}[dim]{child_config.display_name}[/dim]")
+
+    output.print("")
+
+
 def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     """
     Show current configuration including provider, profile, config files, and agent models.
@@ -58,11 +106,12 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     # ========================================================================
     # Table 1: Current Configuration
     # ========================================================================
+    # Standard widths: 25 + 35 + 40 = 100 (consistent across all tables)
     config_table_data = {
         "title": "⚙️  Current Configuration",
         "columns": [
-            {"name": "Setting", "style": "cyan", "width": 20},
-            {"name": "Value", "style": "white", "width": 30},
+            {"name": "Setting", "style": "cyan", "width": 25},
+            {"name": "Value", "style": "white", "width": 35},
             {"name": "Source", "style": "yellow", "width": 40},
         ],
         "rows": [
@@ -85,8 +134,8 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     status_table_data = {
         "title": "📁 Configuration Files",
         "columns": [
-            {"name": "Location", "style": "cyan", "width": 30},
-            {"name": "Status", "style": "white", "width": 20},
+            {"name": "Location", "style": "cyan", "width": 25},
+            {"name": "Status", "style": "white", "width": 15},
             {"name": "Path", "style": "dim", "width": 60},
         ],
         "rows": [
@@ -107,8 +156,8 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     agent_table_data = {
         "title": "🤖 Agent Models",
         "columns": [
-            {"name": "Agent", "style": "cyan", "width": 30},
-            {"name": "Model", "style": "yellow", "width": 40},
+            {"name": "Agent", "style": "cyan", "width": 25},
+            {"name": "Model", "style": "yellow", "width": 45},
             {"name": "Source", "style": "dim", "width": 30},
         ],
         "rows": []
@@ -151,6 +200,11 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
             continue
 
     output.print_table(agent_table_data)
+
+    # ========================================================================
+    # Agent Hierarchy (ASCII tree)
+    # ========================================================================
+    _build_agent_hierarchy(output, current_tier)
 
     # ========================================================================
     # Usage hints
