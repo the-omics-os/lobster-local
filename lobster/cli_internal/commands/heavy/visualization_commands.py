@@ -104,9 +104,9 @@ def plots_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
         Summary string for conversation history, or None
     """
     try:
-        plots = client.data_manager.get_plot_history()
+        history, stats, _ = client.data_manager.plot_manager.get_plot_history()
 
-        if plots:
+        if history:
             output.print("\n[bold red]📊 Generated Plots[/bold red]\n", style="info")
 
             table_data = {
@@ -120,7 +120,7 @@ def plots_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
                 "rows": []
             }
 
-            for plot in plots:
+            for plot in history:
                 try:
                     created = datetime.fromisoformat(
                         plot["timestamp"].replace("Z", "+00:00")
@@ -186,7 +186,7 @@ def plot_show(
                 plots_dir.mkdir(parents=True, exist_ok=True)
                 # Save any existing plots to the directory
                 if client.data_manager.latest_plots:
-                    saved_files = client.data_manager.save_plots_to_workspace()
+                    saved_files, _, _ = client.data_manager.plot_manager.save_plots_to_workspace()
                     if saved_files:
                         output.print(
                             f"[green]✓ Saved {len(saved_files)} plot file(s) to workspace[/green]",
@@ -230,7 +230,7 @@ def plot_show(
 
             # Save plots if needed
             if client.data_manager.latest_plots:
-                saved_files = client.data_manager.save_plots_to_workspace()
+                saved_files, _, _ = client.data_manager.plot_manager.save_plots_to_workspace()
 
             # Construct the filename
             plot_id = plot_info["id"]

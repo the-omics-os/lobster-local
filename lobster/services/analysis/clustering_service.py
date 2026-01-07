@@ -527,6 +527,11 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                         ]
                         for res in adata_clustered.uns["resolutions_tested"]
                     }
+                    # Add explicit column name mapping for downstream tools
+                    clustering_stats["resolution_columns"] = {
+                        res: f"leiden_res{res}".replace(".", "_")
+                        for res in adata_clustered.uns["resolutions_tested"]
+                    }
 
             # Add UMAP distance warning to stats
             if "umap_distance_warning" in adata_clustered.uns:
@@ -1054,6 +1059,10 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             # BUG-002 FIX: Preserve X_pca for downstream quality evaluation
             if "X_pca" in adata_selected.obsm:
                 adata.obsm["X_pca"] = adata_selected.obsm["X_pca"].copy()
+
+            # BUG-003 FIX: Transfer PCA variance information for elbow plots
+            if "pca" in adata_selected.uns:
+                adata.uns["pca"] = adata_selected.uns["pca"].copy()
 
             # Transfer multi-resolution results if available
             if "clustering_results" in adata_selected.uns:

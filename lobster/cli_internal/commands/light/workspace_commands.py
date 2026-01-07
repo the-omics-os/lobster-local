@@ -431,29 +431,45 @@ def workspace_load(
 def workspace_remove(
     client: "AgentClient",
     output: OutputAdapter,
-    modality_name: str
+    selector: str
 ) -> Optional[str]:
     """
-    Remove a modality from memory.
+    Remove modality(ies) from memory by index, pattern, or exact name.
 
     Args:
         client: AgentClient instance
         output: OutputAdapter for rendering
-        modality_name: Name of modality to remove
+        selector: Index (#), pattern (with wildcards), or exact modality name
 
     Returns:
         Summary string for conversation history, or None
     """
-    if not modality_name:
-        output.print("[red]Usage: /workspace remove <modality_name>[/red]", style="error")
+    if not selector:
+        output.print("[red]Usage: /workspace remove <#|pattern|name>[/red]", style="error")
         output.print(
-            "[dim]Examples: /workspace remove geo_gse12345_clustered[/dim]",
+            "[dim]Examples:[/dim]",
             style="info"
         )
-        output.print("\n[dim]💡 Tip: Use '/modalities' to see loaded modalities[/dim]", style="info")
+        output.print(
+            "[dim]  /workspace remove 1              - Remove by index[/dim]",
+            style="info"
+        )
+        output.print(
+            "[dim]  /workspace remove *              - Remove all modalities[/dim]",
+            style="info"
+        )
+        output.print(
+            "[dim]  /workspace remove *clustered*    - Remove matching pattern[/dim]",
+            style="info"
+        )
+        output.print(
+            "[dim]  /workspace remove geo_gse12345   - Remove by exact name[/dim]",
+            style="info"
+        )
+        output.print("\n[dim]💡 Tip: Use '/modalities' to see loaded modalities with indexes[/dim]", style="info")
         return None
 
-    # Check if modality exists
+    # Check if modality management is available
     if not hasattr(client.data_manager, "list_modalities"):
         output.print(
             "[red]❌ Modality management not available in this client[/red]",
@@ -462,15 +478,67 @@ def workspace_remove(
         return None
 
     available_modalities = client.data_manager.list_modalities()
-    if modality_name not in available_modalities:
-        output.print(
-            f"[red]❌ Modality '{modality_name}' not found[/red]",
-            style="error"
-        )
-        output.print(f"\n[yellow]Available modalities ({len(available_modalities)}):[/yellow]", style="warning")
-        for mod in available_modalities:
-            output.print(f"  • {mod}", style="info")
+
+    if not available_modalities:
+        output.print("[yellow]No modalities currently loaded[/yellow]", style="warning")
         return None
+
+    # Determine which modalities to remove
+    modalities_to_remove = []
+    sorted_modalities = sorted(available_modalities)
+
+    if selector.isdigit():
+        # Index-based removal
+        idx = int(selector)
+        if 1 <= idx <= len(sorted_modalities):
+            modalities_to_remove = [sorted_modalities[idx - 1]]
+        else:
+            output.print(
+                f"[red]Index {idx} out of range (1-{len(sorted_modalities)})[/red]",
+                style="error"
+            )
+            output.print(f"\n[yellow]Available modalities ({len(available_modalities)}):[/yellow]", style="warning")
+            for i, mod in enumerate(sorted_modalities, start=1):
+                output.print(f"  {i}. {mod}", style="info")
+            return None
+    elif "*" in selector or "?" in selector or "[" in selector:
+        # Pattern-based removal (wildcards detected)
+        for name in sorted_modalities:
+            if fnmatch.fnmatch(name.lower(), selector.lower()):
+                modalities_to_remove.append(name)
+
+        if not modalities_to_remove:
+            output.print(
+                f"[yellow]No modalities match pattern: {selector}[/yellow]",
+                style="warning"
+            )
+            output.print(f"\n[yellow]Available modalities ({len(available_modalities)}):[/yellow]", style="warning")
+            for i, mod in enumerate(sorted_modalities, start=1):
+                output.print(f"  {i}. {mod}", style="info")
+            return None
+    else:
+        # Exact name match
+        if selector in available_modalities:
+            modalities_to_remove = [selector]
+        else:
+            output.print(
+                f"[red]❌ Modality '{selector}' not found[/red]",
+                style="error"
+            )
+            output.print(f"\n[yellow]Available modalities ({len(available_modalities)}):[/yellow]", style="warning")
+            for i, mod in enumerate(sorted_modalities, start=1):
+                output.print(f"  {i}. {mod}", style="info")
+            return None
+
+    # Confirm removal for multiple modalities
+    if len(modalities_to_remove) > 1:
+        output.print(
+            f"[yellow]⚠️  About to remove {len(modalities_to_remove)} modalities:[/yellow]",
+            style="warning"
+        )
+        for mod in modalities_to_remove:
+            output.print(f"  • {mod}", style="info")
+        output.print("")  # spacing
 
     try:
         # Import the service
@@ -478,40 +546,58 @@ def workspace_remove(
             ModalityManagementService,
         )
 
-        # Create service instance and remove modality
+        # Create service instance
         service = ModalityManagementService(client.data_manager)
-        success, stats, ir = service.remove_modality(modality_name)
 
-        if success:
-            # Log to provenance
-            client.data_manager.log_tool_usage(
-                tool_name="remove_modality",
-                parameters={"modality_name": modality_name},
-                description=stats,
-                ir=ir,
-            )
+        # Remove each modality
+        removed_count = 0
+        failed_count = 0
 
-            # Display success message
+        for modality_name in modalities_to_remove:
+            success, stats, ir = service.remove_modality(modality_name)
+
+            if success:
+                # Log to provenance
+                client.data_manager.log_tool_usage(
+                    tool_name="remove_modality",
+                    parameters={"modality_name": modality_name},
+                    description=stats,
+                    ir=ir,
+                )
+
+                # Display success message
+                output.print(
+                    f"[green]✓ Removed: {stats['removed_modality']}[/green]",
+                    style="success"
+                )
+                if len(modalities_to_remove) == 1:
+                    # Show detailed info only for single removal
+                    output.print(
+                        f"[dim]  Shape: {stats['shape']['n_obs']} obs × {stats['shape']['n_vars']} vars[/dim]",
+                        style="info"
+                    )
+                removed_count += 1
+            else:
+                output.print(
+                    f"[red]✗ Failed to remove: {modality_name}[/red]",
+                    style="error"
+                )
+                failed_count += 1
+
+        # Summary for multiple removals
+        if len(modalities_to_remove) > 1:
+            remaining = client.data_manager.list_modalities()
             output.print(
-                f"[green]✓ Successfully removed modality: {stats['removed_modality']}[/green]",
-                style="success"
-            )
-            output.print(
-                f"[dim]  Shape: {stats['shape']['n_obs']} obs × {stats['shape']['n_vars']} vars[/dim]",
+                f"\n[dim]Summary: {removed_count} removed, {failed_count} failed, {len(remaining)} remaining[/dim]",
                 style="info"
             )
-            output.print(
-                f"[dim]  Remaining modalities: {stats['remaining_modalities']}[/dim]",
-                style="info"
-            )
 
-            return f"Removed modality: {modality_name}"
-        else:
-            output.print(
-                f"[red]❌ Failed to remove modality: {modality_name}[/red]",
-                style="error"
-            )
-            return None
+        if removed_count > 0:
+            if removed_count == 1:
+                return f"Removed modality: {modalities_to_remove[0]}"
+            else:
+                return f"Removed {removed_count} modalities"
+        return None
 
     except Exception as e:
         output.print(

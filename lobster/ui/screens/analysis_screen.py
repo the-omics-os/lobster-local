@@ -586,7 +586,7 @@ class AnalysisScreen(Screen):
             self.notify("Cleared", timeout=1)
 
         elif cmd == "/save":
-            saved = self.client.data_manager.save_plots_to_workspace()
+            saved, _, _ = self.client.data_manager.plot_manager.save_plots_to_workspace()
             if saved:
                 results.append_system_message(f"Saved {len(saved)} plots to workspace.")
                 self.query_one(PlotPreview).refresh_plots()

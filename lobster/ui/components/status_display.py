@@ -503,9 +503,9 @@ class EnhancedStatusDisplay:
     def _create_plots_panel(self, client) -> Panel:
         """Create plots status panel."""
         try:
-            plots = client.data_manager.get_plot_history()
+            history, stats, _ = client.data_manager.plot_manager.get_plot_history()
 
-            if plots:
+            if history:
                 table = Table(
                     show_header=True,
                     header_style=f"bold {LobsterTheme.PRIMARY_ORANGE}",
@@ -517,7 +517,7 @@ class EnhancedStatusDisplay:
                 table.add_column("Created", style="grey50", width=8)
 
                 # Show last 5 plots
-                for plot in plots[-5:]:
+                for plot in history[-5:]:
                     plot_title = plot["title"]
                     if len(plot_title) > 13:
                         plot_title = plot_title[:10] + "..."

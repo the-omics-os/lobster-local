@@ -545,7 +545,7 @@ def extract_available_commands() -> Dict[str, str]:
         "/workspace": "Show workspace status and information",
         "/workspace list": "List available datasets in workspace",
         "/workspace load": "Load dataset or file into workspace",
-        "/workspace remove": "Remove modality from memory",
+        "/workspace remove": "Remove modality(ies) by index, pattern, or name",
         "/workspace save": "Save modality to workspace",
         "/workspace info": "Show dataset information",
         "/restore": "Restore previous session datasets",
@@ -5047,8 +5047,8 @@ when they are started by agents or analysis workflows.
             selector = parts[2] if len(parts) > 2 else None
             return workspace_load(client, output, selector, current_directory, PathResolver)
         elif subcommand == "remove":
-            modality_name = parts[2] if len(parts) > 2 else None
-            return workspace_remove(client, output, modality_name)
+            selector = parts[2] if len(parts) > 2 else None
+            return workspace_remove(client, output, selector)
         elif subcommand == "status":
             return workspace_status(client, output)
         else:
@@ -5115,6 +5115,23 @@ when they are started by agents or analysis workflows.
     # =========================================================================
     # /read - File Inspection Only (no state change, view-only)
     # =========================================================================
+    elif cmd == "/read":
+        # No argument provided - show usage help
+        console.print("\n[bold cyan]/read[/bold cyan] - View file contents (inspection only)\n")
+        console.print("[bold]Usage:[/bold]")
+        console.print("  /read <filename>        View a single file")
+        console.print("  /read *.h5ad            View all H5AD files (glob pattern)")
+        console.print("  /read data/*.csv        View CSVs from a subfolder\n")
+        console.print("[bold]Examples:[/bold]")
+        console.print("  /read my_data.h5ad      Inspect H5AD file structure")
+        console.print("  /read config.yaml       View configuration file")
+        console.print("  /read results.csv       Preview CSV contents\n")
+        console.print("[dim]Note: /read is for inspection only. To load data for analysis, use:[/dim]")
+        console.print("[dim]  • /workspace load <name>  - Load from workspace[/dim]")
+        console.print("[dim]  • /archive <file.tar>     - Load multi-sample archives[/dim]")
+        console.print("[dim]  • Natural language: \"load my_data.h5ad\"[/dim]\n")
+        return None
+
     elif cmd.startswith("/read "):
         # Use shared command implementation (unified with dashboard)
         output = ConsoleOutputAdapter(console)
@@ -5156,41 +5173,6 @@ when they are started by agents or analysis workflows.
         # Use shared command implementation (unified with dashboard)
         output = ConsoleOutputAdapter(console)
         return export_data(client, output)
-
-        # Show generated plots
-        plots = client.data_manager.get_plot_history()
-
-        if plots:
-            table = Table(
-                title="🦞 Generated Plots",
-                box=box.ROUNDED,
-                border_style="red",
-                title_style="bold red on white",
-            )
-            table.add_column("ID", style="bold white")
-            table.add_column("Title", style="white")
-            table.add_column("Source", style="grey74")
-            table.add_column("Created", style="grey50")
-
-            for plot in plots:
-                from datetime import datetime
-
-                try:
-                    created = datetime.fromisoformat(
-                        plot["timestamp"].replace("Z", "+00:00")
-                    )
-                    created_str = created.strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    created_str = plot["timestamp"][:16] if plot["timestamp"] else "N/A"
-
-                table.add_row(
-                    plot["id"], plot["title"], plot["source"] or "N/A", created_str
-                )
-
-            console.print(table)
-        else:
-            console.print("[grey50]No plots generated yet[/grey50]")
-
 
     elif cmd.startswith("/open "):
         # Handle /open command for files and folders

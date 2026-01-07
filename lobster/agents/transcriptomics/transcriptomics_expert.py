@@ -502,11 +502,12 @@ def transcriptomics_expert(
                 response += (
                     f"\n- Resolutions tested: {clustering_stats['resolutions_tested']}"
                 )
-                response += f"\n- Multi-resolution summary:"
+                response += f"\n- Cluster columns (use these exact names for visualization):"
                 for res, n_clusters in clustering_stats.get(
                     "multi_resolution_summary", {}
                 ).items():
-                    response += f"\n  - Resolution {res}: {n_clusters} clusters"
+                    key_name = f"leiden_res{res}".replace(".", "_")
+                    response += f"\n  - `{key_name}` (resolution={res}): {n_clusters} clusters"
             else:
                 # Single resolution mode (existing behavior)
                 response += f"\n- Number of clusters: {clustering_stats['n_clusters']}"

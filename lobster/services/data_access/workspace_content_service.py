@@ -265,11 +265,13 @@ class WorkspaceContentService:
     - Publications: Papers from PubMed, PMC, bioRxiv
     - Datasets: GEO, SRA, PRIDE datasets with metadata
     - Metadata: Sample mappings, validation results, QC reports
+    - Exports: Analysis results and data exports
 
     **Storage Structure:**
     - workspace_path/literature/*.json (publications)
     - workspace_path/data/*.json (datasets)
     - workspace_path/metadata/*.json (metadata)
+    - workspace_path/exports/*.* (exported results)
 
     Examples:
         >>> service = WorkspaceContentService(data_manager)
@@ -307,6 +309,7 @@ class WorkspaceContentService:
         self.publications_dir = self.workspace_base / "literature"
         self.datasets_dir = self.workspace_base / "data"
         self.metadata_dir = self.workspace_base / "metadata"
+        self.exports_dir = self.workspace_base / "exports"
 
         # Queue directories are managed by DataManagerV2 at .lobster/queues/
         # Actual files: download_queue.jsonl, publication_queue.jsonl
@@ -316,6 +319,7 @@ class WorkspaceContentService:
         self.publications_dir.mkdir(parents=True, exist_ok=True)
         self.datasets_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
+        self.exports_dir.mkdir(parents=True, exist_ok=True)
 
         logger.debug(
             f"WorkspaceContentService initialized with workspace at {self.workspace_base}"
@@ -337,6 +341,8 @@ class WorkspaceContentService:
             return self.datasets_dir
         elif content_type == ContentType.METADATA:
             return self.metadata_dir
+        elif content_type == ContentType.EXPORTS:
+            return self.exports_dir
         elif content_type in (
             ContentType.DOWNLOAD_QUEUE,
             ContentType.PUBLICATION_QUEUE,
