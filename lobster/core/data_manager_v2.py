@@ -2766,7 +2766,7 @@ https://github.com/OmicsOS/lobster
             ...     description="Quality control and clustering for 10X data"
             ... )
             >>> print(f"Exported: {path}")
-            Exported: /Users/kevin/.lobster/notebooks/standard_qc_workflow.ipynb
+            Exported: <workspace>/notebooks/standard_qc_workflow.ipynb
         """
         if not self.provenance:
             raise ValueError("Provenance tracking disabled - cannot export notebook")
@@ -2798,7 +2798,7 @@ https://github.com/OmicsOS/lobster
         Execute saved notebook with new data.
 
         Args:
-            notebook_path: Path to .ipynb file or filename in .lobster/notebooks/
+            notebook_path: Path to .ipynb file or filename in <workspace>/notebooks/
             input_modality: Name of modality to use as input
             parameters: Optional parameter overrides
             dry_run: If True, validate but don't execute
@@ -2825,8 +2825,8 @@ https://github.com/OmicsOS/lobster
         # Resolve notebook path
         nb_path = Path(notebook_path)
         if not nb_path.exists():
-            # Try .lobster/notebooks/
-            nb_path = Path.home() / ".lobster" / "notebooks" / notebook_path
+            # Try workspace notebooks directory
+            nb_path = self.workspace_path / "notebooks" / notebook_path
 
         if not nb_path.exists():
             raise FileNotFoundError(f"Notebook not found: {notebook_path}")
@@ -2852,12 +2852,12 @@ https://github.com/OmicsOS/lobster
 
     def list_notebooks(self) -> List[Dict[str, Any]]:
         """
-        List available notebooks in .lobster/notebooks/
+        List available notebooks in workspace notebooks directory.
 
         Returns:
             List of notebook metadata
         """
-        notebooks_dir = Path.home() / ".lobster" / "notebooks"
+        notebooks_dir = self.workspace_path / "notebooks"
         if not notebooks_dir.exists():
             return []
 

@@ -265,82 +265,63 @@ class Settings:
 
 
 # Model pricing configuration (USD per million tokens)
-# Pricing as of January 2025 - Update as needed
-# Source: https://www.anthropic.com/pricing
-MODEL_PRICING = {
-    # AWS Bedrock Model IDs - Official Pricing (as of Nov 2024)
-    # Source: https://aws.amazon.com/bedrock/pricing/
-    # Claude Haiku 4.5
-    "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
-        "input_per_million": 1.00,  # $0.001 per 1K tokens
-        "output_per_million": 5.00,  # $0.005 per 1K tokens
-        "display_name": "Claude 4.5 Haiku",
-    },
-    # Claude Sonnet 4
-    "us.anthropic.claude-sonnet-4-20250514-v1:0": {
-        "input_per_million": 3.00,  # $0.003 per 1K tokens
-        "output_per_million": 15.00,  # $0.015 per 1K tokens
-        "display_name": "Claude 4 Sonnet",
-    },
-    # Claude Sonnet 4.5 (Standard Context)
-    "us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
-        "input_per_million": 3.00,  # $0.003 per 1K tokens
-        "output_per_million": 15.00,  # $0.015 per 1K tokens
-        "display_name": "Claude 4.5 Sonnet",
-    },
-    # Note: Long Context variants use different pricing:
-    # - Sonnet 4 Long Context: $6.00/$22.50 per million ($0.006/$0.0225 per 1K)
-    # - Sonnet 4.5 Long Context: $6.00/$22.50 per million ($0.006/$0.0225 per 1K)
-    # Add model IDs here when they become available
-    # Anthropic Direct API Model IDs (same pricing)
-    "claude-4-5-haiku": {
-        "input_per_million": 1.00,
-        "output_per_million": 5.00,
-        "display_name": "Claude 4.5 Haiku",
-    },
-    "claude-4-sonnet": {
-        "input_per_million": 3.00,
-        "output_per_million": 15.00,
-        "display_name": "Claude 4 Sonnet",
-    },
-    "claude-4-5-sonnet": {
-        "input_per_million": 3.00,
-        "output_per_million": 15.00,
-        "display_name": "Claude 4.5 Sonnet",
-    },
-    # Legacy Claude 3.5 models (for backward compatibility)
-    "claude-3-5-sonnet-20240620": {
-        "input_per_million": 3.00,
-        "output_per_million": 15.00,
-        "display_name": "Claude 3.5 Sonnet",
-    },
-    "claude-3-5-sonnet-20241022": {
-        "input_per_million": 3.00,
-        "output_per_million": 15.00,
-        "display_name": "Claude 3.5 Sonnet (v2)",
-    },
-    "us.anthropic.claude-3-5-sonnet-20240620-v1:0": {
-        "input_per_million": 3.00,
-        "output_per_million": 15.00,
-        "display_name": "Claude 3.5 Sonnet",
-    },
-    "us.anthropic.claude-3-5-sonnet-20241022-v2:0": {
-        "input_per_million": 3.00,
-        "output_per_million": 15.00,
-        "display_name": "Claude 3.5 Sonnet (v2)",
-    },
-    # Claude 3 Opus (legacy)
-    "claude-3-opus-20240229": {
-        "input_per_million": 15.00,
-        "output_per_million": 75.00,
-        "display_name": "Claude 3 Opus",
-    },
-    "us.anthropic.claude-3-opus-20240229-v1:0": {
-        "input_per_million": 15.00,
-        "output_per_million": 75.00,
-        "display_name": "Claude 3 Opus",
-    },
-}
+# Dynamically loaded from ProviderRegistry - single source of truth
+# Pricing is defined in each provider's ModelInfo objects:
+#   - lobster/config/providers/anthropic_provider.py
+#   - lobster/config/providers/bedrock_provider.py
+#   - lobster/config/providers/gemini_provider.py
+#   - lobster/config/providers/ollama_provider.py (free - pricing=0.0)
+
+# Cache for lazy-loaded pricing (avoids circular imports)
+_MODEL_PRICING_CACHE: Dict[str, Any] = None
+
+
+def get_model_pricing() -> Dict[str, Any]:
+    """
+    Get model pricing dictionary from all registered providers.
+
+    Uses lazy loading to avoid circular imports. Pricing is defined
+    in each provider's ModelInfo objects (single source of truth).
+
+    Returns:
+        Dict mapping model names to pricing info:
+        {
+            "model-name": {
+                "input_per_million": float,
+                "output_per_million": float,
+                "display_name": str
+            }
+        }
+
+    Example:
+        >>> pricing = get_model_pricing()
+        >>> gemini_cost = pricing.get("gemini-3-pro-preview")
+        >>> if gemini_cost:
+        ...     print(f"Input: ${gemini_cost['input_per_million']}/M tokens")
+    """
+    global _MODEL_PRICING_CACHE
+
+    if _MODEL_PRICING_CACHE is None:
+        from lobster.config.providers.registry import ProviderRegistry
+
+        _MODEL_PRICING_CACHE = ProviderRegistry.get_all_models_with_pricing()
+
+    return _MODEL_PRICING_CACHE
+
+
+def reset_model_pricing_cache() -> None:
+    """
+    Reset the pricing cache (for testing or after provider changes).
+
+    This forces the next call to get_model_pricing() to reload from providers.
+    """
+    global _MODEL_PRICING_CACHE
+    _MODEL_PRICING_CACHE = None
+
+
+# Backward compatibility: MODEL_PRICING as module-level dict
+# Populated on first access via get_model_pricing()
+MODEL_PRICING: Dict[str, Any] = get_model_pricing()
 
 
 # Default pricing for unknown models (use Sonnet as reasonable default)

@@ -202,6 +202,69 @@ class ProviderRegistry:
         cls._providers.clear()
         cls._initialized = False
 
+    @classmethod
+    def get_all_models_with_pricing(cls) -> Dict[str, Dict[str, float]]:
+        """
+        Generate unified pricing dictionary from all registered providers.
+
+        This is the single source of truth for model pricing, collecting
+        pricing data from each provider's ModelInfo definitions.
+
+        Returns:
+            Dict mapping model names to pricing info:
+            {
+                "gemini-3-pro-preview": {
+                    "input_per_million": 2.00,
+                    "output_per_million": 12.00,
+                    "display_name": "Gemini 3 Pro"
+                },
+                ...
+            }
+
+        Note:
+            - Models with pricing=None or pricing=0.0 are excluded (e.g., Ollama)
+            - This method triggers provider initialization if not already done
+
+        Example:
+            >>> pricing = ProviderRegistry.get_all_models_with_pricing()
+            >>> cost_info = pricing.get("gemini-3-pro-preview")
+            >>> if cost_info:
+            ...     print(f"Input: ${cost_info['input_per_million']}/M tokens")
+        """
+        cls._ensure_initialized()
+
+        pricing_dict: Dict[str, Dict[str, float]] = {}
+
+        for provider in cls._providers.values():
+            # Skip local providers (Ollama) - they have no cost and require network calls
+            # to list models. Cloud providers have static MODELS catalogs.
+            if provider.name == "ollama":
+                continue
+
+            try:
+                # Use static MODELS attribute if available (avoids unnecessary calls)
+                if hasattr(provider, "MODELS"):
+                    models = provider.MODELS
+                else:
+                    models = provider.list_models()
+
+                for model in models:
+                    # Only include models with defined pricing
+                    if (
+                        model.input_cost_per_million is not None
+                        and model.input_cost_per_million > 0
+                    ):
+                        pricing_dict[model.name] = {
+                            "input_per_million": model.input_cost_per_million,
+                            "output_per_million": model.output_cost_per_million or 0.0,
+                            "display_name": model.display_name,
+                        }
+            except Exception as e:
+                # Log but don't fail - some providers may not be available
+                logger.debug(f"Could not get models from {provider.name}: {e}")
+
+        return pricing_dict
+
 
 def get_provider(name: str) -> Optional[ILLMProvider]:
     """

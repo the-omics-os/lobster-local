@@ -519,7 +519,8 @@ def extract_available_commands() -> Dict[str, str]:
     # Static command definitions with descriptions (extracted from help text)
     command_descriptions = {
         "/help": "Show this help message",
-        "/status": "Show system status",
+        "/session": "Show current session status",
+        "/status": "Show subscription tier, packages, and agents",
         "/input-features": "Show input capabilities and navigation features",
         "/dashboard": "Switch to interactive dashboard (Textual UI)",
         "/status-panel": "Show comprehensive system status panel",
@@ -568,8 +569,6 @@ def extract_available_commands() -> Dict[str, str]:
         "/config model <name> --save": "Switch Ollama model and persist to workspace",
         "/clear": "Clear screen",
         "/exit": "Exit the chat",
-        # Deprecated commands
-        "/load": "[DEPRECATED] Use /queue load instead",
     }
 
     # Try to extract dynamically as fallback, but use static definitions as primary
@@ -616,36 +615,77 @@ if PROMPT_TOOLKIT_AVAILABLE:
         def get_completions(
             self, document: Document, complete_event: CompleteEvent
         ) -> Iterable[Completion]:
-            """Generate command completions."""
+            """Generate hierarchical command completions.
+
+            Implements depth-aware filtering to show only relevant commands:
+            - Typing "/" → shows top-level commands (/help, /config, /queue)
+            - Typing "/config " → shows subcommands (provider, model, show)
+            - Typing "/config model " → shows model names
+
+            This prevents overwhelming users with nested subcommands at the top level.
+            """
             text_before_cursor = document.text_before_cursor.lstrip()
 
             # Only complete if we're typing a command (starts with /)
             if not text_before_cursor.startswith("/"):
                 return
 
-            # Extract the command being typed (from / until space or end)
-            command_part = (
-                text_before_cursor.split()[0]
-                if " " in text_before_cursor
-                else text_before_cursor
-            )
-
             # Get available commands (cached)
             commands = self._get_cached_commands()
 
-            # Generate completions
+            # Analyze input structure for hierarchical filtering
+            has_trailing_space = text_before_cursor.endswith(" ")
+            typed_text = text_before_cursor.rstrip()  # Remove trailing space for analysis
+            typed_parts = typed_text.split() if typed_text else []
+            current_depth = len(typed_parts)
+
+            # Determine target depth for completions
+            if has_trailing_space:
+                # User typed "/config " (with space) → show next level subcommands
+                # Target depth: current_depth + 1 (e.g., depth 1 → show depth 2)
+                target_depth = current_depth + 1
+                prefix_match = typed_text + " "  # Must start with "/config "
+            else:
+                # User typed "/conf" (no space) → complete current level
+                # Target depth: current_depth (e.g., depth 1 → complete depth 1)
+                target_depth = current_depth
+                prefix_match = typed_text  # Must start with "/conf"
+
+            # Generate completions with depth filtering
             for cmd, description in commands.items():
-                if cmd.lower().startswith(command_part.lower()):
-                    # Escape HTML special characters to prevent XML parsing errors
-                    escaped_cmd = html.escape(cmd)
-                    escaped_desc = html.escape(description)
-                    yield Completion(
-                        text=cmd,
-                        start_position=-len(command_part),
-                        display=HTML(f"<ansired>{escaped_cmd}</ansired>"),
-                        display_meta=HTML(f"<dim>{escaped_desc}</dim>"),
-                        style="class:completion.command",
-                    )
+                # Calculate command depth (number of space-separated parts)
+                cmd_depth = len(cmd.split())
+
+                # Apply hierarchical filter: only show commands at target depth
+                if cmd_depth != target_depth:
+                    continue
+
+                # Apply prefix filter: command must start with what user typed
+                if not cmd.lower().startswith(prefix_match.lower()):
+                    continue
+
+                # Calculate completion text and cursor position
+                if has_trailing_space:
+                    # Show only the next part (e.g., "provider" from "/config provider")
+                    completion_text = cmd[len(prefix_match):]  # Extract remaining part
+                    start_position = 0
+                else:
+                    # Show full command and replace from beginning of current word
+                    completion_text = cmd
+                    current_word = typed_parts[-1] if typed_parts else ""
+                    start_position = -len(current_word)
+
+                # Escape HTML special characters to prevent XML parsing errors
+                escaped_cmd = html.escape(completion_text)
+                escaped_desc = html.escape(description)
+
+                yield Completion(
+                    text=completion_text,
+                    start_position=start_position,
+                    display=HTML(f"<ansired>{escaped_cmd}</ansired>"),
+                    display_meta=HTML(f"<dim>{escaped_desc}</dim>"),
+                    style="class:completion.command",
+                )
 
         def _get_cached_commands(self) -> Dict[str, str]:
             """Get commands with caching."""
@@ -2481,517 +2521,13 @@ def _get_matrix_info(matrix) -> Dict[str, Any]:
     return info
 
 
-def display_status(client: "AgentClient"):
-    """Display current system status with enhanced orange theming."""
-    status = client.get_status()
-
-    # Get current mode/profile
-    configurator = get_agent_configurator()
-    current_mode = configurator.get_current_profile()
-
-    # Prepare status data for the themed status panel
-    status_data = {
-        "session_id": status["session_id"],
-        "mode": current_mode,
-        "messages": str(status["message_count"]),
-        "workspace": status["workspace"],
-        "data_loaded": status["has_data"],
-    }
-
-    # Add data summary if available
-    if status["has_data"] and status["data_summary"]:
-        summary = status["data_summary"]
-        status_data["data_shape"] = str(summary.get("shape", "N/A"))
-        status_data["memory_usage"] = summary.get("memory_usage", "N/A")
-
-    # Use the themed status panel
-    console_manager.print_status_panel(status_data, "System Status")
-
-
-def _show_workspace_prompt(client):
-    """Display minimal oh-my-zsh style status with system information."""
-    try:
-        import psutil
-        import shutil
-        from lobster.core.license_manager import get_current_tier
-        from lobster.config.agent_registry import AGENT_REGISTRY, _ensure_plugins_loaded
-        from lobster.tools.gpu_detector import GPUDetector
-
-        # Ensure plugins are loaded before accessing AGENT_REGISTRY
-        _ensure_plugins_loaded()
-
-        tier = get_current_tier()
-        tier_color = {"free": "green", "premium": "yellow", "enterprise": "magenta"}.get(tier, "white")
-
-        # Count agents
-        child_agent_names = set()
-        for config in AGENT_REGISTRY.values():
-            if config.child_agents:
-                child_agent_names.update(config.child_agents)
-        agent_count = sum(
-            1 for name, config in AGENT_REGISTRY.items()
-            if config.supervisor_accessible is not False and name not in child_agent_names
-        )
-
-        # Get system information
-        # RAM
-        ram_gb = round(psutil.virtual_memory().total / (1024**3))
-
-        # GPU
-        hw_rec = GPUDetector.get_hardware_recommendation()
-        gpu_label = hw_rec["device"].upper()  # CUDA, MPS, or CPU
-
-        # Disk space (workspace)
-        try:
-            workspace_path = client.workspace_path if hasattr(client, 'workspace_path') else Path.cwd()
-            disk_usage = shutil.disk_usage(workspace_path)
-            disk_free_gb = round(disk_usage.free / (1024**3))
-        except Exception:
-            disk_free_gb = "?"
-
-        # Line 1: Application status
-        console.print(f"  [{tier_color}]●[/] lobster v{__version__} [{tier_color}]{tier}[/] [dim]│[/] {agent_count} agents [dim]│ local │[/] [dim italic]/help[/]")
-
-        # Line 2-3: System resources (stacked for clarity)
-        console.print(f"[dim]  └─ Compute:[/] {ram_gb}GB RAM [dim]│[/] {gpu_label}")
-        console.print(f"[dim]     Storage:[/] {disk_free_gb}GB free [dim](workspace)[/]")
-        console.print()
-    except Exception as e:
-        # Fallback to basic prompt if system info fails
-        console.print(f"[dim red]Error loading system info: {e}[/dim red]")
-        console.print(f"  [green]●[/] lobster v{__version__}")
-        console.print()
-
-
-def init_client_with_animation(
-    workspace: Optional[Path] = None,
-    reasoning: bool = False,
-    verbose: bool = False,
-    debug: bool = False,
-    profile_timings: Optional[bool] = None,
-    provider_override: Optional[str] = None,
-    model_override: Optional[str] = None,
-    session_id: Optional[str] = None,
-) -> "AgentClient":
+def _display_status_info():
     """
-    Initialize client. Fast startup thanks to lazy imports.
+    Display subscription tier, installed packages, and available agents.
+
+    Shared implementation for both 'lobster status' CLI command and '/status' chat command.
+    This function is client-independent and shows installation/license information.
     """
-    get_console_manager()
-
-    # Initialize client - lazy imports make this fast
-    client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider_override, model_override, session_id)
-
-    return client
-
-
-@app.command()
-def config_test(
-    output_json: bool = typer.Option(
-        False,
-        "--json",
-        "-j",
-        help="Output results as JSON (machine-readable)",
-    ),
-):
-    """Test API connectivity and validate configuration."""
-    import json as json_module
-
-    from dotenv import load_dotenv
-
-    # Results structure for JSON output
-    test_results = {
-        "valid": False,
-        "env_file": None,
-        "checks": {
-            "llm_provider": {"status": "fail", "provider": None, "message": None, "hint": None},
-            "ncbi_api": {"status": "skip", "has_key": False, "message": None},
-            "workspace": {"status": "fail", "path": None, "message": None},
-        },
-    }
-
-    def log(msg: str, style: str = None):
-        """Print message only if not in JSON mode."""
-        if not output_json:
-            if style:
-                console.print(f"[{style}]{msg}[/{style}]")
-            else:
-                console.print(msg)
-
-    # Check .env file exists
-    env_file = Path.cwd() / ".env"
-    test_results["env_file"] = str(env_file) if env_file.exists() else None
-
-    if not env_file.exists():
-        if output_json:
-            test_results["checks"]["llm_provider"]["message"] = "No .env file found"
-            print(json_module.dumps(test_results, indent=2))
-        else:
-            console.print(f"[red]❌ No .env file found in current directory[/red]")
-            console.print(f"[dim]Run 'lobster init' to create configuration[/dim]")
-        raise typer.Exit(1)
-
-    load_dotenv()
-
-    if not output_json:
-        console.print()
-        console.print(
-            Panel.fit(
-                f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Configuration Test[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-                border_style=LobsterTheme.PRIMARY_ORANGE,
-                padding=(0, 2),
-            )
-        )
-        console.print()
-        console.print(f"[green]✅ Found .env file:[/green] {env_file}")
-        console.print()
-
-    # Test LLM Provider
-    log("Testing LLM Provider...", "bold")
-    try:
-        from lobster.config.llm_factory import LLMFactory, LLMProvider
-
-        provider = LLMFactory.detect_provider()
-        if provider is None:
-            test_results["checks"]["llm_provider"]["message"] = "No API keys found"
-            test_results["checks"]["llm_provider"]["hint"] = "Set ANTHROPIC_API_KEY, AWS_BEDROCK_ACCESS_KEY, or run Ollama"
-            log("❌ No LLM provider configured", "red")
-        else:
-            test_results["checks"]["llm_provider"]["provider"] = provider.value
-            log(f"  Detected provider: {provider.value}", "yellow")
-
-            # Provider-specific pre-checks for Ollama
-            if provider == LLMProvider.OLLAMA:
-                ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-                log(f"  Checking Ollama server at {ollama_url}...", "yellow")
-                try:
-                    import requests
-                    resp = requests.get(f"{ollama_url}/api/tags", timeout=5)
-                    if resp.status_code != 200:
-                        raise Exception(f"Ollama server returned status {resp.status_code}")
-                    models = resp.json().get("models", [])
-                    if not models:
-                        test_results["checks"]["llm_provider"]["message"] = "Ollama running but no models installed"
-                        test_results["checks"]["llm_provider"]["hint"] = "Run: ollama pull llama3.2:3b"
-                        log("❌ Ollama: No models installed", "red")
-                        provider = None
-                    else:
-                        model_names = [m.get("name", "unknown") for m in models[:3]]
-                        log(f"  Ollama server: Running ({len(models)} models)", "green")
-                except requests.exceptions.ConnectionError:
-                    test_results["checks"]["llm_provider"]["message"] = "Ollama server not running"
-                    test_results["checks"]["llm_provider"]["hint"] = "Start Ollama: ollama serve"
-                    log("❌ Ollama server not accessible", "red")
-                    provider = None
-                except Exception as e:
-                    test_results["checks"]["llm_provider"]["message"] = f"Ollama error: {str(e)[:60]}"
-                    log(f"❌ Ollama check failed: {e}", "red")
-                    provider = None
-
-            # Test LLM connectivity
-            if provider is not None:
-                try:
-                    if provider == LLMProvider.OLLAMA:
-                        test_config = {"model_id": "", "temperature": 1.0, "max_tokens": 50}
-                    elif provider == LLMProvider.ANTHROPIC_DIRECT:
-                        test_config = {"model_id": "claude-3-5-haiku-20241022", "temperature": 1.0, "max_tokens": 50}
-                    else:  # Bedrock
-                        test_config = {"model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0", "temperature": 1.0, "max_tokens": 50}
-
-                    test_llm = LLMFactory.create_llm(test_config, "config_test")
-                    log("  Testing API connectivity...", "yellow")
-                    response = test_llm.invoke("Reply with just 'ok'")
-
-                    test_results["checks"]["llm_provider"]["status"] = "pass"
-                    test_results["checks"]["llm_provider"]["message"] = "Connected"
-                    log(f"✅ {provider.value} API: Connected", "green")
-                except Exception as e:
-                    error_msg = str(e)
-                    if "invalid_api_key" in error_msg.lower() or "authentication" in error_msg.lower():
-                        hint = "Check your API key"
-                    elif "rate_limit" in error_msg.lower():
-                        hint = "Rate limited - wait and retry"
-                    elif "model" in error_msg.lower() and "not found" in error_msg.lower():
-                        hint = "Model not available in your region/plan"
-                    else:
-                        hint = None
-
-                    test_results["checks"]["llm_provider"]["message"] = error_msg[:100]
-                    test_results["checks"]["llm_provider"]["hint"] = hint
-                    log(f"❌ {provider.value} API: {error_msg[:60]}", "red")
-    except Exception as e:
-        test_results["checks"]["llm_provider"]["message"] = str(e)[:100]
-        log(f"❌ LLM Provider test failed: {e}", "red")
-
-    if not output_json:
-        console.print()
-
-    # Test NCBI API
-    log("Testing NCBI API...", "bold")
-    ncbi_key = os.environ.get("NCBI_API_KEY")
-    test_results["checks"]["ncbi_api"]["has_key"] = bool(ncbi_key)
-
-    if ncbi_key or os.environ.get("NCBI_EMAIL"):
-        try:
-            import urllib.request
-            import xml.etree.ElementTree as ET
-
-            base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-            params = {"db": "pubmed", "term": "test", "retmax": "1", "retmode": "xml"}
-            if ncbi_key:
-                params["api_key"] = ncbi_key
-
-            url = f"{base_url}?" + "&".join([f"{k}={v}" for k, v in params.items()])
-            log("  Testing NCBI E-utilities...", "yellow")
-
-            with urllib.request.urlopen(url, timeout=10) as response:
-                root = ET.fromstring(response.read())
-                error = root.find(".//ERROR")
-                if error is not None:
-                    test_results["checks"]["ncbi_api"]["status"] = "fail"
-                    test_results["checks"]["ncbi_api"]["message"] = error.text
-                    log(f"❌ NCBI API Error: {error.text}", "red")
-                else:
-                    test_results["checks"]["ncbi_api"]["status"] = "pass"
-                    test_results["checks"]["ncbi_api"]["message"] = "Connected"
-                    log(f"✅ NCBI API: Connected {'(with API key)' if ncbi_key else ''}", "green")
-        except Exception as e:
-            test_results["checks"]["ncbi_api"]["status"] = "fail"
-            test_results["checks"]["ncbi_api"]["message"] = str(e)[:60]
-            log(f"❌ NCBI API: {str(e)[:60]}", "red")
-    else:
-        test_results["checks"]["ncbi_api"]["status"] = "skip"
-        test_results["checks"]["ncbi_api"]["message"] = "Not configured (optional)"
-        log("⊘ NCBI API: Not configured (optional)", "dim")
-
-    if not output_json:
-        console.print()
-
-    # Test Workspace
-    log("Testing Workspace...", "bold")
-    try:
-        from lobster.core.workspace import resolve_workspace
-        workspace_path = resolve_workspace(explicit_path=None, create=True)
-        test_results["checks"]["workspace"]["path"] = str(workspace_path)
-
-        test_file = workspace_path / ".config_test_write"
-        try:
-            test_file.write_text("test")
-            test_file.unlink()
-            test_results["checks"]["workspace"]["status"] = "pass"
-            test_results["checks"]["workspace"]["message"] = "Writable"
-            log("✅ Workspace: Writable", "green")
-            log(f"  Path: {workspace_path}", "dim")
-        except PermissionError:
-            test_results["checks"]["workspace"]["message"] = "Permission denied"
-            log("❌ Workspace: Permission denied", "red")
-        except Exception as e:
-            test_results["checks"]["workspace"]["message"] = str(e)[:60]
-            log(f"❌ Workspace: {e}", "red")
-    except Exception as e:
-        test_results["checks"]["workspace"]["message"] = str(e)[:60]
-        log(f"❌ Workspace setup failed: {e}", "red")
-
-    # Determine overall validity
-    test_results["valid"] = test_results["checks"]["llm_provider"]["status"] == "pass"
-
-    # Output
-    if output_json:
-        print(json_module.dumps(test_results, indent=2))
-    else:
-        console.print()
-
-        # Summary table
-        table = Table(title="Configuration Test Summary", box=box.ROUNDED)
-        table.add_column("Service", style="cyan", no_wrap=True)
-        table.add_column("Status", style="bold", no_wrap=True)
-        table.add_column("Details", style="dim")
-
-        for check_name, check_data in test_results["checks"].items():
-            status = check_data["status"]
-            icon = "✅" if status == "pass" else ("❌" if status == "fail" else "⊘")
-            style = "green" if status == "pass" else ("red" if status == "fail" else "dim")
-            details = check_data.get("message") or ""
-            if check_name == "llm_provider" and check_data.get("provider"):
-                details = f"{check_data['provider']}: {details}"
-            table.add_row(check_name.replace("_", " ").title(), f"[{style}]{icon}[/{style}]", details)
-
-        console.print(table)
-        console.print()
-
-        if test_results["valid"]:
-            console.print(
-                Panel.fit(
-                    "[bold green]✅ Configuration Valid[/bold green]\n\n"
-                    "All required services are accessible.\n"
-                    f"You can now run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-                    border_style="green",
-                    padding=(1, 2),
-                )
-            )
-        else:
-            console.print(
-                Panel.fit(
-                    "[bold red]❌ Configuration Issues Detected[/bold red]\n\n"
-                    "Please check your API keys in the .env file.\n"
-                    f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
-                    border_style="red",
-                    padding=(1, 2),
-                )
-            )
-
-    if not test_results["valid"]:
-        raise typer.Exit(1)
-
-
-@app.command()
-def config_show():
-    """Display current configuration with masked secrets."""
-    console.print()
-    console.print(
-        Panel.fit(
-            f"[bold {LobsterTheme.PRIMARY_ORANGE}]⚙️  Current Configuration[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-            border_style=LobsterTheme.PRIMARY_ORANGE,
-            padding=(0, 2),
-        )
-    )
-    console.print()
-
-    # Check .env file
-    env_file = Path.cwd() / ".env"
-    if not env_file.exists():
-        console.print(f"[red]❌ No .env file found in current directory[/red]")
-        console.print(f"[dim]Run 'lobster init' to create configuration[/dim]")
-        raise typer.Exit(1)
-
-    console.print(f"[dim]Configuration file:[/dim] {env_file}")
-    console.print()
-
-    # Load environment variables
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
-    def mask_secret(value: Optional[str], show_chars: int = 4) -> str:
-        """Mask a secret value, showing only first few characters."""
-        if not value:
-            return "[dim]Not set[/dim]"
-        if len(value) <= show_chars:
-            return "[yellow]" + "*" * len(value) + "[/yellow]"
-        return f"[yellow]{value[:show_chars]}{'*' * (len(value) - show_chars)}[/yellow]"
-
-    # Create configuration table
-    table = Table(
-        title=None, box=box.SIMPLE, show_header=True, header_style="bold cyan"
-    )
-    table.add_column("Setting", style="cyan", no_wrap=True)
-    table.add_column("Value", style="white")
-
-    # LLM Provider
-    anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-    bedrock_access = os.environ.get("AWS_BEDROCK_ACCESS_KEY")
-    bedrock_secret = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY")
-    llm_provider = os.environ.get("LOBSTER_LLM_PROVIDER")
-    ollama_model = os.environ.get("OLLAMA_DEFAULT_MODEL")
-
-    table.add_row("", "")  # Spacing
-    table.add_row("[bold]LLM Provider", "")
-
-    # Show detected provider first
-    from lobster.config.llm_factory import LLMFactory
-
-    provider = LLMFactory.detect_provider()
-    if provider:
-        table.add_row("  [dim]Detected Provider[/dim]", f"[green]{provider.value}[/green]")
-
-    # Anthropic API
-    if anthropic_key:
-        table.add_row("  ANTHROPIC_API_KEY", mask_secret(anthropic_key))
-    else:
-        table.add_row("  ANTHROPIC_API_KEY", "[dim]Not set[/dim]")
-
-    # AWS Bedrock
-    if bedrock_access or bedrock_secret:
-        table.add_row("  AWS_BEDROCK_ACCESS_KEY", mask_secret(bedrock_access))
-        table.add_row("  AWS_BEDROCK_SECRET_ACCESS_KEY", mask_secret(bedrock_secret))
-    else:
-        table.add_row("  AWS_BEDROCK_ACCESS_KEY", "[dim]Not set[/dim]")
-        table.add_row("  AWS_BEDROCK_SECRET_ACCESS_KEY", "[dim]Not set[/dim]")
-
-    # Ollama - use provider_setup module
-    if llm_provider == "ollama" or provider and provider.value == "ollama":
-        table.add_row("  LOBSTER_LLM_PROVIDER", "[green]ollama[/green]")
-
-        # Get Ollama status using provider_setup
-        ollama_status = provider_setup.get_ollama_status()
-
-        if ollama_status.running:
-            table.add_row("  [dim]Ollama Status[/dim]", "[green]✓ Running[/green]")
-            if ollama_status.models:
-                model_count = len(ollama_status.models)
-                table.add_row(
-                    "  [dim]Available Models[/dim]", f"[cyan]{model_count} model(s)[/cyan]"
-                )
-        else:
-            table.add_row("  [dim]Ollama Status[/dim]", "[yellow]Not running[/yellow]")
-
-        if ollama_model:
-            table.add_row("  OLLAMA_DEFAULT_MODEL", f"[yellow]{ollama_model}[/yellow]")
-        else:
-            table.add_row(
-                "  OLLAMA_DEFAULT_MODEL", "[dim]llama3:8b-instruct (default)[/dim]"
-            )
-    else:
-        table.add_row("  LOBSTER_LLM_PROVIDER", "[dim]Not set (using cloud)[/dim]")
-
-    # NCBI API (optional)
-    table.add_row("", "")  # Spacing
-    table.add_row("[bold]NCBI API (Optional)", "")
-
-    ncbi_key = os.environ.get("NCBI_API_KEY")
-    ncbi_email = os.environ.get("NCBI_EMAIL")
-
-    table.add_row("  NCBI_API_KEY", mask_secret(ncbi_key))
-    if ncbi_email:
-        table.add_row("  NCBI_EMAIL", f"[yellow]{ncbi_email}[/yellow]")
-    else:
-        table.add_row("  NCBI_EMAIL", "[dim]Not set[/dim]")
-
-    console.print(table)
-    console.print()
-
-    # Status
-    from lobster.config.llm_factory import LLMFactory
-
-    provider = LLMFactory.detect_provider()
-
-    if provider:
-        console.print(
-            Panel.fit(
-                f"[green]✅ Configuration looks valid[/green]\n\n"
-                f"Primary provider: [bold]{provider.value}[/bold]\n"
-                f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster config test[/bold {LobsterTheme.PRIMARY_ORANGE}] to verify connectivity",
-                border_style="green",
-                padding=(1, 2),
-            )
-        )
-    else:
-        console.print(
-            Panel.fit(
-                "[red]❌ No LLM provider configured[/red]\n\n"
-                "Please configure one of:\n"
-                "  • Claude API (ANTHROPIC_API_KEY)\n"
-                "  • AWS Bedrock (AWS_BEDROCK credentials)\n"
-                "  • Ollama (local, LOBSTER_LLM_PROVIDER=ollama)\n\n"
-                f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init[/bold {LobsterTheme.PRIMARY_ORANGE}]",
-                border_style="red",
-                padding=(1, 2),
-            )
-        )
-
-
-@app.command()
-def status():
-    """Display subscription tier, installed packages, and available agents."""
     from rich.table import Table
 
     console.print()
@@ -3143,6 +2679,415 @@ def status():
         console.print()
         console.print("[bold]Enabled Features:[/bold]")
         console.print(f"[cyan]{', '.join(features)}[/cyan]")
+
+
+def display_session(client: "AgentClient"):
+    """Display current session status with enhanced orange theming."""
+    status = client.get_status()
+
+    # Get current mode/profile
+    configurator = get_agent_configurator()
+    current_mode = configurator.get_current_profile()
+
+    # Prepare status data for the themed status panel
+    status_data = {
+        "session_id": status["session_id"],
+        "mode": current_mode,
+        "messages": str(status["message_count"]),
+        "workspace": status["workspace"],
+        "data_loaded": status["has_data"],
+    }
+
+    # Add data summary if available
+    if status["has_data"] and status["data_summary"]:
+        summary = status["data_summary"]
+        status_data["data_shape"] = str(summary.get("shape", "N/A"))
+        status_data["memory_usage"] = summary.get("memory_usage", "N/A")
+
+    # Use the themed status panel
+    console_manager.print_status_panel(status_data, "Session Status")
+
+
+def _show_workspace_prompt(client):
+    """Display minimal oh-my-zsh style status with system information."""
+    try:
+        import psutil
+        import shutil
+        from lobster.core.license_manager import get_current_tier
+        from lobster.config.agent_registry import AGENT_REGISTRY, _ensure_plugins_loaded
+        from lobster.tools.gpu_detector import GPUDetector
+
+        # Ensure plugins are loaded before accessing AGENT_REGISTRY
+        _ensure_plugins_loaded()
+
+        tier = get_current_tier()
+        tier_color = {"free": "green", "premium": "yellow", "enterprise": "magenta"}.get(tier, "white")
+
+        # Count agents
+        child_agent_names = set()
+        for config in AGENT_REGISTRY.values():
+            if config.child_agents:
+                child_agent_names.update(config.child_agents)
+        agent_count = sum(
+            1 for name, config in AGENT_REGISTRY.items()
+            if config.supervisor_accessible is not False and name not in child_agent_names
+        )
+
+        # Get system information
+        # RAM
+        ram_gb = round(psutil.virtual_memory().total / (1024**3))
+
+        # GPU
+        hw_rec = GPUDetector.get_hardware_recommendation()
+        gpu_label = hw_rec["device"].upper()  # CUDA, MPS, or CPU
+
+        # Disk space (workspace)
+        try:
+            workspace_path = client.workspace_path if hasattr(client, 'workspace_path') else Path.cwd()
+            disk_usage = shutil.disk_usage(workspace_path)
+            disk_free_gb = round(disk_usage.free / (1024**3))
+        except Exception:
+            disk_free_gb = "?"
+
+        # Line 1: Application status
+        console.print(f"  [{tier_color}]●[/] lobster v{__version__} [{tier_color}]{tier}[/] [dim]│[/] {agent_count} agents [dim]│ local │[/] [dim italic]/help[/]")
+
+        # Line 2-3: System resources (stacked for clarity)
+        console.print(f"[dim]  └─ Compute:[/] {ram_gb}GB RAM [dim]│[/] {gpu_label}")
+        console.print(f"[dim]     Storage:[/] {disk_free_gb}GB free [dim](workspace)[/]")
+        console.print()
+    except Exception as e:
+        # Fallback to basic prompt if system info fails
+        console.print(f"[dim red]Error loading system info: {e}[/dim red]")
+        console.print(f"  [green]●[/] lobster v{__version__}")
+        console.print()
+
+
+def init_client_with_animation(
+    workspace: Optional[Path] = None,
+    reasoning: bool = False,
+    verbose: bool = False,
+    debug: bool = False,
+    profile_timings: Optional[bool] = None,
+    provider_override: Optional[str] = None,
+    model_override: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> "AgentClient":
+    """
+    Initialize client. Fast startup thanks to lazy imports.
+    """
+    get_console_manager()
+
+    # Initialize client - lazy imports make this fast
+    client = init_client(workspace, reasoning, verbose, debug, profile_timings, provider_override, model_override, session_id)
+
+    return client
+
+
+@app.command()
+def config_test(
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        "-j",
+        help="Output results as JSON (machine-readable)",
+    ),
+):
+    """Test API connectivity and validate configuration."""
+    import json as json_module
+
+    from dotenv import load_dotenv
+
+    # Results structure for JSON output
+    test_results = {
+        "valid": False,
+        "env_file": None,
+        "checks": {
+            "llm_provider": {"status": "fail", "provider": None, "message": None, "hint": None},
+            "ncbi_api": {"status": "skip", "has_key": False, "message": None},
+            "workspace": {"status": "fail", "path": None, "message": None},
+        },
+    }
+
+    def log(msg: str, style: str = None):
+        """Print message only if not in JSON mode."""
+        if not output_json:
+            if style:
+                console.print(f"[{style}]{msg}[/{style}]")
+            else:
+                console.print(msg)
+
+    # Check .env file exists
+    env_file = Path.cwd() / ".env"
+    test_results["env_file"] = str(env_file) if env_file.exists() else None
+
+    if not env_file.exists():
+        if output_json:
+            test_results["checks"]["llm_provider"]["message"] = "No .env file found"
+            print(json_module.dumps(test_results, indent=2))
+        else:
+            console.print(f"[red]❌ No .env file found in current directory[/red]")
+            console.print(f"[dim]Run 'lobster init' to create configuration[/dim]")
+        raise typer.Exit(1)
+
+    load_dotenv()
+
+    if not output_json:
+        console.print()
+        console.print(
+            Panel.fit(
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Configuration Test[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                border_style=LobsterTheme.PRIMARY_ORANGE,
+                padding=(0, 2),
+            )
+        )
+        console.print()
+        console.print(f"[green]✅ Found .env file:[/green] {env_file}")
+        console.print()
+
+    # Test LLM Provider
+    log("Testing LLM Provider...", "bold")
+    try:
+        from lobster.config.llm_factory import LLMFactory, LLMProvider
+
+        workspace_path = Path.cwd() / ".lobster_workspace"
+        provider = LLMFactory.get_current_provider(workspace_path=workspace_path)
+        if provider is None:
+            test_results["checks"]["llm_provider"]["message"] = "No API keys found"
+            test_results["checks"]["llm_provider"]["hint"] = "Set ANTHROPIC_API_KEY, AWS_BEDROCK_ACCESS_KEY, or run Ollama"
+            log("❌ No LLM provider configured", "red")
+        else:
+            # provider is a string, not an enum
+            test_results["checks"]["llm_provider"]["provider"] = provider
+            log(f"  Detected provider: {provider}", "yellow")
+
+            # Provider-specific pre-checks for Ollama
+            if provider == "ollama":
+                ollama_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+                log(f"  Checking Ollama server at {ollama_url}...", "yellow")
+                try:
+                    import requests
+                    resp = requests.get(f"{ollama_url}/api/tags", timeout=5)
+                    if resp.status_code != 200:
+                        raise Exception(f"Ollama server returned status {resp.status_code}")
+                    models = resp.json().get("models", [])
+                    if not models:
+                        test_results["checks"]["llm_provider"]["message"] = "Ollama running but no models installed"
+                        test_results["checks"]["llm_provider"]["hint"] = "Run: ollama pull llama3.2:3b"
+                        log("❌ Ollama: No models installed", "red")
+                        provider = None
+                    else:
+                        model_names = [m.get("name", "unknown") for m in models[:3]]
+                        log(f"  Ollama server: Running ({len(models)} models)", "green")
+                except requests.exceptions.ConnectionError:
+                    test_results["checks"]["llm_provider"]["message"] = "Ollama server not running"
+                    test_results["checks"]["llm_provider"]["hint"] = "Start Ollama: ollama serve"
+                    log("❌ Ollama server not accessible", "red")
+                    provider = None
+                except Exception as e:
+                    test_results["checks"]["llm_provider"]["message"] = f"Ollama error: {str(e)[:60]}"
+                    log(f"❌ Ollama check failed: {e}", "red")
+                    provider = None
+
+            # Test LLM connectivity
+            if provider is not None:
+                try:
+                    # provider is a string
+                    if provider == "ollama":
+                        test_config = {"model_id": "", "temperature": 1.0, "max_tokens": 50}
+                    elif provider == "anthropic":
+                        test_config = {"model_id": "claude-3-5-haiku-20241022", "temperature": 1.0, "max_tokens": 50}
+                    elif provider == "gemini":
+                        test_config = {"model_id": "gemini-2.0-flash-exp", "temperature": 1.0, "max_tokens": 50}
+                    else:  # bedrock
+                        test_config = {"model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0", "temperature": 1.0, "max_tokens": 50}
+
+                    test_llm = LLMFactory.create_llm(test_config, "config_test")
+                    log("  Testing API connectivity...", "yellow")
+                    response = test_llm.invoke("Reply with just 'ok'")
+
+                    test_results["checks"]["llm_provider"]["status"] = "pass"
+                    test_results["checks"]["llm_provider"]["message"] = "Connected"
+                    log(f"✅ {provider} API: Connected", "green")
+                except Exception as e:
+                    error_msg = str(e)
+                    if "invalid_api_key" in error_msg.lower() or "authentication" in error_msg.lower():
+                        hint = "Check your API key"
+                    elif "rate_limit" in error_msg.lower():
+                        hint = "Rate limited - wait and retry"
+                    elif "model" in error_msg.lower() and "not found" in error_msg.lower():
+                        hint = "Model not available in your region/plan"
+                    else:
+                        hint = None
+
+                    test_results["checks"]["llm_provider"]["message"] = error_msg[:100]
+                    test_results["checks"]["llm_provider"]["hint"] = hint
+                    log(f"❌ {provider} API: {error_msg[:60]}", "red")
+    except Exception as e:
+        test_results["checks"]["llm_provider"]["message"] = str(e)[:100]
+        log(f"❌ LLM Provider test failed: {e}", "red")
+
+    if not output_json:
+        console.print()
+
+    # Test NCBI API
+    log("Testing NCBI API...", "bold")
+    ncbi_key = os.environ.get("NCBI_API_KEY")
+    test_results["checks"]["ncbi_api"]["has_key"] = bool(ncbi_key)
+
+    if ncbi_key or os.environ.get("NCBI_EMAIL"):
+        try:
+            import urllib.request
+            import xml.etree.ElementTree as ET
+
+            base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+            params = {"db": "pubmed", "term": "test", "retmax": "1", "retmode": "xml"}
+            if ncbi_key:
+                params["api_key"] = ncbi_key
+
+            url = f"{base_url}?" + "&".join([f"{k}={v}" for k, v in params.items()])
+            log("  Testing NCBI E-utilities...", "yellow")
+
+            with urllib.request.urlopen(url, timeout=10) as response:
+                root = ET.fromstring(response.read())
+                error = root.find(".//ERROR")
+                if error is not None:
+                    test_results["checks"]["ncbi_api"]["status"] = "fail"
+                    test_results["checks"]["ncbi_api"]["message"] = error.text
+                    log(f"❌ NCBI API Error: {error.text}", "red")
+                else:
+                    test_results["checks"]["ncbi_api"]["status"] = "pass"
+                    test_results["checks"]["ncbi_api"]["message"] = "Connected"
+                    log(f"✅ NCBI API: Connected {'(with API key)' if ncbi_key else ''}", "green")
+        except Exception as e:
+            test_results["checks"]["ncbi_api"]["status"] = "fail"
+            test_results["checks"]["ncbi_api"]["message"] = str(e)[:60]
+            log(f"❌ NCBI API: {str(e)[:60]}", "red")
+    else:
+        test_results["checks"]["ncbi_api"]["status"] = "skip"
+        test_results["checks"]["ncbi_api"]["message"] = "Not configured (optional)"
+        log("⊘ NCBI API: Not configured (optional)", "dim")
+
+    if not output_json:
+        console.print()
+
+    # Test Workspace
+    log("Testing Workspace...", "bold")
+    try:
+        from lobster.core.workspace import resolve_workspace
+        workspace_path = resolve_workspace(explicit_path=None, create=True)
+        test_results["checks"]["workspace"]["path"] = str(workspace_path)
+
+        test_file = workspace_path / ".config_test_write"
+        try:
+            test_file.write_text("test")
+            test_file.unlink()
+            test_results["checks"]["workspace"]["status"] = "pass"
+            test_results["checks"]["workspace"]["message"] = "Writable"
+            log("✅ Workspace: Writable", "green")
+            log(f"  Path: {workspace_path}", "dim")
+        except PermissionError:
+            test_results["checks"]["workspace"]["message"] = "Permission denied"
+            log("❌ Workspace: Permission denied", "red")
+        except Exception as e:
+            test_results["checks"]["workspace"]["message"] = str(e)[:60]
+            log(f"❌ Workspace: {e}", "red")
+    except Exception as e:
+        test_results["checks"]["workspace"]["message"] = str(e)[:60]
+        log(f"❌ Workspace setup failed: {e}", "red")
+
+    # Determine overall validity
+    test_results["valid"] = test_results["checks"]["llm_provider"]["status"] == "pass"
+
+    # Output
+    if output_json:
+        print(json_module.dumps(test_results, indent=2))
+    else:
+        console.print()
+
+        # Summary table
+        table = Table(title="Configuration Test Summary", box=box.ROUNDED)
+        table.add_column("Service", style="cyan", no_wrap=True)
+        table.add_column("Status", style="bold", no_wrap=True)
+        table.add_column("Details", style="dim")
+
+        for check_name, check_data in test_results["checks"].items():
+            status = check_data["status"]
+            icon = "✅" if status == "pass" else ("❌" if status == "fail" else "⊘")
+            style = "green" if status == "pass" else ("red" if status == "fail" else "dim")
+            details = check_data.get("message") or ""
+            if check_name == "llm_provider" and check_data.get("provider"):
+                details = f"{check_data['provider']}: {details}"
+            table.add_row(check_name.replace("_", " ").title(), f"[{style}]{icon}[/{style}]", details)
+
+        console.print(table)
+        console.print()
+
+        if test_results["valid"]:
+            console.print(
+                Panel.fit(
+                    "[bold green]✅ Configuration Valid[/bold green]\n\n"
+                    "All required services are accessible.\n"
+                    f"You can now run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                    border_style="green",
+                    padding=(1, 2),
+                )
+            )
+        else:
+            console.print(
+                Panel.fit(
+                    "[bold red]❌ Configuration Issues Detected[/bold red]\n\n"
+                    "Please check your API keys in the .env file.\n"
+                    f"Run: [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
+                    border_style="red",
+                    padding=(1, 2),
+                )
+            )
+
+    if not test_results["valid"]:
+        raise typer.Exit(1)
+
+
+@app.command(name="config")
+def config_command(
+    workspace: Optional[str] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory to use",
+    ),
+):
+    """Display current LLM configuration (provider, models, config files).
+
+    This command shows:
+    - Current LLM provider and profile
+    - Configuration file locations
+    - Per-agent model assignments
+    - Available config commands
+    """
+    from lobster.core.workspace import resolve_workspace
+    from lobster.core.client import AgentClient
+
+    # Resolve workspace path
+    workspace_path = resolve_workspace(workspace, create=False)
+
+    # Create minimal client for config access
+    try:
+        client = AgentClient(workspace_path=str(workspace_path))
+        output = ConsoleOutputAdapter(console)
+
+        # Use unified config_show implementation from config_commands.py
+        config_show(client, output)
+    except Exception as e:
+        console.print(f"[red]❌ Error displaying configuration: {str(e)}[/red]")
+        console.print(f"[dim]Run 'lobster init' if not yet configured[/dim]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def status():
+    """Display subscription tier, installed packages, and available agents."""
+    _display_status_info()
 
 
 @app.command()
@@ -4566,7 +4511,8 @@ def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
 
 [bold white]Key Commands:[/bold white]
 
-[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] System status
+[{LobsterTheme.PRIMARY_ORANGE}]/session[/{LobsterTheme.PRIMARY_ORANGE}]      [grey50]-[/grey50] Current session status
+[{LobsterTheme.PRIMARY_ORANGE}]/status[/{LobsterTheme.PRIMARY_ORANGE}]       [grey50]-[/grey50] Subscription tier & agents
 [{LobsterTheme.PRIMARY_ORANGE}]/data[/{LobsterTheme.PRIMARY_ORANGE}]         [grey50]-[/grey50] Current data summary
 [{LobsterTheme.PRIMARY_ORANGE}]/workspace[/{LobsterTheme.PRIMARY_ORANGE}]    [grey50]-[/grey50] Workspace info
 [{LobsterTheme.PRIMARY_ORANGE}]/plots[/{LobsterTheme.PRIMARY_ORANGE}]        [grey50]-[/grey50] List generated plots
@@ -4587,8 +4533,12 @@ def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
         output = ConsoleOutputAdapter(console)
         return data_summary(client, output)
 
+    elif cmd == "/session":
+        display_session(client)
+
     elif cmd == "/status":
-        display_status(client)
+        # Display subscription tier, packages, and agents (replicates CLI 'lobster status')
+        _display_status_info()
 
     elif cmd == "/tokens":
         # Display token usage and cost information
@@ -4613,7 +4563,9 @@ def _execute_command(cmd: str, client: "AgentClient") -> Optional[str]:
             summary_table.add_column("Value", style="green")
 
             summary_table.add_row("Session ID", token_usage["session_id"])
-            summary_table.add_row("Provider", f"{'🦙 Ollama (Local)' if is_ollama else current_provider.capitalize()}")
+            # Handle None provider gracefully
+            provider_display = "🦙 Ollama (Local)" if is_ollama else (current_provider.capitalize() if current_provider else "Unknown")
+            summary_table.add_row("Provider", provider_display)
             summary_table.add_row(
                 "Total Input Tokens", f"{token_usage['total_input_tokens']:,}"
             )
@@ -4977,7 +4929,7 @@ when they are started by agents or analysis workflows.
             # Also show workspace tree if it exists
             from lobster.core.workspace import resolve_workspace
 
-            workspace_path = resolve_workspace(explicit_path=workspace, create=False)
+            workspace_path = resolve_workspace(explicit_path=client.workspace_path, create=False)
             if workspace_path.exists():
                 console_manager.print()  # Add spacing
                 workspace_tree = create_workspace_tree(workspace_path)
@@ -4997,7 +4949,12 @@ when they are started by agents or analysis workflows.
         # Use shared command implementation (unified with dashboard)
         output = ConsoleOutputAdapter(console)
         parts = cmd.split()
-        subcommand = parts[1] if len(parts) > 1 else "info"
+
+        # Default to showing status summary when no args (like /config and /queue)
+        if len(parts) == 1:
+            return workspace_status(client, output)
+
+        subcommand = parts[1]
 
         if subcommand == "list":
             force_refresh = "--refresh" in cmd.lower()
@@ -5011,8 +4968,12 @@ when they are started by agents or analysis workflows.
         elif subcommand == "remove":
             modality_name = parts[2] if len(parts) > 2 else None
             return workspace_remove(client, output, modality_name)
-        else:
+        elif subcommand == "status":
             return workspace_status(client, output)
+        else:
+            console.print(f"[yellow]Unknown workspace subcommand: {subcommand}[/yellow]")
+            console.print("[cyan]Available: status, list, info, load, remove[/cyan]")
+            return None
 
     elif cmd.startswith("/queue"):
         # Use shared command implementation (unified with dashboard)
@@ -5067,139 +5028,6 @@ when they are started by agents or analysis workflows.
         output = ConsoleOutputAdapter(console)
         filename = cmd[6:].strip()
         return file_read(client, output, filename, current_directory, PathResolver)
-
-    elif cmd.startswith("/load "):
-        # DEPRECATED: Use /queue load instead
-        console.print("[yellow]⚠️  Deprecation Warning: /load is deprecated.[/yellow]")
-        console.print("[yellow]   Use /queue load <file> for queue operations[/yellow]")
-        console.print("[yellow]   Use /workspace load <file> for data files[/yellow]\n")
-
-        # Load publication list from .ris file
-        filename = cmd[6:].strip()
-
-        # BUG FIX #6: Use PathResolver for secure path resolution
-        resolver = PathResolver(
-            current_directory=current_directory,
-            workspace_path=(
-                client.data_manager.workspace_path
-                if hasattr(client, "data_manager")
-                else None
-            ),
-        )
-        resolved = resolver.resolve(filename, search_workspace=True, must_exist=False)
-
-        if not resolved.is_safe:
-            console.print(f"[red]❌ Security error: {resolved.error}[/red]")
-            return None
-
-        file_path = resolved.path
-
-        # Validate file extension
-        if not file_path.suffix.lower() in [".ris", ".txt"]:
-            console_manager.print_error_panel(
-                f"Invalid file type: {file_path.suffix}",
-                "Only .ris or .txt files are supported for /load command",
-            )
-            return None
-
-        # Check if file exists
-        if not file_path.exists():
-            console_manager.print_error_panel(
-                f"File not found: {file_path}",
-                f"Searched in: {current_directory}",
-            )
-            return None
-
-        console.print(
-            f"[cyan]📚 Loading publication list from: {file_path.name}[/cyan]\n"
-        )
-
-        try:
-            with create_progress(client_arg=client) as progress:
-                task = progress.add_task(
-                    "[cyan]Parsing .ris file and creating queue entries...",
-                    total=None,
-                )
-
-                # Load publications into queue
-                result = client.load_publication_list(
-                    file_path=str(file_path),
-                    priority=5,  # Default priority
-                    schema_type="general",  # Default schema
-                    extraction_level="methods",  # Default extraction level
-                )
-
-                progress.remove_task(task)
-
-            # Display results
-            if result["added_count"] > 0:
-                console.print(
-                    f"[green]✅ Successfully loaded {result['added_count']} publications[/green]\n"
-                )
-
-                console.print("[cyan]📊 Load Summary:[/cyan]")
-                console.print(
-                    f"  • Added to queue: [bold]{result['added_count']}[/bold] publications"
-                )
-                if result["skipped_count"] > 0:
-                    console.print(
-                        f"  • Skipped: [yellow]{result['skipped_count']}[/yellow] entries (malformed or invalid)"
-                    )
-                console.print(
-                    f"  • Status: [bold]PENDING[/bold] (ready for processing)"
-                )
-                console.print(f"  • Queue file: publication_queue.jsonl\n")
-
-                console.print("[cyan]💡 Next steps:[/cyan]")
-                console.print(
-                    "  • View queue: [white]get_content_from_workspace(workspace='publication_queue')[/white]"
-                )
-                console.print(
-                    "  • Process queue: Ask the research agent to process pending publications\n"
-                )
-
-                if result.get("errors") and len(result["errors"]) > 0:
-                    console.print(
-                        f"[yellow]⚠️  {len(result['errors'])} error(s) occurred during parsing:[/yellow]"
-                    )
-                    for i, error in enumerate(
-                        result["errors"][:3], 1
-                    ):  # Show first 3 errors
-                        console.print(f"  {i}. {error}")
-                    if len(result["errors"]) > 3:
-                        console.print(f"  ... and {len(result['errors']) - 3} more")
-
-                # Return summary for conversation history
-                return f"Loaded {result['added_count']} publications from {file_path.name} into publication queue (skipped {result['skipped_count']})"
-            else:
-                console.print(
-                    f"[bold red on white] ⚠️  Error [/bold red on white] "
-                    f"[red]No publications could be loaded from file[/red]"
-                )
-                if result.get("errors"):
-                    console.print(f"\n[yellow]Errors:[/yellow]")
-                    for error in result["errors"][:5]:
-                        console.print(f"  • {error}")
-                return None
-
-        except FileNotFoundError as e:
-            console_manager.print_error_panel(
-                f"File not found: {str(e)}",
-                "Check the file path and try again",
-            )
-            return None
-        except ValueError as e:
-            console_manager.print_error_panel(
-                f"Invalid file format: {str(e)}",
-                "Ensure the file is a valid .ris format",
-            )
-            return None
-        except Exception as e:
-            console_manager.print_error_panel(
-                f"Failed to load publication list: {str(e)}",
-                "Check the file format and try again",
-            )
-            return None
 
     elif cmd.startswith("/archive"):
         # Use shared command implementation (unified with dashboard)
@@ -5892,12 +5720,121 @@ def show_config(
 
 @config_app.command(name="test")
 def test(
-    profile: str = typer.Option(..., "--profile", "-p", help="Profile to test"),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p", help="Profile to test (optional, auto-detects if not provided)"),
     agent: Optional[str] = typer.Option(
         None, "--agent", "-a", help="Specific agent to test"
     ),
 ):
-    """Test a specific configuration."""
+    """Test LLM provider connectivity and configuration.
+
+    If no --profile is specified, auto-detects the currently configured provider
+    and tests basic connectivity. With --profile, tests the full agent configuration.
+    """
+    # Load .env file for provider detection
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    # If no profile specified, test current provider connectivity
+    if not profile:
+        console.print()
+        console.print(
+            Panel.fit(
+                f"[bold {LobsterTheme.PRIMARY_ORANGE}]🔍 Testing LLM Provider[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+                border_style=LobsterTheme.PRIMARY_ORANGE,
+                padding=(0, 2),
+            )
+        )
+        console.print()
+
+        from lobster.config.providers import ProviderRegistry
+        from lobster.config.llm_factory import LLMFactory
+
+        # Auto-detect current provider (use ProviderRegistry directly)
+        try:
+            # Get list of configured providers
+            configured = ProviderRegistry.get_configured_providers()
+
+            if not configured:
+                console.print("[red]❌ No LLM provider configured[/red]")
+                console.print("[yellow]💡 Run 'lobster init' to configure a provider[/yellow]")
+                raise typer.Exit(1)
+
+            # Check environment variable first
+            import os
+            explicit_provider = os.getenv("LOBSTER_LLM_PROVIDER")
+            if explicit_provider and explicit_provider in [p.name for p in configured]:
+                provider = explicit_provider
+            else:
+                # Use first configured provider
+                provider = configured[0].name
+
+            if provider is None:
+                console.print("[red]❌ No LLM provider configured[/red]")
+                console.print("[yellow]💡 Run 'lobster init' to configure a provider[/yellow]")
+                raise typer.Exit(1)
+
+            # provider is a string, not an enum
+            console.print(f"[cyan]Detected provider:[/cyan] {provider}")
+            console.print()
+
+            # Test provider connectivity
+            console.print("[yellow]Testing API connectivity...[/yellow]")
+
+            try:
+                # Get provider object and create model directly (bypass ConfigResolver)
+                from lobster.config.providers import get_provider
+                provider_obj = get_provider(provider)
+
+                if not provider_obj:
+                    raise Exception(f"Provider '{provider}' not found in registry")
+
+                # Get default model for provider
+                default_model = provider_obj.get_default_model()
+
+                # Create test model directly via provider
+                test_llm = provider_obj.create_chat_model(
+                    model_id=default_model,
+                    temperature=1.0,
+                    max_tokens=50
+                )
+
+                response = test_llm.invoke("Reply with just 'ok'")
+
+                console.print()
+                console.print(
+                    Panel.fit(
+                        f"[bold green]✅ Provider Test Successful[/bold green]\n\n"
+                        f"Provider: [cyan]{provider}[/cyan]\n"
+                        f"Status: [green]Connected[/green]\n\n"
+                        f"Your {provider} provider is working correctly.\n"
+                        f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!",
+                        border_style="green",
+                        padding=(1, 2),
+                    )
+                )
+                return True
+
+            except Exception as e:
+                error_msg = str(e)
+                console.print()
+                console.print(
+                    Panel.fit(
+                        f"[bold red]❌ Provider Test Failed[/bold red]\n\n"
+                        f"Provider: [cyan]{provider}[/cyan]\n"
+                        f"Error: [red]{error_msg[:100]}[/red]\n\n"
+                        f"[yellow]💡 Check your API keys in .env file[/yellow]\n"
+                        f"Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster init --force[/bold {LobsterTheme.PRIMARY_ORANGE}] to reconfigure",
+                        border_style="red",
+                        padding=(1, 2),
+                    )
+                )
+                raise typer.Exit(1)
+
+        except Exception as e:
+            console.print(f"[red]❌ Error: {str(e)}[/red]")
+            raise typer.Exit(1)
+
+    # Profile-based testing (original functionality)
     try:
         configurator = initialize_configurator(profile=profile)
 

@@ -164,8 +164,8 @@ class NotebookExporter:
             exportable_count, len(activities)
         )
 
-        # Save to .lobster/notebooks/
-        output_dir = Path.home() / ".lobster" / "notebooks"
+        # Save to workspace notebooks directory
+        output_dir = self.data_manager.workspace_path / "notebooks"
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{name}.ipynb"
 

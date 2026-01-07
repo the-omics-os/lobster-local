@@ -77,6 +77,15 @@ class BedrockProvider(ILLMProvider):
             input_cost_per_million=1.0,
             output_cost_per_million=5.0,
         ),
+        ModelInfo(
+            name="us.anthropic.claude-opus-4-1-20250805-v1:0",
+            display_name="Claude Opus 4.1 (Bedrock Cross-Region)",
+            description="Claude 4.1 Opus via Bedrock - godmode profile",
+            provider="bedrock",
+            context_window=200000,
+            input_cost_per_million=15.0,
+            output_cost_per_million=75.0,
+        ),
         # Standard region model IDs (anthropic. prefix)
         ModelInfo(
             name="anthropic.claude-sonnet-4-20250514-v1:0",

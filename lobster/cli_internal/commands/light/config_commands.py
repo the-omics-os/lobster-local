@@ -155,16 +155,19 @@ def config_show(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     # ========================================================================
     # Usage hints
     # ========================================================================
-    output.print("\n[cyan]💡 Usage:[/cyan]")
+    output.print("\n[cyan]💡 Available Config Commands:[/cyan]")
+    output.print("\n[yellow]Provider Management:[/yellow]")
     output.print("  • [white]/config provider[/white] - List available providers")
     output.print("  • [white]/config provider <name>[/white] - Switch provider (runtime only)")
     output.print("  • [white]/config provider <name> --save[/white] - Switch and persist to workspace")
-    output.print("  • [white]/config model <name>[/white] - Set model for current provider")
 
-    # Deprecation note
-    output.print(
-        "\n[yellow]Note:[/yellow] [dim]/provider command is deprecated. Use /config provider instead.[/dim]"
-    )
+    output.print("\n[yellow]Model Management:[/yellow]")
+    output.print("  • [white]/config model[/white] - List available models for current provider")
+    output.print("  • [white]/config model <name>[/white] - Switch model (runtime only)")
+    output.print("  • [white]/config model <name> --save[/white] - Switch model and persist to workspace")
+
+    output.print("\n[yellow]Configuration Display:[/yellow]")
+    output.print("  • [white]/config[/white] or [white]/config show[/white] - Show this configuration summary")
 
     return f"Displayed configuration (provider: {provider}, profile: {profile})"
 

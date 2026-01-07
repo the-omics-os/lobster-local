@@ -17,11 +17,10 @@ if TYPE_CHECKING:
 
 from lobster.cli_internal.commands.output_adapter import OutputAdapter
 from lobster.cli_internal.utils.path_resolution import PathResolver
-from lobster.core.component_registry import component_registry
 
-# Import extraction cache manager (premium feature - graceful fallback if unavailable)
-ExtractionCacheManager = component_registry.get_service('extraction_cache')
-HAS_EXTRACTION_CACHE = ExtractionCacheManager is not None
+# NOTE: component_registry is imported lazily in archive_queue() to avoid
+# triggering heavy dependency loads (pandas/numpy) at module import time.
+# This keeps light commands fast (<300ms startup).
 
 
 def file_read(
@@ -359,8 +358,12 @@ def archive_queue(
     # BUG FIX #1: Handle nested archive commands with proper cache management
     # Use ExtractionCacheManager instead of client instance variables to prevent race conditions
 
+    # Lazy import to avoid loading heavy dependencies at module import time
+    from lobster.core.component_registry import component_registry
+    ExtractionCacheManager = component_registry.get_service('extraction_cache')
+
     # Check if extraction cache is available (premium feature)
-    if not HAS_EXTRACTION_CACHE:
+    if ExtractionCacheManager is None:
         output.print(
             "[yellow]Archive caching is a premium feature not available in this distribution.[/yellow]",
             style="warning"

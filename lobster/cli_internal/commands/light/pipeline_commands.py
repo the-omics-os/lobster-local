@@ -116,7 +116,7 @@ def pipeline_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]
 
         if not notebooks:
             output.print(
-                "[yellow]No notebooks found in .lobster/notebooks/[/yellow]",
+                "[yellow]No notebooks found in workspace notebooks directory[/yellow]",
                 style="warning"
             )
             output.print("Export one with: [green]/pipeline export[/green]", style="info")
