@@ -512,6 +512,7 @@ def transcriptomics_expert(
                 # Single resolution mode (existing behavior)
                 response += f"\n- Number of clusters: {clustering_stats['n_clusters']}"
                 response += f"\n- Leiden resolution: {clustering_stats.get('resolution', 'N/A')}"
+                response += f"\n- Cluster column name: `leiden` (use this exact name for visualization)"
 
             # Continue with common details
             response += f"\n- UMAP coordinates: {'Yes' if clustering_stats['has_umap'] else 'No'}"

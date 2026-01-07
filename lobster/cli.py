@@ -5259,6 +5259,13 @@ when they are started by agents or analysis workflows.
     elif cmd == "/clear":
         console.clear()
 
+    elif cmd == "/reset":
+        # Reset conversation state
+        client.reset()
+        console.print("[green]✓ Conversation reset[/green]")
+        console.print("[dim]Messages cleared. Data and modalities retained.[/dim]")
+        return "Conversation reset"
+
     elif cmd == "/exit":
         if Confirm.ask("[dim]exit?[/dim]"):
             display_goodbye()

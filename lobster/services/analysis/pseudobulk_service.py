@@ -481,9 +481,18 @@ class PseudobulkService:
             }
 
             # Add additional metadata from original obs (take from first cell)
+            # BUG-007 IMPROVEMENT: Check for inconsistent metadata within groups
             for col in obs.columns:
                 if col not in ["sample_id", "cell_type"] and col not in metadata:
                     metadata[col] = first_cell_obs[col]
+                    # Warn if metadata is inconsistent within group
+                    group_values = obs.iloc[cell_indices][col]
+                    if hasattr(group_values, "nunique") and group_values.nunique() > 1:
+                        self.logger.warning(
+                            f"Inconsistent '{col}' values in group {group_id}: "
+                            f"using first cell value '{first_cell_obs[col]}' "
+                            f"(found {group_values.nunique()} unique values)"
+                        )
 
             group_metadata.append(metadata)
 

@@ -316,10 +316,10 @@ class WorkspaceContentService:
         self.queues_dir = self.workspace_base / ".lobster" / "queues"
 
         # Create directories if they don't exist (queues_dir is created by DataManagerV2)
+        # Note: exports_dir is not created here since get_exports_directory() has a create parameter
         self.publications_dir.mkdir(parents=True, exist_ok=True)
         self.datasets_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
-        self.exports_dir.mkdir(parents=True, exist_ok=True)
 
         logger.debug(
             f"WorkspaceContentService initialized with workspace at {self.workspace_base}"

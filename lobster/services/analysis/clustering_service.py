@@ -1064,6 +1064,17 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
             if "pca" in adata_selected.uns:
                 adata.uns["pca"] = adata_selected.uns["pca"].copy()
 
+            # BUG-004 FIX: Transfer neighbor graph information for trajectory analysis
+            if "neighbors" in adata_selected.uns:
+                adata.uns["neighbors"] = adata_selected.uns["neighbors"].copy()
+            if hasattr(adata_selected, "obsp"):
+                if "distances" in adata_selected.obsp:
+                    adata.obsp["distances"] = adata_selected.obsp["distances"].copy()
+                if "connectivities" in adata_selected.obsp:
+                    adata.obsp["connectivities"] = adata_selected.obsp[
+                        "connectivities"
+                    ].copy()
+
             # Transfer multi-resolution results if available
             if "clustering_results" in adata_selected.uns:
                 adata.uns["clustering_results"] = adata_selected.uns[
@@ -1400,6 +1411,7 @@ print(f"Clustering pipeline complete: {adata.n_obs} cells in {n_clusters} cluste
                 "interpretation": "\n".join(interpretation),
                 "recommendations": recommendations,
                 "execution_time_seconds": round(execution_time, 2),
+                "metrics": metrics_to_compute,  # BUG-008 FIX: Add metrics list for agent
             }
 
             # Add metrics
