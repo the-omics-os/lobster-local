@@ -1071,7 +1071,12 @@ app.add_typer(config_app, name="config")
 def default_callback(ctx: typer.Context):
     """
     Show friendly help guide when lobster is invoked without subcommands.
+    Also checks for updates on every invocation.
     """
+    # Check for updates (non-blocking, cached, fails silently if offline)
+    from lobster.config.version_check import maybe_show_update_notification
+    maybe_show_update_notification(console)
+
     # If no subcommand was invoked, show the default help
     if ctx.invoked_subcommand is None:
         show_default_help()
