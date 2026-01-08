@@ -13,6 +13,9 @@ Components are advertised via entry points in pyproject.toml:
     [project.entry-points."lobster.agents"]
     metadata_assistant = "package.module:AGENT_CONFIG"
 
+    [project.entry-points."lobster.agent_configs"]
+    metadata_assistant = "package.module:CUSTOM_AGENT_CONFIG"
+
 Usage:
     from lobster.core.component_registry import component_registry
 
@@ -22,6 +25,10 @@ Usage:
     # Agents
     agent_config = component_registry.get_agent('metadata_assistant')
     all_agents = component_registry.list_agents()  # Includes core + custom
+
+    # Agent LLM Configs
+    llm_config = component_registry.get_agent_config('metadata_assistant')
+    all_configs = component_registry.list_agent_configs()
 """
 
 import sys
@@ -47,6 +54,7 @@ class ComponentRegistry:
     def __init__(self):
         self._services: Dict[str, Type[Any]] = {}
         self._custom_agents: Dict[str, Any] = {}  # AgentRegistryConfig instances
+        self._custom_agent_configs: Dict[str, Any] = {}  # CustomAgentConfig instances
         self._loaded = False
 
     def load_components(self) -> None:
@@ -65,10 +73,15 @@ class ComponentRegistry:
         # Load custom agents from 'lobster.agents' entry point
         self._load_entry_point_group('lobster.agents', self._custom_agents)
 
+        # Load custom agent LLM configs from 'lobster.agent_configs' entry point
+        self._load_entry_point_group('lobster.agent_configs', self._custom_agent_configs)
+
         self._loaded = True
         logger.debug(
             f"Component discovery complete. "
-            f"Services: {len(self._services)}, Custom agents: {len(self._custom_agents)}"
+            f"Services: {len(self._services)}, "
+            f"Custom agents: {len(self._custom_agents)}, "
+            f"Custom agent configs: {len(self._custom_agent_configs)}"
         )
 
     def _load_entry_point_group(self, group: str, target_dict: Dict[str, Any]) -> None:
@@ -216,6 +229,54 @@ class ComponentRegistry:
         return all_agents
 
     # =========================================================================
+    # AGENT CONFIG API
+    # =========================================================================
+
+    def get_agent_config(self, name: str, required: bool = False) -> Optional[Any]:
+        """
+        Get a custom agent LLM config by name.
+
+        Args:
+            name: Agent name (e.g., 'metadata_assistant')
+            required: If True, raise error when config not found
+
+        Returns:
+            CustomAgentConfig if found, None otherwise
+
+        Raises:
+            ValueError: If required=True and config not found
+        """
+        if not self._loaded:
+            self.load_components()
+
+        config = self._custom_agent_configs.get(name)
+
+        if config is None and required:
+            raise ValueError(
+                f"Required agent config '{name}' not found. "
+                f"Available configs: {list(self._custom_agent_configs.keys())}"
+            )
+
+        return config
+
+    def has_agent_config(self, name: str) -> bool:
+        """Check if a custom agent config is available."""
+        if not self._loaded:
+            self.load_components()
+        return name in self._custom_agent_configs
+
+    def list_agent_configs(self) -> Dict[str, Any]:
+        """
+        List all custom agent LLM configs (from entry points).
+
+        Returns:
+            Dict[str, CustomAgentConfig] - All available agent configs
+        """
+        if not self._loaded:
+            self.load_components()
+        return dict(self._custom_agent_configs)
+
+    # =========================================================================
     # UTILITY METHODS
     # =========================================================================
 
@@ -233,6 +294,10 @@ class ComponentRegistry:
                 "count": len(self._custom_agents),
                 "names": list(self._custom_agents.keys()),
             },
+            "custom_agent_configs": {
+                "count": len(self._custom_agent_configs),
+                "names": list(self._custom_agent_configs.keys()),
+            },
             "total_agents": len(self.list_agents()),
         }
 
@@ -240,6 +305,7 @@ class ComponentRegistry:
         """Reset the registry state (for testing)."""
         self._services.clear()
         self._custom_agents.clear()
+        self._custom_agent_configs.clear()
         self._loaded = False
 
 

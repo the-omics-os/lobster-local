@@ -22,6 +22,7 @@ from lobster.cli_internal.commands.light.queue_commands import (
     queue_list,
     queue_clear,
     queue_export,
+    queue_import,
     QueueFileTypeNotSupported,
 )
 from lobster.cli_internal.commands.light.metadata_commands import (
@@ -120,6 +121,7 @@ __all__ = [
     "queue_list",
     "queue_clear",
     "queue_export",
+    "queue_import",
     "QueueFileTypeNotSupported",
     # Metadata commands (light)
     "metadata_list",

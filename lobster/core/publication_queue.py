@@ -129,6 +129,86 @@ class PublicationQueue:
                 logger.error(f"Failed to add entry to publication queue: {e}")
                 raise PublicationQueueError(f"Failed to add entry: {e}") from e
 
+    def import_entries(
+        self,
+        entries: List[PublicationQueueEntry],
+        skip_duplicates: bool = True,
+    ) -> dict:
+        """
+        Import entries from external source (e.g., exported queue file).
+
+        This method is designed for restoring previously exported queues.
+        By default, it skips entries that already exist (by entry_id).
+
+        Args:
+            entries: List of PublicationQueueEntry objects to import
+            skip_duplicates: If True, skip entries with existing entry_id.
+                           If False, raises PublicationQueueError on duplicates.
+
+        Returns:
+            dict: Import statistics with keys:
+                - imported: Number of entries successfully imported
+                - skipped: Number of duplicate entries skipped
+                - errors: Number of entries that failed to import
+
+        Raises:
+            PublicationQueueError: If skip_duplicates=False and duplicates found,
+                                  or if write operation fails
+        """
+        if not entries:
+            return {"imported": 0, "skipped": 0, "errors": 0}
+
+        with self._locked():
+            # Load existing entries
+            existing_entries = self._load_entries()
+            existing_ids = {e.entry_id for e in existing_entries}
+
+            # Track statistics
+            imported = 0
+            skipped = 0
+            errors = 0
+
+            # Process each entry
+            for entry in entries:
+                try:
+                    if entry.entry_id in existing_ids:
+                        if skip_duplicates:
+                            skipped += 1
+                            logger.debug(
+                                f"Skipped duplicate entry: {entry.entry_id}"
+                            )
+                            continue
+                        else:
+                            raise PublicationQueueError(
+                                f"Entry with ID '{entry.entry_id}' already exists"
+                            )
+
+                    # Add to list and track ID
+                    existing_entries.append(entry)
+                    existing_ids.add(entry.entry_id)
+                    imported += 1
+
+                except PublicationQueueError:
+                    raise  # Re-raise if not skipping duplicates
+                except Exception as e:
+                    errors += 1
+                    logger.error(f"Failed to import entry {entry.entry_id}: {e}")
+
+            # Only write if we imported something
+            if imported > 0:
+                # Backup before modification
+                self._backup_queue()
+
+                # Write all entries atomically
+                self._write_entries_atomic(existing_entries)
+
+                logger.info(
+                    f"Imported {imported} entries to publication queue "
+                    f"(skipped {skipped} duplicates, {errors} errors)"
+                )
+
+            return {"imported": imported, "skipped": skipped, "errors": errors}
+
     def get_entry(self, entry_id: str) -> PublicationQueueEntry:
         """
         Retrieve specific entry by ID.

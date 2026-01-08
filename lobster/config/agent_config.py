@@ -85,6 +85,134 @@ class AgentModelConfig:
     thinking_config: Optional[ThinkingConfig] = None
 
 
+@dataclass
+class CustomAgentConfig:
+    """
+    Configuration for custom agent LLM settings (registered via entry points).
+
+    Custom packages register these configs via the 'lobster.agent_configs' entry point
+    group. They are discovered at runtime and merged into the LobsterAgentConfigurator.
+
+    Supports two modes:
+    1. Explicit model_preset: Specify a model directly (e.g., "claude-4-sonnet")
+    2. model_reference: Copy config from another agent (e.g., "research_agent")
+
+    Attributes:
+        name: Agent name (must match the agent's name in AGENT_REGISTRY)
+        model_preset: Optional key in MODEL_PRESETS (e.g., "claude-4-sonnet")
+        model_reference: Optional agent name to copy config from (e.g., "research_agent")
+        thinking_preset: Optional key in THINKING_PRESETS (e.g., "standard")
+        temperature_override: Optional custom temperature (overrides preset default)
+        custom_params: Additional parameters passed to agent
+
+    Examples:
+        ```python
+        # Explicit model preset
+        METADATA_ASSISTANT_CONFIG = CustomAgentConfig(
+            name="metadata_assistant",
+            model_preset="claude-4-sonnet",
+            thinking_preset="standard",
+        )
+
+        # Dynamic reference (copies research_agent's current model)
+        METADATA_ASSISTANT_CONFIG = CustomAgentConfig(
+            name="metadata_assistant",
+            model_reference="research_agent",  # Uses same model as research_agent
+            thinking_preset="standard",
+        )
+        ```
+    """
+
+    name: str
+    model_preset: Optional[str] = None  # Key in MODEL_PRESETS (e.g., "claude-4-sonnet")
+    model_reference: Optional[str] = None  # Agent name to copy config from (e.g., "research_agent")
+    thinking_preset: Optional[str] = None  # Key in THINKING_PRESETS
+    temperature_override: Optional[float] = None
+    custom_params: Dict = field(default_factory=dict)
+
+    def to_agent_model_config(
+        self, configurator: "LobsterAgentConfigurator"
+    ) -> AgentModelConfig:
+        """
+        Convert to AgentModelConfig using configurator's preset registry.
+
+        Supports two modes:
+        1. model_preset: Explicit model selection
+        2. model_reference: Copy config from another agent
+
+        Args:
+            configurator: The LobsterAgentConfigurator instance with MODEL_PRESETS
+
+        Returns:
+            AgentModelConfig ready for use in the agent system
+
+        Raises:
+            ValueError: If configuration is invalid
+        """
+        # Validate that exactly one of model_preset or model_reference is specified
+        if self.model_preset and self.model_reference:
+            raise ValueError(
+                f"Agent '{self.name}': Cannot specify both model_preset and model_reference. "
+                f"Choose one: explicit preset ('{self.model_preset}') or reference ('{self.model_reference}')."
+            )
+
+        if not self.model_preset and not self.model_reference:
+            raise ValueError(
+                f"Agent '{self.name}': Must specify either model_preset or model_reference. "
+                f"Examples: model_preset='claude-4-sonnet' or model_reference='research_agent'"
+            )
+
+        # Resolve model config
+        if self.model_reference:
+            # Dynamic reference: Copy config from another agent
+            if self.model_reference not in configurator._agent_configs:
+                raise ValueError(
+                    f"Agent '{self.name}': Referenced agent '{self.model_reference}' not found in configurator. "
+                    f"Available agents: {list(configurator._agent_configs.keys())}"
+                )
+
+            # Copy model config from referenced agent
+            referenced_config = configurator._agent_configs[self.model_reference]
+            model_config = referenced_config.model_config
+
+        else:
+            # Explicit model preset
+            if self.model_preset not in configurator.MODEL_PRESETS:
+                raise ValueError(
+                    f"Agent '{self.name}': Unknown model preset '{self.model_preset}'. "
+                    f"Available: {list(configurator.MODEL_PRESETS.keys())}"
+                )
+
+            model_config = configurator.MODEL_PRESETS[self.model_preset]
+
+        # Apply temperature override if specified
+        if self.temperature_override is not None:
+            from dataclasses import replace
+
+            model_config = replace(model_config, temperature=self.temperature_override)
+
+        # Resolve thinking config
+        thinking_config = None
+        if self.thinking_preset:
+            if self.thinking_preset not in configurator.THINKING_PRESETS:
+                raise ValueError(
+                    f"Agent '{self.name}': Unknown thinking preset '{self.thinking_preset}'. "
+                    f"Available: {list(configurator.THINKING_PRESETS.keys())}"
+                )
+            thinking_config = configurator.THINKING_PRESETS[self.thinking_preset]
+
+            # Only apply thinking if model supports it
+            if not model_config.supports_thinking:
+                thinking_config = None
+
+        return AgentModelConfig(
+            name=self.name,
+            model_config=model_config,
+            thinking_config=thinking_config,
+            custom_params=self.custom_params,
+        )
+
+
 class LobsterAgentConfigurator:
     """
     Professional configuration manager for Lobster AI agents.
@@ -235,7 +363,11 @@ class LobsterAgentConfigurator:
         # Note: Environment variables still use LOBSTER_ prefix for backward compatibility
         self.profile = profile or os.environ.get("LOBSTER_PROFILE", "production")
         self._agent_configs = {}
+        self._custom_configs_loaded = False  # Track lazy loading
         self._load_from_profile()
+
+        # Note: Custom agent configs are loaded lazily to avoid circular imports
+        # They will be loaded on first access via _ensure_custom_configs_loaded()
 
         # Apply environment overrides
         self._apply_env_overrides()
@@ -280,6 +412,70 @@ class LobsterAgentConfigurator:
                 model_config=model_config,
                 thinking_config=thinking_config,
             )
+
+    def _ensure_custom_configs_loaded(self):
+        """
+        Lazily load custom agent configs from entry points (on first access).
+
+        This method is idempotent and defers loading to avoid circular imports
+        during Settings initialization. Custom configs take precedence over
+        profile defaults for premium agents.
+
+        Entry points are discovered via the 'lobster.agent_configs' group.
+        """
+        if self._custom_configs_loaded:
+            return
+
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        try:
+            from lobster.core.component_registry import component_registry
+
+            # Trigger discovery
+            component_registry.load_components()
+
+            # Merge custom configs
+            custom_configs = component_registry.list_agent_configs()
+
+            if not custom_configs:
+                self._custom_configs_loaded = True
+                return
+
+            for agent_name, custom_config in custom_configs.items():
+                try:
+                    # Convert CustomAgentConfig → AgentModelConfig
+                    agent_model_config = custom_config.to_agent_model_config(self)
+
+                    # Merge into registry (overwrites if agent_name already exists)
+                    self._agent_configs[agent_name] = agent_model_config
+
+                    ref_or_preset = custom_config.model_reference or custom_config.model_preset
+                    logger.debug(
+                        f"Loaded custom config for '{agent_name}' "
+                        f"(config: {ref_or_preset})"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to load custom config for '{agent_name}': {e}"
+                    )
+
+            logger.info(
+                f"Merged {len(custom_configs)} custom agent configs: "
+                f"{list(custom_configs.keys())}"
+            )
+
+        except ImportError:
+            # component_registry not available (shouldn't happen in normal installs)
+            logger.debug(
+                "component_registry not available, skipping custom agent configs"
+            )
+        except Exception as e:
+            # Don't let component discovery failures break the system
+            logger.warning(f"Failed to load custom agent configs: {e}")
+
+        self._custom_configs_loaded = True
 
     def _apply_env_overrides(self):
         """Apply environment variable overrides."""
@@ -363,6 +559,9 @@ class LobsterAgentConfigurator:
         Raises:
             KeyError: If agent configuration not found
         """
+        # Lazily load custom configs on first access (avoids circular imports)
+        self._ensure_custom_configs_loaded()
+
         if agent_name not in self._agent_configs:
             raise KeyError(f"No configuration found for agent: {agent_name}")
 

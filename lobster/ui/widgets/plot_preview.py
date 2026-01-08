@@ -74,7 +74,7 @@ class PlotPreview(Vertical):
             self.plot_count = 0
             return
 
-        plots = self.client.data_manager.get_latest_plots(8)
+        plots, _, _ = self.client.data_manager.plot_manager.get_latest_plots(8)
 
         if not plots:
             plot_list.append(ListItem(Label("[dim]No plots yet[/dim]")))

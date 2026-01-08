@@ -57,6 +57,7 @@ from lobster.cli_internal.commands import (
     queue_list,
     queue_clear,
     queue_export,
+    queue_import,
     QueueFileTypeNotSupported,
     metadata_list,
     metadata_clear,
@@ -1161,6 +1162,11 @@ def init_client(
 
     # Resolve workspace (create if needed for proper config loading)
     workspace_path = resolve_workspace(explicit_path=workspace, create=True)
+
+    # Reload credentials for the target workspace
+    # This ensures we load from workspace/.env (if exists) or fall back to global credentials
+    settings.reload_credentials(workspace_path)
+
     resolver = ConfigResolver.get_instance(workspace_path)
 
     try:
@@ -3497,9 +3503,14 @@ def init(
       Provide API keys via command-line flags for automated deployment.
 
     Global mode (--global):
-      Saves provider settings to ~/.config/lobster/providers.json.
-      External workspaces without their own config will use these defaults.
-      API keys should still be set via environment variables or workspace .env.
+      Saves provider settings to ~/.config/lobster/providers.json AND
+      credentials to ~/.config/lobster/credentials.env (mode 0o600).
+      External workspaces without their own .env will use these global credentials.
+
+    Credential Resolution Priority:
+      1. Workspace .env (highest priority)
+      2. Global credentials.env (~/.config/lobster/)
+      3. Environment variables
 
     Examples:
       lobster init                                    # Interactive setup (workspace)
@@ -3750,16 +3761,36 @@ def init(
 
         # Save configuration based on mode
         if global_config:
-            # Global mode: only save provider config, no .env
+            # Global mode: save provider config AND credentials
             try:
+                from lobster.config.global_config import save_global_credentials
+
+                # Extract credentials from env_lines
+                credentials = {}
+                for line in env_lines:
+                    if "=" in line and not line.startswith("#"):
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        # Only save actual API key credentials
+                        if any(cred_key in key for cred_key in [
+                            "API_KEY", "ACCESS_KEY", "SECRET_KEY", "CLOUD_KEY"
+                        ]):
+                            credentials[key] = value.strip()
+
+                # Save provider config
                 global_config_path = _create_global_config(config_dict)
+
+                # Save credentials to credentials.env (with secure permissions)
+                credentials_path = None
+                if credentials:
+                    credentials_path = save_global_credentials(credentials)
+
                 console.print(f"[green]✅ Global configuration saved:[/green]")
                 console.print(f"  • Config: {global_config_path}")
+                if credentials_path:
+                    console.print(f"  • Credentials: {credentials_path} [dim](mode: 0o600)[/dim]")
                 if backup_path:
                     console.print(f"  • Backup: {backup_path}")
-                console.print()
-                console.print("[dim]Note: API keys should be set via environment variables[/dim]")
-                console.print("[dim]  export ANTHROPIC_API_KEY=sk-ant-xxx[/dim]")
             except Exception as e:
                 console.print(f"[red]❌ Failed to write global config: {str(e)}[/red]")
                 raise typer.Exit(1)
@@ -3788,13 +3819,15 @@ def init(
     # Interactive mode: run wizard
     console.print("\n")
     if global_config:
+        from lobster.config.global_config import get_global_credentials_path
+        creds_path = get_global_credentials_path()
         console.print(
             Panel.fit(
                 "[bold white]🦞 Welcome to Lobster AI![/bold white]\n\n"
                 "Let's set up your [cyan]global[/cyan] provider defaults.\n"
-                f"This wizard will create [cyan]{config_path}[/cyan]\n\n"
-                "[dim]These defaults apply to all workspaces without their own config.[/dim]\n"
-                "[dim]API keys should be set via environment variables.[/dim]",
+                f"Config: [cyan]{config_path}[/cyan]\n"
+                f"Credentials: [cyan]{creds_path}[/cyan]\n\n"
+                "[dim]These defaults apply to all workspaces without their own config.[/dim]",
                 border_style="bright_blue",
                 padding=(1, 2),
             )
@@ -4257,16 +4290,37 @@ def init(
         # Save configuration based on mode
         console.print()
         if global_config:
-            # Global mode: only save provider config, no .env
+            # Global mode: save provider config AND credentials
             try:
+                from lobster.config.global_config import save_global_credentials
+
+                # Extract credentials from env_lines
+                credentials = {}
+                for line in env_lines:
+                    if "=" in line and not line.startswith("#"):
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        # Only save actual API key credentials
+                        if any(cred_key in key for cred_key in [
+                            "API_KEY", "ACCESS_KEY", "SECRET_KEY", "CLOUD_KEY"
+                        ]):
+                            credentials[key] = value.strip()
+
+                # Save provider config
                 global_config_path = _create_global_config(config_dict)
+
+                # Save credentials to credentials.env (with secure permissions)
+                credentials_path = None
+                if credentials:
+                    credentials_path = save_global_credentials(credentials)
+
                 success_message = f"[bold green]✅ Global configuration saved![/bold green]\n\n"
                 success_message += f"Config: [cyan]{global_config_path}[/cyan]\n"
+                if credentials_path:
+                    success_message += f"Credentials: [cyan]{credentials_path}[/cyan] [dim](secure: mode 0o600)[/dim]\n"
                 if backup_path:
                     success_message += f"Backup: [cyan]{backup_path}[/cyan]\n"
-                success_message += "\n[dim]API keys should be set via environment variables:[/dim]\n"
-                success_message += "[dim]  export ANTHROPIC_API_KEY=sk-ant-xxx[/dim]\n\n"
-                success_message += f"[bold white]Next step:[/bold white] Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!"
+                success_message += f"\n[bold white]Next step:[/bold white] Run [bold {LobsterTheme.PRIMARY_ORANGE}]lobster chat[/bold {LobsterTheme.PRIMARY_ORANGE}] to start analyzing!"
             except Exception as e:
                 console.print(f"[red]❌ Failed to write global config: {str(e)}[/red]")
                 raise typer.Exit(1)
@@ -5245,9 +5299,13 @@ when they are started by agents or analysis workflows.
             name = parts[2] if len(parts) > 2 else None
             return queue_export(client, name, output)
 
+        elif subcommand == "import":
+            filename = parts[2] if len(parts) > 2 else None
+            return queue_import(client, filename, output, current_directory)
+
         else:
             console.print(f"[yellow]Unknown queue subcommand: {subcommand}[/yellow]")
-            console.print("[cyan]Available: load, list, clear, export[/cyan]")
+            console.print("[cyan]Available: load, list, clear, export, import[/cyan]")
             return None
 
     # =========================================================================

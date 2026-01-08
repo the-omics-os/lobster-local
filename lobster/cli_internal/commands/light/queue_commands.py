@@ -661,3 +661,207 @@ def queue_export(
     except Exception as e:
         output.print(f"[red]❌ Export failed: {str(e)}[/red]", style="error")
         return None
+
+
+def _check_metadata_files(
+    entries: List,
+    workspace_path: Path,
+) -> Tuple[int, List[str]]:
+    """
+    Check which workspace_metadata_keys have missing files.
+
+    Args:
+        entries: List of PublicationQueueEntry objects
+        workspace_path: Path to workspace directory
+
+    Returns:
+        Tuple of (missing_count, list of missing file basenames)
+    """
+    metadata_dir = workspace_path / "metadata"
+    missing_files = []
+
+    for entry in entries:
+        if hasattr(entry, "workspace_metadata_keys") and entry.workspace_metadata_keys:
+            for key in entry.workspace_metadata_keys:
+                file_path = metadata_dir / key
+                if not file_path.exists():
+                    missing_files.append(key)
+
+    return len(missing_files), missing_files
+
+
+def queue_import(
+    client: "AgentClient",
+    filename: str,
+    output: OutputAdapter,
+    current_directory: Optional[Path] = None,
+) -> Optional[str]:
+    """
+    Import previously exported queue from JSONL file.
+
+    Args:
+        client: AgentClient instance
+        filename: Path to JSONL file to import
+        output: OutputAdapter for rendering
+        current_directory: Current working directory (optional for dashboard)
+
+    Returns:
+        Summary string for conversation history, or None
+    """
+    import json
+
+    from lobster.core.schemas.publication_queue import PublicationQueueEntry
+
+    if not filename:
+        output.print("[yellow]Usage: /queue import <file.jsonl>[/yellow]", style="warning")
+        return None
+
+    # Resolve file path
+    if current_directory:
+        # CLI mode: use PathResolver for secure resolution
+        from lobster.cli_internal.utils.path_resolution import PathResolver
+
+        resolver = PathResolver(
+            current_directory=current_directory,
+            workspace_path=(
+                client.data_manager.workspace_path
+                if hasattr(client, "data_manager")
+                else None
+            ),
+        )
+        resolved = resolver.resolve(filename, search_workspace=True, must_exist=True)
+
+        if not resolved.is_safe:
+            output.print(f"[red]❌ Security error: {resolved.error}[/red]", style="error")
+            return None
+
+        if not resolved.exists:
+            output.print(f"[red]❌ File not found: {filename}[/red]", style="error")
+            return None
+
+        file_path = resolved.path
+    else:
+        # Dashboard mode: treat as absolute or workspace-relative path
+        file_path = Path(filename)
+        if not file_path.is_absolute():
+            file_path = client.data_manager.workspace_path / filename
+
+        if not file_path.exists():
+            output.print(f"[red]❌ File not found: {filename}[/red]", style="error")
+            return None
+
+    ext = file_path.suffix.lower()
+
+    # Only support .jsonl files for import
+    if ext != ".jsonl":
+        output.print(
+            f"[red]❌ Unsupported file type: {ext}[/red]\n"
+            "[yellow]The /queue import command only accepts .jsonl files "
+            "(exported via /queue export).[/yellow]\n"
+            "[dim]To load .ris files, use: /queue load <file.ris>[/dim]",
+            style="error",
+        )
+        return None
+
+    if client.publication_queue is None:
+        output.print("[red]❌ Publication queue not initialized[/red]", style="error")
+        return None
+
+    output.print(f"[cyan]📥 Importing queue from: {file_path.name}[/cyan]\n", style="info")
+
+    # Parse JSONL file
+    entries = []
+    parse_errors = 0
+    line_count = 0
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+
+                line_count += 1
+                try:
+                    data = json.loads(line)
+                    entry = PublicationQueueEntry.from_dict(data)
+                    entries.append(entry)
+                except json.JSONDecodeError as e:
+                    parse_errors += 1
+                    output.print(
+                        f"[yellow]⚠️  Line {line_num}: Invalid JSON - {e}[/yellow]",
+                        style="warning",
+                    )
+                except Exception as e:
+                    parse_errors += 1
+                    output.print(
+                        f"[yellow]⚠️  Line {line_num}: Invalid entry - {e}[/yellow]",
+                        style="warning",
+                    )
+
+        if not entries:
+            output.print("[yellow]No valid entries found in file[/yellow]", style="warning")
+            return None
+
+        # Import entries to queue
+        result = client.publication_queue.import_entries(entries, skip_duplicates=True)
+
+        imported = result.get("imported", 0)
+        skipped = result.get("skipped", 0)
+        errors = result.get("errors", 0)
+
+        # Display results
+        if imported > 0:
+            output.print(
+                f"[green]✅ Imported {imported} entries into queue[/green]",
+                style="success",
+            )
+
+        if skipped > 0:
+            output.print(
+                f"[yellow]⏭️  Skipped {skipped} duplicate entries (already in queue)[/yellow]",
+                style="warning",
+            )
+
+        if errors > 0 or parse_errors > 0:
+            total_errors = errors + parse_errors
+            output.print(
+                f"[red]❌ {total_errors} entries failed to import[/red]",
+                style="error",
+            )
+
+        # Check for missing metadata files
+        if imported > 0 and hasattr(client, "data_manager"):
+            workspace_path = client.data_manager.workspace_path
+            missing_count, missing_files = _check_metadata_files(entries, workspace_path)
+
+            if missing_count > 0:
+                output.print(
+                    f"\n[yellow]⚠️  {missing_count} referenced metadata files not found in workspace[/yellow]",
+                    style="warning",
+                )
+                # Show first few missing files
+                preview = missing_files[:5]
+                for f in preview:
+                    output.print(f"   • {f}", style="dim")
+                if missing_count > 5:
+                    output.print(f"   ... and {missing_count - 5} more", style="dim")
+
+                output.print(
+                    "\n[dim]Tip: Re-run processing for affected entries to regenerate metadata.[/dim]"
+                )
+
+        # Build summary
+        summary_parts = []
+        if imported > 0:
+            summary_parts.append(f"imported {imported}")
+        if skipped > 0:
+            summary_parts.append(f"skipped {skipped} duplicates")
+        if errors + parse_errors > 0:
+            summary_parts.append(f"{errors + parse_errors} errors")
+
+        return f"Queue import complete: {', '.join(summary_parts)}"
+
+    except Exception as e:
+        output.print(f"[red]❌ Import failed: {str(e)}[/red]", style="error")
+        return None

@@ -5,6 +5,7 @@ This module centralizes all configuration settings for the application,
 including the new professional agent configuration system.
 """
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -14,6 +15,8 @@ from dotenv import load_dotenv
 from lobster.config.agent_config import initialize_configurator
 from lobster.config.supervisor_config import SupervisorConfig
 
+logger = logging.getLogger(__name__)
+
 
 class Settings:
     """
@@ -22,12 +25,19 @@ class Settings:
     This class manages application-wide settings with fallbacks
     and environment variable overrides for easier configuration
     in different environments, especially in containers.
+
+    Credential Loading Priority (lowest to highest):
+    1. Global credentials (~/.config/lobster/credentials.env)
+    2. Workspace credentials (./.env or workspace/.env)
+    3. Environment variables (explicit exports)
+
+    Higher priority sources override lower priority ones.
     """
 
     def __init__(self):
         """Initialize application settings."""
-        # Load dotenv
-        load_dotenv()
+        # Load credentials in priority order (lowest first, so higher priority overrides)
+        self._load_credentials()
 
         # hackathon
         self.LINKUP_API_KEY = os.environ.get("LINKUP_API_KEY", "")
@@ -126,6 +136,71 @@ class Settings:
         """
         return getattr(self, name, default)
 
+    def _load_credentials(self, workspace_path: Path = None) -> None:
+        """
+        Load credentials from global and workspace sources.
+
+        Loading Order (lowest to highest priority):
+        1. Global credentials (~/.config/lobster/credentials.env)
+        2. Workspace credentials (workspace/.env or ./.env)
+
+        Higher priority sources override lower priority ones.
+        Environment variables (explicit exports) always take highest priority.
+
+        Args:
+            workspace_path: Optional explicit workspace path. If None, uses CWD.
+
+        Example:
+            >>> settings._load_credentials()  # Load from CWD
+            >>> settings._load_credentials(Path("/path/to/workspace"))  # Explicit workspace
+        """
+        from lobster.config.global_config import (
+            get_global_credentials_path,
+            global_credentials_exist,
+        )
+
+        # Step 1: Load global credentials (lowest priority, override=False preserves existing env vars)
+        if global_credentials_exist():
+            global_creds_path = get_global_credentials_path()
+            load_dotenv(global_creds_path, override=False)
+            logger.debug(f"Loaded global credentials from {global_creds_path}")
+
+        # Step 2: Load workspace credentials (higher priority, overrides global)
+        # Determine workspace .env path
+        if workspace_path:
+            workspace_env = workspace_path / ".env"
+        else:
+            # Default: look in current working directory
+            workspace_env = Path.cwd() / ".env"
+
+        if workspace_env.exists():
+            load_dotenv(workspace_env, override=True)
+            logger.debug(f"Loaded workspace credentials from {workspace_env}")
+        else:
+            # Fallback: let load_dotenv find .env in default locations
+            load_dotenv(override=True)
+
+    def reload_credentials(self, workspace_path: Path) -> None:
+        """
+        Reload credentials for a specific workspace.
+
+        Call this when switching workspaces to ensure correct credentials are loaded.
+
+        Args:
+            workspace_path: Path to the workspace directory
+
+        Example:
+            >>> settings.reload_credentials(Path("/new/workspace"))
+        """
+        self._load_credentials(workspace_path)
+        # Refresh API key attributes
+        self.AWS_BEDROCK_ACCESS_KEY = os.environ.get("AWS_BEDROCK_ACCESS_KEY", "")
+        self.AWS_BEDROCK_SECRET_ACCESS_KEY = os.environ.get("AWS_BEDROCK_SECRET_ACCESS_KEY", "")
+        self.ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+        self.NCBI_API_KEY = os.environ.get("NCBI_API_KEY", "")
+        self._ncbi_api_keys = self._load_ncbi_api_keys()
+        logger.info(f"Reloaded credentials for workspace: {workspace_path}")
+
     def _load_ncbi_api_keys(self) -> List[str]:
         """
         Load all NCBI API keys from environment variables.
@@ -187,6 +262,11 @@ class Settings:
         """
         Get LLM parameters for a specific agent using the new configuration system.
 
+        Resolution order:
+        1. Custom agent config (from entry points)
+        2. Profile config (FREE tier agents)
+        3. Fallback to data_expert_agent
+
         Args:
             agent_name: Name of the agent (e.g., 'supervisor', 'transcriptomics_expert', 'method_agent')
 
@@ -199,44 +279,89 @@ class Settings:
         try:
             params = self.agent_configurator.get_llm_params(agent_name)
             return params
-        except KeyError as k:
-            # Fallback to data_expert settings with warning
-            print(f"⚠️  WARNING: No configuration found for agent '{agent_name}'")
-            print("⚠️  Falling back to data_expert_agent configuration")
-            print(f"⚠️  To fix: Add '{agent_name}' to all profiles in agent_config.py")
+        except KeyError:
+            # Check if this is a premium agent without custom config
+            is_premium_agent = self._is_premium_agent(agent_name)
+
+            if is_premium_agent:
+                # Premium agent without custom config - use INFO log (expected behavior)
+                logger.info(
+                    f"No custom configuration for premium agent '{agent_name}'. "
+                    f"Using default configuration (data_expert_agent). "
+                    f"To customize: Add entry point in custom package."
+                )
+            else:
+                # FREE tier agent missing from profiles - this may be a configuration issue
+                logger.warning(
+                    f"No configuration for agent '{agent_name}'. "
+                    f"Falling back to data_expert_agent. "
+                    f"To fix: Add '{agent_name}' to all profiles in agent_config.py"
+                )
 
             try:
                 # Use data_expert as fallback
                 params = self.agent_configurator.get_llm_params("data_expert_agent")
                 return params
-            except KeyError:
-                # If data_expert doesn't exist either, raise original error
-                raise KeyError(f"{k}")
+            except KeyError as e:
+                # If data_expert doesn't exist either, raise error
+                raise KeyError(
+                    f"Fallback configuration failed for '{agent_name}'. "
+                    f"data_expert_agent not found: {e}"
+                )
+
+    def _is_premium_agent(self, agent_name: str) -> bool:
+        """
+        Check if an agent is a premium agent (not in FREE tier).
+
+        Args:
+            agent_name: Agent name to check
+
+        Returns:
+            True if the agent is premium-only (not in FREE tier)
+        """
+        try:
+            from lobster.config.subscription_tiers import is_agent_available
+
+            # Agent is premium if it's available in premium but not in free tier
+            is_available_premium = is_agent_available(agent_name, "premium")
+            is_available_free = is_agent_available(agent_name, "free")
+
+            return is_available_premium and not is_available_free
+        except ImportError:
+            # subscription_tiers not available, assume not premium
+            return False
+        except Exception:
+            # Any error, assume not premium
+            return False
 
     def get_assistant_llm_params(self, agent_name: str) -> Dict[str, Any]:
         """
-        Get LLM parameters for a specific assistants using the new configuration system.
+        Get LLM parameters for a specific assistant using the new configuration system.
 
         Args:
-            agent_name: Name of the agent (e.g., 'supervisor', 'transcriptomics_expert', 'method_agent')
+            agent_name: Name of the assistant (e.g., 'data_expert_assistant')
 
         Returns:
             Dictionary of LLM initialization parameters
         """
         try:
             return self.agent_configurator.get_llm_params(agent_name)
-        except KeyError as k:
-            # Fallback to data_expert settings with warning
-            print(f"⚠️  WARNING: No configuration found for assistant '{agent_name}'")
-            print("⚠️  Falling back to data_expert_agent configuration")
-            print(f"⚠️  To fix: Add '{agent_name}' to all profiles in agent_config.py")
+        except KeyError:
+            # Assistants use INFO level logging for fallback (expected behavior)
+            logger.info(
+                f"No configuration for assistant '{agent_name}'. "
+                f"Using default configuration (data_expert_agent)."
+            )
 
             try:
                 # Use data_expert as fallback
                 return self.agent_configurator.get_llm_params("data_expert_agent")
-            except KeyError:
-                # If data_expert doesn't exist either, raise original error
-                raise KeyError(f"{k}")
+            except KeyError as e:
+                # If data_expert doesn't exist either, raise error
+                raise KeyError(
+                    f"Fallback configuration failed for assistant '{agent_name}'. "
+                    f"data_expert_agent not found: {e}"
+                )
 
     def get_agent_model_config(self, agent_name: str):
         """
