@@ -238,7 +238,14 @@ def metadata_list(client: "AgentClient", output: OutputAdapter) -> Optional[str]
 
 def metadata_clear(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
     """
-    Clear metadata store.
+    Clear metadata store (memory) AND workspace metadata files (disk).
+
+    Clears:
+    1. In-memory metadata_store (DataManagerV2)
+    2. In-memory current_metadata (legacy)
+    3. Workspace metadata files (workspace/metadata/*.json)
+
+    NOTE: Does NOT clear export files. Use /metadata clear exports for that.
 
     Args:
         client: AgentClient instance
@@ -247,27 +254,296 @@ def metadata_clear(client: "AgentClient", output: OutputAdapter) -> Optional[str
     Returns:
         Summary string for conversation history, or None
     """
-    if not hasattr(client.data_manager, "metadata_store"):
-        output.print("[yellow]⚠️  Metadata store not available[/yellow]", style="warning")
-        return None
+    # Count in-memory entries (metadata_store)
+    metadata_store_count = 0
+    if hasattr(client.data_manager, "metadata_store"):
+        metadata_store_count = len(client.data_manager.metadata_store)
 
-    metadata_store = client.data_manager.metadata_store
-    num_entries = len(metadata_store)
+    # Count in-memory current_metadata (legacy)
+    current_metadata_count = 0
+    if hasattr(client.data_manager, "current_metadata"):
+        current_metadata_count = len(client.data_manager.current_metadata)
 
-    if num_entries == 0:
-        output.print("[grey50]Metadata store is already empty[/grey50]", style="info")
-        return "Metadata store already empty"
+    memory_count = metadata_store_count + current_metadata_count
+
+    # Count disk files in workspace/metadata/
+    disk_files = []
+    metadata_dir = None
+    if hasattr(client.data_manager, "workspace_path"):
+        metadata_dir = Path(client.data_manager.workspace_path) / "metadata"
+        if metadata_dir.exists():
+            disk_files = list(metadata_dir.glob("*.json"))
+
+    disk_count = len(disk_files)
+    total_count = memory_count + disk_count
+
+    if total_count == 0:
+        output.print("[grey50]Metadata is already empty (memory + disk)[/grey50]", style="info")
+        return "Metadata already empty"
+
+    # Show what will be cleared
+    output.print("\n[bold]About to clear:[/bold]")
+    output.print(f"  • Memory (metadata_store): {metadata_store_count} entries")
+    output.print(f"  • Memory (current_metadata): {current_metadata_count} entries")
+    output.print(f"  • Disk (workspace/metadata/): {disk_count} files")
+    output.print(f"  • Total: {total_count} items\n")
 
     # Confirm with user
-    confirm = output.confirm(f"[yellow]Clear all {num_entries} metadata entries?[/yellow]")
+    confirm = output.confirm(f"[yellow]Clear all {total_count} metadata items?[/yellow]")
 
     if confirm:
-        metadata_store.clear()
+        # 1. Clear metadata_store (in-memory cache)
+        cleared_store = 0
+        if metadata_store_count > 0 and hasattr(client.data_manager, "metadata_store"):
+            client.data_manager.metadata_store.clear()
+            cleared_store = metadata_store_count
+
+        # 2. Clear current_metadata (legacy in-memory)
+        cleared_current = 0
+        if current_metadata_count > 0 and hasattr(client.data_manager, "current_metadata"):
+            client.data_manager.current_metadata.clear()
+            cleared_current = current_metadata_count
+
+        # 3. Clear disk files
+        deleted_files = 0
+        failed_files = 0
+        for json_file in disk_files:
+            try:
+                json_file.unlink()
+                deleted_files += 1
+            except Exception as e:
+                failed_files += 1
+                output.print(
+                    f"[yellow]⚠️  Could not delete {json_file.name}: {e}[/yellow]",
+                    style="warning"
+                )
+
+        # Report results
+        result_parts = []
+        if cleared_store > 0:
+            result_parts.append(f"{cleared_store} metadata_store entries")
+        if cleared_current > 0:
+            result_parts.append(f"{cleared_current} current_metadata entries")
+        if deleted_files > 0:
+            result_parts.append(f"{deleted_files} disk files")
+
         output.print(
-            f"[green]✓ Cleared {num_entries} metadata entries from store[/green]",
+            f"[green]✓ Cleared {' + '.join(result_parts)}[/green]",
             style="success"
         )
-        return f"Cleared {num_entries} metadata entries"
+
+        if failed_files > 0:
+            output.print(
+                f"[yellow]⚠️  {failed_files} files could not be deleted[/yellow]",
+                style="warning"
+            )
+
+        return f"Cleared {total_count} metadata items (memory + disk)"
+    else:
+        output.print("[cyan]Operation cancelled[/cyan]", style="info")
+        return None
+
+
+def metadata_clear_exports(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
+    """
+    Clear export files from workspace/exports/.
+
+    Clears:
+    - All files in workspace/exports/ (*.csv, *.tsv, *.xlsx)
+
+    Args:
+        client: AgentClient instance
+        output: OutputAdapter for rendering
+
+    Returns:
+        Summary string for conversation history, or None
+    """
+    # Count export files
+    export_files = []
+    exports_dir = None
+    if hasattr(client.data_manager, "workspace_path"):
+        exports_dir = Path(client.data_manager.workspace_path) / "exports"
+        if exports_dir.exists():
+            export_files = [
+                f for f in exports_dir.iterdir()
+                if f.is_file() and f.suffix in {".csv", ".tsv", ".xlsx"}
+            ]
+
+    if not export_files:
+        output.print("[grey50]No export files to clear[/grey50]", style="info")
+        return "No export files to clear"
+
+    # Show what will be cleared
+    output.print("\n[bold]About to clear export files:[/bold]")
+    output.print(f"  • Location: {exports_dir}")
+    output.print(f"  • Files: {len(export_files)}\n")
+
+    # Show first few files
+    for f in export_files[:5]:
+        size_kb = f.stat().st_size / 1024
+        output.print(f"    • {f.name} ({size_kb:.1f} KB)")
+    if len(export_files) > 5:
+        output.print(f"    • ... and {len(export_files) - 5} more files\n")
+
+    # Confirm with user
+    confirm = output.confirm(
+        f"[yellow]Delete all {len(export_files)} export files?[/yellow]"
+    )
+
+    if confirm:
+        deleted = 0
+        failed = 0
+        for f in export_files:
+            try:
+                f.unlink()
+                deleted += 1
+            except Exception as e:
+                failed += 1
+                output.print(
+                    f"[yellow]⚠️  Could not delete {f.name}: {e}[/yellow]",
+                    style="warning"
+                )
+
+        output.print(
+            f"[green]✓ Deleted {deleted} export files[/green]",
+            style="success"
+        )
+
+        if failed > 0:
+            output.print(
+                f"[yellow]⚠️  {failed} files could not be deleted[/yellow]",
+                style="warning"
+            )
+
+        return f"Cleared {deleted} export files"
+    else:
+        output.print("[cyan]Operation cancelled[/cyan]", style="info")
+        return None
+
+
+def metadata_clear_all(client: "AgentClient", output: OutputAdapter) -> Optional[str]:
+    """
+    Clear ALL metadata: memory, workspace/metadata/, and workspace/exports/.
+
+    This is the most comprehensive clear operation. Equivalent to:
+    - /metadata clear + /metadata clear exports
+
+    Args:
+        client: AgentClient instance
+        output: OutputAdapter for rendering
+
+    Returns:
+        Summary string for conversation history, or None
+    """
+    # ========================================================================
+    # Count all items
+    # ========================================================================
+
+    # Memory: metadata_store
+    metadata_store_count = 0
+    if hasattr(client.data_manager, "metadata_store"):
+        metadata_store_count = len(client.data_manager.metadata_store)
+
+    # Memory: current_metadata
+    current_metadata_count = 0
+    if hasattr(client.data_manager, "current_metadata"):
+        current_metadata_count = len(client.data_manager.current_metadata)
+
+    # Disk: workspace/metadata/*.json
+    disk_files = []
+    metadata_dir = None
+    if hasattr(client.data_manager, "workspace_path"):
+        metadata_dir = Path(client.data_manager.workspace_path) / "metadata"
+        if metadata_dir.exists():
+            disk_files = list(metadata_dir.glob("*.json"))
+
+    # Disk: workspace/exports/*
+    export_files = []
+    exports_dir = None
+    if hasattr(client.data_manager, "workspace_path"):
+        exports_dir = Path(client.data_manager.workspace_path) / "exports"
+        if exports_dir.exists():
+            export_files = [
+                f for f in exports_dir.iterdir()
+                if f.is_file() and f.suffix in {".csv", ".tsv", ".xlsx"}
+            ]
+
+    # Totals
+    memory_count = metadata_store_count + current_metadata_count
+    disk_count = len(disk_files)
+    export_count = len(export_files)
+    total_count = memory_count + disk_count + export_count
+
+    if total_count == 0:
+        output.print(
+            "[grey50]Nothing to clear (memory, metadata, exports all empty)[/grey50]",
+            style="info"
+        )
+        return "Nothing to clear"
+
+    # ========================================================================
+    # Show what will be cleared
+    # ========================================================================
+    output.print("\n[bold red]⚠️  About to clear ALL metadata:[/bold red]")
+    output.print(f"  • Memory (metadata_store): {metadata_store_count} entries")
+    output.print(f"  • Memory (current_metadata): {current_metadata_count} entries")
+    output.print(f"  • Disk (workspace/metadata/): {disk_count} files")
+    output.print(f"  • Disk (workspace/exports/): {export_count} files")
+    output.print(f"  • Total: {total_count} items\n")
+
+    # Confirm with user
+    confirm = output.confirm(
+        f"[bold red]Clear ALL {total_count} items? This cannot be undone![/bold red]"
+    )
+
+    if confirm:
+        results = []
+
+        # 1. Clear metadata_store
+        if metadata_store_count > 0 and hasattr(client.data_manager, "metadata_store"):
+            client.data_manager.metadata_store.clear()
+            results.append(f"{metadata_store_count} metadata_store entries")
+
+        # 2. Clear current_metadata
+        if current_metadata_count > 0 and hasattr(client.data_manager, "current_metadata"):
+            client.data_manager.current_metadata.clear()
+            results.append(f"{current_metadata_count} current_metadata entries")
+
+        # 3. Clear workspace/metadata/*.json
+        deleted_metadata = 0
+        for f in disk_files:
+            try:
+                f.unlink()
+                deleted_metadata += 1
+            except Exception as e:
+                output.print(
+                    f"[yellow]⚠️  Could not delete {f.name}: {e}[/yellow]",
+                    style="warning"
+                )
+        if deleted_metadata > 0:
+            results.append(f"{deleted_metadata} metadata files")
+
+        # 4. Clear workspace/exports/*
+        deleted_exports = 0
+        for f in export_files:
+            try:
+                f.unlink()
+                deleted_exports += 1
+            except Exception as e:
+                output.print(
+                    f"[yellow]⚠️  Could not delete {f.name}: {e}[/yellow]",
+                    style="warning"
+                )
+        if deleted_exports > 0:
+            results.append(f"{deleted_exports} export files")
+
+        # Report
+        output.print(
+            f"[green]✓ Cleared: {', '.join(results)}[/green]",
+            style="success"
+        )
+
+        return f"Cleared all metadata ({total_count} items)"
     else:
         output.print("[cyan]Operation cancelled[/cyan]", style="info")
         return None

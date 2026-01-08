@@ -61,6 +61,8 @@ from lobster.cli_internal.commands import (
     QueueFileTypeNotSupported,
     metadata_list,
     metadata_clear,
+    metadata_clear_exports,
+    metadata_clear_all,
     workspace_list,
     workspace_info,
     workspace_load,
@@ -533,7 +535,9 @@ def extract_available_commands() -> Dict[str, str]:
         "/data": "Show current data summary",
         "/metadata": "Show detailed metadata information",
         "/metadata list": "List metadata store entries",
-        "/metadata clear": "Clear metadata store",
+        "/metadata clear": "Clear metadata (memory + workspace/metadata/)",
+        "/metadata clear exports": "Clear export files (workspace/exports/)",
+        "/metadata clear all": "Clear ALL metadata (memory + disk + exports)",
         # Queue commands (temporary, intent-driven)
         "/queue": "Show queue status",
         "/queue load": "Load file into queue (supports .ris, more coming)",
@@ -5137,14 +5141,25 @@ when they are started by agents or analysis workflows.
         output = ConsoleOutputAdapter(console)
         parts = cmd.split()
         subcommand = parts[1] if len(parts) > 1 else None
+        subsubcommand = parts[2] if len(parts) > 2 else None
 
         if subcommand == "clear":
-            return metadata_clear(client, output)
+            # Handle /metadata clear [subtype]
+            if subsubcommand == "exports":
+                return metadata_clear_exports(client, output)
+            elif subsubcommand == "all":
+                return metadata_clear_all(client, output)
+            elif subsubcommand is None:
+                return metadata_clear(client, output)
+            else:
+                console.print(f"[yellow]Unknown clear type: {subsubcommand}[/yellow]")
+                console.print("[cyan]Available: /metadata clear, /metadata clear exports, /metadata clear all[/cyan]")
+                return None
         elif subcommand == "list" or subcommand is None:
             return metadata_list(client, output)
         else:
             console.print(f"[yellow]Unknown metadata subcommand: {subcommand}[/yellow]")
-            console.print("[cyan]Available: list, clear[/cyan]")
+            console.print("[cyan]Available: list, clear, clear exports, clear all[/cyan]")
             return None
 
     elif cmd == "/files":

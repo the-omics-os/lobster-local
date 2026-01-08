@@ -28,6 +28,8 @@ from lobster.cli_internal.commands.light.queue_commands import (
 from lobster.cli_internal.commands.light.metadata_commands import (
     metadata_list,
     metadata_clear,
+    metadata_clear_exports,
+    metadata_clear_all,
 )
 from lobster.cli_internal.commands.light.workspace_commands import (
     workspace_list,
@@ -126,6 +128,8 @@ __all__ = [
     # Metadata commands (light)
     "metadata_list",
     "metadata_clear",
+    "metadata_clear_exports",
+    "metadata_clear_all",
     # Workspace commands (light)
     "workspace_list",
     "workspace_info",
