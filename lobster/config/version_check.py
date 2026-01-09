@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Cache settings
 CACHE_FILE_NAME = ".version_check_cache.json"
-CACHE_DURATION_SECONDS = 24 * 60 * 60  # 24 hours
+CACHE_DURATION_SECONDS = 15 * 60  # 15 minutes - balance between responsiveness and API overhead
 PYPI_URL = "https://pypi.org/pypi/lobster-ai/json"
 REQUEST_TIMEOUT_SECONDS = 3  # Short timeout to avoid blocking startup
 
