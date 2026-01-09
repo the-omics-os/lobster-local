@@ -344,7 +344,16 @@ class BedrockProvider(ILLMProvider):
                 "Set AWS_BEDROCK_ACCESS_KEY and AWS_BEDROCK_SECRET_ACCESS_KEY."
             )
 
-        # Pass through any additional kwargs
+        # Handle thinking parameter specially for ChatBedrockConverse
+        # ChatBedrockConverse expects thinking nested in additional_model_request_fields
+        if "thinking" in kwargs:
+            thinking_config = kwargs.pop("thinking")
+            # Wrap thinking in additional_model_request_fields if not already wrapped
+            if "additional_model_request_fields" not in bedrock_params:
+                bedrock_params["additional_model_request_fields"] = {}
+            bedrock_params["additional_model_request_fields"]["thinking"] = thinking_config
+
+        # Pass through any remaining kwargs
         bedrock_params.update(kwargs)
 
         logger.debug(

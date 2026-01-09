@@ -95,11 +95,38 @@ class ExportSchemaRegistry:
             "modality": "sra_amplicon",
             "description": "SRA 16S/ITS amplicon samples (microbiome)",
             "priority_groups": {
+                # ================================================================
+                # Provenance Fields - Understanding Study vs Publication Context
+                # ================================================================
+                #
+                # CRITICAL: For batch effect correction, use study_accession, NOT source_* fields!
+                #
+                # study_accession (SRP*, PRJNA*):
+                #   - Biological study identifier (sequencing center, protocol, temporal batch)
+                #   - Same study = same technical conditions = batch effect group
+                #   - USE THIS for ComBat-seq, PERMANOVA, or other batch correction methods
+                #
+                # source_entry_id / source_doi / source_pmid:
+                #   - Publication that CITED this dataset
+                #   - Different purpose: literature provenance, citation tracking
+                #   - NOT suitable for batch correction (one study can appear in multiple papers)
+                #
+                # Example:
+                #   Study SRP001 sequenced at Broad Institute in 2020
+                #   → Cited by Paper A (PMID:12345) in 2021
+                #   → Also cited by Paper B (PMID:67890) in 2022
+                #
+                #   For batch correction: Group by SRP001 (technical batch)
+                #   For literature tracking: Track both PMID:12345 and PMID:67890
+                #
+                # See: wiki/48-manual-sample-enrichment-workflow.md for R/Python examples
+                # ================================================================
                 ExportPriority.CORE_IDENTIFIERS: [
                     "run_accession",  # Primary identifier (SRR accession)
                     "sample_accession",  # Sample-level accession
                     "biosample",  # SAMN accession
                     "bioproject",  # PRJNA accession
+                    "study_accession",  # Study-level ID (SRP*/PRJNA* - USE FOR BATCH CORRECTION)
                 ],
                 ExportPriority.SAMPLE_METADATA: [
                     "organism_name",  # Scientific name (e.g., "Homo sapiens")

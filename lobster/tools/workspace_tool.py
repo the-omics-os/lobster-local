@@ -1630,16 +1630,16 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                         exports_dir = _get_exports_directory(workspace_path, create=True)
                         base_filename = workspace_service._sanitize_filename(identifier)
 
-                        # Auto-append timestamp if requested and not already present
-                        if add_timestamp and not re.search(r"\d{4}-\d{2}-\d{2}", base_filename):
-                            timestamp = datetime.now().strftime("%Y-%m-%d")
-                            base_filename = f"{base_filename}_{timestamp}"
+                        # Generate timestamp if requested (date + time format)
+                        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S") if add_timestamp else ""
 
                         # Check for deprecated location
                         _check_deprecated_export_location(workspace_path)
 
                         # Export 1: Rich file (current df with ~90 columns)
-                        rich_file_path = exports_dir / f"{base_filename}_rich.csv"
+                        # Timestamp after suffix: filename_rich_2026-01-09_143052.csv
+                        rich_filename = f"{base_filename}_rich_{timestamp}.csv" if timestamp else f"{base_filename}_rich.csv"
+                        rich_file_path = exports_dir / rich_filename
                         df.to_csv(rich_file_path, index=False, encoding="utf-8")
                         logger.info(
                             f"CSV export (rich): {len(df)} rows, {len(df.columns)} columns → {rich_file_path.name}"
@@ -1653,7 +1653,8 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                         )
                         available_strict = [c for c in strict_cols if c in df.columns]
                         df_strict = df[available_strict]
-                        strict_file_path = exports_dir / f"{base_filename}_strict.csv"
+                        strict_filename = f"{base_filename}_strict_{timestamp}.csv" if timestamp else f"{base_filename}_strict.csv"
+                        strict_file_path = exports_dir / strict_filename
                         df_strict.to_csv(strict_file_path, index=False, encoding="utf-8")
                         logger.info(
                             f"CSV export (strict): {len(df_strict)} rows, {len(df_strict.columns)} columns → {strict_file_path.name}"
@@ -1661,7 +1662,8 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
 
                         # Export 3: Provenance log (harmonization audit trail)
                         if provenance_log:
-                            prov_log_path = exports_dir / f"{base_filename}_harmonization_log.tsv"
+                            prov_filename = f"{base_filename}_harmonization_log_{timestamp}.tsv" if timestamp else f"{base_filename}_harmonization_log.tsv"
+                            prov_log_path = exports_dir / prov_filename
                             prov_df = pd.DataFrame(provenance_log)
                             prov_df.to_csv(prov_log_path, sep="\t", index=False, encoding="utf-8")
                             logger.info(
@@ -1727,12 +1729,12 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                         exports_dir = _get_exports_directory(workspace_path, create=True)
                         filename = workspace_service._sanitize_filename(identifier)
 
-                        # Auto-append timestamp if requested and not already present
-                        if add_timestamp and not re.search(r"\d{4}-\d{2}-\d{2}", filename):
-                            timestamp = datetime.now().strftime("%Y-%m-%d")
-                            filename = f"{filename}_{timestamp}"
+                        # Generate timestamp if requested (date + time format)
+                        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S") if add_timestamp else ""
 
-                        cache_file_path = exports_dir / f"{filename}.csv"
+                        # Add timestamp before extension: filename_2026-01-09_143052.csv
+                        final_filename = f"{filename}_{timestamp}.csv" if timestamp else f"{filename}.csv"
+                        cache_file_path = exports_dir / final_filename
 
                         # Check for deprecated location
                         _check_deprecated_export_location(workspace_path)
@@ -2024,11 +2026,16 @@ def create_export_publication_queue_tool(data_manager: DataManagerV2):
             available_cols = [c for c in ordered_cols if c in df.columns]
             df = df[available_cols]
 
-            # Sanitize output filename
+            # Sanitize output filename and add timestamp to prevent overwrites
             safe_filename = workspace_service._sanitize_filename(output_filename)
-            if not safe_filename.endswith(".csv"):
-                safe_filename += ".csv"
-            output_path = exports_dir / safe_filename
+            # Remove .csv extension if present (we'll add it back with timestamp)
+            if safe_filename.endswith(".csv"):
+                safe_filename = safe_filename[:-4]
+
+            # Add timestamp: filename_2026-01-09_143052.csv
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+            final_filename = f"{safe_filename}_{timestamp}.csv"
+            output_path = exports_dir / final_filename
 
             # Write CSV
             df.to_csv(output_path, index=False, encoding="utf-8")
