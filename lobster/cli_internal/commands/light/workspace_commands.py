@@ -561,7 +561,7 @@ def workspace_remove(
                 client.data_manager.log_tool_usage(
                     tool_name="remove_modality",
                     parameters={"modality_name": modality_name},
-                    description=stats,
+                    description=f"Removed modality {stats['removed_modality']}: {stats['shape']['n_obs']} obs x {stats['shape']['n_vars']} vars",
                     ir=ir,
                 )
 

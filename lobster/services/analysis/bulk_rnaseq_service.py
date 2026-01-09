@@ -1077,8 +1077,19 @@ Next suggested step: Import quantification data with tximport for differential e
             FileNotFoundError: If no valid quant.sf files found
             ValueError: If data format is invalid
         """
-        # Auto-detect sample names if not provided
-        if sample_names is None:
+        # FIX BUG-BULK-006: Check for single-sample in root
+        single_sample_mode = False
+        if (salmon_dir / "quant.sf").exists() or (salmon_dir / "quant.genes.sf").exists():
+            single_sample_mode = True
+            if sample_names is None:
+                # Use directory name as sample name for single sample
+                sample_names = [salmon_dir.name]
+                logger.info(
+                    f"Auto-detected single Salmon sample in root: {sample_names[0]}"
+                )
+
+        # Auto-detect sample names if not provided (subdirectories) - only if not single sample
+        if not single_sample_mode and sample_names is None:
             sample_names = [
                 d.name
                 for d in salmon_dir.iterdir()
@@ -1088,7 +1099,7 @@ Next suggested step: Import quantification data with tximport for differential e
 
         if not sample_names:
             raise FileNotFoundError(
-                f"No Salmon quantification directories found in {salmon_dir}"
+                f"No Salmon quantification directories or files found in {salmon_dir}"
             )
 
         # Merge per-sample files
@@ -1097,7 +1108,11 @@ Next suggested step: Import quantification data with tximport for differential e
         failed_samples = []
 
         for sample in sample_names:
-            quant_file = salmon_dir / sample / "quant.sf"
+            # FIX BUG-BULK-006: Handle path for single sample mode
+            if single_sample_mode:
+                quant_file = salmon_dir / "quant.sf"
+            else:
+                quant_file = salmon_dir / sample / "quant.sf"
 
             if not quant_file.exists():
                 logger.warning(f"Missing quant.sf for sample {sample}")
@@ -1185,8 +1200,23 @@ Next suggested step: Import quantification data with tximport for differential e
                 logger.warning("h5py not available, falling back to TSV format")
                 use_h5 = False
 
-        # Auto-detect sample names
-        if sample_names is None:
+        # FIX BUG-BULK-006: Check for single-sample in root
+        single_sample_mode = False
+        if (
+            (kallisto_dir / "abundance.tsv").exists()
+            or (kallisto_dir / "abundance.h5").exists()
+            or (kallisto_dir / "abundance.txt").exists()
+        ):
+            single_sample_mode = True
+            if sample_names is None:
+                # Use directory name as sample name for single sample
+                sample_names = [kallisto_dir.name]
+                logger.info(
+                    f"Auto-detected single Kallisto sample in root: {sample_names[0]}"
+                )
+
+        # Auto-detect sample names (subdirectories) - only if not single sample
+        if not single_sample_mode and sample_names is None:
             sample_names = []
             for d in kallisto_dir.iterdir():
                 if not d.is_dir():
@@ -1204,7 +1234,7 @@ Next suggested step: Import quantification data with tximport for differential e
 
         if not sample_names:
             raise FileNotFoundError(
-                f"No Kallisto quantification directories found in {kallisto_dir}"
+                f"No Kallisto quantification directories or files found in {kallisto_dir}"
             )
 
         # Merge per-sample files
@@ -1214,7 +1244,11 @@ Next suggested step: Import quantification data with tximport for differential e
         formats_used = {"h5": 0, "tsv": 0, "txt": 0}
 
         for sample in sample_names:
-            sample_dir = kallisto_dir / sample
+            # FIX BUG-BULK-006: Handle path for single sample mode
+            if single_sample_mode:
+                sample_dir = kallisto_dir
+            else:
+                sample_dir = kallisto_dir / sample
 
             # Try formats in priority order
             df = None
@@ -1372,6 +1406,20 @@ Next suggested step: Import quantification data with tximport for differential e
         kallisto_count = 0
         salmon_count = 0
 
+        # FIX BUG-BULK-006: Check root directory first for single-sample case
+        if (
+            (directory / "abundance.tsv").exists()
+            or (directory / "abundance.h5").exists()
+            or (directory / "abundance.txt").exists()
+        ):
+            kallisto_count += 1
+            logger.info(f"Detected single Kallisto sample in root directory: {directory}")
+
+        if (directory / "quant.sf").exists() or (directory / "quant.genes.sf").exists():
+            salmon_count += 1
+            logger.info(f"Detected single Salmon sample in root directory: {directory}")
+
+        # Check subdirectories (multi-sample case)
         for subdir in directory.iterdir():
             if not subdir.is_dir():
                 continue

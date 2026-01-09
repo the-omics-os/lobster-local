@@ -86,6 +86,7 @@ PLATFORM_REGISTRY: Dict[str, PlatformCompatibility] = {
     "GPL16791": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 2500
     "GPL18573": PlatformCompatibility.SUPPORTED,  # Illumina NextSeq 500
     "GPL20301": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 4000
+    "GPL20795": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq X Ten (human)
     "GPL21290": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 3000
     "GPL24676": PlatformCompatibility.SUPPORTED,  # Illumina NovaSeq 6000
     "GPL13112": PlatformCompatibility.SUPPORTED,  # Illumina HiSeq 2000 (mouse)

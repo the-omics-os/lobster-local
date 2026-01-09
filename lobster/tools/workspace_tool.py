@@ -2112,7 +2112,7 @@ def create_list_modalities_tool(data_manager: DataManagerV2):
             data_manager.log_tool_usage(
                 tool_name="list_available_modalities",
                 parameters={"filter_pattern": filter_pattern},
-                description=stats,
+                description=f"Listed {stats['matched_modalities']}/{stats['total_modalities']} modalities" + (f" (filter: {filter_pattern})" if filter_pattern else ""),
                 ir=ir,
             )
 

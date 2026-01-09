@@ -139,6 +139,17 @@ class ExportSchemaRegistry:
                     # DataBioMix harmonized fields (standardized by metadata_assistant)
                     "disease",  # Standardized disease term (e.g., "crc", "uc", "cd")
                     "disease_original",  # Original disease string from metadata
+                    # Disease Enrichment Provenance (v0.5.1+)
+                    # Tracks how disease annotation was obtained:
+                    #   - sra_original: Found in standard SRA field (confidence: 1.0)
+                    #   - column_remapped: Found in non-standard column (confidence: 1.0)
+                    #   - abstract_llm: Extracted from publication abstract via LLM
+                    #   - methods_llm: Extracted from publication methods via LLM
+                    #   - manual_override: User-provided mapping (confidence: 1.0)
+                    "disease_source",  # Provenance: how disease was determined
+                    "disease_confidence",  # Confidence score: 0.0-1.0 (LLM confidence or 1.0 for deterministic)
+                    "disease_evidence",  # Supporting quote from publication (max 200 chars)
+                    "enrichment_timestamp",  # ISO timestamp when enriched
                     "host_disease_stat",  # MIMARKS: Disease ontology term (fallback populated)
                     "sample_type",  # Sample type (e.g., "fecal", "tissue", "biopsy")
                     "host_body_site",  # MIMARKS: Anatomical sampling site

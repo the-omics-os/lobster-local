@@ -622,7 +622,7 @@ You can now analyze this dataset using the single-cell or bulk RNA-seq tools.
             data_manager.log_tool_usage(
                 tool_name="get_modality_details",
                 parameters={"modality_name": modality_name},
-                description=stats,
+                description=f"Retrieved info for {modality_name}: {info['shape']['n_obs']} obs x {info['shape']['n_vars']} vars",
                 ir=ir,
             )
 
@@ -677,7 +677,7 @@ You can now analyze this dataset using the single-cell or bulk RNA-seq tools.
             data_manager.log_tool_usage(
                 tool_name="remove_modality",
                 parameters={"modality_name": modality_name},
-                description=stats,
+                description=f"Removed modality {stats['removed_modality']}: {stats['shape']['n_obs']} obs x {stats['shape']['n_vars']} vars",
                 ir=ir,
             )
 
@@ -713,7 +713,7 @@ You can now analyze this dataset using the single-cell or bulk RNA-seq tools.
             data_manager.log_tool_usage(
                 tool_name="validate_modality_compatibility",
                 parameters={"modality_names": modality_names},
-                description=stats,
+                description=f"Validated compatibility of {len(modality_names)} modalities: {'compatible' if validation['compatible'] else 'issues detected'}",
                 ir=ir,
             )
 
@@ -791,7 +791,7 @@ You can now analyze this dataset using the single-cell or bulk RNA-seq tools.
                     "adapter": adapter,
                     "dataset_type": dataset_type,
                 },
-                description=stats,
+                description=f"Loaded modality {stats['modality_name']}: {stats['shape']['n_obs']} obs x {stats['shape']['n_vars']} vars via {stats['adapter']}",
                 ir=ir,
             )
 
