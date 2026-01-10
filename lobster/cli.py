@@ -1072,11 +1072,25 @@ app.add_typer(config_app, name="config")
 
 # App callback to show help when no subcommand is provided
 @app.callback(invoke_without_command=True)
-def default_callback(ctx: typer.Context):
+def default_callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "--version",
+        "-v",
+        help="Show version and exit",
+        is_flag=True,
+    ),
+):
     """
     Show friendly help guide when lobster is invoked without subcommands.
     Also checks for updates on every invocation.
     """
+    # Handle --version flag (fast path - no heavy imports)
+    if version:
+        console.print(f"lobster version {__version__}")
+        raise typer.Exit()
+
     # Check for updates (non-blocking, cached, fails silently if offline)
     from lobster.config.version_check import maybe_show_update_notification
     maybe_show_update_notification(console)

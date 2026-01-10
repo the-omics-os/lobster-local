@@ -774,11 +774,16 @@ def remove_constant_columns(
 
     constant_cols: Set[str] = set()
     for col in all_cols:
-        values = {s.get(col) for s in samples}
-        # Treat None and empty string as same value for this check
-        normalized = {v if v is not None and str(v).strip() else None for v in values}
-        if len(normalized) == 1 and col not in protected_columns:
-            constant_cols.add(col)
+        try:
+            values = {s.get(col) for s in samples}
+            # Treat None and empty string as same value for this check
+            normalized = {v if v is not None and str(v).strip() else None for v in values}
+            if len(normalized) == 1 and col not in protected_columns:
+                constant_cols.add(col)
+        except TypeError:
+            # Skip columns with unhashable types (lists, dicts)
+            # These likely contain structured data worth preserving
+            continue
 
     filtered = [
         {k: v for k, v in s.items() if k not in constant_cols}

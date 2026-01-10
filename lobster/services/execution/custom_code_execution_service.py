@@ -461,6 +461,7 @@ class CustomCodeExecutionService:
         workspace_path: Path,
         load_workspace_files: bool,
         workspace_keys: Optional[List[str]] = None,
+        resolved_paths: Optional[Dict[str, str]] = None,
     ) -> str:
         """
         Generate Python code to set up execution context in subprocess.
@@ -531,7 +532,7 @@ except Exception as e:
             # Determine if selective loading is enabled
             if workspace_keys:
                 # v2.0: Use pre-resolved paths from main process (Gemini Option C - DRY principle)
-                resolved_paths_dict = context.get("resolved_paths", {})
+                resolved_paths_dict = resolved_paths or {}
                 paths_str = repr(resolved_paths_dict)  # {'key': '/full/path/to/file.json', ...}
 
                 setup_code += f"""
@@ -695,12 +696,14 @@ Path = Path
         workspace_path = context.get("workspace_path", self.data_manager.workspace_path)
         load_workspace_files = context.get("load_workspace_files", True)
         workspace_keys = context.get("workspace_keys")
+        resolved_paths = context.get("resolved_paths", {})
 
         setup_code = self._generate_context_setup_code(
             modality_name=modality_name,
             workspace_path=workspace_path,
             load_workspace_files=load_workspace_files,
             workspace_keys=workspace_keys,
+            resolved_paths=resolved_paths,
         )
 
         # Combine setup + user code + result extraction
