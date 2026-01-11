@@ -180,6 +180,8 @@ class CustomCodeExecutionService:
         "itertools",
         "functools",
         "typing",
+        "pathlib",
+        "Path",
         # Lobster internal (for advanced users)
         "lobster",
     }
@@ -324,7 +326,33 @@ class CustomCodeExecutionService:
             code, exec_context
         )
 
-        # Step 4: Compute statistics
+        # Step 4: Save large outputs to files (DeepAgents pattern)
+        MAX_STDOUT_PREVIEW = 500
+        MAX_STDERR_PREVIEW = 2000
+        stdout_file_path = None
+        stderr_file_path = None
+
+        if stdout_output and len(stdout_output) > MAX_STDOUT_PREVIEW:
+            output_dir = workspace_path / ".execution_outputs"
+            output_dir.mkdir(exist_ok=True)
+            stdout_file = output_dir / f"stdout_{int(time.time() * 1000)}.txt"
+            stdout_file.write_text(stdout_output)
+            stdout_file_path = str(stdout_file)
+            stdout_preview = stdout_output[:MAX_STDOUT_PREVIEW] + f"\n\n... Output truncated at {MAX_STDOUT_PREVIEW} chars. Full output: {stdout_file_path}"
+        else:
+            stdout_preview = stdout_output if stdout_output else ""
+
+        if stderr_output and len(stderr_output) > MAX_STDERR_PREVIEW:
+            output_dir = workspace_path / ".execution_outputs"
+            output_dir.mkdir(exist_ok=True)
+            stderr_file = output_dir / f"stderr_{int(time.time() * 1000)}.txt"
+            stderr_file.write_text(stderr_output)
+            stderr_file_path = str(stderr_file)
+            stderr_preview = stderr_output[:MAX_STDERR_PREVIEW] + f"\n\n... Output truncated at {MAX_STDERR_PREVIEW} chars. Full output: {stderr_file_path}"
+        else:
+            stderr_preview = stderr_output if stderr_output else ""
+
+        # Step 5: Compute statistics
         duration = time.time() - start_time
         stats = {
             "success": exec_error is None,
@@ -332,8 +360,10 @@ class CustomCodeExecutionService:
             "warnings": validation_warnings,
             "stdout_lines": len(stdout_output.splitlines()) if stdout_output else 0,
             "stderr_lines": len(stderr_output.splitlines()) if stderr_output else 0,
-            "stdout_preview": stdout_output[:500] if stdout_output else "",
-            "stderr_preview": stderr_output[:500] if stderr_output else "",
+            "stdout_preview": stdout_preview,
+            "stderr_preview": stderr_preview,
+            "stdout_full_path": stdout_file_path,
+            "stderr_full_path": stderr_file_path,
             "result_type": type(result).__name__ if result is not None else None,
             "modality_loaded": modality_name,
             "workspace_files_loaded": load_workspace_files,
@@ -555,15 +585,14 @@ for key, file_path_str in resolved_paths.items():
             with open(file_path) as f:
                 content = json.load(f)
 
-                # Memory optimization: load samples only for large files (Bug 3 fix)
+                # Always preserve full data structure (fixed: was breaking dict→list)
                 file_size = file_path.stat().st_size
-                if isinstance(content, dict) and 'samples' in content and file_size > 100_000_000:
-                    # Large file (>100MB): load samples list only
-                    globals()[key] = content['samples']
-                    print(f"Loaded {{key}}: {{len(content['samples'])}} samples (large file optimization)")
+                globals()[key] = content  # ALWAYS preserve full structure
+                if file_size > 100_000_000:
+                    # Large file: log warning but preserve structure
+                    sample_count = len(content.get('samples', [])) if isinstance(content, dict) else 'N/A'
+                    print(f"Loaded {{key}} (large file: {{file_size // 1_000_000}}MB, samples: {{sample_count}})")
                 else:
-                    # Small file: load full content
-                    globals()[key] = content
                     print(f"Loaded {{key}} from {{file_path.parent.name}}/{{file_path.name}}")
 
                 loaded_files.append(f"{{key}} ({{file_path.parent.name}}/{{file_path.name}})")
@@ -783,7 +812,8 @@ if 'result' in dir() and result is not None:
             error = None
 
             if return_code != 0:
-                # Execution failed
+                # Execution failed - append exit code to stderr for LLM visibility
+                stderr_output = f"{stderr_output.rstrip()}\n\nExit code: {return_code}"
                 error = Exception(
                     f"Code execution failed with return code {return_code}"
                 )
@@ -810,10 +840,19 @@ if 'result' in dir() and result is not None:
 
         finally:
             # Clean up temporary files
-            if script_path.exists():
-                script_path.unlink()
             if result_path.exists():
                 result_path.unlink()
+            if script_path.exists():
+                if error is not None:
+                    # Archive failed script for debugging
+                    import shutil
+                    archive_dir = workspace_path / ".failed_scripts"
+                    archive_dir.mkdir(exist_ok=True)
+                    archive_path = archive_dir / script_path.name
+                    shutil.move(str(script_path), str(archive_path))
+                    logger.debug(f"Archived failed script to {archive_path}")
+                else:
+                    script_path.unlink()
 
     def _create_ir(
         self,

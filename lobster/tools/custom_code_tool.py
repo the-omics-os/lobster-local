@@ -141,6 +141,19 @@ def create_execute_custom_code_tool(
         RETURNING RESULTS:
         Assign to `result` variable: `result = my_computation()`
 
+        DEFENSIVE CODING REQUIRED:
+        - Use data.get('key', default) instead of data['key']
+        - Check `if value is not None` before .lower()/.upper()
+        - Convert numpy types: int(val), float(val), list(arr)
+        - Check isinstance(data, dict) before dict operations
+
+        Example defensive pattern:
+            samples = data.get('samples', [])
+            for s in samples:
+                disease = s.get('disease')
+                if disease:
+                    print(disease.lower())
+
         NOTEBOOK EXPORT (persist parameter):
         - persist=False (default): Code is EPHEMERAL
           * Execution logged in provenance for tracking
@@ -266,13 +279,31 @@ def create_execute_custom_code_tool(
 
         except CodeValidationError as e:
             logger.error(f"Code validation failed: {e}")
-            return f"Code validation failed: {str(e)}"
+            import json
+            return json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "validation_error",
+                "stderr": str(e)
+            }, indent=2)
         except CodeExecutionError as e:
             logger.error(f"Code execution failed: {e}")
-            return f"Code execution failed: {str(e)}"
+            import json
+            return json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "execution_error",
+                "stderr": str(e)
+            }, indent=2)
         except Exception as e:
             logger.error(f"Unexpected error in execute_custom_code: {e}", exc_info=True)
-            return f"Unexpected error: {str(e)}"
+            import json
+            return json.dumps({
+                "success": False,
+                "error": str(e),
+                "error_type": "unexpected_error",
+                "stderr": str(e)
+            }, indent=2)
 
     return execute_custom_code
 
@@ -289,10 +320,10 @@ def _format_response(
     post_processor_msg: Optional[str] = None,
 ) -> str:
     """
-    Format unified response for all agents.
+    Format unified JSON response for all agents (DeepAgents pattern).
 
-    Provides consistent output format regardless of which agent invokes the tool.
-    Includes result preview, warnings, stdout/stderr, and persistence status.
+    Returns structured JSON instead of markdown for programmatic parsing by LLMs.
+    Enables retry logic, error pattern matching, and conditional branching.
 
     Args:
         result: Execution result value
@@ -301,47 +332,26 @@ def _format_response(
         post_processor_msg: Optional message from agent-specific post-processor
 
     Returns:
-        Formatted markdown string
+        JSON string with structured execution result
     """
-    response = "Custom code executed successfully\n\n"
-    response += f"**Duration**: {stats.get('duration_seconds', 0):.2f}s\n"
+    import json
 
-    # Warnings section
-    warnings = stats.get("warnings", [])
-    if warnings:
-        response += f"\n**Warnings ({len(warnings)}):**\n"
-        for warning in warnings:
-            response += f"  - {warning}\n"
+    # Build typed response object
+    response_obj = {
+        "success": True,
+        "duration_seconds": stats.get("duration_seconds", 0),
+        "result": result,
+        "result_type": stats.get("result_type", type(result).__name__ if result is not None else None),
+        "stdout": stats.get("stdout_preview", ""),
+        "stderr": stats.get("stderr_preview", ""),
+        "stdout_full_path": stats.get("stdout_full_path"),
+        "stderr_full_path": stats.get("stderr_full_path"),
+        "warnings": stats.get("warnings", []),
+        "persisted": persist,
+        "post_processor_message": post_processor_msg,
+    }
 
-    # Result section (with preview limiting)
-    if result is not None:
-        result_preview = str(result)[:500]
-        if len(str(result)) > 500:
-            result_preview += "... (truncated)"
-        result_type = stats.get("result_type", type(result).__name__)
-        response += f"\n**Result** ({result_type}):\n{result_preview}\n"
-
-    # Stdout section
-    stdout_preview = stats.get("stdout_preview", "")
-    if stdout_preview:
-        response += f"\n**Output**:\n{stdout_preview}\n"
-
-    # Stderr section (for debugging)
-    stderr_preview = stats.get("stderr_preview", "")
-    if stderr_preview:
-        response += f"\n**Stderr**:\n{stderr_preview}\n"
-
-    # Post-processor message (agent-specific)
-    if post_processor_msg:
-        response += f"\n{post_processor_msg}\n"
-
-    # Persistence status
-    if persist:
-        response += "\nThis execution was saved to provenance (exportable to notebook).\n"
-    else:
-        response += "\nThis execution was ephemeral (not saved to provenance).\n"
-
-    return response
+    return json.dumps(response_obj, indent=2)
 
 
 # =============================================================================

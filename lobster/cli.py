@@ -2745,6 +2745,7 @@ def _show_workspace_prompt(client):
         from lobster.core.license_manager import get_current_tier
         from lobster.config.agent_registry import AGENT_REGISTRY, _ensure_plugins_loaded
         from lobster.tools.gpu_detector import GPUDetector
+        from lobster.config.llm_factory import LLMFactory
 
         # Ensure plugins are loaded before accessing AGENT_REGISTRY
         _ensure_plugins_loaded()
@@ -2761,6 +2762,29 @@ def _show_workspace_prompt(client):
             1 for name, config in AGENT_REGISTRY.items()
             if config.supervisor_accessible is not False and name not in child_agent_names
         )
+
+        # Get current provider (same approach as /config command)
+        try:
+            from lobster.core.config_resolver import ConfigResolver
+
+            # Use ConfigResolver with workspace path (same as /config command)
+            resolver = ConfigResolver(workspace_path=Path(client.workspace_path))
+            current_provider, _ = resolver.resolve_provider(
+                runtime_override=getattr(client, 'provider_override', None)
+            )
+
+            # Provider icon mapping
+            provider_icons = {
+                "anthropic": "🔵",
+                "bedrock": "🟠",
+                "ollama": "🦙",
+                "gemini": "🔷"
+            }
+            provider_icon = provider_icons.get(current_provider, "⚪")
+            provider_display = f"{provider_icon} {current_provider}"
+        except Exception as e:
+            # Fallback to unknown if resolution fails
+            provider_display = f"⚪ unknown"
 
         # Get system information
         # RAM
@@ -2781,9 +2805,10 @@ def _show_workspace_prompt(client):
         # Line 1: Application status
         console.print(f"  [{tier_color}]●[/] lobster v{__version__} [{tier_color}]{tier}[/] [dim]│[/] {agent_count} agents [dim]│ local │[/] [dim italic]/help[/]")
 
-        # Line 2-3: System resources (stacked for clarity)
+        # Line 2-4: System resources (stacked for clarity)
         console.print(f"[dim]  └─ Compute:[/] {ram_gb}GB RAM [dim]│[/] {gpu_label}")
         console.print(f"[dim]     Storage:[/] {disk_free_gb}GB free [dim](workspace)[/]")
+        console.print(f"[dim]     Provider:[/] {provider_display}")
         console.print()
     except Exception as e:
         # Fallback to basic prompt if system info fails
@@ -4548,14 +4573,29 @@ def chat(
                 if token_usage and "error" not in token_usage:
                     cost = token_usage.get("total_cost_usd", 0.0)
                     tokens = token_usage.get("total_tokens", 0)
-                    # Check if using Ollama (local = free)
-                    from lobster.config.llm_factory import LLMFactory
-                    current_provider = getattr(client, 'provider_override', None) or LLMFactory.get_current_provider()
+
+                    # Get provider using ConfigResolver (same as /config command)
+                    from lobster.core.config_resolver import ConfigResolver
+                    resolver = ConfigResolver(workspace_path=Path(client.workspace_path))
+                    current_provider, _ = resolver.resolve_provider(
+                        runtime_override=getattr(client, 'provider_override', None)
+                    )
+
+                    # Provider icon mapping
+                    provider_icons = {
+                        "anthropic": "🔵",
+                        "bedrock": "🟠",
+                        "ollama": "🦙",
+                        "gemini": "🔷"
+                    }
+                    provider_icon = provider_icons.get(current_provider, "⚪")
+
                     if current_provider == "ollama":
-                        # Ollama is free - show token count only
-                        token_prefix = f"[dim grey42]🦙 FREE · {tokens:,}t[/dim grey42] "
+                        # Ollama is free - show icon, FREE, and token count
+                        token_prefix = f"[dim grey42]{provider_icon} · FREE · {tokens:,}t[/dim grey42] "
                     else:
-                        token_prefix = f"[dim grey42]${cost:.4f} · {tokens:,}t[/dim grey42] "
+                        # Cloud providers - show icon, cost, and token count
+                        token_prefix = f"[dim grey42]{provider_icon} · ${cost:.4f} · {tokens:,}t[/dim grey42] "
             except Exception:
                 pass
 

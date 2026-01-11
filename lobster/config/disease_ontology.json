@@ -1,0 +1,83 @@
+{
+  "version": "1.0.0",
+  "schema_version": "1.0",
+  "backend": "json",
+  "description": "Lobster disease ontology for IBD/CRC studies. Phase 1: Keyword matching. Phase 2: Embedding-based (see kevin_notes/sragent_embedding_ontology_plan.md). Keywords merged from disease_standardization_service.py and metadata_assistant.py.",
+  "diseases": [
+    {
+      "id": "crc",
+      "name": "Colorectal Cancer",
+      "keywords": [
+        "crc",
+        "colorectal cancer",
+        "colon cancer",
+        "rectal cancer",
+        "colorectal carcinoma",
+        "colon carcinoma",
+        "rectal carcinoma",
+        "colorectal",
+        "colon_cancer",
+        "rectal_cancer"
+      ],
+      "mondo_id": "MONDO:0005575",
+      "umls_cui": "C0009402",
+      "mesh_terms": ["D015179"]
+    },
+    {
+      "id": "uc",
+      "name": "Ulcerative Colitis",
+      "keywords": [
+        "uc",
+        "ulcerative colitis",
+        "colitis ulcerosa",
+        "ulcerative_colitis",
+        "ulcerative",
+        "uc_"
+      ],
+      "mondo_id": "MONDO:0005101",
+      "umls_cui": "C0009324",
+      "mesh_terms": ["D003093"]
+    },
+    {
+      "id": "cd",
+      "name": "Crohn's Disease",
+      "keywords": [
+        "cd",
+        "crohn's disease",
+        "crohns disease",
+        "crohn disease",
+        "crohn's",
+        "crohns",
+        "crohn",
+        "cd_",
+        "crohns_disease"
+      ],
+      "mondo_id": "MONDO:0005011",
+      "umls_cui": "C0010346",
+      "mesh_terms": ["D003424"]
+    },
+    {
+      "id": "healthy",
+      "name": "Healthy Control",
+      "keywords": [
+        "healthy",
+        "healthy control",
+        "healthy volunteer",
+        "healthy donor",
+        "healthy subject",
+        "normal control",
+        "non-ibd",
+        "non ibd",
+        "non_ibd",
+        "non-diseased",
+        "non diseased",
+        "non_diseased",
+        "disease-free",
+        "disease free"
+      ],
+      "mondo_id": null,
+      "umls_cui": null,
+      "mesh_terms": []
+    }
+  ]
+}
