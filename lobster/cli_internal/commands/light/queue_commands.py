@@ -256,15 +256,32 @@ def queue_load_file(
                 extraction_level="methods",
             )
 
-            if result["added_count"] > 0:
+            added = result["added_count"]
+            duplicates = result.get("duplicate_count", 0)
+            file_dups = result.get("file_duplicates", 0)
+            queue_dups = result.get("queue_duplicates", 0)
+            malformed = result.get("skipped_count", 0)
+
+            if added > 0:
                 output.print(
-                    f"[green]✅ Loaded {result['added_count']} items into queue[/green]\n",
+                    f"[green]✅ Loaded {added} items into queue[/green]\n",
                     style="success",
                 )
 
-                if result["skipped_count"] > 0:
+                # Show deduplication info (informational, not warning)
+                if duplicates > 0:
+                    dup_details = []
+                    if file_dups > 0:
+                        dup_details.append(f"{file_dups} duplicates in file")
+                    if queue_dups > 0:
+                        dup_details.append(f"{queue_dups} already in queue")
                     output.print(
-                        f"[yellow]⚠️  Skipped {result['skipped_count']} malformed entries[/yellow]",
+                        f"[dim]ℹ️  Deduplicated: {', '.join(dup_details)}[/dim]"
+                    )
+
+                if malformed > 0:
+                    output.print(
+                        f"[yellow]⚠️  Skipped {malformed} malformed entries[/yellow]",
                         style="warning",
                     )
 
@@ -276,7 +293,20 @@ def queue_load_file(
                 output.print("  • Build citation network")
                 output.print("  • Custom analysis (describe your intent)\n")
 
-                return f"Loaded {result['added_count']} publications into queue from {file_path.name}. Awaiting user intent."
+                return f"Loaded {added} publications into queue from {file_path.name}. Awaiting user intent."
+
+            elif duplicates > 0:
+                # All entries were duplicates - not an error, just informational
+                output.print(
+                    f"[cyan]ℹ️  No new items added - all {duplicates} entries already in queue or duplicated[/cyan]",
+                    style="info",
+                )
+                if queue_dups > 0:
+                    output.print(
+                        f"[dim]   ({queue_dups} already in queue, {file_dups} duplicates in file)[/dim]"
+                    )
+                return f"No new publications added from {file_path.name} - all entries were duplicates."
+
             else:
                 output.print("[red]❌ No items could be loaded from file[/red]", style="error")
                 if result.get("errors"):

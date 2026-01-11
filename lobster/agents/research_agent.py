@@ -2029,10 +2029,11 @@ Could not extract content for: {identifier}
         # Resolve identifier: entry_id, PMID, or DOI → entry_id
         resolved_entry_id = _find_or_create_queue_entry(entry_id, data_manager)
 
-        # Process the entry (existing service logic)
-        return publication_processing_service.process_entry(
+        # Process the entry (returns structured outcome)
+        outcome = publication_processing_service.process_entry(
             entry_id=resolved_entry_id, extraction_tasks=extraction_tasks
         )
+        return outcome.response_markdown
 
     @tool
     def process_publication_queue(

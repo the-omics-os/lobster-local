@@ -2242,14 +2242,51 @@ class AgentClient(BaseClient):
                 "added_count": 0,
                 "entry_ids": [],
                 "skipped_count": 0,
+                "duplicate_count": 0,
                 "errors": [str(e)],
             }
 
-        # Add entries to queue
+        # Phase 1: Deduplicate entries within the file (by entry_id)
+        # RIS files often contain duplicate entries from reference managers
+        seen_entry_ids: set = set()
+        unique_entries = []
+        file_duplicates = 0
+
+        for entry in entries:
+            if entry.entry_id in seen_entry_ids:
+                file_duplicates += 1
+                logger.debug(f"Skipping duplicate entry in file: {entry.entry_id}")
+            else:
+                seen_entry_ids.add(entry.entry_id)
+                unique_entries.append(entry)
+
+        if file_duplicates > 0:
+            logger.info(
+                f"Deduplicated {file_duplicates} duplicate entries within RIS file"
+            )
+
+        # Phase 2: Check for entries already in queue
+        existing_ids = {e.entry_id for e in self.publication_queue.list_entries()}
+        queue_duplicates = 0
+        entries_to_add = []
+
+        for entry in unique_entries:
+            if entry.entry_id in existing_ids:
+                queue_duplicates += 1
+                logger.debug(f"Entry already in queue: {entry.entry_id}")
+            else:
+                entries_to_add.append(entry)
+
+        if queue_duplicates > 0:
+            logger.info(
+                f"Skipped {queue_duplicates} entries already in queue"
+            )
+
+        # Phase 3: Add unique entries to queue
         added_ids = []
         failed_entries = []
 
-        for entry in entries:
+        for entry in entries_to_add:
             try:
                 # Override priority, schema_type, extraction_level if provided
                 if priority != 5:
@@ -2271,23 +2308,32 @@ class AgentClient(BaseClient):
                 entry_id = self.publication_queue.add_entry(entry)
                 added_ids.append(entry_id)
             except Exception as e:
+                # Only log actual failures (not duplicates - those are pre-filtered)
                 failed_entries.append(str(e))
                 logger.warning(f"Failed to add entry to queue: {e}")
 
         # Get parser statistics
         stats = parser.get_statistics()
+        total_duplicates = file_duplicates + queue_duplicates
 
         result = {
             "added_count": len(added_ids),
             "entry_ids": added_ids,
             "skipped_count": stats.get("skipped", 0),
+            "duplicate_count": total_duplicates,
+            "file_duplicates": file_duplicates,
+            "queue_duplicates": queue_duplicates,
             "errors": stats.get("errors", []) + failed_entries,
         }
 
-        logger.info(
-            f"Loaded {result['added_count']} publications from {file_path}, "
-            f"skipped {result['skipped_count']}"
-        )
+        # Build informative log message
+        log_parts = [f"Loaded {result['added_count']} publications from {file_path}"]
+        if total_duplicates > 0:
+            log_parts.append(f"deduplicated {total_duplicates}")
+        if stats.get("skipped", 0) > 0:
+            log_parts.append(f"malformed {stats.get('skipped', 0)}")
+
+        logger.info(", ".join(log_parts))
 
         return result
 

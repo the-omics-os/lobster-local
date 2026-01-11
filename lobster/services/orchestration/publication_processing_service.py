@@ -562,8 +562,8 @@ class PublicationProcessingService:
         entry_id: str,
         extraction_tasks: str = "resolve_identifiers,ncbi_enrich,metadata,methods,identifiers,validate_provenance,fetch_sra_metadata",
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
-    ) -> str:
-        """Process a single publication queue entry with optional log suppression."""
+    ) -> "EntryProcessingOutcome":
+        """Process a single publication queue entry, returning structured outcome."""
         with self._provider_log_context():
             return self._process_entry_internal(
                 entry_id=entry_id,
@@ -576,7 +576,7 @@ class PublicationProcessingService:
         entry_id: str,
         extraction_tasks: str = "resolve_identifiers,ncbi_enrich,metadata,methods,identifiers,validate_provenance,fetch_sra_metadata",
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
-    ) -> str:
+    ) -> "EntryProcessingOutcome":
         """
         Process a single publication queue entry.
 
@@ -585,8 +585,13 @@ class PublicationProcessingService:
             extraction_tasks: Comma-separated tasks to run
             progress_callback: Optional callback(step_name, current_step, total_steps)
                               Called after each major processing step for progress tracking.
-        """
 
+        Returns:
+            EntryProcessingOutcome with structured results and actual PublicationStatus.
+        """
+        import time as time_module
+
+        entry_start_time = time_module.time()
         data_manager = self.data_manager
 
         def _report_progress(step_name: str):
@@ -595,24 +600,27 @@ class PublicationProcessingService:
                 current, total = self.PROCESSING_STEPS[step_name]
                 progress_callback(step_name, current, total)
 
+        # Track step results for structured output
+        step_results: Dict[str, bool] = {}
+
         try:
             try:
                 entry = data_manager.publication_queue.get_entry(entry_id)
             except Exception as e:  # pragma: no cover - defensive
-                return (
-                    "## Error: Publication Queue Entry Not Found\n\n"
-                    f"Entry ID '{entry_id}' not found in publication queue.\n\n"
-                    f"**Error**: {str(e)}\n\n"
-                    "**Tip**: Use get_content_from_workspace(workspace='publication_queue') "
-                    "to list available entries."
+                return EntryProcessingOutcome(
+                    entry_id=entry_id,
+                    final_status="failed",
+                    error=f"Entry not found: {str(e)}",
+                    response_markdown=(
+                        f"## Error: Publication Queue Entry Not Found\n\n"
+                        f"Entry ID '{entry_id}' not found in publication queue.\n\n"
+                        f"**Error**: {str(e)}"
+                    ),
                 )
 
             tasks = [task.strip().lower() for task in extraction_tasks.split(",")]
             if self._timing_enabled:
                 self._latest_timings = {}
-
-            # FIX: Removed intermediate update_status call to prevent O(n²) file rewrites
-            # All updates are now collected in-memory and written once at the end
 
             # In-memory collection for all extracted identifiers (merged at end)
             all_extracted_identifiers = {}
@@ -1430,15 +1438,33 @@ class PublicationProcessingService:
                 ]
             )
 
-            return "\n".join(response_parts)
+            elapsed = time_module.time() - entry_start_time
+            return EntryProcessingOutcome(
+                entry_id=entry_id,
+                final_status=final_status,
+                title=entry.title,
+                extracted_identifiers=all_extracted_identifiers,
+                dataset_ids=all_dataset_ids,
+                workspace_keys=workspace_keys,
+                step_results=step_results,
+                error=paywall_error,
+                is_paywalled=is_paywalled,
+                elapsed_seconds=elapsed,
+                step_timings=dict(self._latest_timings) if self._timing_enabled else {},
+                response_markdown="\n".join(response_parts),
+            )
 
         except Exception as e:  # pragma: no cover - outer safety net
             logger.error("Failed to process publication entry %s: %s", entry_id, e)
-            return (
-                "## Error Processing Publication Entry\n\n"
-                f"Entry ID: {entry_id}\n\n"
-                f"**Error**: {str(e)}\n\n"
-                "**Tip**: Ensure the entry exists in the publication queue and try again."
+            return EntryProcessingOutcome(
+                entry_id=entry_id,
+                final_status="failed",
+                error=str(e),
+                response_markdown=(
+                    f"## Error Processing Publication Entry\n\n"
+                    f"Entry ID: {entry_id}\n\n"
+                    f"**Error**: {str(e)}"
+                ),
             )
 
     def process_queue_entries(
@@ -1478,19 +1504,24 @@ class PublicationProcessingService:
             "",
         ]
 
+        status_counts: Dict[str, int] = {}
         for idx, entry in enumerate(entries, start=1):
             summary.append(f"### Entry {idx}: {entry.title or entry.entry_id}")
             summary.append(f"- Entry ID: {entry.entry_id}")
             summary.append(f"- Current Status: {entry.status}")
-            result = self.process_entry(
+            outcome = self.process_entry(
                 entry.entry_id, extraction_tasks=extraction_tasks
             )
-            summary.append(result)
+            summary.append(outcome.response_markdown)
             summary.append("")
+            # Track status counts
+            status_counts[outcome.final_status] = (
+                status_counts.get(outcome.final_status, 0) + 1
+            )
 
-        summary.append(
-            f"Processed {len(entries)} publication entries from the queue successfully."
-        )
+        # Compact summary at end
+        status_str = ", ".join(f"{k}={v}" for k, v in sorted(status_counts.items()))
+        summary.append(f"Processed {len(entries)} entries. Status: [{status_str}]")
         return "\n".join(summary)
 
     # =========================================================================
@@ -1640,40 +1671,21 @@ class PublicationProcessingService:
         start_time = time.time()
 
         def process_single_entry(entry_id: str) -> EntryProcessingResult:
-            entry_start = time.time()
-            status = "unknown"
-            response = ""
-            timings: Dict[str, float] = {}
-
             try:
-                response = self.process_entry(
+                outcome = self.process_entry(
                     entry_id=entry_id,
                     extraction_tasks=extraction_tasks,
                 )
-                if self._timing_enabled:
-                    timings = self._latest_timings.copy()
-
-                if "COMPLETED" in response.upper():
-                    status = "completed"
-                elif "FAILED" in response.upper():
-                    status = "failed"
-                elif "PAYWALLED" in response.upper():
-                    status = "paywalled"
-                else:
-                    status = "processed"
+                return EntryProcessingResult.from_outcome(outcome)
             except Exception as e:
                 logger.error(f"Error processing {entry_id}: {e}")
-                status = "error"
-                response = f"Error: {str(e)}"
-
-            elapsed = time.time() - entry_start
-            return EntryProcessingResult(
-                entry_id=entry_id,
-                status=status,
-                response=response,
-                elapsed_seconds=elapsed,
-                timings=timings,
-            )
+                return EntryProcessingResult(
+                    entry_id=entry_id,
+                    status="error",
+                    response=f"Error: {str(e)}",
+                    elapsed_seconds=0.0,
+                    timings={},
+                )
 
         executor = ThreadPoolExecutor(max_workers=effective_workers)
         try:
@@ -1703,7 +1715,11 @@ class PublicationProcessingService:
             executor.shutdown(wait=True, cancel_futures=True)
 
         total_time = time.time() - start_time
-        successful = sum(1 for r in results if r.status in ("completed", "processed"))
+        # Count by actual PublicationStatus values
+        successful = sum(
+            1 for r in results
+            if r.status in ("metadata_enriched", "handoff_ready", "completed")
+        )
         failed = sum(1 for r in results if r.status in ("failed", "error"))
 
         logger.debug(
@@ -1801,45 +1817,27 @@ class PublicationProcessingService:
                         step_callback = make_step_callback(worker_id)
 
                         # Process entry
-                        entry_start = time.time()
-                        status = "unknown"
-                        response = ""
-                        timings: Dict[str, float] = {}
-
                         try:
-                            response = self.process_entry(
+                            outcome = self.process_entry(
                                 entry_id=entry_id,
                                 extraction_tasks=extraction_tasks,
                                 progress_callback=step_callback,
                             )
-                            if self._timing_enabled:
-                                timings = self._latest_timings.copy()
-
-                            if "COMPLETED" in response.upper():
-                                status = "completed"
-                            elif "FAILED" in response.upper():
-                                status = "failed"
-                            elif "PAYWALLED" in response.upper():
-                                status = "paywalled"
-                            else:
-                                status = "processed"
+                            result = EntryProcessingResult.from_outcome(outcome)
                         except Exception as e:
-                            status = "error"
-                            response = f"Error: {str(e)}"
-
-                        elapsed = time.time() - entry_start
+                            result = EntryProcessingResult(
+                                entry_id=entry_id,
+                                status="error",
+                                response=f"Error: {str(e)}",
+                                elapsed_seconds=0.0,
+                                timings={},
+                            )
 
                         # Update progress: worker completed entry
-                        progress.worker_complete(worker_id, status, elapsed)
-
-                        # Store result
-                        result = EntryProcessingResult(
-                            entry_id=entry_id,
-                            status=status,
-                            response=response,
-                            elapsed_seconds=elapsed,
-                            timings=timings,
+                        progress.worker_complete(
+                            worker_id, result.status, result.elapsed_seconds
                         )
+
                         with results_lock:
                             results.append(result)
 
@@ -1859,7 +1857,11 @@ class PublicationProcessingService:
                     executor.shutdown(wait=True, cancel_futures=True)
 
         total_time = time.time() - start_time
-        successful = sum(1 for r in results if r.status in ("completed", "processed"))
+        # Count by actual PublicationStatus values
+        successful = sum(
+            1 for r in results
+            if r.status in ("metadata_enriched", "handoff_ready", "completed")
+        )
         failed = sum(1 for r in results if r.status in ("failed", "error"))
 
         logger.debug(
@@ -1878,14 +1880,76 @@ class PublicationProcessingService:
 
 
 @dataclass
-class EntryProcessingResult:
-    """Result of processing a single publication entry."""
+class EntryProcessingOutcome:
+    """Structured outcome of processing a single publication entry.
+
+    This is the canonical result returned by process_entry, containing
+    both the actual PublicationStatus and structured extraction results.
+    Eliminates string-parsing to determine status.
+    """
 
     entry_id: str
-    status: str  # "completed", "failed", "paywalled", "error", "processed"
+    final_status: str  # PublicationStatus value (e.g., "metadata_enriched", "handoff_ready")
+    title: Optional[str] = None
+
+    # Extraction results
+    extracted_identifiers: Dict[str, List[str]] = field(default_factory=dict)
+    dataset_ids: List[str] = field(default_factory=list)
+    workspace_keys: List[str] = field(default_factory=list)
+
+    # Step-level success tracking
+    step_results: Dict[str, bool] = field(default_factory=dict)  # step_name -> succeeded
+
+    # Error info
+    error: Optional[str] = None
+    is_paywalled: bool = False
+
+    # Timing
+    elapsed_seconds: float = 0.0
+    step_timings: Dict[str, float] = field(default_factory=dict)
+
+    # For backward compat - full markdown response if needed
+    response_markdown: str = ""
+
+    def is_successful(self) -> bool:
+        """Entry reached a non-error terminal state."""
+        return self.final_status in (
+            "metadata_enriched", "handoff_ready", "completed"
+        )
+
+    def is_handoff_ready(self) -> bool:
+        """Entry is ready for metadata_assistant."""
+        return self.final_status == "handoff_ready"
+
+
+@dataclass
+class EntryProcessingResult:
+    """Result of processing a single publication entry (parallel processing)."""
+
+    entry_id: str
+    status: str  # Actual PublicationStatus value
     response: str
     elapsed_seconds: float
     timings: Dict[str, float] = field(default_factory=dict)
+
+    # Structured data from EntryProcessingOutcome
+    extracted_identifiers: Dict[str, List[str]] = field(default_factory=dict)
+    dataset_ids: List[str] = field(default_factory=list)
+    step_results: Dict[str, bool] = field(default_factory=dict)
+
+    @classmethod
+    def from_outcome(cls, outcome: EntryProcessingOutcome) -> "EntryProcessingResult":
+        """Create from structured outcome."""
+        return cls(
+            entry_id=outcome.entry_id,
+            status=outcome.final_status,
+            response=outcome.response_markdown,
+            elapsed_seconds=outcome.elapsed_seconds,
+            timings=outcome.step_timings,
+            extracted_identifiers=outcome.extracted_identifiers,
+            dataset_ids=outcome.dataset_ids,
+            step_results=outcome.step_results,
+        )
 
 
 @dataclass
@@ -1901,52 +1965,48 @@ class ParallelProcessingResult:
 
     def to_summary_string(self) -> str:
         """
-        Format result as markdown for agent/LLM consumption.
-
-        Returns a human-readable summary suitable for the metadata_assistant
-        to process HANDOFF_READY entries.
+        Compact, precise summary of processing results.
 
         Returns:
-            Markdown-formatted string with processing statistics and per-entry results.
+            Compact string with actual PublicationStatus counts.
         """
-        lines = [
-            "## Publication Queue Processing (Parallel)",
-            "",
-            f"**Entries Processed**: {self.total_entries}",
-            f"**Successful**: {self.successful}",
-            f"**Failed**: {self.failed}",
-            f"**Total Time**: {self.total_time:.1f}s",
-            f"**Throughput**: {self.entries_per_minute:.1f} entries/min",
-            "",
+        # Group by actual status
+        status_counts: Dict[str, int] = {}
+        for r in self.entry_results:
+            status_counts[r.status] = status_counts.get(r.status, 0) + 1
+
+        # Build compact output
+        parts = [
+            f"processed={self.total_entries}",
+            f"time={self.total_time:.1f}s",
+            f"rate={self.entries_per_minute:.1f}/min",
         ]
 
-        # Group entries by status
-        status_groups: Dict[str, List[EntryProcessingResult]] = {}
-        for result in self.entry_results:
-            status = result.status
-            if status not in status_groups:
-                status_groups[status] = []
-            status_groups[status].append(result)
+        # Add status breakdown (sorted by count desc)
+        status_parts = []
+        for status, count in sorted(
+            status_counts.items(), key=lambda x: -x[1]
+        ):
+            status_parts.append(f"{status}={count}")
+        parts.append(f"status=[{', '.join(status_parts)}]")
 
-        # Show status summary
-        lines.append("### Status Summary")
-        for status, entries in sorted(status_groups.items()):
-            lines.append(f"- **{status.upper()}**: {len(entries)} entries")
-        lines.append("")
+        # Count identifiers and datasets across all results
+        total_identifiers = sum(
+            sum(len(v) for v in r.extracted_identifiers.values())
+            for r in self.entry_results
+        )
+        total_datasets = sum(len(r.dataset_ids) for r in self.entry_results)
+        if total_identifiers > 0:
+            parts.append(f"identifiers={total_identifiers}")
+        if total_datasets > 0:
+            parts.append(f"datasets={total_datasets}")
 
-        # Show per-entry details (abbreviated for large batches)
-        lines.append("### Entry Details")
-        for result in self.entry_results[:20]:  # Limit to first 20 for readability
-            lines.append(
-                f"- **{result.entry_id}**: {result.status} ({result.elapsed_seconds:.1f}s)"
-            )
+        # Count handoff_ready entries specifically
+        handoff_count = status_counts.get("handoff_ready", 0)
+        if handoff_count > 0:
+            parts.append(f"ready_for_metadata_assistant={handoff_count}")
 
-        if len(self.entry_results) > 20:
-            lines.append(f"- ... and {len(self.entry_results) - 20} more entries")
-
-        lines.append("")
-
-        return "\n".join(lines)
+        return " | ".join(parts)
 
     def get_timing_summary(self) -> Dict[str, Dict[str, float]]:
         """
