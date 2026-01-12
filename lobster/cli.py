@@ -2956,7 +2956,7 @@ def config_test(
                     else:  # bedrock
                         test_config = {"model_id": "us.anthropic.claude-3-5-haiku-20241022-v1:0", "temperature": 1.0, "max_tokens": 50}
 
-                    test_llm = LLMFactory.create_llm(test_config, "config_test")
+                    test_llm = LLMFactory.create_llm(test_config, "config_test", workspace_path=workspace_path)
                     log("  Testing API connectivity...", "yellow")
                     response = test_llm.invoke("Reply with just 'ok'")
 
