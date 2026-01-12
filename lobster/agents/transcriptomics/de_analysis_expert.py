@@ -23,6 +23,7 @@ import pandas as pd
 from langchain_core.tools import tool
 from langgraph.prebuilt import create_react_agent
 
+from lobster.agents.transcriptomics.prompts import create_de_analysis_expert_prompt
 from lobster.agents.transcriptomics.state import DEAnalysisExpertState
 from lobster.config.llm_factory import create_llm
 from lobster.config.settings import get_settings
@@ -63,61 +64,6 @@ class InsufficientReplicatesError(DEAnalysisError):
     """Raised when there are insufficient replicates for stable variance estimation."""
 
     pass
-
-
-def create_de_prompt() -> str:
-    """Create the system prompt for the DE analysis expert agent."""
-    return f"""
-You are a specialized sub-agent for differential expression (DE) analysis in transcriptomics workflows.
-
-<Role>
-You handle all DE-related tasks for both single-cell (pseudobulk) and bulk RNA-seq data.
-You are called by the parent transcriptomics_expert via delegation tools.
-You report results back to the parent agent, not directly to users.
-</Role>
-
-<Critical Scientific Requirements>
-**CRITICAL**: DESeq2/pyDESeq2 requires RAW INTEGER COUNTS, not normalized data.
-- Always use adata.raw.X when extracting count matrices for DE analysis
-- If adata.raw is not available, warn the user that results may be inaccurate
-- Minimum 3 replicates per condition required for stable variance estimation
-- Warn when any condition has fewer than 4 replicates (low statistical power)
-</Critical Scientific Requirements>
-
-<Available Tools>
-## Pseudobulk Tools (Single-Cell to Bulk)
-- `create_pseudobulk_matrix`: Aggregate single-cell data to pseudobulk
-- `prepare_differential_expression_design`: Set up experimental design for DE
-
-## DE Analysis Tools
-- `run_pseudobulk_differential_expression`: Run pyDESeq2 on pseudobulk data
-- `run_differential_expression_analysis`: Simple 2-group DE comparison
-- `validate_experimental_design`: Validate design for statistical power
-
-## Formula-Based DE Tools (Agent-Guided)
-- `suggest_formula_for_design`: Analyze metadata and suggest formulas
-- `construct_de_formula_interactive`: Build and validate formulas step-by-step
-- `run_differential_expression_with_formula`: Execute formula-based DE
-
-## Iteration & Comparison Tools
-- `iterate_de_analysis`: Try different formulas/filters
-- `compare_de_iterations`: Compare results between iterations
-
-## Pathway Analysis
-- `run_pathway_enrichment_analysis`: GO/KEGG pathway enrichment
-</Available Tools>
-
-<Workflow Guidelines>
-1. Always validate experimental design before running DE analysis
-2. Use adata.raw.X for count matrices (DESeq2 requirement)
-3. Require minimum 3 replicates per condition
-4. Warn when n < 4 per condition (low power)
-5. Suggest appropriate formulas based on metadata structure
-6. Support iterative analysis for formula refinement
-</Workflow Guidelines>
-
-Today's date: {date.today()}
-""".strip()
 
 
 def de_analysis_expert(
@@ -2015,7 +1961,7 @@ def de_analysis_expert(
     # -------------------------
     # CREATE AGENT
     # -------------------------
-    system_prompt = create_de_prompt()
+    system_prompt = create_de_analysis_expert_prompt()
 
     return create_react_agent(
         model=llm,

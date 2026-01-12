@@ -285,7 +285,7 @@ class CustomCodeExecutionService:
         """
         start_time = time.time()
 
-        logger.info(f"Executing custom code: {description}")
+        logger.debug(f"Executing custom code: {description}")
         logger.debug(f"Code ({len(code)} chars):\n{code[:500]}...")
 
         # Step 1: Validate code safety
@@ -384,7 +384,7 @@ class CustomCodeExecutionService:
             stats=stats,
         )
 
-        logger.info(
+        logger.debug(
             f"Code execution {'succeeded' if stats['success'] else 'failed'} "
             f"in {duration:.2f}s"
         )

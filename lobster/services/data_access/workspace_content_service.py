@@ -473,7 +473,7 @@ class WorkspaceContentService:
             with open(file_path, "w") as f:
                 json.dump(content_dict, f, indent=2, default=str)
 
-        logger.info(
+        logger.debug(
             f"Cached {content_type.value} '{content.identifier}' to {file_path} ({output_format})"
         )
 
@@ -766,7 +766,7 @@ class WorkspaceContentService:
         # Sort by cached_at (most recent first)
         content_list.sort(key=lambda x: x.get("cached_at", ""), reverse=True)
 
-        logger.info(
+        logger.debug(
             f"Listed {len(content_list)} cached items"
             + (f" of type {content_type.value}" if content_type else "")
         )
@@ -794,7 +794,7 @@ class WorkspaceContentService:
 
         if file_path.exists():
             file_path.unlink()
-            logger.info(f"Deleted {content_type.value} '{identifier}' from workspace")
+            logger.debug(f"Deleted {content_type.value} '{identifier}' from workspace")
             return True
         else:
             logger.warning(
@@ -1162,5 +1162,5 @@ class WorkspaceContentService:
         exports_dir = self.workspace_base / "exports"
         if create and not exports_dir.exists():
             exports_dir.mkdir(parents=True, exist_ok=True)
-            logger.info(f"Created exports directory: {exports_dir}")
+            logger.debug(f"Created exports directory: {exports_dir}")
         return exports_dir

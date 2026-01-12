@@ -401,7 +401,7 @@ def metadata_store_post_processor(
         if "samples" in result:
             data_manager.metadata_store[workspace_key]["samples"] = result["samples"]
             count = len(result["samples"])
-            logger.info(
+            logger.debug(
                 f"Persisted {count} samples to metadata_store['{workspace_key}']"
             )
             return f"Persisted {count} samples to metadata_store['{workspace_key}']"
@@ -415,7 +415,7 @@ def metadata_store_post_processor(
             "stats": result.get("stats", {}),
         }
         count = len(result["samples"])
-        logger.info(f"Created metadata_store['{output_key}'] with {count} samples")
+        logger.debug(f"Created metadata_store['{output_key}'] with {count} samples")
         return (
             f"Created metadata_store['{output_key}'] with {count} samples\n"
             f"Export with: write_to_workspace(identifier='{output_key}', "

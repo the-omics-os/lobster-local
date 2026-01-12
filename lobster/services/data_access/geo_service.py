@@ -34,7 +34,7 @@ try:
 except ImportError:
     GEOparse = None
 
-from lobster.agents.data_expert_assistant import DataExpertAssistant
+from lobster.agents.data_expert.assistant import DataExpertAssistant
 from lobster.core.adapters.transcriptomics_adapter import TranscriptomicsAdapter
 from lobster.core.data_manager_v2 import DataManagerV2
 from lobster.core.exceptions import (
@@ -1118,7 +1118,7 @@ class GEOService:
             if not adapter:
                 # FIXED Bug #3: Use metadata-based modality detection for TAR archives
                 try:
-                    from lobster.agents.data_expert_assistant import DataExpertAssistant
+                    from lobster.agents.data_expert.assistant import DataExpertAssistant
 
                     assistant = DataExpertAssistant()
 
@@ -2215,7 +2215,7 @@ class GEOService:
                 strategy_config = None
 
                 try:
-                    from lobster.agents.data_expert_assistant import DataExpertAssistant
+                    from lobster.agents.data_expert.assistant import DataExpertAssistant
 
                     assistant = DataExpertAssistant()
 
@@ -5197,7 +5197,7 @@ The actual expression data download will be much faster now that metadata is pre
                     # - Most bulk RNA-seq has 15,000-25,000 genes
                     # - Single-cell can have <5000 genes after filtering
                     try:
-                        from lobster.agents.data_expert_assistant import (
+                        from lobster.agents.data_expert.assistant import (
                             DataExpertAssistant,
                         )
 
@@ -5598,7 +5598,7 @@ The actual expression data download will be much faster now that metadata is pre
             # FIXED: Use metadata-based modality detection instead of flawed heuristic
             n_obs, n_vars = matrix.shape
             try:
-                from lobster.agents.data_expert_assistant import DataExpertAssistant
+                from lobster.agents.data_expert.assistant import DataExpertAssistant
 
                 assistant = DataExpertAssistant()
 

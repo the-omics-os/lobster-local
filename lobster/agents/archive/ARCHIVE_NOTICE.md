@@ -62,7 +62,7 @@ The PDF resolution features will be integrated directly into `research_agent` as
 - Phase 3 Implementation: `kevin_notes/publisher/tmp_todo.md` (Tasks 1-7)
 - Phase 4 Planning: `kevin_notes/publisher/tmp_todo.md` (Phase 4: research_agent Refactoring)
 - New Metadata Services: `lobster/tools/sample_mapping_service.py`, `lobster/tools/metadata_standardization_service.py`
-- New Metadata Agent: `lobster/agents/metadata_assistant.py`
+- New Metadata Agent: `lobster/agents/metadata_assistant/`
 
 ---
 
