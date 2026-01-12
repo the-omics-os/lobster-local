@@ -4673,6 +4673,7 @@ def chat(
                 )
 
                 console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]")
+                console.print("[dim]◆ issues: [link=https://github.com/the-omics-os/lobster-local/issues]github.com/the-omics-os/lobster-local/issues[/link][/dim]")
 
                 # Display session token usage summary
                 if hasattr(client, "token_tracker") and client.token_tracker:
@@ -5607,6 +5608,7 @@ when they are started by agents or analysis workflows.
             )
 
             console.print("[dim]◆ feedback: [link=https://forms.cloud.microsoft/e/AkNk8J8nE8]forms.cloud.microsoft/e/AkNk8J8nE8[/link][/dim]")
+            console.print("[dim]◆ issues: [link=https://github.com/the-omics-os/lobster-local/issues]github.com/the-omics-os/lobster-local/issues[/link][/dim]")
 
             # Display session token usage summary
             if hasattr(client, "token_tracker") and client.token_tracker:
