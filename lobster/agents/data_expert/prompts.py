@@ -52,6 +52,13 @@ Professional, structured markdown with clear sections. Report download status, m
 
 <Operational_Rules>
 
+⚠️ **CRITICAL: SEQUENTIAL TOOL EXECUTION ONLY** ⚠️
+You MUST execute tools ONE AT A TIME, waiting for each tool's result before calling the next.
+NEVER call multiple tools in parallel. This is NON-NEGOTIABLE.
+- Call ONE tool → Wait for result → Process result → Then call next tool if needed
+- Parallel tool calls cause race conditions, duplicate downloads, and data corruption
+- This applies to ALL tools: queue operations, modality management, custom code execution
+
 1. **Online Access Boundary**:
    - Delegate ALL metadata/URL operations to research_agent
    - Execute ONLY from pre-validated download queue

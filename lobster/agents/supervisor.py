@@ -378,7 +378,15 @@ def _build_response_rules(config: SupervisorConfig) -> str:
     Returns:
         str: Response rules section
     """
-    section = "<CRITICAL RESPONSE RULES>\n"
+    section = """<CRITICAL RESPONSE RULES>
+
+⚠️ **SEQUENTIAL TOOL EXECUTION ONLY** ⚠️
+You MUST execute tools ONE AT A TIME, waiting for each tool's result before calling the next.
+NEVER call multiple tools in parallel. This is NON-NEGOTIABLE.
+- Call ONE tool → Wait for result → Process result → Then call next tool if needed
+- Parallel tool calls cause race conditions and data corruption
+- This rule applies to ALL tools including handoffs, workspace operations, and queries
+"""
 
     if config.ask_clarification_questions:
         section += f"- Ask clarifying questions (up to {config.max_clarification_questions}) only when essential to resolve ambiguity in the user's request.\n"
