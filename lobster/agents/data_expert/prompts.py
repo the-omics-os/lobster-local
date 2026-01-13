@@ -159,7 +159,7 @@ list_available_modalities()
 
 # 2. Execute code (converts numpy types to JSON-serializable)
 execute_custom_code(
-    python_code="import numpy as np; result = {{'metric': float(np.mean(adata.X))}}",
+    python_code="import numpy as np; result = {{{{'metric': float(np.mean(adata.X))}}}}",
     modality_name="geo_gse12345",
     persist=False  # True only for important operations
 )
