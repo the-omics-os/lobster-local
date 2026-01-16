@@ -38,6 +38,7 @@ class ErrorCategory(Enum):
     DATA = "data"                 # Data loading/processing errors
     VALIDATION = "validation"     # Input validation errors
     SYSTEM = "system"             # System/resource errors
+    CONTEXT_LIMIT = "context_limit"  # Token/context window exceeded
     UNKNOWN = "unknown"           # Uncategorized errors
 
 
@@ -136,7 +137,30 @@ class ErrorService:
             self._show_notification(error_msg, category, context)
 
     def _categorize_error(self, error_msg: str) -> ErrorCategory:
-        """Auto-detect error category from message."""
+        """
+        Auto-detect error category from message.
+
+        Uses StructuredErrorParser for typed detection of LLM errors,
+        falls back to pattern matching for other error types.
+        """
+        # Try structured parsing first for LLM errors
+        try:
+            from lobster.utils.error_handlers import get_structured_parser, ErrorType
+            parser = get_structured_parser()
+            parsed = parser.parse(error_msg)
+
+            # Map ErrorType to ErrorCategory
+            if parsed.error_type == ErrorType.CONTEXT_LIMIT:
+                return ErrorCategory.CONTEXT_LIMIT
+            elif parsed.error_type == ErrorType.AUTHENTICATION:
+                return ErrorCategory.AUTHENTICATION
+            elif parsed.error_type in (ErrorType.RATE_LIMIT, ErrorType.NETWORK, ErrorType.MODEL_OVERLOADED):
+                return ErrorCategory.CONNECTION
+        except Exception:
+            # Fallback to pattern matching if structured parsing fails
+            pass
+
+        # Pattern-based detection for non-LLM errors
         error_lower = error_msg.lower()
 
         for pattern in self.CONNECTION_PATTERNS:
@@ -227,6 +251,7 @@ class ErrorService:
             ErrorCategory.DATA: "Data Error",
             ErrorCategory.VALIDATION: "Validation Error",
             ErrorCategory.SYSTEM: "System Error",
+            ErrorCategory.CONTEXT_LIMIT: "Context Limit Exceeded",
             ErrorCategory.UNKNOWN: "Error",
         }
         return titles.get(category, "Error")

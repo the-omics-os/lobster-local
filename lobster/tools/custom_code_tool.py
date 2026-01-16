@@ -312,6 +312,121 @@ def create_execute_custom_code_tool(
 # Response Formatting
 # =============================================================================
 
+# Maximum characters for result field to prevent LLM context overflow
+# Large results (e.g., DataFrames, sample lists) can exceed 100K+ chars
+MAX_RESULT_LENGTH = 8000
+
+
+def _truncate_result(result: Any, max_length: int = MAX_RESULT_LENGTH) -> tuple:
+    """
+    Truncate result to prevent LLM context overflow.
+
+    Handles various result types (dict, list, str, primitives) by converting
+    to JSON string, checking length, and truncating if needed.
+
+    Args:
+        result: Execution result (any JSON-serializable type)
+        max_length: Maximum character length for serialized result
+
+    Returns:
+        Tuple of (truncated_result, was_truncated, original_length)
+        - truncated_result: Original or truncated value
+        - was_truncated: Boolean indicating if truncation occurred
+        - original_length: Character count of original serialized result
+    """
+    import json
+
+    if result is None:
+        return None, False, 0
+
+    # Serialize to check length
+    try:
+        serialized = json.dumps(result, default=str)
+    except (TypeError, ValueError):
+        # Fallback for non-serializable objects
+        serialized = str(result)
+
+    original_length = len(serialized)
+
+    if original_length <= max_length:
+        return result, False, original_length
+
+    # Truncation needed - strategy depends on type
+    if isinstance(result, str):
+        # Simple string truncation
+        truncated = result[:max_length - 100]  # Leave room for suffix
+        return (
+            f"{truncated}\n\n... [TRUNCATED: {original_length:,} chars total, "
+            f"showing first {len(truncated):,}]",
+            True,
+            original_length,
+        )
+
+    elif isinstance(result, list):
+        # For lists (e.g., samples), truncate items and show count
+        truncated_list = []
+        current_length = 2  # Account for []
+        for item in result:
+            item_str = json.dumps(item, default=str)
+            if current_length + len(item_str) + 2 > max_length - 200:
+                break
+            truncated_list.append(item)
+            current_length += len(item_str) + 2  # +2 for comma and space
+
+        return (
+            {
+                "_truncated": True,
+                "_total_items": len(result),
+                "_shown_items": len(truncated_list),
+                "_original_chars": original_length,
+                "items": truncated_list,
+            },
+            True,
+            original_length,
+        )
+
+    elif isinstance(result, dict):
+        # For dicts, try to preserve structure but truncate large values
+        truncated_dict = {"_truncated": True, "_original_chars": original_length}
+        current_length = 50  # Account for metadata
+
+        for key, value in result.items():
+            value_str = json.dumps(value, default=str)
+            if current_length + len(key) + len(value_str) + 10 > max_length - 200:
+                truncated_dict["_remaining_keys"] = list(
+                    set(result.keys()) - set(truncated_dict.keys())
+                )
+                break
+
+            # Recursively truncate large nested values
+            if len(value_str) > max_length // 4:
+                if isinstance(value, list) and len(value) > 5:
+                    truncated_dict[key] = {
+                        "_list_preview": value[:5],
+                        "_total_items": len(value),
+                    }
+                elif isinstance(value, str) and len(value) > 500:
+                    truncated_dict[key] = value[:500] + f"... [{len(value)} chars]"
+                else:
+                    truncated_dict[key] = value
+            else:
+                truncated_dict[key] = value
+
+            current_length += len(key) + len(json.dumps(truncated_dict[key], default=str))
+
+        return truncated_dict, True, original_length
+
+    else:
+        # Primitives or other types - convert to string and truncate
+        str_result = str(result)
+        if len(str_result) > max_length:
+            return (
+                f"{str_result[:max_length - 100]}\n\n... [TRUNCATED: {original_length:,} chars]",
+                True,
+                original_length,
+            )
+        return result, False, original_length
+
 
 def _format_response(
     result: Any,
@@ -325,6 +440,10 @@ def _format_response(
     Returns structured JSON instead of markdown for programmatic parsing by LLMs.
     Enables retry logic, error pattern matching, and conditional branching.
 
+    Includes automatic result truncation to prevent LLM context overflow.
+    Large results (>8000 chars) are intelligently truncated while preserving
+    structure and indicating total size.
+
     Args:
         result: Execution result value
         stats: Execution statistics from service
@@ -336,12 +455,17 @@ def _format_response(
     """
     import json
 
+    # Truncate result to prevent context overflow
+    truncated_result, was_truncated, original_length = _truncate_result(result)
+
     # Build typed response object
     response_obj = {
         "success": True,
         "duration_seconds": stats.get("duration_seconds", 0),
-        "result": result,
+        "result": truncated_result,
         "result_type": stats.get("result_type", type(result).__name__ if result is not None else None),
+        "result_truncated": was_truncated,
+        "result_original_chars": original_length if was_truncated else None,
         "stdout": stats.get("stdout_preview", ""),
         "stderr": stats.get("stderr_preview", ""),
         "stdout_full_path": stats.get("stdout_full_path"),
@@ -433,4 +557,6 @@ __all__ = [
     "create_execute_custom_code_tool",
     "metadata_store_post_processor",
     "PostProcessor",
+    "MAX_RESULT_LENGTH",
+    "_truncate_result",
 ]

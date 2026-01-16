@@ -45,6 +45,15 @@ from lobster.cli_internal.commands import (
     queue_clear,
     queue_export,
     QueueFileTypeNotSupported,
+    metadata_overview,
+    metadata_publications,
+    metadata_samples,
+    metadata_workspace,
+    metadata_exports,
+    metadata_list,
+    metadata_clear,
+    metadata_clear_exports,
+    metadata_clear_all,
 )
 
 
@@ -458,6 +467,15 @@ class AnalysisScreen(Screen):
 - `/plots` - Refresh plots panel
 - `/save` - Save plots to workspace
 
+**Metadata:**
+- `/metadata` - Smart overview with stats & next steps
+- `/metadata publications` - Publication queue breakdown
+- `/metadata samples` - Sample statistics & disease coverage
+- `/metadata workspace` - File inventory across all locations
+- `/metadata exports` - Export files with usage hints
+- `/metadata list` - Detailed metadata list
+- `/metadata clear [exports|all]` - Clear metadata
+
 **Queue:**
 - `/queue` - Show queue status
 - `/queue list` - List queue entries
@@ -648,6 +666,61 @@ class AnalysisScreen(Screen):
                 results.append_system_message(f"❌ {str(e)}")
             except Exception as e:
                 results.append_system_message(f"❌ Queue command failed: {str(e)}")
+
+        # Metadata commands (shared implementation with CLI)
+        elif cmd.startswith("/metadata"):
+            output = DashboardOutputAdapter(results)
+            parts = cmd.split(maxsplit=2)
+            subcommand = parts[1] if len(parts) > 1 else None
+            subsubcommand = parts[2] if len(parts) > 2 else None
+
+            try:
+                if subcommand == "clear":
+                    # Handle /metadata clear [exports|all]
+                    if subsubcommand == "exports":
+                        metadata_clear_exports(self.client, output)
+                    elif subsubcommand == "all":
+                        metadata_clear_all(self.client, output)
+                    elif subsubcommand is None:
+                        metadata_clear(self.client, output)
+                    else:
+                        results.append_system_message(
+                            f"Unknown clear type: {subsubcommand}\n"
+                            "Available: exports, all"
+                        )
+
+                elif subcommand in ("publications", "pub"):
+                    # Parse --status= flag if present
+                    status_filter = None
+                    for part in parts[2:]:
+                        if part.startswith("--status="):
+                            status_filter = part.split("=", 1)[1]
+                    metadata_publications(self.client, output, status_filter=status_filter)
+
+                elif subcommand in ("samples", "sample"):
+                    metadata_samples(self.client, output)
+
+                elif subcommand in ("workspace", "ws"):
+                    metadata_workspace(self.client, output)
+
+                elif subcommand in ("exports", "export"):
+                    metadata_exports(self.client, output)
+
+                elif subcommand == "list":
+                    metadata_list(self.client, output)
+
+                elif subcommand is None:
+                    # Default: smart overview
+                    metadata_overview(self.client, output)
+
+                else:
+                    results.append_system_message(
+                        f"Unknown metadata subcommand: {subcommand}\n"
+                        "Available: publications, samples, workspace, exports, list, clear"
+                    )
+
+            except Exception as e:
+                results.append_system_message(f"❌ Metadata command failed: {str(e)}")
 
         else:
             results.append_system_message(

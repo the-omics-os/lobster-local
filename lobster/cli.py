@@ -59,6 +59,11 @@ from lobster.cli_internal.commands import (
     queue_export,
     queue_import,
     QueueFileTypeNotSupported,
+    metadata_overview,
+    metadata_publications,
+    metadata_samples,
+    metadata_workspace,
+    metadata_exports,
     metadata_list,
     metadata_clear,
     metadata_clear_exports,
@@ -533,8 +538,12 @@ def extract_available_commands() -> Dict[str, str]:
         "/files": "List workspace files",
         "/tree": "Show directory tree view",
         "/data": "Show current data summary",
-        "/metadata": "Show detailed metadata information",
-        "/metadata list": "List metadata store entries",
+        "/metadata": "Show smart metadata overview with stats & next steps",
+        "/metadata publications": "Publication queue status breakdown",
+        "/metadata samples": "Aggregated sample statistics & disease coverage",
+        "/metadata workspace": "Categorized file inventory across all locations",
+        "/metadata exports": "Export files with categories & usage hints",
+        "/metadata list": "Legacy detailed list (use overview instead)",
         "/metadata clear": "Clear metadata (memory + workspace/metadata/)",
         "/metadata clear exports": "Clear export files (workspace/exports/)",
         "/metadata clear all": "Clear ALL metadata (memory + disk + exports)",
@@ -3144,6 +3153,79 @@ def status():
     _display_status_info()
 
 
+@app.command(name="metadata")
+def metadata_command(
+    subcommand: Optional[str] = typer.Argument(None, help="Subcommand: overview, publications, samples, workspace, exports, list, clear"),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory. Default: ./.lobster_workspace",
+    ),
+    status_filter: Optional[str] = typer.Option(
+        None,
+        "--status",
+        help="Status filter for publications subcommand",
+    ),
+):
+    """
+    Display metadata overview and statistics.
+
+    Subcommands:
+      - (none): Smart overview with key stats & next steps
+      - publications: Publication queue status breakdown
+      - samples: Sample statistics & disease coverage
+      - workspace: File inventory across all locations
+      - exports: Export files with usage hints
+      - list: Legacy detailed list
+      - clear: Clear metadata (with exports/all options)
+
+    Examples:
+      lobster metadata                           # Smart overview
+      lobster metadata publications              # Publication queue status
+      lobster metadata publications --status=handoff_ready
+      lobster metadata samples                   # Sample statistics
+      lobster metadata exports                   # Export files
+    """
+    from lobster.core.workspace import resolve_workspace
+    from lobster.core.client import AgentClient
+
+    try:
+        # Resolve workspace
+        workspace_path = resolve_workspace(workspace, create=False)
+
+        # Create client
+        client = AgentClient(workspace_path=str(workspace_path))
+        output = ConsoleOutputAdapter(console)
+
+        # Route to appropriate command
+        if subcommand is None:
+            metadata_overview(client, output)
+        elif subcommand in ("publications", "pub"):
+            metadata_publications(client, output, status_filter=status_filter)
+        elif subcommand in ("samples", "sample"):
+            metadata_samples(client, output)
+        elif subcommand in ("workspace", "ws"):
+            metadata_workspace(client, output)
+        elif subcommand in ("exports", "export"):
+            metadata_exports(client, output)
+        elif subcommand == "list":
+            metadata_list(client, output)
+        elif subcommand == "clear":
+            console.print("[yellow]Use: lobster metadata clear [exports|all][/yellow]")
+            console.print("[cyan]  lobster metadata clear         # Clear metadata (memory + workspace/metadata/)[/cyan]")
+            console.print("[cyan]  lobster metadata clear exports # Clear export files only[/cyan]")
+            console.print("[cyan]  lobster metadata clear all     # Clear ALL metadata[/cyan]")
+        else:
+            console.print(f"[red]Unknown subcommand: {subcommand}[/red]")
+            console.print("[cyan]Available: overview, publications, samples, workspace, exports, list, clear[/cyan]")
+            raise typer.Exit(1)
+
+    except Exception as e:
+        console.print(f"[red]❌ Error: {str(e)}[/red]")
+        raise typer.Exit(1)
+
+
 @app.command()
 def activate(
     access_code: str = typer.Argument(
@@ -3358,6 +3440,97 @@ def deactivate():
 
     except ImportError as e:
         console.print(f"[red]❌ License manager not available: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@app.command()
+def purge(
+    scope: str = typer.Option(
+        "all",
+        "--scope",
+        "-s",
+        help="What to purge: 'global' (~/.lobster, ~/.config/lobster), 'workspace' (current), or 'all'",
+    ),
+    workspace: Optional[Path] = typer.Option(
+        None,
+        "--workspace",
+        "-w",
+        help="Workspace directory to purge (default: current workspace)",
+    ),
+    keep_license: bool = typer.Option(
+        False,
+        "--keep-license",
+        help="Preserve license file (~/.lobster/license.json)",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        "-n",
+        help="Show what would be deleted without actually deleting",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Skip confirmation prompt",
+    ),
+):
+    """
+    Remove all Lobster AI files from your system.
+
+    This command removes configuration, cache, and workspace files:
+
+    \b
+    GLOBAL FILES (~/.lobster/, ~/.config/lobster/):
+      • license.json - Premium license entitlement
+      • providers.json - LLM provider configuration
+      • credentials.env - API keys (securely stored)
+      • lobster_history - Command history
+      • version_check_cache - Version check cache
+
+    \b
+    WORKSPACE FILES (.lobster_workspace/):
+      • data/ - Downloaded and processed data files
+      • cache/ - Cached API responses and metadata
+      • plots/ - Generated visualizations
+      • sessions - Conversation history
+
+    \b
+    SAFETY:
+      Only directories verified to contain Lobster AI files will be removed.
+      Other software named "lobster" will NOT be affected.
+
+    \b
+    EXAMPLES:
+      lobster purge --dry-run          # Preview what would be deleted
+      lobster purge --scope global     # Remove only global config files
+      lobster purge --scope workspace  # Remove only current workspace
+      lobster purge --keep-license     # Preserve your license file
+      lobster purge --force            # Skip confirmation prompt
+    """
+    from lobster.cli_internal.commands.output_adapter import ConsoleOutputAdapter
+    from lobster.cli_internal.commands import purge as purge_cmd
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold {LobsterTheme.PRIMARY_ORANGE}]🧹 Lobster AI Purge[/bold {LobsterTheme.PRIMARY_ORANGE}]",
+            border_style=LobsterTheme.PRIMARY_ORANGE,
+            padding=(0, 2),
+        )
+    )
+
+    output = ConsoleOutputAdapter(console)
+    result = purge_cmd(
+        output=output,
+        scope=scope,
+        workspace_path=workspace,
+        keep_license=keep_license,
+        dry_run=dry_run,
+        force=force,
+    )
+
+    if result is None:
         raise typer.Exit(1)
 
 
@@ -5210,11 +5383,27 @@ when they are started by agents or analysis workflows.
                 console.print(f"[yellow]Unknown clear type: {subsubcommand}[/yellow]")
                 console.print("[cyan]Available: /metadata clear, /metadata clear exports, /metadata clear all[/cyan]")
                 return None
-        elif subcommand == "list" or subcommand is None:
+        elif subcommand in ("publications", "pub"):
+            # Parse --status= flag if present
+            status_filter = None
+            for part in parts[2:]:
+                if part.startswith("--status="):
+                    status_filter = part.split("=", 1)[1]
+            return metadata_publications(client, output, status_filter=status_filter)
+        elif subcommand in ("samples", "sample"):
+            return metadata_samples(client, output)
+        elif subcommand in ("workspace", "ws"):
+            return metadata_workspace(client, output)
+        elif subcommand in ("exports", "export"):
+            return metadata_exports(client, output)
+        elif subcommand == "list":
             return metadata_list(client, output)
+        elif subcommand is None:
+            # Default: new smart overview
+            return metadata_overview(client, output)
         else:
             console.print(f"[yellow]Unknown metadata subcommand: {subcommand}[/yellow]")
-            console.print("[cyan]Available: list, clear, clear exports, clear all[/cyan]")
+            console.print("[cyan]Available: publications, samples, workspace, exports, list, clear[/cyan]")
             return None
 
     elif cmd == "/files":

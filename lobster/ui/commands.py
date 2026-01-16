@@ -29,9 +29,16 @@ class LobsterCommands(Provider):
         """Show available commands when palette opens."""
         # Data commands
         yield DiscoveryHit("Data: Show loaded modalities", self._cmd_data, "View current datasets")
-        yield DiscoveryHit("Data: Show metadata", self._cmd_metadata, "View dataset metadata")
+        yield DiscoveryHit("Data: Show dataset metadata", self._cmd_dataset_metadata, "View AnnData metadata")
         yield DiscoveryHit("Files: List workspace files", self._cmd_files, "Show workspace contents")
         yield DiscoveryHit("Files: Show directory tree", self._cmd_tree, "Tree view of workspace")
+
+        # Metadata commands
+        yield DiscoveryHit("Metadata: Overview", self._cmd_metadata_overview, "Smart overview with stats")
+        yield DiscoveryHit("Metadata: Publications", self._cmd_metadata_publications, "Publication queue breakdown")
+        yield DiscoveryHit("Metadata: Samples", self._cmd_metadata_samples, "Sample statistics")
+        yield DiscoveryHit("Metadata: Workspace", self._cmd_metadata_workspace, "File inventory")
+        yield DiscoveryHit("Metadata: Exports", self._cmd_metadata_exports, "Export files")
 
         # Plot commands
         yield DiscoveryHit("Plots: List generated plots", self._cmd_plots, "View all plots")
@@ -62,9 +69,14 @@ class LobsterCommands(Provider):
 
         commands = [
             ("data", "Show loaded modalities", self._cmd_data),
-            ("metadata", "Show dataset metadata", self._cmd_metadata),
+            ("dataset metadata", "Show AnnData metadata", self._cmd_dataset_metadata),
             ("files", "List workspace files", self._cmd_files),
             ("tree", "Show directory tree", self._cmd_tree),
+            ("metadata overview", "Metadata smart overview", self._cmd_metadata_overview),
+            ("metadata publications", "Publication queue breakdown", self._cmd_metadata_publications),
+            ("metadata samples", "Sample statistics", self._cmd_metadata_samples),
+            ("metadata workspace", "File inventory", self._cmd_metadata_workspace),
+            ("metadata exports", "Export files", self._cmd_metadata_exports),
             ("plots", "List generated plots", self._cmd_plots),
             ("open plots", "Open plots folder", self._cmd_open_plots),
             ("queue downloads", "Download queue status", self._cmd_queue_downloads),
@@ -112,8 +124,8 @@ class LobsterCommands(Provider):
 
         self._show_result("\n".join(lines))
 
-    async def _cmd_metadata(self) -> None:
-        """Show dataset metadata."""
+    async def _cmd_dataset_metadata(self) -> None:
+        """Show dataset (AnnData) metadata."""
         if not self.client:
             self.app.notify("No client available", severity="error")
             return
@@ -135,6 +147,86 @@ class LobsterCommands(Provider):
             lines.append("")
 
         self._show_result("\n".join(lines))
+
+    async def _cmd_metadata_overview(self) -> None:
+        """Show smart metadata overview (calls /metadata slash command)."""
+        if not self.client:
+            self.app.notify("No client available", severity="error")
+            return
+
+        from lobster.ui.widgets import ResultsDisplay
+        from lobster.cli_internal.commands import metadata_overview, DashboardOutputAdapter
+
+        try:
+            results = self.app.query_one(ResultsDisplay)
+            output = DashboardOutputAdapter(results)
+            metadata_overview(self.client, output)
+        except Exception as e:
+            self.app.notify(f"Metadata overview failed: {e}", severity="error")
+
+    async def _cmd_metadata_publications(self) -> None:
+        """Show publication queue breakdown (calls /metadata publications)."""
+        if not self.client:
+            self.app.notify("No client available", severity="error")
+            return
+
+        from lobster.ui.widgets import ResultsDisplay
+        from lobster.cli_internal.commands import metadata_publications, DashboardOutputAdapter
+
+        try:
+            results = self.app.query_one(ResultsDisplay)
+            output = DashboardOutputAdapter(results)
+            metadata_publications(self.client, output, status_filter=None)
+        except Exception as e:
+            self.app.notify(f"Metadata publications failed: {e}", severity="error")
+
+    async def _cmd_metadata_samples(self) -> None:
+        """Show sample statistics (calls /metadata samples)."""
+        if not self.client:
+            self.app.notify("No client available", severity="error")
+            return
+
+        from lobster.ui.widgets import ResultsDisplay
+        from lobster.cli_internal.commands import metadata_samples, DashboardOutputAdapter
+
+        try:
+            results = self.app.query_one(ResultsDisplay)
+            output = DashboardOutputAdapter(results)
+            metadata_samples(self.client, output)
+        except Exception as e:
+            self.app.notify(f"Metadata samples failed: {e}", severity="error")
+
+    async def _cmd_metadata_workspace(self) -> None:
+        """Show workspace inventory (calls /metadata workspace)."""
+        if not self.client:
+            self.app.notify("No client available", severity="error")
+            return
+
+        from lobster.ui.widgets import ResultsDisplay
+        from lobster.cli_internal.commands import metadata_workspace, DashboardOutputAdapter
+
+        try:
+            results = self.app.query_one(ResultsDisplay)
+            output = DashboardOutputAdapter(results)
+            metadata_workspace(self.client, output)
+        except Exception as e:
+            self.app.notify(f"Metadata workspace failed: {e}", severity="error")
+
+    async def _cmd_metadata_exports(self) -> None:
+        """Show export files (calls /metadata exports)."""
+        if not self.client:
+            self.app.notify("No client available", severity="error")
+            return
+
+        from lobster.ui.widgets import ResultsDisplay
+        from lobster.cli_internal.commands import metadata_exports, DashboardOutputAdapter
+
+        try:
+            results = self.app.query_one(ResultsDisplay)
+            output = DashboardOutputAdapter(results)
+            metadata_exports(self.client, output)
+        except Exception as e:
+            self.app.notify(f"Metadata exports failed: {e}", severity="error")
 
     async def _cmd_files(self) -> None:
         """List workspace files."""

@@ -26,6 +26,11 @@ from lobster.cli_internal.commands.light.queue_commands import (
     QueueFileTypeNotSupported,
 )
 from lobster.cli_internal.commands.light.metadata_commands import (
+    metadata_overview,
+    metadata_publications,
+    metadata_samples,
+    metadata_workspace,
+    metadata_exports,
     metadata_list,
     metadata_clear,
     metadata_clear_exports,
@@ -54,6 +59,11 @@ from lobster.cli_internal.commands.light.config_commands import (
     config_provider_switch,
     config_model_list,
     config_model_switch,
+)
+from lobster.cli_internal.commands.light.purge_commands import (
+    purge,
+    discover_purge_targets,
+    PurgeScope,
 )
 
 # ============================================================================
@@ -126,6 +136,11 @@ __all__ = [
     "queue_import",
     "QueueFileTypeNotSupported",
     # Metadata commands (light)
+    "metadata_overview",
+    "metadata_publications",
+    "metadata_samples",
+    "metadata_workspace",
+    "metadata_exports",
     "metadata_list",
     "metadata_clear",
     "metadata_clear_exports",
@@ -152,6 +167,10 @@ __all__ = [
     "config_provider_switch",
     "config_model_list",
     "config_model_switch",
+    # Purge commands (light)
+    "purge",
+    "discover_purge_targets",
+    "PurgeScope",
     # Modality commands (heavy - lazy)
     "modalities_list",
     "modality_describe",
