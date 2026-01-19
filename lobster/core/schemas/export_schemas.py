@@ -467,7 +467,16 @@ def get_ordered_export_columns(
         extra_cols = sorted(all_cols - set(ordered_cols))
         ordered_cols.extend(extra_cols)
 
-    return ordered_cols
+    # Final dedup pass (defensive programming - Bug #DataBioMix-3)
+    # Guarantees no duplicates even if schema has errors
+    final_cols = []
+    seen = set()
+    for col in ordered_cols:
+        if col not in seen:
+            final_cols.append(col)
+            seen.add(col)
+
+    return final_cols
 
 
 def infer_data_type(samples: List[Dict[str, Any]]) -> str:
@@ -640,10 +649,26 @@ def harmonize_column_names(
                                     })
                         processed_keys.add(key)
 
+        # Fix for CSV alignment bug (Bug #DataBioMix-3, Jan 2026):
+        # Backfill critical provenance columns to prevent downstream CSV shifting
+        # when these values are empty strings (which get stripped by the loop above).
+        # This ensures DataFrame has expected keys even if values are empty.
+        for col in ["source_doi", "source_pmid", "source_entry_id"]:
+            if col not in harmonized:
+                harmonized[col] = ""
+
         # Second pass: keep non-aliased columns as-is
         for key, value in sample.items():
             if key not in processed_keys:
                 harmonized[key] = value
+
+        # Fix for array serialization bug (Bug #DataBioMix-4, Jan 2026):
+        # Convert lists to JSON strings to prevent CSV column splitting
+        # Lists like _quality_flags=['a','b'] become '["a","b"]' for proper CSV handling
+        for key, value in harmonized.items():
+            if isinstance(value, list):
+                import json
+                harmonized[key] = json.dumps(value)
 
         result.append(harmonized)
 

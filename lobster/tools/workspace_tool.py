@@ -1622,7 +1622,14 @@ def create_write_to_workspace_tool(data_manager: DataManagerV2):
                                 )
                                 samples_count = len(df)  # Update count after dedup
 
-                        available_cols = [c for c in ordered_cols if c in df.columns]
+                        # Defensive deduplication: prevent duplicate columns (Bug #DataBioMix-3)
+                        # Ensures uniqueness even if ordered_cols has duplicates
+                        available_cols = []
+                        seen = set()
+                        for c in ordered_cols:
+                            if c in df.columns and c not in seen:
+                                available_cols.append(c)
+                                seen.add(c)
                         df = df[available_cols]
 
                         # v2.0: Dual-file export (ALWAYS export both strict + rich)
@@ -2023,7 +2030,14 @@ def create_export_publication_queue_tool(data_manager: DataManagerV2):
 
             # Create DataFrame with schema-ordered columns
             df = pd.DataFrame(filtered_samples)
-            available_cols = [c for c in ordered_cols if c in df.columns]
+
+            # Defensive deduplication: prevent duplicate columns (Bug #DataBioMix-3)
+            available_cols = []
+            seen = set()
+            for c in ordered_cols:
+                if c in df.columns and c not in seen:
+                    available_cols.append(c)
+                    seen.add(c)
             df = df[available_cols]
 
             # Sanitize output filename and add timestamp to prevent overwrites
